@@ -1,0 +1,16 @@
+INSTRUCTION_SET=-5 # 80386 (pentium optimized)
+OPTIMIZATION=-osbhlkp
+
+regs.obj : src\regs.c .AUTODEPEND
+ *wcc src\regs.c -i="$(%watcom)/h" $(INSTRUCTION_SET) $(OPTIMIZATION) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+ 
+debug.obj : src\debug.c .AUTODEPEND
+ *wcc src\debug.c -i="$(%watcom)/h" $(INSTRUCTION_SET) $(OPTIMIZATION) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+
+main.obj : src\main.c .AUTODEPEND
+ *wcc src\main.c -i="$(%watcom)/h" $(INSTRUCTION_SET) $(OPTIMIZATION) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+ 
+essreg.exe : regs.obj debug.obj main.obj .AUTODEPEND
+ @%write essreg.lk1 FIL main.obj,debug.obj,regs.obj
+ @%append essreg.lk1
+ *wlink name essreg sys dos op m libf cstart_t op maxe=10 op q op DOSSEG op STACK=512 op el sort @essreg.lk1

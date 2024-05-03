@@ -11,6 +11,8 @@
 *.ilk
 *.map
 *.exp
+*.lk1
+*.err
 
 # Precompiled Headers
 *.gch
@@ -29,7 +31,6 @@
 *.dylib
 
 # Executables
-*.exe
 *.out
 *.app
 *.i*86
@@ -41,12 +42,3 @@
 *.su
 *.idb
 *.pdb
-
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf

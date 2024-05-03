@@ -1,0 +1,10 @@
+INSTRUCTION_SET=-5 # 80386 (pentium optimized)
+OPTIMIZATION=-os
+
+1869opl3.obj : src\1869opl3.c .AUTODEPEND
+ *wcc src\1869opl3.c -i="$(%watcom)/h" $(INSTRUCTION_SET) $(OPTIMIZATION) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+ 
+1869opl3.com : 1869opl3.obj .AUTODEPEND
+ @%write 1869opl3.lk1 FIL 1869opl3.obj
+ @%append 1869opl3.lk1
+ *wlink name 1869opl3 sys com op maxe=10 op q @1869opl3.lk1

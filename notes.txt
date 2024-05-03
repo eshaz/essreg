@@ -1,0 +1,1 @@
+ES1869FM volume assigned to IISResetting mixer fixes opl3, freezes windows audioDisabling es689 bit in mixer register enables opl3just reading a mixer reg enables opl3having another sound operation before reading the register does not enable the opl3, might be that it's required to read a register before going to dos mode to enable the opl3
