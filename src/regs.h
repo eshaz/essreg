@@ -5,15 +5,11 @@
 #define ESSREG_H
 
 #define BIN_PAT "%c%c%c%c%c%c%c%c"
-#define BIN(byte) \
-	((byte) & 0x80 ? '1' : '0'), \
-	((byte) & 0x40 ? '1' : '0'), \
-	((byte) & 0x20 ? '1' : '0'), \
-	((byte) & 0x10 ? '1' : '0'), \
-	((byte) & 0x08 ? '1' : '0'), \
-	((byte) & 0x04 ? '1' : '0'), \
-	((byte) & 0x02 ? '1' : '0'), \
-	((byte) & 0x01 ? '1' : '0')
+#define BIN(byte)                                                              \
+  ((byte)&0x80 ? '1' : '0'), ((byte)&0x40 ? '1' : '0'),                        \
+      ((byte)&0x20 ? '1' : '0'), ((byte)&0x10 ? '1' : '0'),                    \
+      ((byte)&0x08 ? '1' : '0'), ((byte)&0x04 ? '1' : '0'),                    \
+      ((byte)&0x02 ? '1' : '0'), ((byte)&0x01 ? '1' : '0')
 
 unsigned int read_mixer_reg(unsigned int reg_addr);
 void write_mixer_reg(unsigned int reg_addr, unsigned char reg_value);
