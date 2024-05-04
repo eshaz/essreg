@@ -41,6 +41,7 @@ Example: `essreg r=before.txt 3=0 m=1 p=1 r=0 t=0 r=after.txt`
 * Utility to fix ES1869 OPL3 playback for some games in the Windows DOS box.
 * This program reads the FM volume mixer register on the sound card and then runs the application.
 * Sound card with ES1869 chip is assumed to be on I/O port 220h.
+* The IIS mixer control must not be muted in the Windows volume mixer. However, the volume can be set to 0.
 
 ```
 Example:

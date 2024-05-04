@@ -1,0 +1,53 @@
+HKR,Config,"3D Effect",01,20,20,00,00
+HKR,Config,"3D Effect",01,80,80,80,80
+HKR,Config,"3D Effect",01,DA,DA,00,00
+HKR,Config,"3D Effect",01,FF,FF,FF,FF
+HKR,Config,"3D Effect Enable",01,00,00,00,00
+HKR,Config,"3D Effect Enable",01,FF,FF,00,00
+HKR,Config,"3D Limit",01,00,00,00,00
+HKR,Config,"AuxBVolumeInMap",01, \
+HKR,Config,"AuxBVolumeOutMap",01, \
+HKR,Config,Bass,01,FF,7F,FF,7F
+HKR,Config,"CDAudioVolumeInMap",01, \
+HKR,Config,"CDAudioVolumeOutMap",01, \
+HKR,Config,"DCdrift",01,00,00,00,00
+;HKR,Config,"Disable Mic Gain",01,FF
+;HKR,Config,"Disable Mic Preamp",01,00
+HKR,Config,"Disable Warning",01,FF
+HKR,Config,"Enable AUXB",01,00,00,00,00
+HKR,Config,"Enable AUXB",01,01,00,00,00
+;HKR,Config,"Enable ES938",01,01,00,00,00
+HKR,Config,"Enable ES938",01,ff,00,00,00
+;HKR,Config,"Enable IIS",01,00,00,00,00
+;HKR,Config,"Enable Software 3D Effect",01,01,00,00,00
+;HKR,Config,"HwVolume 2-Wire Mode",01,01,00,00,00
+;HKR,Config,"HwVolumeMap",01, \
+;HKR,Config,"HwVolumeStep",01,02,00,00,00
+HKR,Config,"IISVolumeOutMap",01, \
+HKR,Config,"LineInVolumeInMap",01, \
+HKR,Config,"LineInVolumeOutMap",01, \
+;HKR,Config,"Mappable Input",01,01,00,00,00
+;HKR,Config,"Mappable Input Mute Label",,"X-Mic Mute"
+;HKR,Config,"Mappable Input Mute LongLabel",,"X-Microphone Mute"
+;HKR,Config,"Mappable Input Source Label",,"X-Mic"
+;HKR,Config,"Mappable Input Source LongLabel",,"X-Microphone"
+;HKR,Config,"Mappable Input Volume Label",,"X-Mic Volume"
+;HKR,Config,"Mappable Input Volume LongLabel",,"X-Microphone Volume Level"
+HKR,Config,"MicVolumeInMap",01, \
+HKR,Config,"MicVolumeOutMap",01, \
+HKR,Config,"Mixer:Output",01,5b,00,00,00
+HKR,Config,"MonoInPhoneMute",01,00,00,00,00
+;HKR,Config,"MonoInPhoneMute",01,ff
+HKR,Config,"Multiple FM Support",01,FF
+HKR,Config,MutesOut,01,44,00,00,00
+HKR,Config,"PCSpeakerVol",01,00,40,00,00
+;HKR,Config,"Single Mode DMA",01,01,00,00,00
+HKR,Config,"SynthVolumeInMap",01, \
+HKR,Config,"SynthVolumeOutMap",01, \
+;HKR,Config,"Telegaming",01,01,00,00,00
+HKR,Config,"Telegaming",01,01,00,00,00
+HKR,Config,"Telegaming Vol",01,FF,00,00,00
+HKR,Config,Treble,01,FF,7F,FF,7F
+;HKR,Config,"Want Local Powerdown",01,01,00,00,00
+HKR,Config,"WaveVolumeInMap",01, \
+HKR,Config,"WaveVolumeOutMap",01, \

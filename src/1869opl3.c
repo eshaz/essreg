@@ -10,7 +10,7 @@
  * set to zero, but must not be muted.
  * 
  * Usage:
- *   `1869opl3 "c:\path\to\game.exe /arg1 /arg2"`
+ *	 `1869opl3 "c:\path\to\game.exe /arg1 /arg2"`
  * 
  * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
  * 
@@ -21,22 +21,22 @@
 #include <process.h>
 
 int main(int argc, char **argv) {
-  int audio_base = 0x220;
-  char application_path[256];
-  unsigned char prev_val;
-  
-  getcmd(application_path);
-  
-  // set mixer register to full FM volume
-  outp(audio_base + 0x04, 0x36);
-  prev_val = inp(audio_base + 0x05);
-  outp(audio_base + 0x05, 0xff);
-  
-  // execute the command supplied from the args
-  system(application_path);
-  
-  // reset FM volume to previous value
-  outp(audio_base + 0x04, 0x36);
-  outp(audio_base + 0x05, prev_val);
-  return 0;
+	int audio_base = 0x220;
+	char application_path[256];
+	unsigned char prev_val;
+	
+	getcmd(application_path);
+	
+	// set mixer register to full FM volume
+	outp(audio_base + 0x04, 0x36);
+	prev_val = inp(audio_base + 0x05);
+	outp(audio_base + 0x05, 0xff);
+	
+	// execute the command supplied from the args
+	system(application_path);
+	
+	// reset FM volume to previous value
+	outp(audio_base + 0x04, 0x36);
+	outp(audio_base + 0x05, prev_val);
+	return 0;
 }
