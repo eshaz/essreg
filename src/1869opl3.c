@@ -10,7 +10,7 @@
  * set to zero, but must not be muted.
  *
  * Usage:
- *	 `1869opl3 "c:\path\to\game.exe /arg1 /arg2"`
+ *   `1869opl3 "c:\path\to\game.exe /arg1 /arg2"`
  *
  * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
  *

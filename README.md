@@ -11,28 +11,28 @@ This repository contains two utilities designed for the ESS AudioDrive ES1869sou
   * [Examples!](digital_recording)
 
 ```
-ES1869 Register Utility
-(c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ES1869 Register Utility (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
 
-|Option------|Description----------------------------------------------
-| c          | (Calibrate Op Amp)
-| r=[path]   | (Dump ES1869 Registers)
-|            |   * `path` to save the registers; defaults to essreg.txt
-| g          | (Get all values)
-| 3=[value]  | (Get / Set 3D Amount)
-|            |   * 0         3D disable
-|            |   * 1  - 63   3D amount (raw value)
-|            |   * 1% - 100% 3D amount (percent)
-| ml=[value] | (Get / Set Mono-In Level)
-|            |   * 0  - 15   Mono-In Level (raw value)
-|            |   * 0% - 100% Mono-In Level (percent)
-| m=[1,0]    | (Enable / Disable Mono-In)
-| p=[1,0]    | (Enable / Disable Mic Preamp)
-| d=[1,0]    | (Enable / Disable FM,IIS,ES689 digital record)
-| t=[1,0]    | (Enable / Disable Telegaming Mode)
-
-`3`, `ml`, `m`, `p`, `d`, `t`
-  * Omitting the parameter will show the current value.
+|Option--------------|Description----------------------------------------
+| a                  | Get all values
+| r=[path]           | Dump ES1869 Registers        default "essreg.txt"
+| c                  | Calibrate Op Amp
+| 3=[0,63; 0%,100%]  | 3D Amount                    Get / Set
+| ol=[-1024,960]     | ADC Offset Samples Left      Get / Set
+| or=[-1024,960]     | ADC Offset Wamples Right     Get / Set
+| a1s                | Audio 1 Sample Rate          Get
+| a1f                | Audio 1 Filter Clock         Get
+| a2s                | Audio 2 Sample Rate          Get
+| a2f                | Audio 2 Filter Clock         Get
+| pa=[1,0]           | Analog Stays On              Enable / Disable
+| pd                 | Digital Power Down           Get
+| m=[1,0]            | Mono-In                      Enable / Disable
+| ml=[0,25; 0%,100%] | Mono-In Level                Get / Set 
+| micp=[1,0]         | Mic Preamp                   Enable / Disable
+| fmd=[1,0]          | FM,IIS,ES689 digital record  Enable / Disable
+| fms=[1,0]          | FM,IIS,ES689 digital sync    Enable / Disable
+| fmr=[1,0]          | FM Reset                     Execute
+| t=[1,0]            | Telegaming Mode              Enable / Disable
 
 Example: `essreg r=before.txt 3=0 m=1 p=1 r=0 t=0 r=after.txt`
 ```

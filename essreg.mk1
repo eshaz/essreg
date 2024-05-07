@@ -1,5 +1,5 @@
 INSTRUCTION_SET=-5 # 80386 (pentium optimized)
-OPTIMIZATION=-osbhlkp
+OPTIMIZATION=-osbhl+kp
 
 regs.obj : src\regs.c .AUTODEPEND
  *wcc src\regs.c -i="$(%watcom)/h" $(INSTRUCTION_SET) $(OPTIMIZATION) -w4 -e10 -d1 -bt=dos -fo=.obj -ms

@@ -1,5 +1,8 @@
 #include "debug.h"
-#include "regs.h"
+
+#include <dos.h>
+#include <io.h>
+#include <stdio.h>
 
 void print_reg(unsigned int reg_addr, unsigned char reg_value) {
   fprintf(stderr, "%02X | %02X | " BIN_PAT " \n", reg_addr, reg_value,
