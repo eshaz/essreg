@@ -1,0 +1,351 @@
+"ES1869 AudioDrive V4.04.00.1319"
+
+[Version]
+LayoutFile=Layout.inf
+Signature="$CHICAGO$"
+Class=MEDIA
+provider=%ESS%
+
+[ClassInstall]
+AddReg=Class.AddReg
+
+[Class.AddReg]
+HKR,,,,%MediaClassName%
+HKR,,Icon,,"-1"
+HKR,,Installer,,mmci.dll
+
+[Manufacturer]
+%ESSMfgName%=ESS
+
+[ESS]
+%*ESS0006.DeviceDesc%=ESS0006_Device,*ESS0006
+%*ESS1869.DeviceDesc%=CPQB0AC_Device,*CPQB0AC
+
+[PreCopySection]
+HKR,,NoSetupUI,,1
+
+;---------------------------------------------------------------;
+
+
+[ESS0006_Device]
+CopyFiles=ESS0006.CopyList
+AddReg=ESS0006.AddReg
+
+[ESS1869_Device]
+DelFiles=ESS.DelList
+CopyFiles=ESS1869.CopyList, ESSDC.CopyList
+DelReg=WAVE.DelReg
+AddReg=WAVE.AddReg,MIXER.AddReg,ESS1869.AddReg,ESSCheck.AddReg,GPO.AddReg,ES938.AddReg,DMA.AddReg,Essdc.AddReg,Ext.AddReg
+UpdateInis=ESS.UpdateInis
+UpdateIniFields=Drivers.fields
+
+;Compaq Master Project DevNode
+[CPQB0AC_Device]
+DelFiles=ESS.DelList
+CopyFiles=ESS1869.CopyList
+DelReg=WAVE.DelReg
+AddReg=WAVE.AddReg,MIXER.AddReg,ESS1869.AddReg,ESSCheck.AddReg,DMA.AddReg,Ext.AddReg,CPQB0AC.AddReg,ESSDC.AddReg
+UpdateInis=ESS.UpdateInis
+UpdateIniFields=Drivers.fields
+
+
+;---------------------------------------------------------------;
+
+[ESS.UpdateInis]
+system.ini,386Enh,"device=vaudrv.386"
+system.ini,386Enh,"device=es1869wn.386"
+system.ini,386Enh,"device=esx88win.386"
+system.ini,386Enh,"device=vsbpd.386"
+system.ini,386Enh,"device=vadlibd.386"
+system.ini,386Enh,"device=vadlib.386"
+system.ini,386Enh,"device=vsbd.386"
+system.ini,drivers,"wave*=auddrive.drv",,1
+system.ini,drivers,"midi*=auddrive.drv",,1
+system.ini,drivers,"aux*=auddrive.drv",,1
+system.ini,drivers,"mixer*=auddrive.drv",,1
+system.ini,drivers,"midi*=audmpu.drv",,1
+system.ini,drivers,"midi*=audmpio.drv",,1
+system.ini,drivers,"midi*=es1869wn.drv",,1
+system.ini,drivers,"aux*=es1869wn.drv",,1
+system.ini,drivers,"mixer*=es1869wn.drv",,1
+win.ini,windows,load,essdaemn.exe,,
+
+[Joystick.UpdateInis]
+system.ini,drivers,"joystick="
+
+[ESS0006.CopyList]
+es1869.vxd,,
+
+[ESS1869.CopyList]
+es1869.vxd,,
+es1869.drv,,
+esfm.drv,,
+essmpu.drv,,
+
+[Joystick.CopyList]
+vjoyd.vxd,,
+msjstick.drv,,
+
+[ESSDC.CopyList]
+essdc.exe,,
+
+;---------------------------------------------------------------;
+
+[ESS.DelList]
+vaudrv.386,,,1
+es1869wn.386,,,1
+auddrive.drv,,,1
+es1869wn.drv,,,1
+audmpio.drv,,,1
+audmpu.drv,,,1
+auddrive.hlp,,,1
+audmpu.hlp,,,1
+nullwave.drv,,,1
+
+[ESS.DelList1]
+essfm.drv,,,1
+
+;---------------------------------------------------------------;
+
+[ESSCheck.AddReg]
+HKLM,%KEY_FIL%\PostInstall,UpdateIniFields,,"UpdateIniFields=fl.UpdateIniFields"
+HKLM,%KEY_FIL%\fl.UpdateIniFields,,,"1"
+HKLM,%KEY_FIL%\fl.UpdateIniFields,msmixmgr,,"system.ini,boot,drivers,msmixmgr.dll"
+
+[Drivers.fields]
+system.ini,boot,drivers,msmixmgr.dll
+system.ini,boot,drivers,mmmixer.dll
+
+;---------------------------------------------------------------;
+
+[ESS0006.AddReg]
+HKR,,DevLoader,,mmdevldr.vxd
+HKR,,Driver,,es1869.vxd
+
+[ESS1869.AddReg]
+HKR,,Driver,,es1869.vxd
+HKR,Drivers\wave\es1869.drv,Description,,%*ESS1869.DeviceDesc%
+HKR,Drivers\wave\es1869.drv,Driver,,es1869.drv
+HKR,Drivers\midi\esfm.drv,Description,,%V_ESFM%
+HKR,Drivers\midi\esfm.drv,Driver,,esfm.drv
+HKR,Drivers\midi\essmpu.drv,Description,,%V_EXTERNAL%
+HKR,Drivers\midi\essmpu.drv,External,1,01,00,00,00
+HKR,Drivers\midi\essmpu.drv,Driver,,essmpu.drv
+HKR,Drivers\mixer\es1869.drv,Description,,%*ESS1869.DeviceDesc%
+HKR,Drivers\mixer\es1869.drv,Driver,,es1869.drv
+HKR,Drivers\aux\es1869.drv,Description,,%*ESS1869.DeviceDesc%
+HKR,Drivers\aux\es1869.drv,Driver,,es1869.drv
+HKR,Drivers,SubClasses,,"wave,midi,aux,mixer"
+HKR,Config,"PCSpeakerVol",01,00,40,00,00
+HKR,Config,"Disable Mic Preamp",01,00
+;HKR,Config,"Want Local Powerdown",01,01,00,00,00
+
+[CPQB0AC.AddReg]
+HKR,Config,"Telegaming",01,01,00,00,00
+HKR,Config,"Enable AUXB",01,01,00,00,00
+HKR,Config,"Mixer:Output",01,5b,00,00,00
+; enable Spatializer
+HKR,Config,"Enable ES938",01,01,00,00,00
+HKR,Config,"3D Effect Enable",01,00,00,00,00
+HKR,Config,"3D Effect",01,40,40,00,00
+; disable Modem Call Progress by default
+HKR,Config,"MonoInPhoneMute",01,01,00,00,00
+
+
+[MIXER.AddReg]
+HKLM,Software\Microsoft\Windows\CurrentVersion\Run,SystemTray,,"SysTray.Exe"
+HKLM,%KEY_IOC%\Vol,,,
+
+[WAVE.AddReg]
+HKR,,DevLoader,,mmdevldr.vxd
+HKR,Drivers,MIGRATED,,0
+HKR,Config,"Disable Warning",01,FF
+HKR,Config,"Multiple FM Support",01,FF
+HKLM,%KEY_IOC%\acm,,,
+HKLM,%KEY_IOC%\Rec,,,
+HKLM,%KEY_IOC%\MPlay,,,
+
+[ESSDC.AddReg]
+HKLM,Software\Microsoft\Windows\CurrentVersion\Run,Essdc,,"essdc.exe"
+HKR,Config,"DCdrift",01,ff,00,00,00
+
+[WAVE.DelReg]
+HKR,Drivers\midi
+HKR,Drivers\wave
+HKR,Drivers\mixer
+HKR,Drivers\aux
+
+[Joystick.DelReg]
+HKR,Drivers\joystick
+
+;---------------------------------------------------------------;
+
+[DisksNames]
+1=      "",     ,
+
+[SourceDisksNames]
+1="Driver Disk",,
+
+[Files]
+[SourceDisksFiles]
+es1869.drv=     1,      ,
+es1869.vxd=     1,      ,
+esfm.drv=       1,      ,
+essfm.drv=      1,      ,
+essmport.drv=   1,      ,
+essmpu.drv=     1,      ,
+
+[DestinationDirs]
+DefaultDestDir = 11
+
+;---------------------------------------------------------------;
+
+[Strings]
+;Non-localized strings
+KEY_WARNVER="SYSTEM\CurrentControlSet\Control\SessionManager\WarnVerDLLs"
+KEY_CHKVER="SYSTEM\CurrentControlSet\Control\SessionManager\CheckVerDLLs"
+KEY_FIL="SYSTEM\CurrentControlSet\Control\MediaResources\FilterList"
+KEY_UI="SYSTEM\CurrentControlSet\Control\MediaResources\FilterList\fl.UpdateInis"
+KEY_IOC="SYSTEM\CurrentControlSet\Control\MediaResources\InstallOptionalComponents"
+
+;Localized strings
+ESS="ESS"
+ESSMfgName="ESS Technology, Inc."
+*ESS0006.DeviceDesc="ES1869 Control Interface"
+*ESS1869.DeviceDesc="ES1869 Plug and Play AudioDrive"
+Joystick.DeviceDesc="Gameport Joystick"
+MediaClassName="Sound, video and game controllers"
+V_INTERNAL="Internal OPL2/OPL3 FM Synthesis"
+V_EXTERNAL="External MIDI Port"
+V_ESFM="Internal ESFM Synthesis"
+
+;---------------------------------------------------------------;
+
+[GPO.AddReg]
+; Deleting the semicolon before a "HKR,..." line below "enables" that line.
+; Enabling "GPO0 Default" forces GPO0 pin high.
+; Enabling "GPO0 Show" makes mixer app control of GPO0 possible.
+; Enabling "GPO0 LongLabel" defines the GPO0 long label in the mixer app.
+; Enabling "GPO0 Label" defines the GPO0 short label in the mixer app.
+; Enabling "GPO1 Default" forces GPO1 pin low.
+; Enabling "GPO1 Show" makes mixer app control of GPO1 possible.
+; Enabling "GPO1 LongLabel" defines the GPO1 long label in the mixer app.
+; Enabling "GPO1 Label" defines the GPO1 short label in the mixer app.
+; Note: A long/short label may contain up to 63/15 characters, respectively.
+;
+;HKR,"Config\GPO Selections","GPO0 Default",01,01,00,00,00
+;HKR,"Config\GPO Selections","GPO0 Show",01,01,00,00,00
+;HKR,"Config\GPO Selections","GPO0 LongLabel",,"General Purpose Output 0"
+;HKR,"Config\GPO Selections","GPO0 Label",,"GPO0"
+;HKR,"Config\GPO Selections","GPO1 Default",01,00,00,00,00
+;HKR,"Config\GPO Selections","GPO1 Show",01,01,00,00,00
+;HKR,"Config\GPO Selections","GPO1 LongLabel",,"General Purpose Output 1"
+;HKR,"Config\GPO Selections","GPO1 Label",,"GPO1"
+
+[ES938.AddReg]
+; Deleting the semicolon before a "HKR,..." line below "enables" that line.
+; Enabling "Enable ES938" makes mixer app control of treble, bass and 3D effect possible.
+; Enabling "Treble" forces the initial treble level to 0x7FFF.
+; Enabling "Bass" forces the initial bass level to 0x7FFF.
+; Enabling "3D Effect Enable" forces 3D effect to be enabled.
+; Enabling "3D Effect" forces the 3D effect level to 0xBFFF.
+; Enabling "3D Limit" 
+; Enabling "Enable Software 3D Effect" forces software 3D effect to be enabled.
+; Note: Levels range from 0x0000 (min, represented as 00,00,00,00) to
+; 0xFFFF (max, represented as FF,FF,FF,FF).  The first two bytes in the
+; representation indicate the level and these two bytes are duplicated
+; into the last two bytes (e.g. level 0x1234 is 34,12,34,12).
+;
+;HKR,Config,"Enable ES938",01,01,00,00,00
+HKR,Config,Treble,01,FF,7F,FF,7F
+HKR,Config,Bass,01,FF,7F,FF,7F
+HKR,Config,"3D Effect Enable",01,00,00,00,00
+HKR,Config,"3D Effect",01,DA,DA,00,00
+HKR,Config,"3D Limit",01,00,00,00,00
+;HKR,Config,"Enable Software 3D Effect",01,01,00,00,00
+
+[DMA.AddReg]
+; Deleting the semicolon before a "HKR,..." line below "enables" that line.
+; Enabling "Single Mode DMA" forces the use of single transfer mode DMA.
+;
+;HKR,Config,"Single Mode DMA",01,01,00,00,00
+
+[VolumeMap.AddReg]
+HKR,Config,"LineInVolumeInMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+HKR,Config,"WaveVolumeInMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+HKR,Config,"MicVolumeInMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+HKR,Config,"CDAudioVolumeInMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+HKR,Config,"SynthVolumeInMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+HKR,Config,"AuxBVolumeInMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+
+HKR,Config,"LineInVolumeOutMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+HKR,Config,"WaveVolumeOutMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+HKR,Config,"MicVolumeOutMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+HKR,Config,"CDAudioVolumeOutMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+HKR,Config,"SynthVolumeOutMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+HKR,Config,"AuxBVolumeOutMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+HKR,Config,"IISVolumeOutMap",01, \
+ 00, 01, 02, 03, 04, 05, 06, 07, 08, \
+ 09, 0a, 0b, 0c, 0d, 0e, 0f 
+
+[Ext.AddReg]
+; Deleting the semicolon before a "HKR,..." line below "enables" that line.
+; Enabling "HwVolumeStep" forces double rate hardware volume button stepping.
+; Enabling "HwVolumeMap" forces hardware volume mapping to be as specified.
+; Enabling "HwVolume 2-Wire Mode" forces 2-wire mode hardware volume control.
+; Note: Volume stepping ranges from single rate (min, represented as
+; 01,00,00,00) to quadruple rate (max, represented as 04,00,00,00).
+; The hardware volume map must contain 64 entries, and each entry can range
+; in value from 00 (min) to 3F (max).
+;
+;HKR,Config,"HwVolumeStep",01,02,00,00,00
+;HKR,Config,"HwVolumeMap",01, \
+; 00, 02, 04, 06, 08, 0C, 10, 14, \
+; 18, 1C, 20, 24, 28, 2C, 2E, 30, \
+; 32, 32, 33, 33, 34, 34, 35, 35, \
+; 36, 36, 36, 37, 37, 37, 38, 38, \
+; 38, 38, 39, 39, 39, 39, 3A, 3A, \
+; 3A, 3A, 3B, 3B, 3B, 3B, 3C, 3C, \
+; 3C, 3C, 3D, 3D, 3D, 3D, 3E, 3E, \
+; 3E, 3E, 3E, 3F, 3F, 3F, 3F, 3F
+;HKR,Config,"HwVolume 2-Wire Mode",01,01,00,00,00
+
+[Power.AddReg]
+; Deleting the semicolon before a "HKR,..." line below "enables" that line.
+; Enabling "Want Local Powerdown" forces power down of idle devices.
+;
+;HKR,Config,"Want Local Powerdown",01,01,00,00,00
+
+
+;
+; Add the following line(s) to proper Addreg section to grey out AUXB
+; or/and IIS mixer control(s).
+;
+;
+;HKR,Config,"Enable AUXB",01,00,00,00,00
+;HKR,Config,"Enable IIS",01,00,00,00,00
+
