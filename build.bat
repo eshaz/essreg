@@ -6,5 +6,5 @@ SET EDPATH=C:\WATCOM\EDDAT
 wmake
 copy essreg.exe build\essreg.exe /y
 copy 1869opl3.com build\1869opl3.com /y
-copy 1869opl3.com build\esfmpat.exe /y
+copy esfmpat.exe build\esfmpat.exe /y
 

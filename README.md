@@ -49,6 +49,23 @@ Example:
 c:\>1869opl3.com "c:\path\to\game.exe"
 ```
 
+## [`esfmpat.exe`](build)
+* Utility to write custom patch banks to the Windows ESFM VxD driver.
+* Known Issues: Patch banks that are larger than the existing bank will cause page faults. The custom patch bank must be the same size in bytes of the original.
+* See the [ESFM patch banks](esfm_patch_banks) for the Windows 98, Windows NT4, and other custom patches.
+* See the [recordings](digital_recording) for ESFM patch comparisons.
+
+```
+ESFM Patch Utility (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+
+This utility writes your custom patch set to an existing ESFM.DRV file.
+Compatible with the VxD Windows driver only.
+
+** WARNING: BACKUP YOUR ORIGINAL ESFM.DRV BEFORE RUNNING THIS UTILITY! **
+
+Usage: esfmpat "c:\path\to\esfm.drv" "c:\path\to\patch.bin"
+```
+
 ## Building
 
 ### Prerequisites

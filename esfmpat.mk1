@@ -1,0 +1,10 @@
+INSTRUCTION_SET=-5 # 80386 (pentium optimized)
+OPTIMIZATION=-osbhl+kp
+
+esfmpat.obj : src\esfmpat.c .AUTODEPEND
+ *wcc src\esfmpat.c -i="$(%watcom)/h" $(INSTRUCTION_SET) $(OPTIMIZATION) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+
+esfmpat.exe : esfmpat.obj .AUTODEPEND
+ @%write esfmpat.lk1 FIL esfmpat.obj
+ @%append esfmpat.lk1
+ *wlink name esfmpat sys dos op m libf cstart_t op maxe=10 op q op DOSSEG op STACK=512 op el sort @esfmpat.lk1
