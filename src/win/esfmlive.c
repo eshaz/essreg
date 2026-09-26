@@ -43,8 +43,31 @@ static HGLOBAL bank_handle(const struct live *lv) {
   return (HGLOBAL)*(u16 __far *)(lv->dg + DG_BANK_SEL);
 }
 
-static int open_live(struct live *lv, char *why) {
+/* handle of segment `seg` of a loaded module: ToolHelp, or else the module
+ * database itself, which is the NE header in memory with 10-byte segment
+ * table entries ending in the segment's handle (ToolHelp's
+ * GlobalEntryModule is a stub in Wine) */
+static HGLOBAL module_segment(HMODULE mod, unsigned seg) {
   GLOBALENTRY ge;
+  u8 __far *ne;
+  HGLOBAL h = 0;
+
+  memset(&ge, 0, sizeof(ge));
+  ge.dwSize = sizeof(ge);
+  if (GlobalEntryModule(&ge, mod, seg) && ge.hBlock)
+    return ge.hBlock;
+  ne = (u8 __far *)GlobalLock((HGLOBAL)mod);
+  if (!ne)
+    return 0;
+  if (ne[0] == 'N' && ne[1] == 'E' && seg >= 1 &&
+      seg <= *(u16 __far *)(ne + 0x1C))
+    h = (HGLOBAL) * (u16 __far *)(ne + *(u16 __far *)(ne + 0x22) +
+                                   (seg - 1) * 10 + 8);
+  GlobalUnlock((HGLOBAL)mod);
+  return h;
+}
+
+static int open_live(struct live *lv, char *why) {
   FILE *f;
 
   memset(lv, 0, sizeof(*lv));
@@ -66,13 +89,11 @@ static int open_live(struct live *lv, char *why) {
   }
   fclose(f);
 
-  memset(&ge, 0, sizeof(ge));
-  ge.dwSize = sizeof(ge);
-  if (!GlobalEntryModule(&ge, lv->mod, lv->drv.autodata) || !ge.hBlock) {
+  lv->dgroup = module_segment(lv->mod, lv->drv.autodata);
+  if (!lv->dgroup) {
     strcpy(why, "cannot find the driver's data segment");
     return -1;
   }
-  lv->dgroup = ge.hBlock;
   lv->dg = (u8 __far *)GlobalLock(lv->dgroup);
   if (!lv->dg) {
     strcpy(why, "cannot lock the driver's data segment");
