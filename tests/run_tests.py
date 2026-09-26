@@ -43,7 +43,8 @@ def c_tests(tmp):
     failures = 0
     src = lambda *names: [os.path.join(SRC, n) for n in names]  # noqa: E731
 
-    tests = [("t_esshw", src("esshw.c", "simhw.c"))]
+    tests = [("t_esshw", src("esshw.c", "simhw.c")),
+             ("t_vxdapi", src("vxdapi.c", "esshw.c"))]
     if os.path.exists(os.path.join(SRC, "esscat.tbl")):
         tests.append(("t_esscat", src("esscat.c", "essio.c", "esshw.c",
                                       "simhw.c")))
