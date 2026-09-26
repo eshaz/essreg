@@ -18,9 +18,10 @@ cp "$ROOT/tools/nestamp.c" "$WORK/tools/"
 # the makefile runs "nestamp essctl.exe": use a native build of it here
 cc -O -o "$WORK/bin/nestamp" "$ROOT/tools/nestamp.c"
 cd "$WORK"
-# wmake on Linux wants forward slashes and explicit object extensions
-sed -i -e 's#\\#/#g' -e 's/libf cstart_t\([^.]\)/libf cstart_t.obj\1/' \
-    -e 's/\r$//' ./*.mk1 Makefile
+# wmake on Linux wants forward slashes.  The DOS makefiles link Watcom 11's
+# tiny-model startup (libf cstart_t) into small-model programs; Open
+# Watcom's does not start them, so they get the default startup here.
+sed -i -e 's#\\#/#g' -e 's/ libf cstart_t//' -e 's/\r$//' ./*.mk1 Makefile
 export WATCOM="$OW" PATH="$WORK/bin:$OW/binl64:$PATH" INCLUDE="$OW/h"
 wmake -h "$@"
 mkdir -p "$ROOT/out/ow2"
