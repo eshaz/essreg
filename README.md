@@ -16,7 +16,7 @@ for the FM synthesizer's patch banks.
   * through the register interface of the rebuilt `ES1869.VXD` (below): nothing Windows or a DOS game is doing is disturbed;
   * with the stock driver, directly: essctl borrows the sound device around each access and gives it back, so a DOS game gets "in use" only while essctl is actually reading;
   * `/sim`: a simulated ES1869, to try essctl without the card.
-* **Profiles**: File > *Save profile* stores the 50 ordinary settings in an INI file; File > *Load profile* restores them. Put `essctl /load C:\ESS\MY.INI` in the StartUp group to restore them at every start of Windows.
+* **Profiles**: File > *Save profile* stores the 50 ordinary settings in an INI file; File > *Load profile* restores them. Put `essctl /load C:\ESS\MY.INI` in the StartUp group to restore them at every start of Windows: the ESS driver resets the mixer whenever Windows starts and puts back only its own settings ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)).
 * **ESFM**: *ESFM > Load patch bank* replaces the FM synthesizer's sounds while Windows runs.
 
 ```

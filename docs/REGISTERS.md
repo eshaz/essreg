@@ -240,7 +240,7 @@ DS p.60
 | 7 | Serial port enable (SW SE) | `ser.enable` | bit | caution |  | 1 = enable the DSP serial port (OR'd with the SE pin); synchronized to DCLK, so it has no effect while DCLK is not running (DS p.60) |
 | 6 | Serial data signed | `ser.signed` | bit | caution |  | 1 = serial data is signed two's complement, 0 = unsigned (offset binary) (DS p.60) |
 | 5 | Serial interface reset | `ser.reset` | bit | caution |  | 1 = hold the DSP serial interface in reset, which resets the left/right flags of stereo modes; 0 = release (DS p.60) |
-| 4 | ES689/ES69x interface | `ser.es689` | bit | caution |  | 1 = an ES689/ES69x may use the music DAC while MCLK is seen high at least every 20 us; FM volume 36h applies (DS p.61) |
+| 4 | ES689/ES69x interface | `ser.es689` | bit | caution | driver sets it | 1 = an ES689/ES69x may use the music DAC while MCLK is seen high at least every 20 us; FM volume 36h applies (DS p.61) |
 | 3 | Active-low frame sync | `ser.sync_low` | bit | caution |  | 1 = frame sync pulses FSR and FSX are active-low, 0 = active-high (DS p.61) |
 | 2 | DSP test mode | `ser.test_mode` | bit | expert |  | Test mode: DCLK, FSX and FSR become outputs; DCLK runs at 1.5876 MHz and the frame rate comes from 4Ah (DS p.61) |
 | 1 | Telegaming mode | `ser.telegaming` | bit | caution |  | Telegaming (Game and Telephony) mode, as essreg calls it: in Serial mode Audio 1 DMA plays through the Audio 2 DAC at the 14h volume; 0 = Audio 1 unheard (DS p.61) |
@@ -281,8 +281,8 @@ DS p.62
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 3 | 3-D effect | `fx.3d.enable` | bit | safe | profile | 1 = enable the Spatializer VBX 3-D effect, 0 = bypass it; the effect also needs bit 2 (released from reset) (DS p.62) |
-| 2 | 3-D released from reset | `fx.3d.run` | bit | caution |  | Active-low reset of the 3-D effect: 1 = release from reset, 0 = reset (DS p.62) |
+| 3 | 3-D effect | `fx.3d.enable` | bit | safe | profile, driver sets it | 1 = enable the Spatializer VBX 3-D effect, 0 = bypass it; the effect also needs bit 2 (released from reset) (DS p.62) |
+| 2 | 3-D released from reset | `fx.3d.run` | bit | caution | driver sets it | Active-low reset of the 3-D effect: 1 = release from reset, 0 = reset (DS p.62) |
 
 ### 52h 3-D level
 
@@ -290,7 +290,7 @@ DS p.62
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 5:0 | 3-D level | `fx.3d.level` | level | safe | profile | Amount of 3-D effect: 0 = minimum, 3Fh = maximum; reset to zero by hardware reset (DS p.62) |
+| 5:0 | 3-D level | `fx.3d.level` | level | safe | profile, driver sets it | Amount of 3-D effect: 0 = minimum, 3Fh = maximum; reset to zero by hardware reset (DS p.62) |
 
 ### 60h Left master volume and mute
 
@@ -336,17 +336,17 @@ DS p.62
 
 > note: DS p.17 says the hardware volume interrupt is polled at 64h bit 3; the 64h description (p.62) uses bit 4
 
-> note: ES1869.VXD also rewrites 64h (bits 5 and 3:2 at device start, bits 1:0 in HwVol_Int_Enable/Disable, all of it in Save/Restore_DOS_Mixer); not flagged FF_DRVOWNED
+> ES1869.VXD rewrites 64h: bits 5 and 3:2 at device start, bits 1:0 in HwVol_Int_Enable/Disable, all of it in Save/Restore_DOS_Mixer
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
 | 7 | Split mode | `hwvol.split` | bit | caution |  | 1 = split the HW volume counters 61h/63h from 60h/62h; host software then updates the master volume. 0 = slaved together (DS p.62) |
 | 6 | MPU-401 IRQ mask (1 = on) | `irq.mpu401.mask` | bit | expert |  | AND'ed with the MPU-401 interrupt request; if low, the request stays low. Cleared by hardware reset (DS p.62) |
-| 5 | Count by 3 | `hwvol.count_by_3` | bit | caution |  | 1 = each push of Up or Down changes the volume by 3 (2.25 dB), 0 = by 1; cleared by hardware reset (DS p.62) |
+| 5 | Count by 3 | `hwvol.count_by_3` | bit | caution | driver sets it | 1 = each push of Up or Down changes the volume by 3 (2.25 dB), 0 = by 1; cleared by hardware reset (DS p.62) |
 | 4 | HW volume IRQ request | `hwvol.irq` | status | read-only |  | Read-only interrupt request from a hardware volume event; any write to 66h clears it (DS p.62) |
-| 3:2 | HW volume button mode | `hwvol.mode` | choice | caution |  | Button mode: normal 3-wire; 2-wire (Up and Down low together = Mute); 2-wire with 10 us debounce and no auto-increment; or disabled (DS p.63) Values: 0 = Three-wire; 1 = Two-wire; 2 = Two-wire, fast debounce; 3 = Disabled. |
-| 1 | HW volume IRQ mask (1 = on) | `hwvol.irq_mask` | bit | expert |  | AND'ed with the hardware volume interrupt request before it is OR'd into the Audio 1 interrupt; cleared by hardware reset (DS p.63) |
-| 0 | Disable SB Pro master emulation | `master.sbpro_off` | bit | caution |  | 0 = writes to 22h/32h and mixer reset update 60h/62h; 1 = 22h/32h are in effect read-only. Cleared by hardware reset (DS p.63) |
+| 3:2 | HW volume button mode | `hwvol.mode` | choice | caution | driver sets it | Button mode: normal 3-wire; 2-wire (Up and Down low together = Mute); 2-wire with 10 us debounce and no auto-increment; or disabled (DS p.63) Values: 0 = Three-wire; 1 = Two-wire; 2 = Two-wire, fast debounce; 3 = Disabled. |
+| 1 | HW volume IRQ mask (1 = on) | `hwvol.irq_mask` | bit | expert | driver sets it | AND'ed with the hardware volume interrupt request before it is OR'd into the Audio 1 interrupt; cleared by hardware reset (DS p.63) |
+| 0 | Disable SB Pro master emulation | `master.sbpro_off` | bit | caution | driver sets it | 0 = writes to 22h/32h and mixer reset update 60h/62h; 1 = 22h/32h are in effect read-only. Cleared by hardware reset (DS p.63) |
 
 ### 65h Opamp calibration control
 
@@ -442,7 +442,7 @@ DS p.64
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:0 | Audio 2 sample rate | `a2.rate` | value | expert |  | Bit 7 picks the 768 kHz (1) or 793.8 kHz (0) clock; rate = clock / (128 - bits 6:0), e.g. F0h = 48 kHz, 6Eh = 44.1 kHz (DS p.64) |
+| 7:0 | Audio 2 sample rate | `a2.rate` | value | expert | driver sets it | Bit 7 picks the 768 kHz (1) or 793.8 kHz (0) clock; rate = clock / (128 - bits 6:0), e.g. F0h = 48 kHz, 6Eh = 44.1 kHz (DS p.64) |
 
 ### 71h Audio 2 mode
 
@@ -452,10 +452,10 @@ DS p.64
 |---|---|---|---|---|---|---|
 | 5 | New A1h rate mode | `a2.new_a1` | bit | caution | driver sets it | 1 = A1h behaves like 70h, giving accurate rates that divide 48 kHz; 0 = A1h behaves as in earlier AudioDrive chips (DS p.64) |
 | 4 | Audio 2 4x oversampling | `a2.oversample4x` | bit | caution | driver sets it | 1 = the Audio 2 DAC is in 4x oversampling mode, which always bypasses its switched-capacitor filter (DS p.64) |
-| 3 | Audio 2 filter bypass | `a2.scf_bypass` | bit | caution | driver sets it | 1 = bypass the switched-capacitor filter of the Audio 2 DAC (DS p.64) |
-| 2 | Audio 1 filter bypass | `a1.scf_bypass` | bit | caution | driver sets it | 1 = bypass the switched-capacitor filter of the Audio 1 CODEC (DS p.64) |
+| 3 | Audio 2 filter bypass | `a2.scf_bypass` | bit | caution |  | 1 = bypass the switched-capacitor filter of the Audio 2 DAC (DS p.64) |
+| 2 | Audio 1 filter bypass | `a1.scf_bypass` | bit | caution |  | 1 = bypass the switched-capacitor filter of the Audio 1 CODEC (DS p.64) |
 | 1 | Audio 2 asynchronous | `a2.async` | bit | expert | driver sets it | 1 = the Audio 2 DAC runs at its own rate (70h, 72h); 0 = it is slaved to the Audio 1 sample and filter rate (DS p.64) |
-| 0 | Audio 2 mixed into FM | `a2.fm_mix` | bit | caution | driver sets it | 1 = Audio 2 DMA is slaved to the FM synthesizer sample rate and digitally mixed into the FM output (DS p.64) |
+| 0 | Audio 2 mixed into FM | `a2.fm_mix` | bit | caution |  | 1 = Audio 2 DMA is slaved to the FM synthesizer sample rate and digitally mixed into the FM output (DS p.64) |
 
 ### 72h Audio 2 filter clock rate
 
@@ -463,7 +463,7 @@ DS p.64
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:0 | Audio 2 filter clock | `a2.filter` | value | expert |  | Filter clock divider of the Audio 2 switched-capacitor filter in asynchronous mode, programmed like A2h; reset to zero (DS p.64) |
+| 7:0 | Audio 2 filter clock | `a2.filter` | value | expert | driver sets it | Filter clock divider of the Audio 2 switched-capacitor filter in asynchronous mode, programmed like A2h; reset to zero (DS p.64) |
 
 ### 74h Audio 2 transfer count reload low
 
@@ -471,7 +471,7 @@ DS p.64
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:0 | Audio 2 count reload low | `a2.count.lo` | value | expert |  | Low byte of the two's complement Audio 2 DMA transfer count reload (DS p.64) |
+| 7:0 | Audio 2 count reload low | `a2.count.lo` | value | expert | driver sets it | Low byte of the two's complement Audio 2 DMA transfer count reload (DS p.64) |
 
 ### 76h Audio 2 transfer count reload high
 
@@ -479,7 +479,7 @@ DS p.64
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:0 | Audio 2 count reload high | `a2.count.hi` | value | expert |  | High byte of the two's complement Audio 2 DMA transfer count reload (DS p.64) |
+| 7:0 | Audio 2 count reload high | `a2.count.hi` | value | expert | driver sets it | High byte of the two's complement Audio 2 DMA transfer count reload (DS p.64) |
 
 ### 78h Audio 2 control 1
 
@@ -489,10 +489,10 @@ DS p.64
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:6 | Audio 2 DMA transfer type | `a2.xfer` | choice | expert |  | Single transfer (1 DACK per DRQ) or demand transfer with 2, 4 or 8 DACKs per DRQ (DS p.65) Values: 0 = Single; 1 = Demand 2; 2 = Demand 4; 3 = Demand 8. |
-| 4 | Audio 2 auto-initialize | `a2.autoinit` | bit | expert |  | 1 = the counter reloads at zero and DMA continues; 0 = normal mode, DMA stops and bit 1 is cleared (DS p.65) |
-| 1 | Audio 2 DMA enable | `a2.dma_enable` | bit | expert |  | 1 = Audio 2 DMA writes into the 32-word Audio 2 FIFO; cleared at terminal count unless auto-initialize (DS p.65) |
-| 0 | Audio 2 FIFO to DAC | `a2.fifo_enable` | bit | expert |  | 1 = data moves from the FIFO to the Audio 2 DAC (or to the DSP serial port or the FM mix) (DS p.65) |
+| 7:6 | Audio 2 DMA transfer type | `a2.xfer` | choice | expert | driver sets it | Single transfer (1 DACK per DRQ) or demand transfer with 2, 4 or 8 DACKs per DRQ (DS p.65) Values: 0 = Single; 1 = Demand 2; 2 = Demand 4; 3 = Demand 8. |
+| 4 | Audio 2 auto-initialize | `a2.autoinit` | bit | expert | driver sets it | 1 = the counter reloads at zero and DMA continues; 0 = normal mode, DMA stops and bit 1 is cleared (DS p.65) |
+| 1 | Audio 2 DMA enable | `a2.dma_enable` | bit | expert | driver sets it | 1 = Audio 2 DMA writes into the 32-word Audio 2 FIFO; cleared at terminal count unless auto-initialize (DS p.65) |
+| 0 | Audio 2 FIFO to DAC | `a2.fifo_enable` | bit | expert | driver sets it | 1 = data moves from the FIFO to the Audio 2 DAC (or to the DSP serial port or the FM mix) (DS p.65) |
 
 ### 7Ah Audio 2 control 2
 
@@ -500,15 +500,15 @@ DS p.65
 
 > note: DS p.49 and p.53 say 7Ah bits 4:3 choose the playback or record mixer as the Mixer record source; the 7Ah description (p.65) reserves bits 5:3
 
-> 7Ah is reset to zero by hardware or software reset (DS p.65), hence FF_VOLATILE
+> 7Ah is reset to zero by hardware or software reset (DS p.65), hence FF_VOLATILE; ES1869.DRV also writes it for every playback
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7 | Audio 2 IRQ latch | `a2.irq` | bit | expert | cleared by DSP reset | Set when the DMA counter rolls over to zero or when 1 is written; write 0 to clear it (DS p.65) |
-| 6 | Audio 2 IRQ mask (1 = on) | `a2.irq_mask` | bit | expert | cleared by DSP reset | AND'ed with bit 7 to produce the Audio 2 interrupt request (DS p.65) |
-| 2 | Audio 2 signed data | `a2.signed` | bit | expert | cleared by DSP reset | 1 = data is signed two's complement, 0 = unsigned (DS p.65) |
-| 1 | Audio 2 stereo | `a2.stereo` | bit | expert | cleared by DSP reset | 1 = stereo data, 0 = mono (DS p.65) |
-| 0 | Audio 2 16-bit | `a2.16bit` | bit | expert | cleared by DSP reset | 1 = 16-bit samples, 0 = 8-bit samples (DS p.65) |
+| 7 | Audio 2 IRQ latch | `a2.irq` | bit | expert | driver sets it, cleared by DSP reset | Set when the DMA counter rolls over to zero or when 1 is written; write 0 to clear it (DS p.65) |
+| 6 | Audio 2 IRQ mask (1 = on) | `a2.irq_mask` | bit | expert | driver sets it, cleared by DSP reset | AND'ed with bit 7 to produce the Audio 2 interrupt request (DS p.65) |
+| 2 | Audio 2 signed data | `a2.signed` | bit | expert | driver sets it, cleared by DSP reset | 1 = data is signed two's complement, 0 = unsigned (DS p.65) |
+| 1 | Audio 2 stereo | `a2.stereo` | bit | expert | driver sets it, cleared by DSP reset | 1 = stereo data, 0 = mono (DS p.65) |
+| 0 | Audio 2 16-bit | `a2.16bit` | bit | expert | driver sets it, cleared by DSP reset | 1 = 16-bit samples, 0 = 8-bit samples (DS p.65) |
 
 ### 7Ch Audio 2 DAC mixer volume
 
@@ -527,9 +527,9 @@ DS p.65
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 3 | Mic +26 dB preamp | `fx.mic.boost` | bit | safe | profile | 1 = +26 dB microphone preamp gain, 0 = 0 dB; on after hardware reset, which sets 7Dh to 08h (DS p.65) |
-| 2:1 | MONO_OUT source | `fx.monoout.source` | choice | safe | profile | Source of the MONO_OUT pin; overridden in Serial mode by the FDXO setting of 46h (DS p.65) Values: 0 = Mute (CMR); 1 = CIN_R pin; 2 = Audio 2 DAC right; 3 = Record level mono mix. |
-| 0 | MONO_IN to line out | `fx.monoin.direct` | bit | safe | profile | 1 = MONO_IN is mixed at unity gain with AOUT_L/R after the playback mixer, 3-D effect and master volume (DS p.65) |
+| 3 | Mic +26 dB preamp | `fx.mic.boost` | bit | safe | profile, driver sets it | 1 = +26 dB microphone preamp gain, 0 = 0 dB; on after hardware reset, which sets 7Dh to 08h (DS p.65) |
+| 2:1 | MONO_OUT source | `fx.monoout.source` | choice | safe | profile, driver sets it | Source of the MONO_OUT pin; overridden in Serial mode by the FDXO setting of 46h (DS p.65) Values: 0 = Mute (CMR); 1 = CIN_R pin; 2 = Audio 2 DAC right; 3 = Record level mono mix. |
+| 0 | MONO_IN to line out | `fx.monoin.direct` | bit | safe | profile, driver sets it | 1 = MONO_IN is mixed at unity gain with AOUT_L/R after the playback mixer, 3-D effect and master volume (DS p.65) |
 
 ### 7Fh I2S interface
 
@@ -541,7 +541,7 @@ DS p.65
 | 3 | I2S data activity | `fx.i2s.data_seen` | bit | caution |  | Latched high if IISDATA has been high at least once since it was last cleared by software (DS p.65) |
 | 2 | I2S clock activity | `fx.i2s.clock_seen` | bit | caution |  | Latched high if IISCLK and IISLR have been high at the same time since it was last cleared by software (DS p.66) |
 | 1 | MODE pin | `fx.i2s.mode_pin` | status | read-only |  | Read-only state of the MODE input pin, which must be high for the I2S serial interface to be enabled (DS p.66) |
-| 0 | I2S drives music DAC | `fx.i2s.enable` | bit | safe | profile | 1 = the I2S serial interface takes control of the music DAC; 0 = the FM synthesizer or ES689/ES69x interface uses it (DS p.66) |
+| 0 | I2S drives music DAC | `fx.i2s.enable` | bit | safe | profile, driver sets it | 1 = the I2S serial interface takes control of the music DAC; 0 = the FM synthesizer or ES689/ES69x interface uses it (DS p.66) |
 
 ## Controller registers
 
@@ -553,7 +553,7 @@ DS p.67; DSP channel
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:0 | Audio 1 sample rate | `a1.rate` | value | expert | cleared by DSP reset | Rate = 397.7 kHz / (128 - x) if bit 7 = 0, 795.5 kHz / (256 - x) if bit 7 = 1. Mixer 71h bit 5 makes it work like 70h (DS p.67) |
+| 7:0 | Audio 1 sample rate | `a1.rate` | value | expert | driver sets it, cleared by DSP reset | Rate = 397.7 kHz / (128 - x) if bit 7 = 0, 795.5 kHz / (256 - x) if bit 7 = 1. Mixer 71h bit 5 makes it work like 70h (DS p.67) |
 
 ### A2h Filter divider
 
@@ -561,7 +561,7 @@ DS p.68; DSP channel
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:0 | Audio 1 filter clock | `a1.filter` | value | expert | cleared by DSP reset | Filter clock = 7.16 MHz / (256 - x); the roll-off is clock/82 and belongs at 80-90% of half the sample rate (DS p.68) |
+| 7:0 | Audio 1 filter clock | `a1.filter` | value | expert | driver sets it, cleared by DSP reset | Filter clock = 7.16 MHz / (256 - x); the roll-off is clock/82 and belongs at 80-90% of half the sample rate (DS p.68) |
 
 ### A4h DMA transfer count reload low
 
@@ -569,7 +569,7 @@ DS p.68; DSP channel
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:0 | Audio 1 count reload low | `a1.count.lo` | value | expert | cleared by DSP reset | Low byte of the two's complement Audio 1 DMA transfer counter reload; reset value 00h (DS p.68) |
+| 7:0 | Audio 1 count reload low | `a1.count.lo` | value | expert | driver sets it, cleared by DSP reset | Low byte of the two's complement Audio 1 DMA transfer counter reload; reset value 00h (DS p.68) |
 
 ### A5h DMA transfer count reload high
 
@@ -577,7 +577,7 @@ DS p.68; DSP channel
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:0 | Audio 1 count reload high | `a1.count.hi` | value | expert | cleared by DSP reset | High byte of the two's complement Audio 1 DMA transfer counter reload; reset value F8h (DS p.68) |
+| 7:0 | Audio 1 count reload high | `a1.count.hi` | value | expert | driver sets it, cleared by DSP reset | High byte of the two's complement Audio 1 DMA transfer counter reload; reset value F8h (DS p.68) |
 
 ### A8h Analog control
 
@@ -587,8 +587,8 @@ DS p.68; DSP channel
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 3 | Record monitor | `rec.monitor` | bit | caution | cleared by DSP reset | 1 = enable record monitor, so AOUT_L/R stay live while the CODEC records (ADC direction); cleared by software reset (DS p.68) |
-| 1:0 | Audio 1 stereo/mono | `a1.channels` | choice | expert | cleared by DSP reset | Operation mode of the first DMA converters: 01 = stereo, 10 = mono; 00 and 11 are reserved (DS p.68) Values: 1 = Stereo; 2 = Mono. |
+| 3 | Record monitor | `rec.monitor` | bit | caution | driver sets it, cleared by DSP reset | 1 = enable record monitor, so AOUT_L/R stay live while the CODEC records (ADC direction); cleared by software reset (DS p.68) |
+| 1:0 | Audio 1 stereo/mono | `a1.channels` | choice | expert | driver sets it, cleared by DSP reset | Operation mode of the first DMA converters: 01 = stereo, 10 = mono; 00 and 11 are reserved (DS p.68) Values: 1 = Stereo; 2 = Mono. |
 
 ### B1h Legacy audio interrupt control
 
@@ -596,9 +596,9 @@ DS p.68; DSP channel
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7 | Game compatible IRQ | `a1.irq.game` | bit | expert | cleared by DSP reset | Reserved for Compatibility mode; leave zero for Extended mode (DS p.68) |
-| 6 | IRQ on DMA counter overflow | `a1.irq.dma` | bit | expert | cleared by DSP reset | 1 = interrupt on each overflow of the DMA counter in Extended mode DMA (DS p.68) |
-| 5 | IRQ on FIFO half-empty edge | `a1.irq.fifo` | bit | expert | cleared by DSP reset | 1 = interrupt on FIFO half-empty transitions during Extended mode block I/O to or from the FIFO (DS p.68) |
+| 7 | Game compatible IRQ | `a1.irq.game` | bit | expert | driver sets it, cleared by DSP reset | Reserved for Compatibility mode; leave zero for Extended mode (DS p.68) |
+| 6 | IRQ on DMA counter overflow | `a1.irq.dma` | bit | expert | driver sets it, cleared by DSP reset | 1 = interrupt on each overflow of the DMA counter in Extended mode DMA (DS p.68) |
+| 5 | IRQ on FIFO half-empty edge | `a1.irq.fifo` | bit | expert | driver sets it, cleared by DSP reset | 1 = interrupt on FIFO half-empty transitions during Extended mode block I/O to or from the FIFO (DS p.68) |
 | 3:0 | Audio 1 IRQ (decoded) | `a1.irq.selected` | choice | read-only |  | Read-only decode of the interrupt number selected for the Audio 1 interrupt (DS p.69) Values: 0 = IRQ 2, 9 or other; 5 = IRQ 5; 10 = IRQ 7; 15 = IRQ 10. |
 
 ### B2h DRQ control
@@ -607,21 +607,21 @@ DS p.69; DSP channel
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7 | Game compatible DRQ | `a1.drq.game` | bit | expert | cleared by DSP reset | Reserved for Compatibility mode; leave zero for Extended mode (DS p.69) |
-| 6 | DRQ for Extended mode DMA | `a1.drq.ext` | bit | expert | cleared by DSP reset | 1 = enable DRQ outputs and DACKB inputs for Extended mode DMA; 0 = block I/O to or from the FIFO (DS p.69) |
-| 5 | DRQ for game compatible DMA | `a1.drq.game_dma` | bit | expert | cleared by DSP reset | Reserved for Compatibility mode; leave zero for Extended mode. With bits 5 and 6 low the Audio 1 DRQ is always low (DS p.69) |
+| 7 | Game compatible DRQ | `a1.drq.game` | bit | expert | driver sets it, cleared by DSP reset | Reserved for Compatibility mode; leave zero for Extended mode (DS p.69) |
+| 6 | DRQ for Extended mode DMA | `a1.drq.ext` | bit | expert | driver sets it, cleared by DSP reset | 1 = enable DRQ outputs and DACKB inputs for Extended mode DMA; 0 = block I/O to or from the FIFO (DS p.69) |
+| 5 | DRQ for game compatible DMA | `a1.drq.game_dma` | bit | expert | driver sets it, cleared by DSP reset | Reserved for Compatibility mode; leave zero for Extended mode. With bits 5 and 6 low the Audio 1 DRQ is always low (DS p.69) |
 | 3:0 | Audio 1 DMA (decoded) | `a1.drq.selected` | choice | read-only |  | Read-only decode of the DMA channel selected for the first audio DMA channel (DS p.69) Values: 0 = Other; 5 = DRQ 0; 10 = DRQ 1; 15 = DRQ 3. |
 
 ### B4h Record level
 
 DS p.69; DSP channel
 
-> note: DS p.67 and p.69 put the RIGHT record level in B4h bits 7:4 and LEFT in 3:0 (unlike the mixer registers); other ESS drivers use 7:4 as left; not verified on hardware
+> DS p.67 and p.69 put the RIGHT record level in B4h bits 7:4 and LEFT in 3:0, unlike the mixer registers; ES1869.DRV writes it the same way (5:297A)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:4 | Record level R | `rec.level.r` | level | caution | cleared by DSP reset | Right record level: microphone 0 to +22.5 dB, other sources -6 to +16.5 dB, in 1.5 dB steps (DS p.69) |
-| 3:0 | Record level L | `rec.level.l` | level | caution | cleared by DSP reset | Left record level: microphone 0 to +22.5 dB, other sources -6 to +16.5 dB, in 1.5 dB steps (DS p.69) |
+| 7:4 | Record level R | `rec.level.r` | level | caution | driver sets it, cleared by DSP reset | Right record level: microphone 0 to +22.5 dB, other sources -6 to +16.5 dB, in 1.5 dB steps (DS p.69) |
+| 3:0 | Record level L | `rec.level.l` | level | caution | driver sets it, cleared by DSP reset | Left record level: microphone 0 to +22.5 dB, other sources -6 to +16.5 dB, in 1.5 dB steps (DS p.69) |
 
 ### B5h DAC direct access holding low
 
@@ -649,11 +649,11 @@ DS p.69; DSP channel
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7 | FIFO to/from CODEC | `a1.fifo.codec` | bit | expert | cleared by DSP reset | 1 = connect the first DMA FIFO to the DAC or ADC, allowing transfers between the FIFO and the analog circuitry (DS p.69) |
-| 6 | Opposite of bit 3 | `a1.fifo.not_stereo` | bit | expert | cleared by DSP reset | Reserved function; must be set to the opposite of bit 3: high for mono, low for stereo (DS p.70) |
-| 5 | FIFO signed | `a1.fifo.signed` | bit | expert | cleared by DSP reset | 1 = first DMA FIFO in two's complement (signed) mode, 0 = unsigned (offset 8000h) (DS p.70) |
-| 3 | FIFO stereo | `a1.fifo.stereo` | bit | expert | cleared by DSP reset | 1 = first DMA FIFO in stereo mode, 0 = mono; bit 6 must be the opposite (DS p.70) |
-| 2 | FIFO 16-bit | `a1.fifo.16bit` | bit | expert | cleared by DSP reset | 1 = first DMA FIFO in 16-bit mode, 0 = 8-bit mode (DS p.70) |
+| 7 | FIFO to/from CODEC | `a1.fifo.codec` | bit | expert | driver sets it, cleared by DSP reset | 1 = connect the first DMA FIFO to the DAC or ADC, allowing transfers between the FIFO and the analog circuitry (DS p.69) |
+| 6 | Opposite of bit 3 | `a1.fifo.not_stereo` | bit | expert | driver sets it, cleared by DSP reset | Reserved function; must be set to the opposite of bit 3: high for mono, low for stereo (DS p.70) |
+| 5 | FIFO signed | `a1.fifo.signed` | bit | expert | driver sets it, cleared by DSP reset | 1 = first DMA FIFO in two's complement (signed) mode, 0 = unsigned (offset 8000h) (DS p.70) |
+| 3 | FIFO stereo | `a1.fifo.stereo` | bit | expert | driver sets it, cleared by DSP reset | 1 = first DMA FIFO in stereo mode, 0 = mono; bit 6 must be the opposite (DS p.70) |
+| 2 | FIFO 16-bit | `a1.fifo.16bit` | bit | expert | driver sets it, cleared by DSP reset | 1 = first DMA FIFO in 16-bit mode, 0 = 8-bit mode (DS p.70) |
 | 0 | Load DAC from holding register | `a1.dac_load` | action | expert | cleared by DSP reset | Write 1 to copy the DAC direct access holding register to the DAC on the next sample rate clock; the bit then clears (DS p.70) |
 
 ### B8h Audio 1 control 2
@@ -662,10 +662,10 @@ DS p.70; DSP channel
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 3 | CODEC in ADC mode | `a1.codec_adc` | bit | expert | cleared by DSP reset | 1 = first DMA converter in ADC mode, 0 = DAC mode (DS p.70) |
-| 2 | Audio 1 auto-initialize | `a1.autoinit` | bit | expert | cleared by DSP reset | 1 = auto-initialize DMA mode, 0 = normal DMA mode (DS p.70) |
-| 1 | Audio 1 DMA read | `a1.dma_read` | bit | expert | cleared by DSP reset | 1 = first DMA is a read (ADC operation), 0 = a write (DAC operation) (DS p.70) |
-| 0 | Audio 1 DMA enable | `a1.dma_enable` | bit | expert | cleared by DSP reset | First DMA active-low reset: 1 = DMA is allowed to proceed, 0 = stops it (DS p.70) |
+| 3 | CODEC in ADC mode | `a1.codec_adc` | bit | expert | driver sets it, cleared by DSP reset | 1 = first DMA converter in ADC mode, 0 = DAC mode (DS p.70) |
+| 2 | Audio 1 auto-initialize | `a1.autoinit` | bit | expert | driver sets it, cleared by DSP reset | 1 = auto-initialize DMA mode, 0 = normal DMA mode (DS p.70) |
+| 1 | Audio 1 DMA read | `a1.dma_read` | bit | expert | driver sets it, cleared by DSP reset | 1 = first DMA is a read (ADC operation), 0 = a write (DAC operation) (DS p.70) |
+| 0 | Audio 1 DMA enable | `a1.dma_enable` | bit | expert | driver sets it, cleared by DSP reset | First DMA active-low reset: 1 = DMA is allowed to proceed, 0 = stops it (DS p.70) |
 
 ### B9h Audio 1 transfer type
 
@@ -675,7 +675,7 @@ DS p.70; DSP channel
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 1:0 | Audio 1 DMA transfer type | `a1.xfer` | choice | expert | cleared by DSP reset | DMA transfer type of the first DMA: single, or demand with 2 or 4 bytes per request; 00 is reserved (DS p.70) Values: 1 = Single; 2 = Demand 2; 3 = Demand 4. |
+| 1:0 | Audio 1 DMA transfer type | `a1.xfer` | choice | expert | driver sets it, cleared by DSP reset | DMA transfer type of the first DMA: single, or demand with 2 or 4 bytes per request; 00 is reserved (DS p.70) Values: 1 = Single; 2 = Demand 2; 3 = Demand 4. |
 
 ### BAh Left channel ADC offset adjust
 
@@ -734,8 +734,8 @@ DS p.40
 | 5 | Hold FM in reset | `pwr.fm_reset` | bit | caution |  | 1 = hold the FM synthesizer in reset, 0 = release it from reset (DS p.40) |
 | 3 | Analog stays on | `pwr.analog_on` | bit | safe | profile | 1 = set Analog_Stays_On: a power-down request then only partially powers down and the analog inputs stay audible (DS p.75) |
 | 2 | Power-down request | `pwr.pdn_request` | pulse | expert |  | Pulse high then low to request power-down: partial if bit 3 is set, full if it is clear (DS p.75) |
-| 1 | GPO1 output | `pwr.gpo1` | bit | caution | profile | Level of the GPO1 output pin; set high by hardware reset (DS p.41) |
-| 0 | GPO0 output | `pwr.gpo0` | bit | caution | profile | Level of the GPO0 output pin, for example an amplifier mute; cleared by hardware reset (DS p.41) |
+| 1 | GPO1 output | `pwr.gpo1` | bit | caution | profile, driver sets it | Level of the GPO1 output pin; set high by hardware reset (DS p.41) |
+| 0 | GPO0 output | `pwr.gpo0` | bit | caution | profile, driver sets it | Level of the GPO0 output pin, for example an amplifier mute; cleared by hardware reset (DS p.41) |
 
 ### Audio_Base+0Ch DSP status
 
