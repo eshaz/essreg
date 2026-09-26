@@ -11,7 +11,8 @@
  *     /base=220    Audio_Base (hex), /cfg=800 Config_Base (hex)
  *     /novxd       direct port I/O even with the extended ES1869.VXD
  *
- * Put "essctl /load C:\ESS\MY.INI" in the StartUp group to restore the
+ * Relative file names are taken from essctl's own directory.  Put
+ * "essctl /load C:\ESS\MY.INI" in the StartUp group to restore the
  * settings at every start of Windows.  Exit codes of the batch actions:
  * 0 done, 1 done with problems, 2 failed, 3 bad command line.
  *
@@ -253,11 +254,13 @@ int profile_load_file(const char *path, char *report, unsigned size) {
 
 int dump_file(const char *path) {
   static char info[2048];
+  char full[144];
   FILE *f;
   int i, j, v, err;
   char text[48];
 
-  f = fopen(path, "w");
+  full_path(path, full, sizeof(full));
+  f = fopen(full, "w");
   if (!f)
     return 2;
   info_text(info, sizeof(info));
