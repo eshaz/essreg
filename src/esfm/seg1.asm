@@ -70,6 +70,9 @@ chip_reset:
         mov_ bp,sp                                      ; 009B
         push di                                         ; 009D
         push si                                         ; 009E
+%if ESFM_FIX
+        call fix_enter
+%endif
         mov di,[bp+0x6]                                 ; 009F
         xor_ ax,ax                                      ; 00A2
         mov dx,[di+0xa]                                 ; 00A4
@@ -124,6 +127,9 @@ L1_00FF:
         loop L1_00FF                                    ; 010C
         mov [di+0x1e],ax                                ; 010E
         mov [di+0x1c],ax                                ; 0111
+%if ESFM_FIX
+        call fix_unlock
+%endif
         pop si                                          ; 0114
         pop di                                          ; 0115
         mov_ sp,bp                                      ; 0116
@@ -132,6 +138,9 @@ L1_00FF:
 
 ; note_off for every voice's channel and note: close, suspend.  Voices held by the sustain pedal stay keyed on.
 all_notes_off:
+%if ESFM_FIX
+        jmp near fix_all_off
+%endif
         push bp                                         ; 011C
         mov_ bp,sp                                      ; 011D
         push di                                         ; 011F
@@ -2358,7 +2367,11 @@ L1_143A:
         db 0x90                                         ; 1441
 
 ; MIDI output driver entry (exported): modMessage(id, msg, dwUser, dw1, dw2)
+%if ESFM_FIX
+modMessage_orig:
+%else
 modMessage:
+%endif
         push bp                                         ; 1442
         mov_ bp,sp                                      ; 1443
         sub sp,byte +0x1a                               ; 1445
@@ -3705,6 +3718,10 @@ R1_1EB3: dw 0xFFFF, 0x0000                              ; 1EB3 KERNEL.UnlockSegm
 R1_1ECB: dw 0xFFFF, 0x0000                              ; 1ECB KERNEL.LocalSize
         db 0x8D, 0x66, 0xFE, 0x1F, 0x5D, 0x4D, 0xCB     ; 1ECF
 
+%if ESFM_FIX
+%include "esfmfix.asm"
+%endif
+
 seg1_data_end:
 
 ; relocation table
@@ -3732,5 +3749,8 @@ seg1_rel_start:
         reloc 3, 5, R1_192E, 0x0001, 0x005B             ; KERNEL.InitTask
         reloc 3, 1, R1_1ACE, 0x0001, 0x0066             ; KERNEL.DOS3Call
         reloc 3, 1, R1_18C6, 0x0003, 0x00D8             ; MMSYSTEM.midiOutMessage
+%if ESFM_FIX
+        reloc 2, 0, FIX_DS1, 0x0004, 0x0000             ; seg4
+%endif
 seg1_rel_end:
 seg1_end:

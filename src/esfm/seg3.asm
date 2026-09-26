@@ -558,7 +558,7 @@ L3_0443:
         pop bp                                          ; 0446
         retf                                            ; 0447
 
-; driver message 62h: a devnode of the ES1869 appeared (allocate the device structure)
+; DRVM_INIT (64h): a devnode of the ES1869 appeared (allocate the device structure)
 dev_add:
         push bp                                         ; 0448
         mov_ bp,sp                                      ; 0449
@@ -607,7 +607,7 @@ L3_0495:
         pop bp                                          ; 049A
         retf 0x4                                        ; 049B
 
-; driver message 67h: find the VxD, read the FM port (0101), register the notification client (0200)
+; DRVM_ENABLE (67h): find the VxD, read the FM port (0101), register the notification client (0200)
 dev_enable:
         push bp                                         ; 049E
         mov_ bp,sp                                      ; 049F
@@ -727,7 +727,7 @@ L3_057D:
         retf                                            ; 057E
         db 0x90                                         ; 057F
 
-; driver message 64h: unregister from the VxD
+; DRVM_DISABLE (66h): unregister from the VxD
 dev_disable:
         push bp                                         ; 0580
         mov_ bp,sp                                      ; 0581
@@ -783,7 +783,7 @@ L3_05E0:
         retf 0x4                                        ; 05E6
         db 0x90                                         ; 05E9
 
-; driver message 63h: free the device structure
+; DRVM_EXIT (65h): free the device structure
 dev_remove:
         push bp                                         ; 05EA
         mov_ bp,sp                                      ; 05EB

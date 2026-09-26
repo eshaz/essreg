@@ -40,3 +40,11 @@ VOICE_NOTE      equ 0x06
 VOICE_HDR3      equ 0x07    ; byte 3 of the patch voice header
 VOICE_HDR0      equ 0x18    ; byte 0 of the patch voice header
 NUM_VOICES      equ 18
+
+; ESFM_FIX: queue of messages that arrive while the driver is held
+QSIZE           equ 64          ; entries, a power of 2
+QENTRY          equ 16
+Q_MSG           equ 0           ; word: uMsg (0 = dropped)
+Q_USER          equ 2           ; dword: dwUser
+Q_DW1           equ 6           ; dword: dwParam1
+Q_DW2           equ 10          ; dword: dwParam2

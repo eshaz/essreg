@@ -80,5 +80,9 @@ bank_undefined:
 hinstance:
         db 0x00, 0x00                                   ; 01B0
 
+%if ESFM_FIX
+%include "esfmfixd.asm"
+%endif
+
 seg4_data_end:
 seg4_end:

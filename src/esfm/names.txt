@@ -64,12 +64,12 @@
 3:03C4 code dev_resume ; power resume: acquire FM, chip_reset
 3:0406 code dev_link ; add dev to device_list
 3:041A code dev_unlink
-3:0448 code dev_add ; driver message 62h: a devnode of the ES1869 appeared (allocate the device structure)
-3:049E code dev_enable ; driver message 67h: find the VxD, read the FM port (0101), register the notification client (0200)
+3:0448 code dev_add ; DRVM_INIT (64h): a devnode of the ES1869 appeared (allocate the device structure)
+3:049E code dev_enable ; DRVM_ENABLE (67h): find the VxD, read the FM port (0101), register the notification client (0200)
 3:0540 code suspend_all ; DRV_POWER suspend
 3:0560 code resume_all ; DRV_POWER resume
-3:0580 code dev_disable ; driver message 64h: unregister from the VxD
-3:05EA code dev_remove ; driver message 63h: free the device structure
+3:0580 code dev_disable ; DRVM_DISABLE (66h): unregister from the VxD
+3:05EA code dev_remove ; DRVM_EXIT (65h): free the device structure
 3:062A code find_device ; device structure of a devnode
 3:0662 code bank_load ; DRV_ENABLE: allocate the bank and copy resource 1234 into it
 3:07C6 code bank_free ; DRV_DISABLE

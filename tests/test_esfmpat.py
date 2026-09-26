@@ -147,6 +147,22 @@ class EsfmpatTest(unittest.TestCase):
         self.assertEqual(read(self.drv), bytes(other))
         self.assertFalse(os.path.exists(os.path.join(self.dir, "ESFM.BAK")))
 
+    def test_fixed_driver(self):
+        # build/ESFM.DRV, rebuilt from src/esfm with the stuck-note fixes,
+        # keeps the bank loader: esfmpat patches it like the ESS driver
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import build_esfm
+        fixed = build_esfm.build(True, workdir=self.dir)
+        with open(self.drv, "wb") as f:
+            f.write(fixed)
+        big = bigger_bank()
+        res = self.run_esfmpat(self.write("big.bin", big))
+        self.assertEqual(res.returncode, 0, res.stdout)
+        ne = NEFile(read(self.drv))
+        self.assertEqual(ne.resource_data(256, 1234)[:len(big)], big)
+        self.assertEqual(read(os.path.join(self.dir, "ESFM.BAK")), fixed)
+        self.assertIn(b"ESFMFIX\0", ne.segment_data(4))
+
 
 if __name__ == "__main__":
     unittest.main()

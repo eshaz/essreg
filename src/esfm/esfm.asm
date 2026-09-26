@@ -8,6 +8,7 @@
 
         bits 16
 %include "ne16.inc"
+%include "esfmdev.inc"
 
         section seg1 progbits start=0 vstart=0 align=1
 %include "seg1.asm"
