@@ -7,8 +7,10 @@
 - Python tests (tests/test_*.py): LE tooling, byte-identical VxD rebuild,
   the VxD register API in a CPU emulator (needs nasm and unicorn).
 - C tests (tests/host/t_*.c) built with gcc against the simulated ES1869:
-  esshw protocols, the register catalog, profiles, and an old-versus-new
-  port trace of essreg's register functions.
+  esshw protocols, the VxD API wrappers, the register catalog, profiles,
+  ESFM patch banks and driver patching, and an old-versus-new port trace
+  of essreg's register functions.
+- With Open Watcom in $OW2: the 16-bit VxD call thunk in a CPU emulator.
 """
 
 import os
@@ -34,8 +36,10 @@ def cc(out, sources, extra=(), strict=True):
         raise RuntimeError("gcc failed:\n%s\n%s" % (" ".join(cmd), res.stderr))
 
 
-def run(exe):
-    res = subprocess.run([exe], capture_output=True, text=True)
+def run(cmd):
+    if isinstance(cmd, str):
+        cmd = [cmd]
+    res = subprocess.run(cmd, capture_output=True, text=True)
     return res.returncode, res.stdout, res.stderr
 
 
@@ -43,17 +47,22 @@ def c_tests(tmp):
     failures = 0
     src = lambda *names: [os.path.join(SRC, n) for n in names]  # noqa: E731
 
-    tests = [("t_esshw", src("esshw.c", "simhw.c")),
-             ("t_vxdapi", src("vxdapi.c", "esshw.c"))]
-    if os.path.exists(os.path.join(SRC, "esscat.tbl")):
-        tests.append(("t_esscat", src("esscat.c", "essio.c", "esshw.c",
-                                      "simhw.c")))
-        tests.append(("t_profile", src("esscat.c", "essio.c", "esshw.c",
-                                       "simhw.c", "profile.c")))
-    for name, sources in tests:
+    esfm_work = os.path.join(tmp, "esfm")
+    os.makedirs(esfm_work)
+    tests = [("t_esshw", src("esshw.c", "simhw.c"), []),
+             ("t_vxdapi", src("vxdapi.c", "esshw.c"), []),
+             ("t_esscat", src("esscat.c", "essio.c", "esshw.c", "simhw.c"),
+              []),
+             ("t_profile", src("esscat.c", "essio.c", "esshw.c", "simhw.c",
+                               "profile.c"), []),
+             ("t_esfm", src("esfmbank.c"),
+              [os.path.join(ROOT, "driver", "ESFM.DRV"),
+               os.path.join(ROOT, "esfm_patch_banks", "bnk_com.bin"),
+               esfm_work])]
+    for name, sources, args in tests:
         exe = os.path.join(tmp, name)
         cc(exe, [os.path.join(HOST, name + ".c")] + sources)
-        code, out, err = run(exe)
+        code, out, err = run([exe] + args)
         sys.stdout.write(out + err)
         failures += code != 0
 
