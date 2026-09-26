@@ -1,0 +1,102 @@
+# Names and hints for tools/ne2asm.py (ESFM.DRV 4.04.00.1319)
+#
+#   seg:off kind name [size] ; comment
+#
+# kinds: code (an entry point), data (bytes, with a size), var (a DGROUP
+# variable: absolute operands [off] use the name), imm (the immediate of
+# the instruction at seg:off is the offset of label <name>), label (a name;
+# with a size on a jump table, the number of entries)
+#
+# The device structure (LocalAlloc, 311h bytes, one per ES1869; list at
+# DGROUP:003C) is described in src/esfm/esfmdev.inc.
+
+# --- segment 1: fixed code: everything MIDI, callable at interrupt time ------
+1:0000 data - 16
+1:0010 code fm_write ; write an FM register: fm_write(dev, reg (9 bits), value).  Native mode: FM_Base+2 = register bits 7:0, +3 = bits 8:15, +1 = data, with fm_delay status reads after each write.  Not atomic.
+1:0062 data vol_curve 32 ; attenuation for MIDI volume (CC 7) / 4
+1:0082 data fnum_table 24 ; F-numbers of the 12 semitones
+1:009A code chip_reset ; reset the synthesizer (native mode, registers 000h-253h = 0) and the channel and voice state of dev
+1:011C code all_notes_off ; note_off for every voice's channel and note: close, suspend.  Voices held by the sustain pedal stay keyed on.
+1:0146 code voice_off ; key off one voice: voice_off(dev, voice)
+1:01BE code note_off ; MIDI note off: note_off(dev, channel, note).  Keys off every voice of that note, or marks it (flag 4) while the channel's sustain pedal is down.
+1:020C code find_voices ; pick the two oldest free voices for a note (dev+18h, dev+1Ah; FFh = none); keys off voices still playing the same note
+1:03DA code steal_voice ; no free voice: take one (second voices first, then the highest channel, then the oldest) and key it off
+1:049C code voice_on ; key on one voice: voice_on(dev, voice)
+1:04EE code calc_pitch ; F-number for a note, pitch bend and operator detune
+1:07C6 code calc_block_fnum ; block and F-number bytes of an operator
+1:0808 code program_operator ; write the 8 registers of one operator (level from velocity and volume, pitch from the note)
+1:0B10 code program_voice ; write a 36-byte patch voice to a hardware voice and mark it active (flag 1) with a new timestamp
+1:0C48 code note_on ; MIDI note on: note_on(velocity, note, channel, dev).  Channel 9 uses drum patches 128-255.
+1:0E46 code sustain ; MIDI controller 64: pedal up keys off the voices marked by note_off
+1:0E94 code pitch_bend ; MIDI pitch bend: rewrites the pitch of every active voice of the channel
+1:0F98 code calc_level ; operator attenuation from velocity, volume, expression and pan
+1:1068 code update_volume ; volume or expression changed: rewrite the levels of the channel's active voices
+1:110C code short_msg ; one complete MIDI short message (status, data 1, data 2) for dev
+1:1408 code driver_callback ; DriverCallback(dwCallback, flags, hmidi, msg, dwInstance, dw1, dw2) for the client of dev
+1:1442 code modMessage ; MIDI output driver entry (exported): modMessage(id, msg, dwUser, dw1, dw2)
+1:14F6 label modm_close
+1:1506 label modm_data ; MODM_DATA: refused with MIDIERR_NOTREADY (43h) while busy
+1:1554 label modm_longdata ; MODM_LONGDATA: parse the buffer; refused while busy
+1:1729 label modm_reset ; MODM_RESET: chip_reset; refused while busy
+1:175A label modm_getvolume
+1:1785 label modm_setvolume
+1:17D6 label modm_getnumdevs
+1:1803 label modm_getdevcaps
+1:1835 label modm_open
+1:17F8 label modmsg_ret_ax ; return AX (DX = 0)
+1:18E2 label modmsg_ret
+1:195E code LibEntry ; start address: C runtime initialization of the DLL
+1:1D7E code ___EXPORTEDSTUB
+
+# --- segment 2: fixed code --------------------------------------------------
+2:0000 code WEP
+
+# --- segment 3: moveable, discardable code (never at interrupt time) --------
+3:0000 code DriverProc
+3:00A2 code mod_get_devcaps
+3:014A code bank_lock ; GlobalWire and GlobalPageLock the bank on the first open
+3:017C code bank_unlock
+3:01A6 code mod_open ; MODM_OPEN: acquire FM from ES1869.VXD, chip_reset, remember the client; only one client at a time (MMSYSERR_ALLOCATED)
+3:0282 code mod_close ; MODM_CLOSE: all_notes_off, release FM, MOM_CLOSE
+3:02E6 code vxd_notify ; notification callback called by ES1869.VXD (registered with 0200)
+3:04FA imm vxd_notify
+3:039A code dev_suspend ; power suspend: all_notes_off, release FM
+3:03C4 code dev_resume ; power resume: acquire FM, chip_reset
+3:0406 code dev_link ; add dev to device_list
+3:041A code dev_unlink
+3:0448 code dev_add ; driver message 62h: a devnode of the ES1869 appeared (allocate the device structure)
+3:049E code dev_enable ; driver message 67h: find the VxD, read the FM port (0101), register the notification client (0200)
+3:0540 code suspend_all ; DRV_POWER suspend
+3:0560 code resume_all ; DRV_POWER resume
+3:0580 code dev_disable ; driver message 64h: unregister from the VxD
+3:05EA code dev_remove ; driver message 63h: free the device structure
+3:062A code find_device ; device structure of a devnode
+3:0662 code bank_load ; DRV_ENABLE: allocate the bank and copy resource 1234 into it
+3:07C6 code bank_free ; DRV_DISABLE
+3:07E2 code LibMain ; remember hInstance
+3:07F2 code vxd_get_entry ; INT 2Fh AX=1684h
+3:081E code vxd_version ; ES1869.VXD 0000
+3:0846 code vxd_fm_info ; ES1869.VXD 0101
+3:08C4 code vxd_fm_acquire ; ES1869.VXD 0102 (counted)
+3:092C code vxd_fm_release ; ES1869.VXD 0103 (counted)
+3:0984 code vxd_register ; ES1869.VXD 0200: notification client
+3:09C0 code vxd_unregister ; ES1869.VXD 0201
+
+# --- segment 4: DGROUP ------------------------------------------------------
+4:0010 var bank_locks 2 ; GlobalPageLock count of the bank
+4:0012 var bank_ptr 4 ; far pointer to the patch bank (offset 0, selector)
+4:001A var fm_delay 2 ; status reads after each FM port write
+4:0020 var running_status 1
+4:0022 var busy 2 ; nonzero while DATA, LONGDATA or RESET is being handled
+4:0024 var semitone_ratio 24 ; 256 * 2^(-n/12), n = 0..11
+4:003C var device_list 2 ; first device structure
+4:003E var notify_name 9 ; "ESSFMMXD": name given to ES1869.VXD with 0200
+4:0047 var bank_file 10 ; "Undefined": name of a RIFF bank file (never set)
+4:0051 var bank_undefined 10 ; "Undefined"
+4:01B0 var hinstance 2
+
+# jump tables (count of entries)
+1:14E0 label jt_modmsg 8 ; MODM_CLOSE .. MODM_SETVOLUME
+1:15EC label jt_syscommon 6 ; F1h .. F6h in long messages
+1:1659 label jt_status 7 ; 80h .. E0h in long messages
+3:001C label jt_drvmsg 15 ; DRV_LOAD .. DRV_POWER
