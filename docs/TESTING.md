@@ -22,9 +22,12 @@ emulator tests. It runs:
   - patch banks (`t_esfm`);
   - a port trace proving that the refactored essreg talks to the chip exactly as the original did (`t_trace`).
 
-With Open Watcom v2 available (`OW2=/path/to/open-watcom`), the tests also
-run the 16-bit VxD call thunk of essctl in a CPU emulator. To compile
-everything with Open Watcom on Linux:
+With Open Watcom v2 available (`OW2=/path/to/open-watcom`), the tests also:
+- run the 16-bit VxD call thunk of essctl in a CPU emulator;
+- build every program and check `essctl.exe`'s NE header: Windows 4.0, one
+  data segment, discardable code, imports, resources (`test_ow2build`).
+
+To compile everything with Open Watcom on Linux:
 
 ```
 tools/ow2build.sh /path/to/open-watcom     # binaries in out/ow2/
