@@ -13,6 +13,9 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   driver's own, and dumps the bank the driver holds before and after
 - ESFM voices: "essctl /dump" with the ESS driver, then the fixed build,
   shows the driver's 18 voices and, for the fixed build, its counters
+- ESFM bank file: the fixed build loads the bank named in SYSTEM.INI
+  [ESFM.DRV] Bank= when it's enabled, and "essctl /load" of a profile with
+  a bank names it there
 
 Win16 wants 8.3 path names, so the work directory is reached through a
 short symbolic link in /tmp.
@@ -141,18 +144,76 @@ class WineTest(unittest.TestCase):
                   (self.win, self.win))
         return read(self.path("ESFM.TXT")).decode("latin-1")
 
+    def system_ini(self):
+        return os.path.join(self.env["WINEPREFIX"], "drive_c", "windows",
+                            "system.ini")
+
+    def fixed_driver(self):
+        fixed = os.path.join(self.link, "FIXED.DRV")
+        if not os.path.exists(fixed):
+            sys.path.insert(0, os.path.join(ROOT, "tools"))
+            import build_esfm
+            build_esfm.build(True, fixed, workdir=self.link)
+        return fixed
+
+    def test_esfm_bank_file(self):
+        bank = bytearray(read(os.path.join(ROOT, "esfm_patch_banks",
+                                           "bnk_com.bin")))
+        off = struct.unpack_from("<H", bank, 0)[0]
+        bank[off + 4] = 0x5A
+        with open(self.path("MARK.BIN"), "wb") as f:
+            f.write(bank)
+        ini = self.system_ini()
+        saved = read(ini)
+        try:
+            with open(ini, "ab") as f:
+                f.write(b"\r\n[ESFM.DRV]\r\nBank=%s\\MARK.BIN\r\n" %
+                        self.win.encode())
+            text = self.esfm_dump(self.fixed_driver())
+            # the driver read SYSTEM.INI and the file through KERNEL when
+            # drvhold enabled it
+            self.assertEqual(read(self.path("BEFORE.BIN"))[:len(bank)],
+                             bytes(bank))
+            self.assertIn("Bank file: %s\\MARK.BIN, %d bytes" %
+                          (self.win, len(bank)), text)
+        finally:
+            with open(ini, "wb") as f:
+                f.write(saved)
+
+    def test_esfm_profile_names_bank_file(self):
+        bank = read(os.path.join(ROOT, "esfm_patch_banks",
+                                 "bnk_com_better_square_wave.bin"))
+        with open(self.path("SQUARE.BIN"), "wb") as f:
+            f.write(bank)
+        with open(self.path("PROF2.INI"), "w", newline="\r\n") as f:
+            f.write("[ESSCTL]\nFormat=1\n[ESFM]\nBank=%s\\SQUARE.BIN\n" %
+                    self.win)
+        ini = self.system_ini()
+        saved = read(ini)
+        try:
+            shutil.copy(self.fixed_driver(), self.path("DRV.DRV"))
+            self.wine("drvhold.exe", "DRV.DRV", self.win,
+                      "%s\\essctl.exe /sim /load %s\\PROF2.INI /q" %
+                      (self.win, self.win))
+            self.assertEqual(read(self.path("AFTER.BIN"))[:len(bank)], bank)
+            text = read(ini).decode("latin-1").replace("\r\n", "\n")
+            self.assertIn("[ESFM.DRV]\nBank=%s\\SQUARE.BIN" % self.win,
+                          text)
+            self.assertIn("ESFM.DRV plays it from the file now",
+                          read(self.path("ESSCTL.LOG")).decode("latin-1"))
+        finally:
+            with open(ini, "wb") as f:
+                f.write(saved)
+
     def test_esfm_voices_in_dump(self):
         text = self.esfm_dump(os.path.join(ROOT, "driver", "ESFM.DRV"))
         self.assertIn("ESFM.DRV", text)
         self.assertIn("The MIDI device is closed", text)
         self.assertIn("ESS driver: drops messages", text)
         self.assertEqual(text.count("  free"), 18)
-        fixed = os.path.join(self.link, "FIXED.DRV")
-        sys.path.insert(0, os.path.join(ROOT, "tools"))
-        import build_esfm
-        build_esfm.build(True, fixed, workdir=self.link)
-        text = self.esfm_dump(fixed)
+        text = self.esfm_dump(self.fixed_driver())
         self.assertIn("Fixed driver: 0 messages queued", text)
+        self.assertIn("Bank file: none in SYSTEM.INI", text)
         self.assertEqual(text.count("  free"), 18)
 
 

@@ -47,7 +47,12 @@ L3_003A:
         jmp short L3_009B                               ; 0055
 
 L3_0057:
+%if ESFM_FIX
+        ; DRV_ENABLE: the built-in bank, then the bank file (esfmfile.asm)
+        callf fix_drv_enable, FIX_S3A, FIX_S3B          ; 0057 far seg1
+%else
         callf bank_load, R3_005A, R3_0069               ; 0057 far seg3
+%endif
         or_ dx,ax                                       ; 005C
         jnz short L3_006D                               ; 005E
         mov ax,0x1                                      ; 0060
@@ -55,7 +60,13 @@ L3_0057:
         jmp short L3_009B                               ; 0064
 
 L3_0066:
+%if ESFM_FIX
+        ; DRV_DISABLE: end the task that watches the bank file, then free
+        ; the bank
+        callf fix_drv_disable, FIX_S3B, 0xFFFF          ; 0066 far seg1
+%else
         callf bank_free, R3_0069, R3_008D               ; 0066 far seg3
+%endif
         jmp short L3_0096                               ; 006B
 
 L3_006D:
@@ -370,7 +381,12 @@ vxd_notify:
         mov ds,ax                                       ; 02EE
         push word [bp+0xc]                              ; 02F0
         push word [bp+0xa]                              ; 02F3
+%if ESFM_FIX
+        ; the seg3 selector chain skips the two calls above, now to seg1
+        callf find_device, R3_02F9, R3_008D             ; 02F6 far seg3
+%else
         callf find_device, R3_02F9, R3_005A             ; 02F6 far seg3
+%endif
         mov_ si,ax                                      ; 02FB
         or_ si,ax                                       ; 02FD
         jnz short L3_0307                               ; 02FF
@@ -1347,5 +1363,8 @@ seg3_rel_start:
         reloc 3, 1, R3_0115, 0x0001, 0x0161             ; KERNEL.lstrcpyn
         reloc 3, 1, R3_0156, 0x0001, 0x006F             ; KERNEL.GlobalWire
         reloc 3, 1, R3_016C, 0x0001, 0x0070             ; KERNEL.GlobalUnWire
+%if ESFM_FIX
+        reloc 2, 0, FIX_S3A, 0x0001, 0x0000             ; seg1
+%endif
 seg3_rel_end:
 seg3_end:

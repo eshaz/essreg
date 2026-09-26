@@ -136,6 +136,25 @@ static int open_live(struct live *lv, char *why) {
 
 static void close_live(struct live *lv) { GlobalUnlock(lv->dgroup); }
 
+// the counters of the fixed driver (src/esfm/esfmfixd.asm) after the
+// static data of DGROUP, 0 for ESS's driver
+static const u8 __far *find_fix(const struct live *lv) {
+  u32 dgsize = GlobalSize(lv->dgroup);
+  u16 i;
+
+  for (i = 0x1B2; i + 32 < 0x800 && i + 32 < dgsize; i++)
+    if (!_fmemcmp(lv->dg + i, "ESFMFIX", 8))
+      return lv->dg + i;
+  return 0;
+}
+
+// version of the fixed driver, 2 and up plays SYSTEM.INI's bank file
+static u16 fix_version(const struct live *lv) {
+  const u8 __far *fix = find_fix(lv);
+
+  return fix ? *(u16 __far *)(fix + 8) : 0;
+}
+
 // copy n bytes into the driver's bank, growing its block if needed
 static int put_bank(struct live *lv, const u8 __far *src, u16 n, char *why) {
   HGLOBAL h = bank_handle(lv), h2;
@@ -233,6 +252,11 @@ int esfm_live_load(const char *path, char *msg, unsigned size) {
       esfm_last_bank[sizeof(esfm_last_bank) - 1] = 0;
       sprintf(text, "ESFM bank loaded: %u patches, %u bytes", info.patches,
               info.size);
+      // the fixed driver keeps playing the file, also after a restart
+      if (fix_version(&lv) >= 2 &&
+          WritePrivateProfileString(ESFM_INI_SECTION, ESFM_INI_KEY, path,
+                                    ESFM_INI_FILE))
+        strcat(text, ", ESFM.DRV plays it from the file now");
       message(msg, size, text);
       rc = 0;
     }
@@ -267,6 +291,10 @@ int esfm_live_restore(char *msg, unsigned size) {
     strcpy(why, "cannot load the driver's bank resource");
   } else if (put_bank(&lv, src, lv.drv.bank_size, why) == 0) {
     esfm_last_bank[0] = 0;
+    // and the fixed driver stops playing a bank file
+    if (fix_version(&lv) >= 2)
+      WritePrivateProfileString(ESFM_INI_SECTION, ESFM_INI_KEY, 0,
+                                ESFM_INI_FILE);
     message(msg, size, "ESFM bank restored from the driver");
     rc = 0;
   }
@@ -306,7 +334,7 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
   struct live lv;
   u16 devoff, i;
   u32 clock;
-  const u8 __far *fix = 0;
+  const u8 __far *fix;
   u32 dgsize;
 
   memset(d, 0, sizeof(*d));
@@ -323,11 +351,7 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
   _disable();
   _fmemcpy(dev, lv.dg + devoff, DEV_SIZE);
   _enable();
-  for (i = 0x1B2; i + 32 < 0x800 && i + 32 < dgsize; i++)
-    if (!_fmemcmp(lv.dg + i, "ESFMFIX", 8)) {
-      fix = lv.dg + i;
-      break;
-    }
+  fix = find_fix(&lv);
   if (fix) {
     _disable();
     d->fixed = 1;
@@ -335,7 +359,20 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
     d->overflow = *(u32 __far *)(fix + 20);
     d->maxdepth = *(u16 __far *)(fix + 24);
     d->purged = *(u16 __far *)(fix + 26);
+    d->version = *(u16 __far *)(fix + 8);
     _enable();
+  }
+  // version 2: the bank file (src/esfm/esfmfile.asm)
+  if (fix && d->version >= 2 &&
+      (u32)(FP_OFF(fix) - FP_OFF(lv.dg)) + 44 + 128 <= dgsize) {
+    d->file_state = *(u16 __far *)(fix + 30);
+    d->file_used = *(u16 __far *)(fix + 32);
+    d->file_size = *(u16 __far *)(fix + 34);
+    d->file_loads = *(u16 __far *)(fix + 36);
+    d->file_checks = *(u16 __far *)(fix + 38);
+    d->watch = *(u16 __far *)(fix + 40);
+    d->watch_err = *(u16 __far *)(fix + 42);
+    _fmemcpy(d->file, fix + 44, sizeof(d->file) - 1);
   }
   close_live(&lv);
 
@@ -366,6 +403,61 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
     d->chip_read = 1;
   }
   return 0;
+}
+
+// the bank file of the fixed driver, and how it's watched
+static void file_text(const struct esfm_diag *d, const char *nl, char *buf,
+                      unsigned size) {
+  static char line[240];
+  int n;
+  const char *plays = d->file_used ? "its last good version plays"
+                                   : "the driver's own bank plays";
+
+  switch (d->file_state) {
+  case ESFM_FILE_NONE:
+    sprintf(line, "Bank file: none in SYSTEM.INI, %s%s",
+            d->file_used ? "the last file's bank still plays"
+                         : "the driver's own bank plays",
+            nl);
+    break;
+  case ESFM_FILE_LOADED:
+    sprintf(line, "Bank file: %.110s, %u bytes%s", d->file, d->file_size,
+            nl);
+    break;
+  case ESFM_FILE_MISSING:
+    sprintf(line, "Bank file: cannot read %.110s, %s%s", d->file, plays, nl);
+    break;
+  case ESFM_FILE_BAD:
+    sprintf(line, "Bank file: %.110s is not a patch bank, %s%s", d->file,
+            plays, nl);
+    break;
+  case ESFM_FILE_NOMEM:
+    sprintf(line, "Bank file: not enough memory for %.110s, %s%s", d->file,
+            plays, nl);
+    break;
+  default:
+    sprintf(line, "Bank file: %.110s changed, loading it%s", d->file, nl);
+  }
+  strncat(buf, line, size - strlen(buf) - 1);
+  if (d->file_state == ESFM_FILE_NONE)
+    return;
+  n = sprintf(line, "Loaded %u time%s, ", d->file_loads,
+              d->file_loads == 1 ? "" : "s");
+  if (d->watch == ESFM_WATCH_RUNNING)
+    sprintf(line + n, "checked every second while a program has the device "
+                      "open (%u checks)%s",
+            d->file_checks, nl);
+  else if (d->watch == ESFM_WATCH_FAILED && d->watch_err == 0xFFFF)
+    sprintf(line + n, "checked when a program opens the device (no timer "
+                      "for the watcher task)%s",
+            nl);
+  else if (d->watch == ESFM_WATCH_FAILED)
+    sprintf(line + n, "checked when a program opens the device (no watcher "
+                      "task, mmTaskCreate error %u)%s",
+            d->watch_err, nl);
+  else
+    sprintf(line + n, "checked when a program opens the device%s", nl);
+  strncat(buf, line, size - strlen(buf) - 1);
 }
 
 static const char *note_name(u8 note, char *buf) {
@@ -400,6 +492,8 @@ void esfm_diag_text(const struct esfm_diag *d, int rc, const char *nl,
     sprintf(line, "ESS driver: drops messages that come while it is "
                   "busy%s", nl);
   strncat(buf, line, size - strlen(buf) - 1);
+  if (d->fixed && d->version >= 2)
+    file_text(d, nl, buf, size);
   sprintf(line, "%sVoice  Channel  Note   State          Age  Chip%s", nl, nl);
   strncat(buf, line, size - strlen(buf) - 1);
   for (i = 0; i < ESFM_VOICES; i++) {

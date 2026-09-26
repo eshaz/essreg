@@ -52,3 +52,6 @@ Q_MSG           equ 0           ; word: uMsg (0 = dropped)
 Q_USER          equ 2           ; dword: dwUser
 Q_DW1           equ 6           ; dword: dwParam1
 Q_DW2           equ 10          ; dword: dwParam2
+
+; ESFM_FIX: the bank file (esfmfile.asm)
+FIX_PATH        equ 128         ; bytes for Bank= from SYSTEM.INI

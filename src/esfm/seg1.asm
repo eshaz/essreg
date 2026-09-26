@@ -3732,6 +3732,7 @@ R1_1ECB: dw 0xFFFF, 0x0000                              ; 1ECB KERNEL.LocalSize
 
 %if ESFM_FIX
 %include "esfmfix.asm"
+%include "esfmfile.asm"
 %endif
 
 seg1_data_end:
@@ -3763,6 +3764,7 @@ seg1_rel_start:
         reloc 3, 1, R1_18C6, 0x0003, 0x00D8             ; MMSYSTEM.midiOutMessage
 %if ESFM_FIX
         reloc 2, 0, FIX_DS1, 0x0004, 0x0000             ; seg4
+        fix_file_relocs
 %endif
 seg1_rel_end:
 seg1_end:

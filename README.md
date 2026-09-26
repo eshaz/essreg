@@ -42,6 +42,7 @@ essctl [/load file] [/save file] [/dump file] [/ui] [/q]
 * The Windows 95 MIDI driver of the ES1869's FM synthesizer, rebuilt from source in [`src/esfm`](src/esfm).
 * ESS's driver drops MIDI messages that come in while it's busy, so notes hang when the music gets busy. This one queues them instead.
 * It also silences every voice when a program closes the device with the sustain pedal down.
+* It can play a patch bank straight from a file named in `SYSTEM.INI`, and loads it again whenever the file changes. See [docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv).
 * See [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md) for the details.
 * Everything else is ESS's code. `python3 tools/build_esfm.py --stock --verify` rebuilds the original byte for byte, and `esfmpat` and essctl's banks work the same.
 * Install it from DOS, since Windows has the driver open: keep a copy of `C:\WINDOWS\SYSTEM\ESFM.DRV`, copy `build\ESFM.DRV` over it and restart Windows.

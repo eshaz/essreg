@@ -34,8 +34,16 @@ struct esfm_status {
 void esfm_get_status(struct esfm_status *st);
 
 // 0 on success, the result message goes to msg
+// with the fixed ESFM.DRV (build/ESFM.DRV) a load also names the file in
+// SYSTEM.INI [ESFM.DRV] Bank=, so the driver keeps playing it and loads it
+// again when it changes, and a restore removes the setting
 int esfm_live_load(const char *path, char *msg, unsigned size);
 int esfm_live_restore(char *msg, unsigned size);
+
+// where the fixed ESFM.DRV finds its bank file
+#define ESFM_INI_FILE "SYSTEM.INI"
+#define ESFM_INI_SECTION "ESFM.DRV"
+#define ESFM_INI_KEY "Bank"
 
 // last bank loaded in this session ("" if none)
 extern char esfm_last_bank[144];
@@ -66,8 +74,32 @@ struct esfm_diag {
   u32 overflow;       // fixed driver, messages refused with a full queue
   u16 maxdepth;
   u16 purged;
+  u16 version;        // fixed driver: 2 has the bank file
+  u16 file_state;     // ESFM_FILE_* below
+  u16 file_used;      // the bank that plays came from the file
+  u16 file_size;      // bytes of that bank
+  u16 file_loads;     // times the driver loaded the file
+  u16 file_checks;    // times it checked the file
+  u16 watch;          // ESFM_WATCH_* below
+  u16 watch_err;      // mmTaskCreate error, 0xFFFF if there was no timer
+  char file[128];     // Bank= from SYSTEM.INI
   char why[96];       // why nothing could be read
 };
+
+// file_state
+#define ESFM_FILE_NONE 0     // no Bank=, the driver's own bank plays
+#define ESFM_FILE_LOADED 1   // the file's bank plays
+#define ESFM_FILE_MISSING 2  // the file can't be opened or read
+#define ESFM_FILE_BAD 3      // the file isn't a patch bank
+#define ESFM_FILE_NOMEM 4    // not enough memory for it
+#define ESFM_FILE_CHANGING 5 // changed, loaded at the next check
+
+// watch: the task that checks the file every second while a program has
+// the device open
+#define ESFM_WATCH_OFF 0
+#define ESFM_WATCH_STARTING 1
+#define ESFM_WATCH_RUNNING 2
+#define ESFM_WATCH_FAILED 3
 
 // read the driver's state, 0 on success
 // read_chip also reads the key-on registers, only while a program has the

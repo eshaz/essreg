@@ -4,6 +4,7 @@
 * Every sound it plays comes from one *patch bank*. The bank is stored in the driver file and copied into memory when the driver is enabled.
 * This page covers the build shipped in `driver/ESFM.DRV` (20976 bytes, module `ESFM`, expected Windows version 4.0). Everything here was read from its code. Addresses are `segment:offset` within that file.
 * The fixed `build/ESFM.DRV` ([ESFM_MIDI.md](ESFM_MIDI.md)) has the same bank loader, so all of this applies to it too.
+* The fixed driver can also play a bank file straight from disk, and loads it again when the file changes. See [Bank file](#bank-file-buildesfmdrv).
 
 ## Bank format
 
@@ -82,6 +83,7 @@ ESFM > *Load patch bank* (or the *ESFM patch bank* page) replaces the bank of th
 * ESFM > *Restore original bank* copies resource 1234 of the driver back.
 * The loaded bank lasts until the driver is disabled or Windows restarts.
 * File > *Save profile* records it as `[ESFM] Bank=path`, and `essctl /load profile.ini` in the StartUp group loads it again at every start.
+* With the fixed driver, both commands also set the driver's bank file. See [Bank file](#bank-file-buildesfmdrv).
 
 ## Changing the bank in the file (esfmpat)
 
@@ -95,3 +97,49 @@ ESFM > *Load patch bank* (or the *ESFM patch bank* page) replaces the bank of th
 
 * `esfmpat esfm.drv` alone prints where the driver's bank is and how large it is.
 * *Note: before this version, `esfmpat` always wrote at offset 2400h. A bank larger than 2060h bytes overwrote the start of segment 3 (at 44A0h) and broke the driver.*
+
+## Bank file (`build/ESFM.DRV`)
+
+The fixed driver can play a bank file straight from disk, instead of the bank built into `ESFM.DRV`. It loads the file again whenever it changes.
+
+Name the file in `SYSTEM.INI`:
+
+```
+[ESFM.DRV]
+Bank=C:\BANKS\MYBANK.BIN
+```
+
+* **Formats:** a raw bank or a RIFF `Ptch` file, the same files `esfmpat` and essctl take. It's checked with the rules of `bank_check`, up to 7FF0h bytes (32752).
+* **When the file is read:**
+  * when Windows enables the driver (`DRV_ENABLE`)
+  * every time a program opens the MIDI device (`MODM_OPEN`)
+  * every second while a program has the device open. A task the driver starts at the first open does this.
+* **Changes:** the whole file is read and compared with the bank that plays. A changed file is loaded once two checks in a row read the same bytes, so a bank editor that is still saving never gets half a file loaded. The new sounds play from the next note on, about 2 seconds after the save.
+* **Missing or broken file:** the bank that plays is kept (the file's last good version, or the driver's own bank). The file is loaded again as soon as it's back.
+* **No `Bank=`:** the driver plays its own bank. Removing the line while Windows runs puts the driver's own bank back at the next check.
+* ESS's `ESFM.DRV` doesn't read this setting.
+* *Note: use a full path, with the drive. Keep the file on a hard disk, since it's read every second while music plays.*
+
+**essctl with this driver:**
+* ESFM > *Load patch bank* also writes `Bank=` to `SYSTEM.INI`, so the driver keeps playing the file after a restart and follows its changes.
+* ESFM > *Restore original bank* removes the `Bank=` line.
+* The *ESFM patch bank* page and `essctl /dump` show the file, whether it loaded and how it's checked:
+
+```
+Bank file: C:\BANKS\MYBANK.BIN, 8288 bytes
+Loaded 3 times, checked every second while a program has the device open (241 checks)
+```
+
+**How it works** ([`src/esfm/esfmfile.asm`](../src/esfm/esfmfile.asm)):
+* `DriverProc` calls the bank file code for `DRV_ENABLE` and `DRV_DISABLE` (the far calls at seg3:0057 and seg3:0066), and that code calls ESS's seg3:0662 and seg3:07C6.
+  * ESS's loader still loads the built-in bank first.
+  * The rest of segment 3 is unchanged, so `esfmpat` works with this driver too.
+* The path comes from `GetPrivateProfileString`. The file is read with `DOS3Call`: INT 21h 716Ch for long file names, or 3Dh where that call doesn't exist.
+* The bank goes into a new `GMEM_SHARE` block, like the one `bank_load` allocates.
+* **The swap.** The new block replaces the old one at DGROUP:0014 while the driver is held ([ESFM_MIDI.md](ESFM_MIDI.md#the-fix-buildesfmdrv)).
+  * MIDI messages that come meanwhile wait in the queue and play with the new bank.
+  * While a program has the device open, the new block is page-locked like the old one (`GlobalWire`, `GlobalPageLock`). The old one is unlocked and freed.
+* **The task.** `mmTaskCreate` starts it and it waits in `mmTaskBlock`. A `timeSetEvent` timer wakes it every second with `mmTaskSignal`.
+  * `DRV_DISABLE` ends the task, and waits for it, before the driver can be unloaded.
+* The state is in the `ESFMFIX` block, version 2, where essctl reads it.
+* *Note: `mmTaskCreate` runs the task from `MMTASK.TSK` in the Windows SYSTEM directory. Without it the page says "no watcher task", and the file is still checked each time a program opens the device.*

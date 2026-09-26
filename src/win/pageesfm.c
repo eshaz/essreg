@@ -17,11 +17,11 @@
 #include "resource.h"
 
 static HWND text, voices;
-static char voice_text[1400];
+static char voice_text[2048];
 
 // show the driver's voices and what the chip says (see esfm_diag_text)
 static void show_voices(void) {
-  static char buf[1400];
+  static char buf[2048];
   struct esfm_diag d;
   int rc = esfm_diag_read(&d, 1);
 
@@ -33,10 +33,14 @@ static void show_voices(void) {
 }
 
 static void show_status(void) {
-  static char buf[600];
+  static char buf[900];
   struct esfm_status st;
+  struct esfm_diag d;
+  int file;
 
   esfm_get_status(&st);
+  // the fixed ESFM.DRV plays the bank file named in SYSTEM.INI
+  file = esfm_diag_read(&d, 0) == 0 && d.version >= 2;
   if (!st.loaded) {
     strcpy(buf, "ESFM.DRV is not loaded.  It is the MIDI driver of the "
                 "ES1869's FM synthesizer; it loads when a program opens "
@@ -44,18 +48,28 @@ static void show_status(void) {
   } else {
     sprintf(buf, "Driver:\t%.100s\r\nBank in memory:\t%lu bytes\r\n",
             st.path, (unsigned long)st.bank_size);
-    if (esfm_last_bank[0])
+    if (file && d.file_used)
+      sprintf(buf + strlen(buf), "Bank file:\t%.100s\r\n", d.file);
+    else if (esfm_last_bank[0])
       sprintf(buf + strlen(buf), "Loaded bank:\t%.100s\r\n", esfm_last_bank);
     else
       strcat(buf, "Loaded bank:\tthe driver's own\r\n");
     if (!st.known)
       sprintf(buf + strlen(buf), "\r\nCannot load banks: %s\r\n", st.why);
   }
-  strcat(buf, "\r\nA bank is a file of 256 patch offsets followed by the "
-              "patches, as in esfm_patch_banks\\*.bin, or a RIFF \"Ptch\" "
-              "file.  It replaces the sounds of the running driver until "
-              "Windows restarts; save a profile to load it again with "
-              "essctl /load.");
+  if (file)
+    strcat(buf, "\r\nA bank is a file of 256 patch offsets followed by the "
+                "patches, as in esfm_patch_banks\\*.bin, or a RIFF \"Ptch\" "
+                "file.  This ESFM.DRV plays the bank file named in "
+                "SYSTEM.INI [" ESFM_INI_SECTION "] " ESFM_INI_KEY "=, and "
+                "loads it again when the file changes.  Load bank sets it, "
+                "Restore original removes it.");
+  else
+    strcat(buf, "\r\nA bank is a file of 256 patch offsets followed by the "
+                "patches, as in esfm_patch_banks\\*.bin, or a RIFF \"Ptch\" "
+                "file.  It replaces the sounds of the running driver until "
+                "Windows restarts; save a profile to load it again with "
+                "essctl /load.");
   SetWindowText(text, buf);
 }
 

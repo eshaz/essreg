@@ -19,6 +19,7 @@
 ;    notes held by the pedal kept sounding after the close.
 ; 4. chip_reset holds the driver as well (it also runs for DRV_POWER and
 ;    DRVM_DISABLE).
+; 5. MODM_OPEN loads a new or changed bank file first (esfmfile.asm).
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
@@ -58,7 +59,7 @@ modMessage:
         cmp     ax,MODM_RESET
         je      .serial
         cmp     ax,MODM_OPEN
-        je      .hold
+        je      .open
         cmp     ax,MODM_CLOSE
         je      .hold
         call    call_orig               ; no FM register access
@@ -79,6 +80,26 @@ modMessage:
         pop     dx
         call    restore_if
         xor     dx,dx
+        jmp     .ret
+
+.open:
+        ; load a new or changed bank file first (esfmfile.asm), and start
+        ; the task that watches it once a program has the device
+        xor     ax,ax
+        call    fix_bank_poll
+        inc     word [fix_lock]
+        call    call_orig
+        push    ax
+        push    dx
+        call    fix_unlock
+        pop     dx
+        pop     ax
+        or      ax,ax
+        jnz     .ret
+        push    dx
+        call    fix_watch_start
+        pop     dx
+        xor     ax,ax
         jmp     .ret
 
 .hold:
