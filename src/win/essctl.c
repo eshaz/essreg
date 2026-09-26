@@ -461,8 +461,11 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   g_main = CreateDialog(inst, "ESSCTL", 0, proc);
   if (!g_main)
     return 2;
-  if (err < 0)
-    set_status("No ES1869 found: %s", esshw_strerror(err));
+  if (err == -ESSHW_ENODEV)
+    set_status("No ES1869 answered at %03Xh: use /base=, or /sim to try "
+               "essctl without the card", esshw.audio_base);
+  else if (err < 0)
+    set_status("%s", esshw_strerror(err));
   ShowWindow(g_main, show);
   accel = LoadAccelerators(inst, "ESSCTL");
   while (GetMessage(&msg, 0, 0, 0)) {

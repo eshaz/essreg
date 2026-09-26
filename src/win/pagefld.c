@@ -301,7 +301,8 @@ void fields_refresh(int how) {
     set_reg(reg, err < 0 ? err : ess_read(reg));
   }
   winio_end();
-  if (err < 0)
+  /* no device: the rows say so, the status line says why */
+  if (err < 0 && err != -ESSHW_ENODEV)
     set_status("%s", esshw_strerror(err));
 }
 

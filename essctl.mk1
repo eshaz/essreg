@@ -63,8 +63,7 @@ essctl.exe : w_essctl.obj w_dlgmain.obj w_page.obj w_pagefld.obj w_pageraw.obj w
  @%write essctl.lk1 FIL w_essctl.obj,w_dlgmain.obj,w_page.obj,w_pagefld.obj,w_pageraw.obj,w_pageinfo.obj,w_pageesfm.obj,w_winio.obj
  @%append essctl.lk1 FIL w_esfmlive.obj,w_esshw.obj,w_esscat.obj,w_essio.obj,w_profile.obj,w_simhw.obj,w_vxdapi.obj,w_esfmbank.obj,w_vxdcall.obj
  @%append essctl.lk1 LIBR commdlg.lib,toolhelp.lib
- @%append essctl.lk1 SEGMENT TYPE CODE MOVEABLE DISCARDABLE
- @%append essctl.lk1 SEGMENT TYPE DATA MOVEABLE
+ @%append essctl.lk1 SEGMENT CLASS 'CODE' MOVEABLE DISCARDABLE
  @%append essctl.lk1 OPTION DESCRIPTION 'ES1869 Control'
  *wlink name essctl sys windows op m op maxe=10 op q op el op stack=8k op heapsize=4k @essctl.lk1
  *wrc -q -bt=windows essctl.res essctl.exe

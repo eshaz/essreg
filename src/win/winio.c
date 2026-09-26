@@ -14,6 +14,7 @@
 #include "winio.h"
 
 int winio_path = WIO_DIRECT;
+int winio_present;
 
 static int ext_hook(u16 fn, u8 bl, u8 bh, u8 al, u8 *result) {
   return vxd_ext_call(fn, bl, bh, al, result);
@@ -33,6 +34,7 @@ int winio_init(const struct winio_opts *opts) {
     simhw_attach();
     esshw.audio_base = simhw.audio_base;
     esshw.config_base = simhw.config_base;
+    winio_present = 1;
     return 0;
   }
 
@@ -44,6 +46,7 @@ int winio_init(const struct winio_opts *opts) {
   if (vxd_open() == 0) {
     if (vxd.adi_valid)
       esshw.audio_base = vxd_adi_word(ADI_AUDIO_BASE);
+    winio_present = vxd.adi_valid;
     if (vxd.ext_version && !opts->novxd && !opts->audio_base) {
       winio_path = WIO_VXDEXT;
       esshw.backend = ESSHW_VXDEXT;
@@ -58,18 +61,27 @@ int winio_init(const struct winio_opts *opts) {
     esshw.audio_base = opts->audio_base;
   if (opts->config_base)
     esshw.config_base = opts->config_base;
-  if (!esshw.config_base) {
+  if (!esshw.config_base || !winio_present) {
     int err;
-    if ((err = winio_begin()) < 0)
+    u16 known = esshw.config_base;
+    winio_present = 1; /* let winio_begin through for the detection */
+    if ((err = winio_begin()) < 0) {
+      winio_present = 0;
       return err;
+    }
     err = esshw_detect_config();
     winio_end();
+    if (known)
+      esshw.config_base = known; /* /cfg= wins over the chip's answer */
+    winio_present = err == 0;
     return err;
   }
   return 0;
 }
 
 int winio_begin(void) {
+  if (!winio_present)
+    return -ESSHW_ENODEV;
   if (winio_path != WIO_DIRECT_VXD)
     return 0;
   return vxd_dsp_begin() ? -ESSHW_EINUSE : 0;

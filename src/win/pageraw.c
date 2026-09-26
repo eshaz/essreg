@@ -169,7 +169,8 @@ void raw_refresh(int how) {
   }
   winio_end();
   fill_list();
-  if (err < 0)
+  /* no device: the rows say so, the status line says why */
+  if (err < 0 && err != -ESSHW_ENODEV)
     set_status("%s", esshw_strerror(err));
 }
 

@@ -26,13 +26,15 @@ struct winio_opts {
 enum winio_path { WIO_VXDEXT, WIO_DIRECT_VXD, WIO_DIRECT, WIO_SIM };
 
 extern int winio_path;
+extern int winio_present; /* an ES1869 answered (or the driver has one) */
 
 /* choose the access path; 0, or a negative ESSHW_E* code when no ES1869
  * answers (the program can still run, read-only values show errors) */
 int winio_init(const struct winio_opts *opts);
 
 /* bracket a batch of register accesses (no yielding in between):
- * 0, or -ESSHW_EINUSE when a DOS box owns the DSP */
+ * 0, -ESSHW_EINUSE when a DOS box owns the DSP, or -ESSHW_ENODEV when no
+ * ES1869 was found */
 int winio_begin(void);
 void winio_end(void);
 
