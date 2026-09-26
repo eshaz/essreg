@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "debug.h"
@@ -14,7 +15,7 @@ static void print_opts() {
   printf("| c                  | Calibrate Op Amp\n");
   printf("| 3=[0,63; 0%%,100%%]  | 3D Amount                    Get / Set\n");
   printf("| ol=[-1024,960]     | ADC Offset Samples Left      Get / Set\n");
-  printf("| or=[-1024,960]     | ADC Offset Wamples Right     Get / Set\n");
+  printf("| or=[-1024,960]     | ADC Offset Samples Right     Get / Set\n");
   printf("| a1s                | Audio 1 Sample Rate          Get\n");
   printf("| a1f                | Audio 1 Filter Clock         Get\n");
   printf("| a2s                | Audio 2 Sample Rate          Get\n");
@@ -27,8 +28,9 @@ static void print_opts() {
   printf("| fmd=[1,0]          | FM,IIS,ES689 digital record  Enable / Disable\n");
   printf("| fms=[1,0]          | FM,IIS,ES689 digital sync    Enable / Disable\n");
   printf("| fmr=[1,0]          | FM Reset                     Execute\n");
-  printf("| t=[1,0]            | Telegaming Mode              Enable / Disable\n\n");
-  printf("Example: `essreg r=before.txt 3=0 m=1 p=1 r=0 t=0 r=after.txt`");
+  printf("| t=[1,0]            | Telegaming Mode              Enable / Disable\n");
+  printf("| x=[1,0]            | Safe DSP protocol (C6h)      Enable / Disable\n\n");
+  printf("Example: `essreg r=before.txt 3=0 m=1 pa=1 t=0 r=after.txt`");
 }
 // clang-format on
 
@@ -66,7 +68,7 @@ int main(int argc, char *argv[]) {
         calibrate_op_amp();
       else if (argv[i][0] == 'r')
         dump_regs("essreg.txt");
-      else if (argv[i][0] == 'f' && argv[1][1] == 'm') {
+      else if (argv[i][0] == 'f' && argv[i][1] == 'm') {
 	    if (argv[i][2] == 'd') get_digital_record();
 	    else if (argv[i][2] == 's') get_fm_sync_audio_2();
 	    else if (argv[i][2] == 'r') get_fm_reset();
@@ -127,12 +129,13 @@ int main(int argc, char *argv[]) {
 	  }
 	  else if (argv[i][0] == 'r')
         dump_regs(arg_data);
-      else if (argv[i][0] == 'f' && argv[1][1] == 'm') {
+      else if (argv[i][0] == 'f' && argv[i][1] == 'm') {
 	    if (argv[i][2] == 'd') set_digital_record(atoi(arg_data));
 	    else if (argv[i][2] == 's') set_fm_sync_audio_2(atoi(arg_data));
 	    else if (argv[i][2] == 'r') set_fm_reset(atoi(arg_data));
 	  }
       else if (argv[i][0] == 't') set_telegaming_mode(atoi(arg_data));
+      else if (argv[i][0] == 'x') set_safe_protocol(atoi(arg_data));
     }
     // clang-format on
   }
