@@ -52,7 +52,8 @@ class OW2BuildTest(unittest.TestCase):
         for s in ne.segments:
             if not s.flags & SEG_DATA:
                 self.assertTrue(s.flags & SEG_DISCARDABLE, s)
-        for mod in ("KERNEL", "USER", "GDI", "COMMDLG", "TOOLHELP"):
+        for mod in ("KERNEL", "USER", "GDI", "COMMDLG", "TOOLHELP",
+                    "MMSYSTEM"):
             self.assertIn(mod, ne.modules)
         exported = {name for name, _ in ne.resident[1:]}
         self.assertEqual(exported, {"MAIN_DLG_PROC", "BIT_DLG_PROC"})

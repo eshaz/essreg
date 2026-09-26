@@ -292,6 +292,12 @@ int dump_file(const char *path) {
     }
   }
   winio_end();
+  if (GetModuleHandle("ESFM")) {
+    struct esfm_diag d;
+    int rc = esfm_diag_read(&d, 1);
+    esfm_diag_text(&d, rc, "\n", info, sizeof(info));
+    fprintf(f, "\nESFM.DRV\n\n%s", info);
+  }
   fclose(f);
   return 0;
 }

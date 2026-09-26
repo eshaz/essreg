@@ -7,7 +7,8 @@
  * DRV_ENABLE), writes the bank it holds to <outdir>\BEFORE.BIN, runs the
  * command (WinExec keeps it in this Win16 process, so it sees the driver),
  * waits for it to finish, writes the bank again to AFTER.BIN and closes
- * the driver.  Progress goes to <outdir>\DRVHOLD.LOG.
+ * the driver.  DRVM_INIT gives the driver a device structure, as when
+ * Windows finds the ES1869.  Progress goes to <outdir>\DRVHOLD.LOG.
  *
  * The bank is found the way ESFM.DRV finds it: the far pointer at 0012h of
  * its data segment.
@@ -79,11 +80,14 @@ static void dump(const char *name) {
 
 typedef LRESULT(FAR PASCAL *DRIVERPROC)(DWORD id, HDRVR drv, UINT msg,
                                         LPARAM p1, LPARAM p2);
+typedef DWORD(FAR PASCAL *MODMESSAGE)(UINT id, UINT msg, DWORD user,
+                                      DWORD p1, DWORD p2);
 
 int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   char driver[128], command[300], text[400];
   HINSTANCE lib, child;
   DRIVERPROC proc;
+  MODMESSAGE mod;
   LRESULT r1, r2;
   DWORD start;
   MSG msg;
@@ -110,6 +114,13 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   r2 = proc(1, (HDRVR)1, DRV_ENABLE, 0, 0);
   sprintf(text, "DRV_LOAD %ld, DRV_ENABLE %ld", r1, r2);
   note(text);
+  /* DRVM_INIT: the driver makes its device structure for a devnode (the
+   * ESFM page and essctl /dump show its voices) */
+  mod = (MODMESSAGE)GetProcAddress(lib, "MODMESSAGE");
+  if (mod) {
+    sprintf(text, "DRVM_INIT %lu", mod(0, 0x64, 0, 0, 0x1234));
+    note(text);
+  }
   dump("BEFORE.BIN");
   child = WinExec(command, SW_SHOWNORMAL);
   sprintf(text, "WinExec(%.300s): %04X", command, child);

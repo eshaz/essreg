@@ -9,6 +9,9 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
 - ESFM: tests/host/drvhold.c loads the real driver/ESFM.DRV and enables
   it, then starts "essctl /load" with a profile naming a bank larger than
   the driver's own; the bank the driver holds is dumped before and after.
+- ESFM voices: "essctl /dump" with the ESS driver and the fixed build
+  loaded shows the driver's 18 voices and, for the fixed build, its
+  counters.
 
 Win16 wants 8.3 path names, so the work directory is reached through a
 short symbolic link in /tmp.
@@ -18,6 +21,7 @@ import os
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -128,6 +132,27 @@ class WineTest(unittest.TestCase):
         self.assertEqual(after[:len(bank)], bytes(bank))
         self.assertIn("ESFM bank loaded", read(self.path("ESSCTL.LOG"))
                       .decode())
+
+    def esfm_dump(self, driver):
+        shutil.copy(driver, self.path("DRV.DRV"))
+        self.wine("drvhold.exe", "DRV.DRV", self.win,
+                  "%s\\essctl.exe /sim /dump %s\\ESFM.TXT /q" %
+                  (self.win, self.win))
+        return read(self.path("ESFM.TXT")).decode("latin-1")
+
+    def test_esfm_voices_in_dump(self):
+        text = self.esfm_dump(os.path.join(ROOT, "driver", "ESFM.DRV"))
+        self.assertIn("ESFM.DRV", text)
+        self.assertIn("The MIDI device is closed", text)
+        self.assertIn("ESS driver: drops messages", text)
+        self.assertEqual(text.count("  free"), 18)
+        fixed = os.path.join(self.link, "FIXED.DRV")
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import build_esfm
+        build_esfm.build(True, fixed, workdir=self.link)
+        text = self.esfm_dump(fixed)
+        self.assertIn("Fixed driver: 0 messages queued", text)
+        self.assertEqual(text.count("  free"), 18)
 
 
 if __name__ == "__main__":

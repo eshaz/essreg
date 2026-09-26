@@ -52,5 +52,7 @@
 #define IDC_PG_BTN1 905
 #define IDC_PG_BTN2 906
 #define IDC_PG_TEXT 907
+#define IDC_PG_BTN3 908
+#define IDC_PG_VOICES 909
 
 #endif /* RESOURCE_H */

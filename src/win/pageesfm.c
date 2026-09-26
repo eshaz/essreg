@@ -12,9 +12,24 @@
 
 #include <commdlg.h>
 #include "esfmlive.h"
+#include "esfmtest.h"
 #include "resource.h"
 
-static HWND text;
+static HWND text, voices;
+static char voice_text[1400];
+
+/* the driver's voices, and what the chip says (see esfm_diag_text) */
+static void show_voices(void) {
+  static char buf[1400];
+  struct esfm_diag d;
+  int rc = esfm_diag_read(&d, 1);
+
+  esfm_diag_text(&d, rc, "\r\n", buf, sizeof(buf));
+  if (strcmp(buf, voice_text)) {
+    strcpy(voice_text, buf);
+    SetWindowText(voices, buf);
+  }
+}
 
 static void show_status(void) {
   static char buf[600];
@@ -35,7 +50,7 @@ static void show_status(void) {
     if (!st.known)
       sprintf(buf + strlen(buf), "\r\nCannot load banks: %s\r\n", st.why);
   }
-  strcat(buf, "\r\n\r\nA bank is a file of 256 patch offsets followed by the "
+  strcat(buf, "\r\nA bank is a file of 256 patch offsets followed by the "
               "patches, as in esfm_patch_banks\\*.bin, or a RIFF \"Ptch\" "
               "file.  It replaces the sounds of the running driver until "
               "Windows restarts; save a profile to load it again with "
@@ -44,7 +59,7 @@ static void show_status(void) {
 }
 
 void esfm_create(void) {
-  int tabs = 64;
+  int tabs = 64, split = area_h * 2 / 5;
 
   page_control("BUTTON", "&Load bank...",
                WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0, 70, 14,
@@ -52,16 +67,42 @@ void esfm_create(void) {
   page_control("BUTTON", "&Restore original",
                WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 76, 0, 70, 14,
                IDC_PG_BTN2);
+  page_control("BUTTON", "&Stress test",
+               WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 152, 0, 70, 14,
+               IDC_PG_BTN3);
   text = page_control("EDIT", "",
                       WS_VISIBLE | WS_BORDER | ES_MULTILINE | ES_READONLY |
                           WS_VSCROLL,
-                      0, 20, area_w, area_h - 20, IDC_PG_EDIT);
+                      0, 20, area_w, split - 24, IDC_PG_EDIT);
   SendMessage(text, EM_SETTABSTOPS, 1, (LPARAM)(int FAR *)&tabs);
+  voices = page_control("EDIT", "",
+                        WS_VISIBLE | WS_BORDER | ES_MULTILINE | ES_READONLY |
+                            WS_VSCROLL,
+                        0, split, area_w, area_h - split, IDC_PG_VOICES);
+  SendMessage(voices, WM_SETFONT, (WPARAM)GetStockObject(ANSI_FIXED_FONT), 0);
+  voice_text[0] = 0;
 }
 
 void esfm_refresh(int how) {
   if (how != REFRESH_TIMER)
     show_status();
+  show_voices();
+}
+
+static void stress_test(HWND owner) {
+  static char report[900];
+  int rc;
+
+  if (!confirm(owner, "The stress test plays about 7 seconds of dense music "
+                      "on the ESFM synthesizer and then looks for notes "
+                      "left sounding.  Stop other MIDI playback first.\n\n"
+                      "Run it now?"))
+    return;
+  rc = esfm_stress_test(report, sizeof(report));
+  MessageBox(owner, report, "ESFM stress test",
+             MB_OK | (rc < 0 ? MB_ICONEXCLAMATION
+                             : rc ? MB_ICONSTOP : MB_ICONINFORMATION));
+  show_voices();
 }
 
 void esfm_command(int id, int code, HWND ctl) {
@@ -72,6 +113,8 @@ void esfm_command(int id, int code, HWND ctl) {
     esfm_menu_load(g_main);
   else if (id == IDC_PG_BTN2)
     esfm_menu_restore(g_main);
+  else if (id == IDC_PG_BTN3)
+    stress_test(g_main);
 }
 
 void esfm_menu_load(HWND owner) {

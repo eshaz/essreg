@@ -15,6 +15,7 @@
 
 #include <windows.h>
 
+#include <conio.h>
 #include <i86.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +29,19 @@
 #define DG_BANK_SEL 0x14
 #define DG_NAME1 0x47 /* "Undefined": file name of the dormant RIFF loader */
 #define DG_NAME2 0x51 /* "Undefined": what it is compared with */
+#define DG_DEVICES 0x3C /* first device structure */
+
+/* device structure (src/esfm/esfmdev.inc) */
+#define DEV_FM_PORT 0x00A
+#define DEV_ACTIVE 0x014
+#define DEV_OPEN 0x016
+#define DEV_CLOCK 0x01C
+#define DEV_CHAN_FLAGS 0x040
+#define DEV_VOICES 0x070
+#define DEV_FLAGS 0x30E
+#define DEV_SIZE 0x311
+#define VOICE_SIZE 0x21
+#define FM_KEYON 0x240 /* key-on registers, 0x250-0x253 for voices 16, 17 */
 
 char esfm_last_bank[144];
 
@@ -259,4 +273,163 @@ int esfm_live_restore(char *msg, unsigned size) {
     message(msg, size, text);
   }
   return rc;
+}
+
+static u32 rd32(const u8 *p) {
+  return p[0] | ((u16)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
+}
+
+/* read an ESFM register in native mode: FM_Base+2/+3 select it, +1 reads
+ * it.  Interrupts are off so that the driver cannot move the address in
+ * between; the driver always writes both address bytes, so it is not
+ * disturbed. */
+static u8 fm_read(u16 port, u16 reg) {
+  u8 v;
+
+  _disable();
+  outp(port + 2, reg & 0xFF);
+  outp(port + 3, reg >> 8);
+  v = (u8)inp(port + 1);
+  _enable();
+  return v;
+}
+
+int esfm_diag_read(struct esfm_diag *d, int read_chip) {
+  static u8 dev[DEV_SIZE];
+  struct live lv;
+  u16 devoff, i;
+  u32 clock;
+  const u8 __far *fix = 0;
+  u32 dgsize;
+
+  memset(d, 0, sizeof(*d));
+  if (open_live(&lv, d->why) != 0)
+    return -1;
+  devoff = *(u16 __far *)(lv.dg + DG_DEVICES);
+  dgsize = GlobalSize(lv.dgroup);
+  if (!devoff || devoff + (u32)DEV_SIZE > dgsize) {
+    close_live(&lv);
+    strcpy(d->why, "the driver has no ES1869 device");
+    return -1;
+  }
+  /* a consistent copy: MIDI callbacks change it at interrupt time */
+  _disable();
+  _fmemcpy(dev, lv.dg + devoff, DEV_SIZE);
+  _enable();
+  for (i = 0x1B2; i + 32 < 0x800 && i + 32 < dgsize; i++)
+    if (!_fmemcmp(lv.dg + i, "ESFMFIX", 8)) {
+      fix = lv.dg + i;
+      break;
+    }
+  if (fix) {
+    _disable();
+    d->fixed = 1;
+    d->queued = *(u32 __far *)(fix + 16);
+    d->overflow = *(u32 __far *)(fix + 20);
+    d->maxdepth = *(u16 __far *)(fix + 24);
+    d->purged = *(u16 __far *)(fix + 26);
+    _enable();
+  }
+  close_live(&lv);
+
+  d->device = 1;
+  d->fm_port = *(u16 *)(dev + DEV_FM_PORT);
+  d->open = *(u16 *)(dev + DEV_OPEN) != 0;
+  d->suspended = (dev[DEV_FLAGS] & 4) != 0;
+  for (i = 0; i < 16; i++)
+    if (dev[DEV_CHAN_FLAGS + i] & 1)
+      d->pedal |= 1 << i;
+  clock = rd32(dev + DEV_CLOCK);
+  for (i = 0; i < ESFM_VOICES; i++) {
+    const u8 *v = dev + DEV_VOICES + i * VOICE_SIZE;
+    d->v[i].flags = v[0];
+    d->v[i].age = clock - rd32(v + 1);
+    d->v[i].channel = v[5];
+    d->v[i].note = v[6];
+    d->v[i].chip = 0xFF;
+  }
+  if (read_chip && d->open && *(u16 *)(dev + DEV_ACTIVE) && !d->suspended &&
+      d->fm_port) {
+    for (i = 0; i < 16; i++)
+      d->v[i].chip = fm_read(d->fm_port, FM_KEYON + i) & 1;
+    d->v[16].chip = (fm_read(d->fm_port, FM_KEYON + 16) |
+                     fm_read(d->fm_port, FM_KEYON + 17)) & 1;
+    d->v[17].chip = (fm_read(d->fm_port, FM_KEYON + 18) |
+                     fm_read(d->fm_port, FM_KEYON + 19)) & 1;
+    d->chip_read = 1;
+  }
+  return 0;
+}
+
+static const char *note_name(u8 note, char *buf) {
+  static const char names[] = "C C#D D#E F F#G G#A A#B ";
+  buf[0] = names[(note % 12) * 2];
+  buf[1] = names[(note % 12) * 2 + 1];
+  sprintf(buf + (buf[1] == ' ' ? 1 : 2), "%d", note / 12 - 1);
+  return buf;
+}
+
+void esfm_diag_text(const struct esfm_diag *d, int rc, const char *nl,
+                    char *buf, unsigned size) {
+  static char line[120];
+  char nb[8];
+  int i;
+
+  buf[0] = 0;
+  if (rc != 0) {
+    sprintf(line, "Voices: %.90s%s", d->why, nl);
+    strncat(buf, line, size - strlen(buf) - 1);
+    return;
+  }
+  sprintf(line, "%s%s%s", d->open ? "A program has the MIDI device open"
+                                  : "The MIDI device is closed",
+          d->suspended ? " (suspended)" : "", nl);
+  strncat(buf, line, size - strlen(buf) - 1);
+  if (d->fixed)
+    sprintf(line, "Fixed driver: %lu messages queued while busy, %lu "
+                  "refused%s",
+            (unsigned long)d->queued, (unsigned long)d->overflow, nl);
+  else
+    sprintf(line, "ESS driver: drops messages that come while it is "
+                  "busy%s", nl);
+  strncat(buf, line, size - strlen(buf) - 1);
+  sprintf(line, "%sVoice  Channel  Note   State          Age  Chip%s", nl, nl);
+  strncat(buf, line, size - strlen(buf) - 1);
+  for (i = 0; i < ESFM_VOICES; i++) {
+    const struct esfm_voice *v = &d->v[i];
+    const char *state = "free";
+    int on = v->flags & 1, n;
+    if (on && (v->flags & 4))
+      state = "held by pedal";
+    else if (on)
+      state = "playing";
+    else if (v->flags & 2)
+      state = "released";
+    n = sprintf(line, "%5d  ", i + 1);
+    if (v->flags)
+      n += sprintf(line + n, "%7d  %-5s  ", v->channel + 1,
+                   note_name(v->note, nb));
+    else
+      n += sprintf(line + n, "%7s  %-5s  ", "", "");
+    n += sprintf(line + n, "%-13s  ", state);
+    if (on)
+      n += sprintf(line + n, "%4lu  ", (unsigned long)v->age);
+    else
+      n += sprintf(line + n, "%4s  ", "");
+    if (v->chip == 0xFF)
+      n += sprintf(line + n, "  -");
+    else
+      n += sprintf(line + n, "%s%s", v->chip ? " on" : "off",
+                   v->chip && !on ? "  STUCK" : "");
+    sprintf(line + n, "%s", nl);
+    strncat(buf, line, size - strlen(buf) - 1);
+  }
+  if (d->pedal) {
+    strcpy(line, "Sustain pedal down on channel");
+    for (i = 0; i < 16; i++)
+      if (d->pedal & (1 << i))
+        sprintf(line + strlen(line), " %d", i + 1);
+    strcat(line, nl);
+    strncat(buf, line, size - strlen(buf) - 1);
+  }
 }
