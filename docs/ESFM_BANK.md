@@ -7,7 +7,9 @@ copied into memory when the driver is enabled.
 
 This document covers the build shipped in `driver/ESFM.DRV` (20976 bytes,
 module `ESFM`, expected Windows version 4.0). Everything below was read
-from its code; addresses are `segment:offset` within that file.
+from its code; addresses are `segment:offset` within that file.  The fixed
+`build/ESFM.DRV` ([ESFM_MIDI.md](ESFM_MIDI.md)) has the same bank loader, so
+all of this applies to it too.
 
 ## Bank format
 

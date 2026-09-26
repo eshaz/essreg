@@ -18,6 +18,7 @@ for the FM synthesizer's patch banks.
   * `/sim`: a simulated ES1869, to try essctl without the card.
 * **Profiles**: File > *Save profile* stores the 50 ordinary settings in an INI file; File > *Load profile* restores them. Put `essctl /load C:\ESS\MY.INI` in the StartUp group to restore them at every start of Windows: the ESS driver resets the mixer whenever Windows starts and puts back only its own settings ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)).
 * **ESFM**: *ESFM > Load patch bank* replaces the FM synthesizer's sounds while Windows runs.
+  * The ESFM page shows the synthesizer's 18 voices live and marks hanging notes; *Stress test* plays dense music to check for them ([docs/ESFM_MIDI.md](docs/ESFM_MIDI.md)).
 
 ```
 essctl [/load file] [/save file] [/dump file] [/ui] [/q]
@@ -37,6 +38,12 @@ essctl [/load file] [/save file] [/dump file] [/ui] [/q]
 * Otherwise it behaves exactly like the ESS driver: `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte for byte.
 * Install: keep a copy of `C:\WINDOWS\SYSTEM\ES1869.VXD`, copy `build\ES1869.VXD` over it, restart Windows. See [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#installing-the-extended-driver), including how to go back if something goes wrong.
 * The rebuilt driver no longer carries ESS's DirectX certification mark.
+
+## [`ESFM.DRV`](build) without hanging notes
+* The Windows 95 MIDI driver of the ES1869's FM synthesizer, rebuilt from source in [`src/esfm`](src/esfm).
+* ESS's driver drops MIDI messages that come in while it is busy, so notes hang when the music gets busy. This one queues them instead, and also silences every voice when a program closes the device with the sustain pedal down. All in [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md).
+* Everything else is ESS's code: `python3 tools/build_esfm.py --stock --verify` rebuilds the original byte for byte, and `esfmpat` and essctl's banks work the same.
+* Install it from DOS (Windows has the driver open): keep a copy of `C:\WINDOWS\SYSTEM\ESFM.DRV`, copy `build\ESFM.DRV` over it, restart Windows.
 
 ## [`essreg.exe`](build)
 * Utility to control otherwise unsupported registers for the ES1869 audio chip.
@@ -110,6 +117,7 @@ Usage: esfmpat "c:\path\to\esfm.drv" "c:\path\to\patch.bin"
 * [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md): how the driver works; rebuilding and installing it.
 * [docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md): the registry settings of the ESS drivers and the registers Windows' driver sets.
 * [docs/ESFM_BANK.md](docs/ESFM_BANK.md): FM patch banks and `ESFM.DRV`.
+* [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md): why ESFM notes hang, the MIDI driver stack, and the fixed `ESFM.DRV`.
 * [docs/RE_NOTES.md](docs/RE_NOTES.md): how the drivers were reverse-engineered.
 * [docs/TESTING.md](docs/TESTING.md): automated tests and a checklist for real hardware.
 * [docs/datasheet](docs/datasheet): the ES1869 data sheet.
@@ -119,12 +127,12 @@ Usage: esfmpat "c:\path\to\esfm.drv" "c:\path\to\patch.bin"
 ### Prerequisites
 * MSDOS like build environment (MS-DOS, Windows 9x, DOS-BOX, etc.)
 * [Watcom C 11.0](https://winworldpc.com/product/watcom-c-c/110b) with the DOS and 16-bit Windows targets
-* For the driver: Python 3 and NASM (any operating system)
+* For the drivers: Python 3 and NASM (any operating system)
 
 ### Building
 * Clone this repo and copy it your build environment.
 * Run [`build.bat`](build.bat) to build the executables.
-* Run `python3 tools/build_vxd.py` to build `build/ES1869.VXD`.
+* Run `python3 tools/build_vxd.py` to build `build/ES1869.VXD`, and `python3 tools/build_esfm.py` to build `build/ESFM.DRV`.
 * On Linux, `tools/ow2build.sh <open-watcom-v2 directory>` builds the programs with Open Watcom v2 into `out/ow2/`.
   The programs in [`build`](build), other than `1869opl3.com`, were built this way; `build.bat` builds the same programs with Watcom C 11.0.
 

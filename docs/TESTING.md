@@ -10,7 +10,8 @@ Needs Python 3, gcc and NASM, plus the `unicorn` Python module for the CPU
 emulator tests. It runs:
 
 - **Python tests** (`tests/test_*.py`):
-  - LE and NE tooling, and the byte-identical rebuild of `ES1869.VXD`;
+  - LE and NE tooling, and the byte-identical rebuilds of `ES1869.VXD` and `ESFM.DRV`;
+  - `ESFM.DRV` in a CPU emulator with an FM chip model and simulated interrupts: the hanging notes of ESS's driver, and the fixed driver (`test_esfmdrv`, [ESFM_MIDI.md](ESFM_MIDI.md));
   - the register API of the rebuilt VxD, executed in a CPU emulator against a simulated ES1869;
   - `esfmpat` on copies of `ESFM.DRV`;
   - that the generated documentation is current.
@@ -36,7 +37,8 @@ tools/ow2build.sh /path/to/open-watcom     # binaries in out/ow2/
 **Under Wine.** `tests/test_wine.py` runs `essctl.exe` as a 16-bit Windows
 program (`ESSREG_WINE=1`; needs 32-bit Wine and Xvfb):
 - profile save/load against the simulated chip;
-- the ESFM live load against the real `ESFM.DRV`.
+- the ESFM live load against the real `ESFM.DRV`;
+- the ESFM voice table of `essctl /dump`, with ESS's driver and the fixed one.
 
 ## On the hardware
 
@@ -100,7 +102,23 @@ order, stopping at the first surprise; each step says what to expect.
    - after a restart, MIDI plays with the new bank;
    - `ESFM.BAK` is the original.
 
-### G. Expert mode (last)
+### G. ESFM hanging notes
+
+See [ESFM_MIDI.md](ESFM_MIDI.md).
+
+1. With ESS's `ESFM.DRV`: essctl, *ESFM patch bank* page, *Stress test*.
+   Expected: voices left sounding (more likely on a fast machine).
+2. Play the MIDI files or games that hang notes, with the ESFM page open.
+   A voice marked STUCK, or one that keeps "playing" after the music stops,
+   is a hanging note.
+3. Install `build\ESFM.DRV` from DOS (see ESFM_MIDI.md) and restart.
+4. The page says "Fixed driver".  Run the stress test again: no voice left
+   sounding.  The "queued while busy" count is what ESS's driver would
+   have dropped.
+5. Play the same music again: no hanging notes; MIDI, the patch bank and
+   *Load bank* work as before.
+
+### H. Expert mode (last)
 
 Only with nothing playing:
 1. Options > *Expert mode*.

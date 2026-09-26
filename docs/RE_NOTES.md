@@ -9,7 +9,7 @@ of NASM).
 | File | Format | What it is | Results |
 |---|---|---|---|
 | `driver/ES1869.VXD` | LE | virtual device driver (device AUDDRV, 3B07h) | full source in `src/vxd/`, [VXD_API.md](VXD_API.md), [VXD_INTERNALS.md](VXD_INTERNALS.md) |
-| `driver/ESFM.DRV` | NE | FM MIDI driver | bank loader and patch format: [ESFM_BANK.md](ESFM_BANK.md) |
+| `driver/ESFM.DRV` | NE | FM MIDI driver | full source in `src/esfm/`; bank loader and patch format: [ESFM_BANK.md](ESFM_BANK.md); hanging notes: [ESFM_MIDI.md](ESFM_MIDI.md) |
 | `driver/ES1869.DRV` | NE | wave, mixer and aux driver | settings and registers it uses: [DRIVER_CONFIG.md](DRIVER_CONFIG.md) |
 | `driver/ESSDC.EXE` | MZ | ESS DOS configuration program | its DSP protocol for controller registers (C6h, then poll Audio_Base+Ch) |
 | ES1869 data sheet | PDF | `docs/datasheet/` | the register catalog `src/esscat.tbl` and [REGISTERS.md](REGISTERS.md) |
@@ -30,6 +30,10 @@ repository.
 | `tools/lelink.py` | Links NASM's ELF output back into an LE file (layout from `src/vxd/layout.json`). |
 | `tools/build_vxd.py` | Builds `build/ES1869.VXD`; `--stock --verify` checks the byte-identical rebuild. |
 | `tools/regdoc.py` | Generates [REGISTERS.md](REGISTERS.md) from the catalog. |
+| `tools/ne2asm.py` | Turns a 16-bit NE module (`ESFM.DRV`) into NASM source: one section per segment, followed by its relocation table. |
+| `tools/nelink.py` | Links that source back into an NE file (layout from `src/esfm/layout.json`). |
+| `tools/build_esfm.py` | Builds `build/ESFM.DRV`; `--stock --verify` checks the byte-identical rebuild. |
+| `tests/esfmemu.py` | Runs `ESFM.DRV` in a 16-bit CPU emulator (Unicorn) with an FM chip model and simulated interrupts ([ESFM_MIDI.md](ESFM_MIDI.md)). |
 
 ## From VxD to source
 
@@ -112,3 +116,13 @@ analysis (`names.txt`).
   (telegaming bit, 1Ch record sources, B9h transfer types, ...), the
   catalog follows the register description and leaves a note (see the
   notes in [REGISTERS.md](REGISTERS.md)).
+
+## From NE driver to source
+
+`ne2asm.py` does for `ESFM.DRV` what `vxd2asm.py` does for the VxD:
+- **Where code is found.** It disassembles by recursive descent from the entry table, the start address, far calls between segments, jump tables and the names in `src/esfm/names.txt`.
+- **Relocations.** An NE relocation is a chain: each site holds the offset of the next site with the same target. Every site becomes a label, and the chain links are written as labels too, so code can move and the chains stay right.
+- **Far calls** into another segment name their target.
+- **Assembling.** `nasm -f bin` assembles every segment into its own section (`vstart=0`, so labels are segment offsets), followed by the segment's relocation table exactly as it sits in the file. A last section tells `nelink.py` the lengths and the exported offsets.
+- **Encodings.** Instructions that NASM would encode differently are written with the "load" macros (`mov_ bx,ax`) or `strict word`; only 2 needed raw bytes.
+- **The layout.** `nelink.py` writes the header, the segment, resource, name and entry tables and the gang-load area. It places the segments and resources at their original offsets, moving the ones after a segment that grew.

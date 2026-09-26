@@ -59,6 +59,12 @@ class RebuildTest(unittest.TestCase):
     def test_stock_identical(self):
         self.assertEqual(self.stock, self.orig)
 
+    def test_build_is_current(self):
+        with open(os.path.join(ROOT, "build", "ESFM.DRV"), "rb") as f:
+            self.assertEqual(f.read(), self.fixed,
+                             "build/ESFM.DRV is out of date: run "
+                             "tools/build_esfm.py")
+
     def test_fixed_driver(self):
         ne, orig = NEFile(self.fixed), NEFile(self.orig)
         self.assertEqual(ne.module_name, "ESFM")
