@@ -42,3 +42,9 @@
 *.su
 *.idb
 *.pdb
+
+# Reverse-engineering and test outputs
+/out/
+__pycache__/
+*.pyc
+/tests/bin/

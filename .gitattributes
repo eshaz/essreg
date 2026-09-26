@@ -1,2 +1,21 @@
 *.c text eol=crlf
 *.h text eol=crlf
+*.asm text eol=crlf
+*.inc text eol=crlf
+*.rc text eol=crlf
+*.tbl text eol=crlf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.sh text eol=lf
+*.pdf binary
+*.bin binary
+*.ico binary
+*.res binary
+*.VXD binary
+*.vxd binary
+*.DRV binary
+*.drv binary
+*.EXE binary
+*.exe binary
+*.com binary
