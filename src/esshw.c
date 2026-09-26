@@ -394,6 +394,8 @@ const char *esshw_strerror(int err) {
     return "the DSP did not answer";
   case ESSHW_ENOCFG:
     return "configuration port not found";
+  case ESSHW_EFAIL:
+    return "the driver rejected the request";
   }
   return "error";
 }

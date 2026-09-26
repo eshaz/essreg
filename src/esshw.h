@@ -42,6 +42,7 @@ enum esshw_backend { ESSHW_DIRECT, ESSHW_VXDEXT, ESSHW_SIM };
 #define ESSHW_EBUSY 4
 #define ESSHW_ETIMEOUT 5
 #define ESSHW_ENOCFG 6
+#define ESSHW_EFAIL 7 /* the driver rejected the call */
 
 /* VxD essreg API function numbers (DX) */
 #define ESSX_INFO 0x0400

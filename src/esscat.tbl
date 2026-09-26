@@ -1,0 +1,717 @@
+/* esscat.tbl -- ES1869 register and field catalog; schema and macros in esscat.h. */
+/* Source: ES1869 data sheet SAM0023-122898 (ESS Technology, 1998); "DS p.N" is its printed page number. */
+/* One macro call per line: REG, then its FLDs; ENUM, then its ENUMVs.  Comments stay on one line. */
+/* Read-only fields have tier T_RO; live status bits use K_RO, other read-only values the kind that formats them best. */
+/* (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>  Licensed under GPL Version 3.0 */
+
+/* ================================ enumerations ================================ */
+
+/* mixer 1Ch bits 2:0 (DS p.59) */
+ENUM(E_RECSRC)
+ENUMV(E_RECSRC, 0, "Microphone")
+ENUMV(E_RECSRC, 1, "L Mic, R Master (L+R)/2")
+ENUMV(E_RECSRC, 2, "Aux A (CD)")
+ENUMV(E_RECSRC, 3, "AOUT_L/AOUT_R")
+ENUMV(E_RECSRC, 4, "Microphone (alt)")
+ENUMV(E_RECSRC, 5, "Record mixer")
+ENUMV(E_RECSRC, 6, "Line")
+ENUMV(E_RECSRC, 7, "Master volume inputs")
+
+/* mixer 0Ch bits 2:1 (DS p.53) */
+ENUM(E_SBADCSRC)
+ENUMV(E_SBADCSRC, 0, "Microphone")
+ENUMV(E_SBADCSRC, 1, "CD (Aux)")
+ENUMV(E_SBADCSRC, 2, "Microphone (alt)")
+ENUMV(E_SBADCSRC, 3, "Line")
+
+/* mixer 42h bits 6:4 (DS p.60) */
+ENUM(E_SERINSRC)
+ENUMV(E_SERINSRC, 0, "Line")
+ENUMV(E_SERINSRC, 1, "Aux A (CD)")
+ENUMV(E_SERINSRC, 2, "Microphone")
+ENUMV(E_SERINSRC, 3, "Master volume inputs")
+ENUMV(E_SERINSRC, 4, "L Mic, R Master (L+R)/2")
+ENUMV(E_SERINSRC, 5, "AOUT_L/AOUT_R")
+ENUMV(E_SERINSRC, 6, "Record mixer")
+ENUMV(E_SERINSRC, 7, "Disconnected (muted)")
+
+/* mixer 44h bits 6:4; 6 and 7 are undefined (DS p.60) */
+ENUM(E_SEROUTSEL)
+ENUMV(E_SEROUTSEL, 0, "Mute")
+ENUMV(E_SEROUTSEL, 1, "Normal")
+ENUMV(E_SEROUTSEL, 2, "Audio 1 DAC only")
+ENUMV(E_SEROUTSEL, 3, "Normal (alt)")
+ENUMV(E_SEROUTSEL, 4, "Mixer, Audio 1 at 0 dB")
+ENUMV(E_SEROUTSEL, 5, "Mixer, Audio 1 muted")
+
+/* mixer 4Eh bits 7:6; 3 is undefined (DS p.61) */
+ENUM(E_SERTXSRC)
+ENUMV(E_SERTXSRC, 0, "None (zero)")
+ENUMV(E_SERTXSRC, 1, "Audio 1 DMA FIFO")
+ENUMV(E_SERTXSRC, 2, "Audio 1 ADC")
+
+/* mixer 4Eh bits 3:2; 3 is undefined (DS p.61) */
+ENUM(E_SERRXTGT)
+ENUMV(E_SERRXTGT, 0, "None (zero)")
+ENUMV(E_SERRXTGT, 1, "Audio 1 DMA FIFO")
+ENUMV(E_SERRXTGT, 2, "Audio 1 DAC")
+
+/* mixer 64h bits 3:2 (DS p.63) */
+ENUM(E_HWVMODE)
+ENUMV(E_HWVMODE, 0, "Three-wire")
+ENUMV(E_HWVMODE, 1, "Two-wire")
+ENUMV(E_HWVMODE, 2, "Two-wire, fast debounce")
+ENUMV(E_HWVMODE, 3, "Disabled")
+
+/* mixer 78h bits 7:6 (DS p.65) */
+ENUM(E_A2XFER)
+ENUMV(E_A2XFER, 0, "Single")
+ENUMV(E_A2XFER, 1, "Demand 2")
+ENUMV(E_A2XFER, 2, "Demand 4")
+ENUMV(E_A2XFER, 3, "Demand 8")
+
+/* mixer 7Dh bits 2:1 (DS p.65) */
+ENUM(E_MONOOUT)
+ENUMV(E_MONOOUT, 0, "Mute (CMR)")
+ENUMV(E_MONOOUT, 1, "CIN_R pin")
+ENUMV(E_MONOOUT, 2, "Audio 2 DAC right")
+ENUMV(E_MONOOUT, 3, "Record level mono mix")
+
+/* controller A8h bits 1:0; 0 and 3 are reserved (DS p.68) */
+ENUM(E_A1CHAN)
+ENUMV(E_A1CHAN, 1, "Stereo")
+ENUMV(E_A1CHAN, 2, "Mono")
+
+/* controller B1h bits 3:0 (DS p.69) */
+ENUM(E_A1IRQ)
+ENUMV(E_A1IRQ, 0, "IRQ 2, 9 or other")
+ENUMV(E_A1IRQ, 5, "IRQ 5")
+ENUMV(E_A1IRQ, 10, "IRQ 7")
+ENUMV(E_A1IRQ, 15, "IRQ 10")
+
+/* controller B2h bits 3:0 (DS p.69) */
+ENUM(E_A1DRQ)
+ENUMV(E_A1DRQ, 0, "Other")
+ENUMV(E_A1DRQ, 5, "DRQ 0")
+ENUMV(E_A1DRQ, 10, "DRQ 1")
+ENUMV(E_A1DRQ, 15, "DRQ 3")
+
+/* controller B9h bits 1:0; 0 is reserved (DS p.70) */
+ENUM(E_A1XFER)
+ENUMV(E_A1XFER, 1, "Single")
+ENUMV(E_A1XFER, 2, "Demand 2")
+ENUMV(E_A1XFER, 3, "Demand 4")
+
+/* Config_Base+5h bits 5:4; 1 and 2 are reserved (DS p.39) */
+ENUM(E_EEPROM)
+ENUMV(E_EEPROM, 0, "Internal ROM")
+ENUMV(E_EEPROM, 3, "EEPROM 512 x 8")
+
+/* Config_Base+5h bits 3:2 (DS p.39) */
+ENUM(E_PNPSTATE)
+ENUMV(E_PNPSTATE, 0, "Wait-for-key")
+ENUMV(E_PNPSTATE, 1, "Sleep")
+ENUMV(E_PNPSTATE, 2, "Isolation")
+ENUMV(E_PNPSTATE, 3, "Configure")
+
+/* PnP card register 25h bits 6:5; 2 and 3 are reserved (DS p.30) */
+ENUM(E_BOARD)
+ENUMV(E_BOARD, 0, "Motherboard")
+ENUMV(E_BOARD, 1, "Card")
+
+/* PnP card register 25h bits 4:3 (DS p.30) */
+ENUM(E_GPLOC)
+ENUMV(E_GPLOC, 0, "Not present")
+ENUMV(E_GPLOC, 1, "GP, 4 addresses")
+ENUMV(E_GPLOC, 2, "GP, 8 addresses")
+ENUMV(E_GPLOC, 3, "GP, 16 addresses")
+
+/* ============================ mixer registers (BK_MIXER) ============================ */
+/* Mixer volumes: 0 = mute, 15 = max; 3 dB per step up to 8, then 1.5 dB per step (DS p.55). */
+
+REG(R_MX00, BK_MIXER, 0, 0x00, RF_WRITEONLY, "Reset mixer", 58)
+FLD(F_MIXRESET, R_MX00, 0, 8, K_ACTION, T_EXPERT, 0, E_NONE, PG_OUTPUT, FMT_NONE, "mix.reset", "Reset mixer", "Any write resets the mixer registers to their initial values; the record volumes are reset only by hardware reset. Software reset does not touch the mixer (DS p.53)")
+
+/* SB Pro 3-bit views: bits 7:5 / 3:1 are the top bits of each nibble of the extended register; bits 4 and 0 are cleared by writes and read as 1 (DS p.53) */
+REG(R_MX04, BK_MIXER, 0, 0x04, RF_ALIAS, "DAC playback volume (SB Pro)", 56)
+FLD(F_SB_VOICE_L, R_MX04, 5, 3, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.voice.l", "SB voice volume L", "Sound Blaster Pro 3-bit view of the Audio 1 play volume 14h, left channel (DS p.53)")
+FLD(F_SB_VOICE_R, R_MX04, 1, 3, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.voice.r", "SB voice volume R", "Sound Blaster Pro 3-bit view of the Audio 1 play volume 14h, right channel (DS p.53)")
+
+REG(R_MX0A, BK_MIXER, 0, 0x0A, RF_ALIAS, "Mic mix volume (SB Pro)", 56)
+FLD(F_SB_MIC, R_MX0A, 1, 2, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.mic", "SB mic mix volume", "SB Pro view of mic mix volume 1Ah: writing 0-3 sets 1Ah to 00h, 55h, AAh or FFh; a read returns 1Ah bits 3:2 (DS p.53)")
+
+/* 0Ch bits 5 and 3 (F1, F0) and 0Eh bit 5 (F2) are SB filter bits that the ES1869 ignores (DS p.56) */
+REG(R_MX0C, BK_MIXER, 0, 0x0C, RF_ALIAS, "ADC source (SB Pro)", 56)
+FLD(F_SB_ADCSRC, R_MX0C, 1, 2, K_ENUM, T_SAFE, 0, E_SBADCSRC, PG_LEGACY, FMT_NONE, "sb.adcsrc", "SB record source", "SB Pro view of record source 1Ch bits 2:1; bit 0 is cleared by writes and read as 1. Use 1Ch for the other sources (DS p.53)")
+
+REG(R_MX0E, BK_MIXER, 0, 0x0E, RF_ALIAS, "Output control (SB Pro)", 56)
+FLD(F_SB_STEREO, R_MX0E, 1, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.stereo", "SB Pro stereo DMA", "1 = SB Pro stereo DMA to the DAC in Compatibility mode (program twice the channel rate). Software reset leaves it set, so clear it after the transfer (DS p.56)")
+
+REG(R_MX14, BK_MIXER, 0, 0x14, 0, "Audio 1 play volume", 58)
+FLD(F_A1VOL_L, R_MX14, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.a1vol.l", "Audio 1 (wave) volume L", "Left playback volume of the first audio channel, gated by the D1h/D3h speaker commands; reset value 88h (DS p.58)")
+FLD(F_A1VOL_R, R_MX14, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.a1vol.r", "Audio 1 (wave) volume R", "Right playback volume of the first audio channel, gated by the D1h/D3h speaker commands; reset value 88h (DS p.58)")
+
+REG(R_MX1A, BK_MIXER, 0, 0x1A, 0, "Mic mix volume", 58)
+FLD(F_MICVOL_L, R_MX1A, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.micvol.l", "Mic volume L", "Left playback volume of the mono Mic input; different L and R values pan it. Reset value 00h (DS p.58)")
+FLD(F_MICVOL_R, R_MX1A, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.micvol.r", "Mic volume R", "Right playback volume of the mono Mic input; different L and R values pan it. Reset value 00h (DS p.58)")
+
+/* note: the simplified 1Ch table on DS p.53 (x0x mic, 01x CD, 110 line, 111 mixer) differs from the register description on p.59; followed p.59 */
+REG(R_MX1C, BK_MIXER, 0, 0x1C, 0, "Extended record source", 58)
+FLD(F_RECSRC, R_MX1C, 0, 3, K_ENUM, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_RECSRC, PG_RECORD, FMT_NONE, "rec.source", "Record source", "Record source in Extended mode. Master volume inputs are the 3-D effect outputs before master volume (DS p.59)")
+FLD(F_RECMUTE, R_MX1C, 4, 1, K_BOOL, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.mute", "Record mute", "1 = mutes the input to the filters for recording; does not affect MONO_OUT (DS p.58)")
+
+REG(R_MX22, BK_MIXER, 0, 0x22, RF_ALIAS, "Master volume (SB Pro)", 56)
+FLD(F_SB_MASTER_L, R_MX22, 5, 3, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.master.l", "SB master volume L", "SB Pro 3-bit master volume, left; writes are translated into 60h unless 64h bit 0 is set, reads are computed from 60h (DS p.54)")
+FLD(F_SB_MASTER_R, R_MX22, 1, 3, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.master.r", "SB master volume R", "SB Pro 3-bit master volume, right; writes are translated into 62h unless 64h bit 0 is set, reads are computed from 62h (DS p.54)")
+
+REG(R_MX26, BK_MIXER, 0, 0x26, RF_ALIAS, "FM volume (SB Pro)", 56)
+FLD(F_SB_FM_L, R_MX26, 5, 3, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.fm.l", "SB FM volume L", "Sound Blaster Pro 3-bit view of the music DAC (FM) volume 36h, left channel (DS p.53)")
+FLD(F_SB_FM_R, R_MX26, 1, 3, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.fm.r", "SB FM volume R", "Sound Blaster Pro 3-bit view of the music DAC (FM) volume 36h, right channel (DS p.53)")
+
+REG(R_MX28, BK_MIXER, 0, 0x28, RF_ALIAS, "AuxA (CD) volume (SB Pro)", 56)
+FLD(F_SB_CD_L, R_MX28, 5, 3, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.cd.l", "SB CD volume L", "Sound Blaster Pro 3-bit view of the AuxA (CD) volume 38h, left channel (DS p.53)")
+FLD(F_SB_CD_R, R_MX28, 1, 3, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.cd.r", "SB CD volume R", "Sound Blaster Pro 3-bit view of the AuxA (CD) volume 38h, right channel (DS p.53)")
+
+REG(R_MX2E, BK_MIXER, 0, 0x2E, RF_ALIAS, "Line volume (SB Pro)", 56)
+FLD(F_SB_LINE_L, R_MX2E, 5, 3, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.line.l", "SB line volume L", "Sound Blaster Pro 3-bit view of the line volume 3Eh, left channel (DS p.53)")
+FLD(F_SB_LINE_R, R_MX2E, 1, 3, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.line.r", "SB line volume R", "Sound Blaster Pro 3-bit view of the line volume 3Eh, right channel (DS p.53)")
+
+REG(R_MX32, BK_MIXER, 0, 0x32, RF_ALIAS, "Master volume", 59)
+FLD(F_SB_MASTER4_L, R_MX32, 4, 4, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.master4.l", "Master volume L (4-bit)", "Backward-compatible 4-bit view of 60h: writes are translated unless 64h bit 0 is set, reads are computed from 60h; reset 88h (DS p.59)")
+FLD(F_SB_MASTER4_R, R_MX32, 0, 4, K_UINT, T_SAFE, 0, E_NONE, PG_LEGACY, FMT_NONE, "sb.master4.r", "Master volume R (4-bit)", "Backward-compatible 4-bit view of 62h: writes are translated unless 64h bit 0 is set, reads are computed from 62h; reset 88h (DS p.59)")
+
+REG(R_MX36, BK_MIXER, 0, 0x36, 0, "FM volume", 59)
+FLD(F_FMVOL_L, R_MX36, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.fmvol.l", "Music DAC (FM) volume L", "Left playback volume of the music DAC (FM, ES689/ES69x or I2S); reset value 88h (DS p.59)")
+FLD(F_FMVOL_R, R_MX36, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.fmvol.r", "Music DAC (FM) volume R", "Right playback volume of the music DAC (FM, ES689/ES69x or I2S); reset value 88h (DS p.59)")
+
+REG(R_MX38, BK_MIXER, 0, 0x38, 0, "AuxA (CD) volume", 59)
+FLD(F_CDVOL_L, R_MX38, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.cdvol.l", "AuxA (CD) volume L", "Left playback volume of the AuxA (CD) input; reset value 00h (DS p.59)")
+FLD(F_CDVOL_R, R_MX38, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.cdvol.r", "AuxA (CD) volume R", "Right playback volume of the AuxA (CD) input; reset value 00h (DS p.59)")
+
+REG(R_MX3A, BK_MIXER, 0, 0x3A, 0, "AuxB volume", 59)
+FLD(F_AUXBVOL_L, R_MX3A, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.auxbvol.l", "AuxB volume L", "Left playback volume of the AuxB input; reset value 00h (DS p.59)")
+FLD(F_AUXBVOL_R, R_MX3A, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.auxbvol.r", "AuxB volume R", "Right playback volume of the AuxB input; reset value 00h (DS p.59)")
+
+REG(R_MX3C, BK_MIXER, 0, 0x3C, 0, "PC speaker volume", 59)
+FLD(F_PCSPKVOL, R_MX3C, 0, 3, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.pcspkvol", "PC speaker volume", "Volume of the PC speaker input PCSPKI on the PCSPKO pin (resistor ladder, see DS p.26); reset value 04h (DS p.59)")
+
+REG(R_MX3E, BK_MIXER, 0, 0x3E, 0, "Line volume", 59)
+FLD(F_LINEVOL_L, R_MX3E, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.linevol.l", "Line volume L", "Left playback volume of the line input; reset value 00h (DS p.59)")
+FLD(F_LINEVOL_R, R_MX3E, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.linevol.r", "Line volume R", "Right playback volume of the line input; reset value 00h (DS p.59)")
+
+/* note: DS p.42 and p.59 say "A[11:0]" is the configuration base but list the reads as A[11:8], A[7:0] */
+REG(R_MX40, BK_MIXER, 0, 0x40, RF_READ_SIDEFX, "ES1869 identification", 59)
+FLD(F_CHIPID, R_MX40, 0, 8, K_HEX, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.chipid", "Identification value", "Four successive reads return 18h, 69h, then Config_Base bits 11:8 and 7:0; every read advances the sequence (DS p.59)")
+
+REG(R_MX42, BK_MIXER, 0, 0x42, 0, "Serial mode input control", 59)
+FLD(F_SIN_OVR, R_MX42, 7, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.in.override", "Serial input override", "1 = source and level below take effect in Serial mode, overriding 1Ch and B4h. Serial mode needs DCLK and the SE pin or 48h bit 7 (DS p.59)")
+FLD(F_SIN_SRC, R_MX42, 4, 3, K_ENUM, T_CAUTION, 0, E_SERINSRC, PG_SERIAL, FMT_NONE, "ser.in.source", "Serial record source", "Record source used during Serial mode when bit 7 is set (DS p.60)")
+FLD(F_SIN_LEVEL, R_MX42, 0, 4, K_UINT, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.in.level", "Serial record level", "Record level in Serial mode: microphone 0 to +22.5 dB, other sources -6 to +16.5 dB, in 1.5 dB steps (DS p.60)")
+
+REG(R_MX44, BK_MIXER, 0, 0x44, 0, "Serial mode output control", 60)
+FLD(F_SOUT_OVR, R_MX44, 7, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.out.override", "Serial master volume override", "1 = master volume during Serial mode comes from bits 3:0 instead of the master volume registers (DS p.60)")
+FLD(F_SOUT_SEL, R_MX44, 4, 3, K_ENUM, T_CAUTION, 0, E_SEROUTSEL, PG_SERIAL, FMT_NONE, "ser.out.select", "Serial output select", "Signal fed to the master volume stage during Serial mode; the Audio 1 DAC choices override record monitor and record mute (DS p.60)")
+FLD(F_SOUT_MVOL, R_MX44, 0, 4, K_UINT, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.out.mastervol", "Serial master volume", "Master volume during Serial mode when bit 7 is set: 0 = mute, 15 = maximum (0 dB) (DS p.60)")
+
+/* note: the FDXO text calls 48h bit 6 the serial reset, but the 48h description puts serial reset in bit 5 (DS p.60) */
+REG(R_MX46, BK_MIXER, 0, 0x46, 0, "Serial mode analog control", 60)
+FLD(F_SAN_OVR, R_MX46, 7, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.an.override", "Serial analog override", "1 = bits 5:0 of this register take effect during Serial mode; 0 = they never take effect (DS p.60)")
+FLD(F_SAN_MUSTEST, R_MX46, 6, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.an.music_test", "Music mixer test", "Test feature: 1 = the music DAC mixer inputs are replaced with the AUXB_L and AUXB_R inputs (DS p.60)")
+FLD(F_SAN_ADCL, R_MX46, 5, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.an.adc_l", "Serial left channel ADC", "1 = the left channel combined ADC and DAC is in ADC mode, 0 = DAC mode (DS p.60)")
+FLD(F_SAN_ADCR, R_MX46, 4, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.an.adc_r", "Serial right channel ADC", "1 = the right channel combined ADC and DAC is in ADC mode, 0 = DAC mode (DS p.60)")
+FLD(F_SAN_MONO, R_MX46, 3, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.an.mono", "Serial mono mode", "1 = mono record, mono playback or mono full-duplex modes; 0 = stereo playback or stereo record (DS p.60)")
+FLD(F_SAN_FDXO, R_MX46, 1, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.an.fdxo", "FDXO enable", "ES1868 compatible: in Serial mode with bit 7 set and serial reset off, MONO_OUT buffers CIN_R, overriding 7Dh bits 2:1 (DS p.60)")
+FLD(F_SAN_FDXI, R_MX46, 0, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.an.fdxi", "FDXI enable", "In Serial mode with bit 5 set, the left channel filter input is MONO_IN instead of the selected record source (DS p.60)")
+
+/* note: the footnote on DS p.55 puts telegaming in 48h bit 0; the 48h description (p.61) and p.20 use bit 1 and reserve bit 0 */
+REG(R_MX48, BK_MIXER, 0, 0x48, 0, "Serial mode control", 60)
+FLD(F_SER_SE, R_MX48, 7, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.enable", "Serial port enable (SW SE)", "1 = enable the DSP serial port (OR'd with the SE pin); synchronized to DCLK, so it has no effect while DCLK is not running (DS p.60)")
+FLD(F_SER_SIGNED, R_MX48, 6, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.signed", "Serial data signed", "1 = serial data is signed two's complement, 0 = unsigned (offset binary) (DS p.60)")
+FLD(F_SER_RESET, R_MX48, 5, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.reset", "Serial interface reset", "1 = hold the DSP serial interface in reset, which resets the left/right flags of stereo modes; 0 = release (DS p.60)")
+FLD(F_SER_ES689, R_MX48, 4, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.es689", "ES689/ES69x interface", "1 = an ES689/ES69x may use the music DAC while MCLK is seen high at least every 20 us; FM volume 36h applies (DS p.61)")
+FLD(F_SER_SYNCLOW, R_MX48, 3, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.sync_low", "Active-low frame sync", "1 = frame sync pulses FSR and FSX are active-low, 0 = active-high (DS p.61)")
+FLD(F_SER_TEST, R_MX48, 2, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.test_mode", "DSP test mode", "Test mode: DCLK, FSX and FSR become outputs; DCLK runs at 1.5876 MHz and the frame rate comes from 4Ah (DS p.61)")
+FLD(F_SER_TELEGAME, R_MX48, 1, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.telegaming", "Telegaming mode", "Telegaming (Game and Telephony) mode, as essreg calls it: in Serial mode Audio 1 DMA plays through the Audio 2 DAC at the 14h volume; 0 = Audio 1 unheard (DS p.61)")
+
+REG(R_MX4A, BK_MIXER, 0, 0x4A, 0, "FSX/FSR rate control (test)", 61)
+FLD(F_SER_FSDIV, R_MX4A, 0, 7, K_HEX, T_EXPERT, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.fs_divisor", "Test frame sync divisor", "Two's complement divisor setting the FSX/FSR frame rate in DSP test mode (48h bit 2); 5Ch (-36) gives 44.1 kHz (DS p.61)")
+
+REG(R_MX4C, BK_MIXER, 0, 0x4C, 0, "Serial mode filter divider", 61)
+FLD(F_SFILT_OVR, R_MX4C, 7, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.filter.override", "Serial filter override", "1 = during Serial mode the Audio 1 DAC and ADC switched-capacitor filters are clocked from DCLK; 0 = no effect (DS p.61)")
+FLD(F_SFILT_DIV, R_MX4C, 0, 4, K_HEX, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.filter.divider", "Serial filter divider", "Two's complement divider of DCLK for the filter clock; the filter -3 dB point is about clock/41, e.g. 02h (-14), 0Eh (-2) (DS p.61)")
+
+REG(R_MX4E, BK_MIXER, 0, 0x4E, 0, "Serial mode format/source/target", 61)
+FLD(F_STX_SRC, R_MX4E, 6, 2, K_ENUM, T_CAUTION, 0, E_SERTXSRC, PG_SERIAL, FMT_NONE, "ser.tx.source", "Serial transmit source", "Source of the serial transmit register: none (held at zero), Audio 1 DMA FIFO in playback direction, or Audio 1 ADC (DS p.61)")
+FLD(F_STX_16, R_MX4E, 5, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.tx.16bit", "Transmit 16-bit", "1 = transmit length is 16 bits, 0 = 8 bits (DS p.61)")
+FLD(F_STX_ST, R_MX4E, 4, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.tx.stereo", "Transmit stereo", "1 = transmit stereo, left and right alternating with left first; 0 = mono (DS p.61)")
+FLD(F_SRX_TGT, R_MX4E, 2, 2, K_ENUM, T_CAUTION, 0, E_SERRXTGT, PG_SERIAL, FMT_NONE, "ser.rx.target", "Serial receive target", "Target of the serial receive register: none (held at zero), Audio 1 DMA FIFO in record direction, or Audio 1 DAC (DS p.61)")
+FLD(F_SRX_16, R_MX4E, 1, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.rx.16bit", "Receive 16-bit", "1 = receive length is 16 bits, 0 = 8 bits (DS p.61)")
+FLD(F_SRX_ST, R_MX4E, 0, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "ser.rx.stereo", "Receive stereo", "1 = receive stereo, left and right alternating with left first; 0 = mono (DS p.61)")
+
+REG(R_MX50, BK_MIXER, 0, 0x50, 0, "3-D enable", 62)
+FLD(F_3D_EN, R_MX50, 3, 1, K_BOOL, T_SAFE, FF_PERSIST, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.enable", "3-D effect", "1 = enable the Spatializer VBX 3-D effect, 0 = bypass it; the effect also needs bit 2 (released from reset) (DS p.62)")
+FLD(F_3D_RUN, R_MX50, 2, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.run", "3-D released from reset", "Active-low reset of the 3-D effect: 1 = release from reset, 0 = reset (DS p.62)")
+
+REG(R_MX52, BK_MIXER, 0, 0x52, 0, "3-D level", 62)
+FLD(F_3D_LEVEL, R_MX52, 0, 6, K_UINT, T_SAFE, FF_PERSIST, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.level", "3-D level", "Amount of 3-D effect: 0 = minimum, 3Fh = maximum; reset to zero by hardware reset (DS p.62)")
+
+REG(R_MX60, BK_MIXER, 0, 0x60, 0, "Left master volume and mute", 62)
+FLD(F_MVOL_L, R_MX60, 0, 6, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_MASTER, FMT_NONE, "master.vol.l", "Master volume L", "Left master volume presented to the analog output, 0.75 dB per step up to 63 (0 dB); 36h after hardware reset (DS p.62)")
+FLD(F_MMUTE_L, R_MX60, 6, 1, K_BOOL, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_MASTER, FMT_NONE, "master.mute.l", "Master mute L", "1 = mute the left master output (DS p.62)")
+
+/* 61h and 63h exist separately only in split mode (64h bit 7 = 1); otherwise they are combined with 60h and 62h (DS p.62) */
+REG(R_MX61, BK_MIXER, 0, 0x61, 0, "Left hardware volume counter", 62)
+FLD(F_HWCNT_L, R_MX61, 0, 6, K_UINT, T_CAUTION, 0, E_NONE, PG_MASTER, FMT_NONE, "hwvol.count.l", "HW volume counter L", "Left hardware volume counter in split mode; host software reads it and updates master volume 60h (DS p.62)")
+FLD(F_HWMUTE_L, R_MX61, 6, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_MASTER, FMT_NONE, "hwvol.mute.l", "HW volume mute L", "Left mute kept by the hardware volume controls in split mode; host software copies it to 60h (DS p.62)")
+
+REG(R_MX62, BK_MIXER, 0, 0x62, 0, "Right master volume and mute", 62)
+FLD(F_MVOL_R, R_MX62, 0, 6, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_MASTER, FMT_NONE, "master.vol.r", "Master volume R", "Right master volume presented to the analog output, 0.75 dB per step up to 63 (0 dB); 36h after hardware reset (DS p.62)")
+FLD(F_MMUTE_R, R_MX62, 6, 1, K_BOOL, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_MASTER, FMT_NONE, "master.mute.r", "Master mute R", "1 = mute the right master output (DS p.62)")
+
+REG(R_MX63, BK_MIXER, 0, 0x63, 0, "Right hardware volume counter", 62)
+FLD(F_HWCNT_R, R_MX63, 0, 6, K_UINT, T_CAUTION, 0, E_NONE, PG_MASTER, FMT_NONE, "hwvol.count.r", "HW volume counter R", "Right hardware volume counter in split mode; host software reads it and updates master volume 62h (DS p.62)")
+FLD(F_HWMUTE_R, R_MX63, 6, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_MASTER, FMT_NONE, "hwvol.mute.r", "HW volume mute R", "Right mute kept by the hardware volume controls in split mode; host software copies it to 62h (DS p.62)")
+
+/* note: DS p.17 says the hardware volume interrupt is polled at 64h bit 3; the 64h description (p.62) uses bit 4 */
+/* note: ES1869.VXD also rewrites 64h (bits 5 and 3:2 at device start, bits 1:0 in HwVol_Int_Enable/Disable, all of it in Save/Restore_DOS_Mixer); not flagged FF_DRVOWNED */
+REG(R_MX64, BK_MIXER, 0, 0x64, 0, "Master volume control", 62)
+FLD(F_HW_SPLIT, R_MX64, 7, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_MASTER, FMT_NONE, "hwvol.split", "Split mode", "1 = split the HW volume counters 61h/63h from 60h/62h; host software then updates the master volume. 0 = slaved together (DS p.62)")
+FLD(F_MPU_IRQMASK, R_MX64, 6, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_STATUS, FMT_NONE, "irq.mpu401.mask", "MPU-401 IRQ mask (1 = on)", "AND'ed with the MPU-401 interrupt request; if low, the request stays low. Cleared by hardware reset (DS p.62)")
+FLD(F_HW_COUNT3, R_MX64, 5, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_MASTER, FMT_NONE, "hwvol.count_by_3", "Count by 3", "1 = each push of Up or Down changes the volume by 3 (2.25 dB), 0 = by 1; cleared by hardware reset (DS p.62)")
+FLD(F_HW_IRQREQ, R_MX64, 4, 1, K_RO, T_RO, 0, E_NONE, PG_MASTER, FMT_NONE, "hwvol.irq", "HW volume IRQ request", "Read-only interrupt request from a hardware volume event; any write to 66h clears it (DS p.62)")
+FLD(F_HW_MODE, R_MX64, 2, 2, K_ENUM, T_CAUTION, 0, E_HWVMODE, PG_MASTER, FMT_NONE, "hwvol.mode", "HW volume button mode", "Button mode: normal 3-wire; 2-wire (Up and Down low together = Mute); 2-wire with 10 us debounce and no auto-increment; or disabled (DS p.63)")
+FLD(F_HW_IRQMASK, R_MX64, 1, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_MASTER, FMT_NONE, "hwvol.irq_mask", "HW volume IRQ mask (1 = on)", "AND'ed with the hardware volume interrupt request before it is OR'd into the Audio 1 interrupt; cleared by hardware reset (DS p.63)")
+FLD(F_SBPRO_MVOFF, R_MX64, 0, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_MASTER, FMT_NONE, "master.sbpro_off", "Disable SB Pro master emulation", "0 = writes to 22h/32h and mixer reset update 60h/62h; 1 = 22h/32h are in effect read-only. Cleared by hardware reset (DS p.63)")
+
+REG(R_MX65, BK_MIXER, 0, 0x65, 0, "Opamp calibration control", 63)
+FLD(F_OPAMP_CAL, R_MX65, 0, 1, K_ACTION, T_CAUTION, 0, E_NONE, PG_POWER, FMT_NONE, "pwr.opamp_cal", "Calibrate op-amps", "Writing 1 starts op-amp calibration (about 200 ms, AOUT_L/R and MONO_OUT muted); reads 1 while it runs. Also runs after hardware reset (DS p.63)")
+
+REG(R_MX66, BK_MIXER, 0, 0x66, RF_WRITEONLY, "Clear hardware volume interrupt request", 63)
+FLD(F_HW_IRQCLR, R_MX66, 0, 8, K_ACTION, T_EXPERT, 0, E_NONE, PG_MASTER, FMT_NONE, "hwvol.irq_clear", "Clear HW volume IRQ", "Any write to this register resets the hardware volume interrupt request (DS p.63)")
+
+REG(R_MX68, BK_MIXER, 0, 0x68, 0, "Mic record volume", 63)
+FLD(F_RMICVOL_L, R_MX68, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.micvol.l", "Mic record volume L", "Left record mixer volume of the mic input; cleared by hardware reset but not by mixer reset (DS p.63)")
+FLD(F_RMICVOL_R, R_MX68, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.micvol.r", "Mic record volume R", "Right record mixer volume of the mic input; cleared by hardware reset but not by mixer reset (DS p.63)")
+
+REG(R_MX69, BK_MIXER, 0, 0x69, 0, "Audio 2 record volume", 63)
+FLD(F_RA2VOL_L, R_MX69, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.a2vol.l", "Audio 2 record volume L", "Left record mixer volume of the second audio channel; cleared by hardware reset but not by mixer reset (DS p.63)")
+FLD(F_RA2VOL_R, R_MX69, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.a2vol.r", "Audio 2 record volume R", "Right record mixer volume of the second audio channel; cleared by hardware reset but not by mixer reset (DS p.63)")
+
+REG(R_MX6A, BK_MIXER, 0, 0x6A, 0, "AuxA (CD) record volume", 63)
+FLD(F_RCDVOL_L, R_MX6A, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.cdvol.l", "CD record volume L", "Left record mixer volume of the AuxA (CD) input; cleared by hardware reset but not by mixer reset (DS p.63)")
+FLD(F_RCDVOL_R, R_MX6A, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.cdvol.r", "CD record volume R", "Right record mixer volume of the AuxA (CD) input; cleared by hardware reset but not by mixer reset (DS p.63)")
+
+REG(R_MX6B, BK_MIXER, 0, 0x6B, 0, "Music DAC record volume", 63)
+FLD(F_RFMVOL_L, R_MX6B, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.fmvol.l", "Music DAC record volume L", "Left record mixer volume of the music DAC (FM or wavetable); cleared by hardware reset but not by mixer reset (DS p.63)")
+FLD(F_RFMVOL_R, R_MX6B, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.fmvol.r", "Music DAC record volume R", "Right record mixer volume of the music DAC (FM or wavetable); cleared by hardware reset but not by mixer reset (DS p.63)")
+
+REG(R_MX6C, BK_MIXER, 0, 0x6C, 0, "AuxB record volume", 63)
+FLD(F_RAUXBVOL_L, R_MX6C, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.auxbvol.l", "AuxB record volume L", "Left record mixer volume of the AuxB input; cleared by hardware reset but not by mixer reset (DS p.63)")
+FLD(F_RAUXBVOL_R, R_MX6C, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.auxbvol.r", "AuxB record volume R", "Right record mixer volume of the AuxB input; cleared by hardware reset but not by mixer reset (DS p.63)")
+
+REG(R_MX6D, BK_MIXER, 0, 0x6D, 0, "Mono_In play mix", 63)
+FLD(F_MONOINVOL_L, R_MX6D, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.monoinvol.l", "MONO_IN volume L", "Left playback mixer volume of the MONO_IN input (DS p.63)")
+FLD(F_MONOINVOL_R, R_MX6D, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.monoinvol.r", "MONO_IN volume R", "Right playback mixer volume of the MONO_IN input (DS p.63)")
+
+REG(R_MX6E, BK_MIXER, 0, 0x6E, 0, "Line record volume", 64)
+FLD(F_RLINEVOL_L, R_MX6E, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.linevol.l", "Line record volume L", "Left record mixer volume of the line input; cleared by hardware reset but not by mixer reset (DS p.64)")
+FLD(F_RLINEVOL_R, R_MX6E, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.linevol.r", "Line record volume R", "Right record mixer volume of the line input; cleared by hardware reset but not by mixer reset (DS p.64)")
+
+REG(R_MX6F, BK_MIXER, 0, 0x6F, 0, "Mono_In record volume", 64)
+FLD(F_RMONOINVOL_L, R_MX6F, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.monoinvol.l", "MONO_IN record volume L", "Left record mixer volume of the MONO_IN input; cleared by hardware reset but not by mixer reset (DS p.64)")
+FLD(F_RMONOINVOL_R, R_MX6F, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.monoinvol.r", "MONO_IN record volume R", "Right record mixer volume of the MONO_IN input; cleared by hardware reset but not by mixer reset (DS p.64)")
+
+REG(R_MX70, BK_MIXER, 0, 0x70, 0, "Audio 2 sample rate", 64)
+FLD(F_A2_RATE, R_MX70, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_AUDIO2, FMT_RATE_70, "a2.rate", "Audio 2 sample rate", "Bit 7 picks the 768 kHz (1) or 793.8 kHz (0) clock; rate = clock / (128 - bits 6:0), e.g. F0h = 48 kHz, 6Eh = 44.1 kHz (DS p.64)")
+
+REG(R_MX71, BK_MIXER, 0, 0x71, 0, "Audio 2 mode", 64)
+FLD(F_A2_NEWA1, R_MX71, 5, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.new_a1", "New A1h rate mode", "1 = A1h behaves like 70h, giving accurate rates that divide 48 kHz; 0 = A1h behaves as in earlier AudioDrive chips (DS p.64)")
+FLD(F_A2_4X, R_MX71, 4, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.oversample4x", "Audio 2 4x oversampling", "1 = the Audio 2 DAC is in 4x oversampling mode, which always bypasses its switched-capacitor filter (DS p.64)")
+FLD(F_A2_SCF2BYP, R_MX71, 3, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.scf_bypass", "Audio 2 filter bypass", "1 = bypass the switched-capacitor filter of the Audio 2 DAC (DS p.64)")
+FLD(F_A2_SCF1BYP, R_MX71, 2, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a1.scf_bypass", "Audio 1 filter bypass", "1 = bypass the switched-capacitor filter of the Audio 1 CODEC (DS p.64)")
+FLD(F_A2_ASYNC, R_MX71, 1, 1, K_BOOL, T_EXPERT, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.async", "Audio 2 asynchronous", "1 = the Audio 2 DAC runs at its own rate (70h, 72h); 0 = it is slaved to the Audio 1 sample and filter rate (DS p.64)")
+FLD(F_A2_FMMIX, R_MX71, 0, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.fm_mix", "Audio 2 mixed into FM", "1 = Audio 2 DMA is slaved to the FM synthesizer sample rate and digitally mixed into the FM output (DS p.64)")
+
+REG(R_MX72, BK_MIXER, 0, 0x72, 0, "Audio 2 filter clock rate", 64)
+FLD(F_A2_FILTER, R_MX72, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_AUDIO2, FMT_FILTER, "a2.filter", "Audio 2 filter clock", "Filter clock divider of the Audio 2 switched-capacitor filter in asynchronous mode, programmed like A2h; reset to zero (DS p.64)")
+
+REG(R_MX74, BK_MIXER, 0, 0x74, 0, "Audio 2 transfer count reload low", 64)
+FLD(F_A2_CNT_LO, R_MX74, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_AUDIO2, FMT_NONE, "a2.count.lo", "Audio 2 count reload low", "Low byte of the two's complement Audio 2 DMA transfer count reload (DS p.64)")
+
+REG(R_MX76, BK_MIXER, 0, 0x76, 0, "Audio 2 transfer count reload high", 64)
+FLD(F_A2_CNT_HI, R_MX76, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_AUDIO2, FMT_NONE, "a2.count.hi", "Audio 2 count reload high", "High byte of the two's complement Audio 2 DMA transfer count reload (DS p.64)")
+
+/* note: Table 24 (DS p.58) names 78h bit 0 "Enable full-duplex mode"; the description (p.65) calls it "Enable FIFO to 2nd chan DAC" */
+REG(R_MX78, BK_MIXER, 0, 0x78, 0, "Audio 2 control 1", 64)
+FLD(F_A2_XFER, R_MX78, 6, 2, K_ENUM, T_EXPERT, 0, E_A2XFER, PG_AUDIO2, FMT_NONE, "a2.xfer", "Audio 2 DMA transfer type", "Single transfer (1 DACK per DRQ) or demand transfer with 2, 4 or 8 DACKs per DRQ (DS p.65)")
+FLD(F_A2_AUTOINIT, R_MX78, 4, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_AUDIO2, FMT_NONE, "a2.autoinit", "Audio 2 auto-initialize", "1 = the counter reloads at zero and DMA continues; 0 = normal mode, DMA stops and bit 1 is cleared (DS p.65)")
+FLD(F_A2_DMAEN, R_MX78, 1, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_AUDIO2, FMT_NONE, "a2.dma_enable", "Audio 2 DMA enable", "1 = Audio 2 DMA writes into the 32-word Audio 2 FIFO; cleared at terminal count unless auto-initialize (DS p.65)")
+FLD(F_A2_FIFOEN, R_MX78, 0, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_AUDIO2, FMT_NONE, "a2.fifo_enable", "Audio 2 FIFO to DAC", "1 = data moves from the FIFO to the Audio 2 DAC (or to the DSP serial port or the FM mix) (DS p.65)")
+
+/* note: DS p.49 and p.53 say 7Ah bits 4:3 choose the playback or record mixer as the Mixer record source; the 7Ah description (p.65) reserves bits 5:3 */
+/* 7Ah is reset to zero by hardware or software reset (DS p.65), hence FF_VOLATILE */
+REG(R_MX7A, BK_MIXER, 0, 0x7A, 0, "Audio 2 control 2", 65)
+FLD(F_A2_IRQ, R_MX7A, 7, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO2, FMT_NONE, "a2.irq", "Audio 2 IRQ latch", "Set when the DMA counter rolls over to zero or when 1 is written; write 0 to clear it (DS p.65)")
+FLD(F_A2_IRQMASK, R_MX7A, 6, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO2, FMT_NONE, "a2.irq_mask", "Audio 2 IRQ mask (1 = on)", "AND'ed with bit 7 to produce the Audio 2 interrupt request (DS p.65)")
+FLD(F_A2_SIGNED, R_MX7A, 2, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO2, FMT_NONE, "a2.signed", "Audio 2 signed data", "1 = data is signed two's complement, 0 = unsigned (DS p.65)")
+FLD(F_A2_STEREO, R_MX7A, 1, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO2, FMT_NONE, "a2.stereo", "Audio 2 stereo", "1 = stereo data, 0 = mono (DS p.65)")
+FLD(F_A2_16BIT, R_MX7A, 0, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO2, FMT_NONE, "a2.16bit", "Audio 2 16-bit", "1 = 16-bit samples, 0 = 8-bit samples (DS p.65)")
+
+/* note: DS p.51 says a software reset sets 7Ch to zero; the 7Ch description (p.65) names only hardware reset, so no FF_VOLATILE */
+REG(R_MX7C, BK_MIXER, 0, 0x7C, 0, "Audio 2 DAC mixer volume", 65)
+FLD(F_A2VOL_L, R_MX7C, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.a2vol.l", "Audio 2 volume L", "Left playback mixer volume of the Audio 2 DAC; reset to zero by hardware reset (DS p.65)")
+FLD(F_A2VOL_R, R_MX7C, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_OUTPUT, FMT_NONE, "mix.a2vol.r", "Audio 2 volume R", "Right playback mixer volume of the Audio 2 DAC; reset to zero by hardware reset (DS p.65)")
+
+REG(R_MX7D, BK_MIXER, 0, 0x7D, 0, "Mic preamp, MONO_IN and MONO_OUT", 65)
+FLD(F_MICBOOST, R_MX7D, 3, 1, K_BOOL, T_SAFE, FF_PERSIST, E_NONE, PG_EFFECTS, FMT_NONE, "fx.mic.boost", "Mic +26 dB preamp", "1 = +26 dB microphone preamp gain, 0 = 0 dB; on after hardware reset, which sets 7Dh to 08h (DS p.65)")
+FLD(F_MONOOUT_SRC, R_MX7D, 1, 2, K_ENUM, T_SAFE, FF_PERSIST, E_MONOOUT, PG_EFFECTS, FMT_NONE, "fx.monoout.source", "MONO_OUT source", "Source of the MONO_OUT pin; overridden in Serial mode by the FDXO setting of 46h (DS p.65)")
+FLD(F_MONOIN_MIX, R_MX7D, 0, 1, K_BOOL, T_SAFE, FF_PERSIST, E_NONE, PG_EFFECTS, FMT_NONE, "fx.monoin.direct", "MONO_IN to line out", "1 = MONO_IN is mixed at unity gain with AOUT_L/R after the playback mixer, 3-D effect and master volume (DS p.65)")
+
+REG(R_MX7F, BK_MIXER, 0, 0x7F, 0, "I2S interface", 65)
+FLD(F_MUSIC_DREC, R_MX7F, 4, 1, K_BOOL, T_SAFE, FF_PERSIST, E_NONE, PG_RECORD, FMT_NONE, "rec.music_digital", "Music DAC digital record", "1 = record the music DAC data (FM, ES689/ES69x or I2S) digitally on Audio 1 in stereo, at the music DAC rate instead of A1h (DS p.65)")
+FLD(F_I2S_DATAACT, R_MX7F, 3, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_EFFECTS, FMT_NONE, "fx.i2s.data_seen", "I2S data activity", "Latched high if IISDATA has been high at least once since it was last cleared by software (DS p.65)")
+FLD(F_I2S_CLKACT, R_MX7F, 2, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_EFFECTS, FMT_NONE, "fx.i2s.clock_seen", "I2S clock activity", "Latched high if IISCLK and IISLR have been high at the same time since it was last cleared by software (DS p.66)")
+FLD(F_MODE_PIN, R_MX7F, 1, 1, K_RO, T_RO, 0, E_NONE, PG_EFFECTS, FMT_NONE, "fx.i2s.mode_pin", "MODE pin", "Read-only state of the MODE input pin, which must be high for the I2S serial interface to be enabled (DS p.66)")
+FLD(F_I2S_EN, R_MX7F, 0, 1, K_BOOL, T_SAFE, FF_PERSIST, E_NONE, PG_EFFECTS, FMT_NONE, "fx.i2s.enable", "I2S drives music DAC", "1 = the I2S serial interface takes control of the music DAC; 0 = the FM synthesizer or ES689/ES69x interface uses it (DS p.66)")
+
+/* ======================= controller registers (BK_CTRL) ======================= */
+/* Written with DSP commands Axh/Bxh and read with C0h after C6h.  A DSP software reset reinitializes them (FF_VOLATILE), except BAh and BBh (DS p.43, p.70). */
+
+REG(R_CT_A1, BK_CTRL, 0, 0xA1, RF_NEEDS_IDLE, "Extended mode sample rate generator", 67)
+FLD(F_A1_RATE, R_CT_A1, 0, 8, K_HEX, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_RATE_A1, "a1.rate", "Audio 1 sample rate", "Rate = 397.7 kHz / (128 - x) if bit 7 = 0, 795.5 kHz / (256 - x) if bit 7 = 1. Mixer 71h bit 5 makes it work like 70h (DS p.67)")
+
+REG(R_CT_A2, BK_CTRL, 0, 0xA2, RF_NEEDS_IDLE, "Filter divider", 68)
+FLD(F_A1_FILTER, R_CT_A2, 0, 8, K_HEX, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_FILTER, "a1.filter", "Audio 1 filter clock", "Filter clock = 7.16 MHz / (256 - x); the roll-off is clock/82 and belongs at 80-90% of half the sample rate (DS p.68)")
+
+REG(R_CT_A4, BK_CTRL, 0, 0xA4, RF_NEEDS_IDLE, "DMA transfer count reload low", 68)
+FLD(F_A1_CNT_LO, R_CT_A4, 0, 8, K_HEX, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.count.lo", "Audio 1 count reload low", "Low byte of the two's complement Audio 1 DMA transfer counter reload; reset value 00h (DS p.68)")
+
+REG(R_CT_A5, BK_CTRL, 0, 0xA5, RF_NEEDS_IDLE, "DMA transfer count reload high", 68)
+FLD(F_A1_CNT_HI, R_CT_A5, 0, 8, K_HEX, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.count.hi", "Audio 1 count reload high", "High byte of the two's complement Audio 1 DMA transfer counter reload; reset value F8h (DS p.68)")
+
+/* A8h bit 4 must be written as 1 and bits 7:5 and 2 as 0; a read-modify-write keeps them (DS p.68) */
+REG(R_CT_A8, BK_CTRL, 0, 0xA8, RF_NEEDS_IDLE, "Analog control", 68)
+FLD(F_A1_RECMON, R_CT_A8, 3, 1, K_BOOL, T_CAUTION, FF_VOLATILE, E_NONE, PG_RECORD, FMT_NONE, "rec.monitor", "Record monitor", "1 = enable record monitor, so AOUT_L/R stay live while the CODEC records (ADC direction); cleared by software reset (DS p.68)")
+FLD(F_A1_CHAN, R_CT_A8, 0, 2, K_ENUM, T_EXPERT, FF_VOLATILE, E_A1CHAN, PG_AUDIO1, FMT_NONE, "a1.channels", "Audio 1 stereo/mono", "Operation mode of the first DMA converters: 01 = stereo, 10 = mono; 00 and 11 are reserved (DS p.68)")
+
+REG(R_CT_B1, BK_CTRL, 0, 0xB1, RF_NEEDS_IDLE, "Legacy audio interrupt control", 68)
+FLD(F_A1_GAMEIRQ, R_CT_B1, 7, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.irq.game", "Game compatible IRQ", "Reserved for Compatibility mode; leave zero for Extended mode (DS p.68)")
+FLD(F_A1_IRQDMA, R_CT_B1, 6, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.irq.dma", "IRQ on DMA counter overflow", "1 = interrupt on each overflow of the DMA counter in Extended mode DMA (DS p.68)")
+FLD(F_A1_IRQFIFO, R_CT_B1, 5, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.irq.fifo", "IRQ on FIFO half-empty edge", "1 = interrupt on FIFO half-empty transitions during Extended mode block I/O to or from the FIFO (DS p.68)")
+FLD(F_A1_IRQSEL, R_CT_B1, 0, 4, K_ENUM, T_RO, 0, E_A1IRQ, PG_AUDIO1, FMT_NONE, "a1.irq.selected", "Audio 1 IRQ (decoded)", "Read-only decode of the interrupt number selected for the Audio 1 interrupt (DS p.69)")
+
+REG(R_CT_B2, BK_CTRL, 0, 0xB2, RF_NEEDS_IDLE, "DRQ control", 69)
+FLD(F_A1_GAMEDRQ, R_CT_B2, 7, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.drq.game", "Game compatible DRQ", "Reserved for Compatibility mode; leave zero for Extended mode (DS p.69)")
+FLD(F_A1_DRQEXT, R_CT_B2, 6, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.drq.ext", "DRQ for Extended mode DMA", "1 = enable DRQ outputs and DACKB inputs for Extended mode DMA; 0 = block I/O to or from the FIFO (DS p.69)")
+FLD(F_A1_DRQGAME, R_CT_B2, 5, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.drq.game_dma", "DRQ for game compatible DMA", "Reserved for Compatibility mode; leave zero for Extended mode. With bits 5 and 6 low the Audio 1 DRQ is always low (DS p.69)")
+FLD(F_A1_DRQSEL, R_CT_B2, 0, 4, K_ENUM, T_RO, 0, E_A1DRQ, PG_AUDIO1, FMT_NONE, "a1.drq.selected", "Audio 1 DMA (decoded)", "Read-only decode of the DMA channel selected for the first audio DMA channel (DS p.69)")
+
+/* note: DS p.67 and p.69 put the RIGHT record level in B4h bits 7:4 and LEFT in 3:0 (unlike the mixer registers); other ESS drivers use 7:4 as left; not verified on hardware */
+REG(R_CT_B4, BK_CTRL, 0, 0xB4, RF_NEEDS_IDLE, "Record level", 69)
+FLD(F_RECLEV_R, R_CT_B4, 4, 4, K_UINT, T_CAUTION, FF_VOLATILE, E_NONE, PG_RECORD, FMT_NONE, "rec.level.r", "Record level R", "Right record level: microphone 0 to +22.5 dB, other sources -6 to +16.5 dB, in 1.5 dB steps (DS p.69)")
+FLD(F_RECLEV_L, R_CT_B4, 0, 4, K_UINT, T_CAUTION, FF_VOLATILE, E_NONE, PG_RECORD, FMT_NONE, "rec.level.l", "Record level L", "Left record level: microphone 0 to +22.5 dB, other sources -6 to +16.5 dB, in 1.5 dB steps (DS p.69)")
+
+REG(R_CT_B5, BK_CTRL, 0, 0xB5, RF_NEEDS_IDLE, "DAC direct access holding low", 69)
+FLD(F_A1_HOLD_LO, R_CT_B5, 0, 8, K_HEX, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.hold.lo", "DAC holding register low", "Low byte of the DAC direct access holding register, which stores 16-bit data for the 8-bit bus (DS p.69)")
+
+REG(R_CT_B6, BK_CTRL, 0, 0xB6, RF_NEEDS_IDLE, "DAC direct access holding high", 69)
+FLD(F_A1_HOLD_HI, R_CT_B6, 0, 8, K_HEX, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.hold.hi", "DAC holding register high", "High byte of the DAC direct access holding register, which stores 16-bit data for the 8-bit bus (DS p.69)")
+
+/* note: Table 25 (DS p.67) shows B7h bit 0 as a fixed 1 and bit 5 as "Data type select"; followed the descriptions (p.69-70) */
+/* B7h bit 4 must be written as 1 and bit 1 as 0 (DS p.70) */
+REG(R_CT_B7, BK_CTRL, 0, 0xB7, RF_NEEDS_IDLE, "Audio 1 control 1", 69)
+FLD(F_A1_FIFOCODEC, R_CT_B7, 7, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.fifo.codec", "FIFO to/from CODEC", "1 = connect the first DMA FIFO to the DAC or ADC, allowing transfers between the FIFO and the analog circuitry (DS p.69)")
+FLD(F_A1_FIFOMONO, R_CT_B7, 6, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.fifo.not_stereo", "Opposite of bit 3", "Reserved function; must be set to the opposite of bit 3: high for mono, low for stereo (DS p.70)")
+FLD(F_A1_FIFOSIGNED, R_CT_B7, 5, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.fifo.signed", "FIFO signed", "1 = first DMA FIFO in two's complement (signed) mode, 0 = unsigned (offset 8000h) (DS p.70)")
+FLD(F_A1_FIFOSTEREO, R_CT_B7, 3, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.fifo.stereo", "FIFO stereo", "1 = first DMA FIFO in stereo mode, 0 = mono; bit 6 must be the opposite (DS p.70)")
+FLD(F_A1_FIFO16, R_CT_B7, 2, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.fifo.16bit", "FIFO 16-bit", "1 = first DMA FIFO in 16-bit mode, 0 = 8-bit mode (DS p.70)")
+FLD(F_A1_LOAD, R_CT_B7, 0, 1, K_ACTION, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.dac_load", "Load DAC from holding register", "Write 1 to copy the DAC direct access holding register to the DAC on the next sample rate clock; the bit then clears (DS p.70)")
+
+REG(R_CT_B8, BK_CTRL, 0, 0xB8, RF_NEEDS_IDLE, "Audio 1 control 2", 70)
+FLD(F_A1_CODECADC, R_CT_B8, 3, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.codec_adc", "CODEC in ADC mode", "1 = first DMA converter in ADC mode, 0 = DAC mode (DS p.70)")
+FLD(F_A1_AUTOINIT, R_CT_B8, 2, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.autoinit", "Audio 1 auto-initialize", "1 = auto-initialize DMA mode, 0 = normal DMA mode (DS p.70)")
+FLD(F_A1_DMAREAD, R_CT_B8, 1, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.dma_read", "Audio 1 DMA read", "1 = first DMA is a read (ADC operation), 0 = a write (DAC operation) (DS p.70)")
+FLD(F_A1_DMAEN, R_CT_B8, 0, 1, K_BOOL, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.dma_enable", "Audio 1 DMA enable", "First DMA active-low reset: 1 = DMA is allowed to proceed, 0 = stops it (DS p.70)")
+
+/* note: the programming steps (DS p.48, p.50) give B9h 00 = single, 01 = demand 2, 11 = demand 4; followed the register description (p.70) */
+REG(R_CT_B9, BK_CTRL, 0, 0xB9, RF_NEEDS_IDLE, "Audio 1 transfer type", 70)
+FLD(F_A1_XFER, R_CT_B9, 0, 2, K_ENUM, T_EXPERT, FF_VOLATILE, E_A1XFER, PG_AUDIO1, FMT_NONE, "a1.xfer", "Audio 1 DMA transfer type", "DMA transfer type of the first DMA: single, or demand with 2 or 4 bytes per request; 00 is reserved (DS p.70)")
+
+/* BAh and BBh are reset only by hardware reset, not by software reset (DS p.70) */
+REG(R_CT_BA, BK_CTRL, 0, 0xBA, RF_NEEDS_IDLE, "Left channel ADC offset adjust", 70)
+FLD(F_WAKE_NODELAY, R_CT_BA, 5, 1, K_BOOL, T_SAFE, FF_PERSIST, E_NONE, PG_POWER, FMT_NONE, "pwr.wake_nodelay", "No mute delay on analog wake", "1 = skip the 100 ms mute of AOUT_L/R after hardware reset or analog wake-up from power-down; cleared by hardware reset (DS p.70)")
+FLD(F_ADCOFF_L, R_CT_BA, 0, 5, K_SMAG, T_SAFE, FF_PERSIST, E_NONE, PG_POWER, FMT_ADCOFF, "adc.off_l", "ADC offset L", "Constant added to the left ADC output: 64 x bits 3:0, or -64 x (bits 3:0 + 1) when sign bit 4 is set (DS p.71)")
+
+REG(R_CT_BB, BK_CTRL, 0, 0xBB, RF_NEEDS_IDLE, "Right channel ADC offset adjust", 70)
+FLD(F_ADCOFF_R, R_CT_BB, 0, 5, K_SMAG, T_SAFE, FF_PERSIST, E_NONE, PG_POWER, FMT_ADCOFF, "adc.off_r", "ADC offset R", "Constant added to the right ADC output: 64 x bits 3:0, or -64 x (bits 3:0 + 1) when sign bit 4 is set (DS p.71)")
+
+/* ====================== audio device I/O ports (BK_APORT) ====================== */
+
+/* Audio_Base+6h reads status but writes resets at the same bits; written bits 7:2 must be 0, so a write must not copy back the status read (DS p.40, p.43) */
+/* note: DS p.75 lists other sources for the activity flags (flag 2: PnP, joystick, MPU-401, ...; flag 1: +4h/+5h); followed p.40 */
+REG(R_AP_6, BK_APORT, 0, 0x06, RF_READ_SIDEFX, "Reset and status flags", 40)
+FLD(F_AP_ACT2, R_AP_6, 7, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.act2", "Activity flag 2", "Set high by each read of this port, then set low by I/O reads or writes to the MPU-401 or FM ports (DS p.40)")
+FLD(F_AP_ACT1, R_AP_6, 6, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.act1", "Activity flag 1", "Set high by each read of this port, then set low by I/O reads or writes to Audio_Base+Ch and +Eh (DS p.40)")
+FLD(F_AP_ACT0, R_AP_6, 5, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.act0", "Activity flag 0", "Set high by each read of this port, then set low by writes to +2h, +3h, +6h or +Ch, reads of +2h, +3h or +Ah, or DMA (DS p.40)")
+FLD(F_AP_SERACT, R_AP_6, 4, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.serial_act", "Serial activity", "1 = DSP serial mode is on (SE pin, 48h bit 7 or bit 5) or an ES689/ES69x drives the FM DAC through MCLK/MSD (DS p.40)")
+FLD(F_AP_DIGUP, R_AP_6, 3, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.digital_up", "Digital section up (0 = down)", "0 = the digital section is powered down (power modes 0 and 1); analog power follows Audio_Base+7h bit 3 (DS p.40)")
+FLD(F_AP_MIDI, R_AP_6, 2, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.midi_mode", "MIDI mode", "1 = processing MIDI command 30h, 31h, 34h or 35h and monitoring serial input; powering down may lose data (DS p.40)")
+FLD(F_AP_FIFORST, R_AP_6, 1, 1, K_PULSE, T_EXPERT, 0, E_NONE, PG_STATUS, FMT_NONE, "ctl.fifo_reset", "Reset Audio 1 FIFO", "Write 1 then 0 to hold and release the FIFO reset (no function in Compatibility mode). A read returns the FIFO reset bit (DS p.40)")
+FLD(F_AP_SWRST, R_AP_6, 0, 1, K_PULSE, T_EXPERT, 0, E_NONE, PG_STATUS, FMT_NONE, "ctl.sw_reset", "DSP software reset", "Write 1 then 0 to reset the ES1869, then read AAh from Audio_Base+Ah (p.43). A read returns the software reset bit (DS p.40)")
+
+/* note: the bit 3 heading reads "Analog power-down" but its description sets or clears Analog_Stays_On (DS p.40) */
+/* GPO0/GPO1 are CAUTION: boards may wire them to an amplifier mute or other circuitry */
+REG(R_AP_7, BK_APORT, 0, 0x07, 0, "Power management", 40)
+FLD(F_AP_SUSPEND, R_AP_7, 7, 1, K_PULSE, T_EXPERT, 0, E_NONE, PG_POWER, FMT_NONE, "pwr.suspend", "Suspend request", "Pulse high then low to request suspend: the ES1869 uploads its context for saving; resuming needs a hardware reset (DS p.76)")
+FLD(F_AP_GPI, R_AP_7, 6, 1, K_RO, T_RO, 0, E_NONE, PG_POWER, FMT_NONE, "pwr.gpi", "GPI pin", "Read-only status of the GPI input pin (DS p.40)")
+FLD(F_AP_FMRESET, R_AP_7, 5, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_POWER, FMT_NONE, "pwr.fm_reset", "Hold FM in reset", "1 = hold the FM synthesizer in reset, 0 = release it from reset (DS p.40)")
+FLD(F_AP_ANALOGON, R_AP_7, 3, 1, K_BOOL, T_SAFE, FF_PERSIST, E_NONE, PG_POWER, FMT_NONE, "pwr.analog_on", "Analog stays on", "1 = set Analog_Stays_On: a power-down request then only partially powers down and the analog inputs stay audible (DS p.75)")
+FLD(F_AP_PDNREQ, R_AP_7, 2, 1, K_PULSE, T_EXPERT, 0, E_NONE, PG_POWER, FMT_NONE, "pwr.pdn_request", "Power-down request", "Pulse high then low to request power-down: partial if bit 3 is set, full if it is clear (DS p.75)")
+FLD(F_AP_GPO1, R_AP_7, 1, 1, K_BOOL, T_CAUTION, FF_PERSIST, E_NONE, PG_POWER, FMT_NONE, "pwr.gpo1", "GPO1 output", "Level of the GPO1 output pin; set high by hardware reset (DS p.41)")
+FLD(F_AP_GPO0, R_AP_7, 0, 1, K_BOOL, T_CAUTION, FF_PERSIST, E_NONE, PG_POWER, FMT_NONE, "pwr.gpo0", "GPO0 output", "Level of the GPO0 output pin, for example an amplifier mute; cleared by hardware reset (DS p.41)")
+
+/* Audio_Base+Ch is only read here: a write sends a command to the DSP (DS p.41) */
+REG(R_AP_C, BK_APORT, 0, 0x0C, 0, "DSP status", 41)
+FLD(F_AP_BUSY, R_AP_C, 7, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.dsp_busy", "DSP busy", "1 = write buffer not available or ES1869 busy; poll until 0 before writing a command (DS p.41)")
+FLD(F_AP_RDREADY, R_AP_C, 6, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.dsp_data", "DSP read data available", "1 = data available in the read buffer (same flag as Audio_Base+Eh bit 7); cleared by reading Audio_Base+Ah (DS p.41)")
+FLD(F_AP_FIFOFULL, R_AP_C, 5, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.fifo_full", "FIFO full", "1 = Extended mode FIFO full (256 bytes loaded) (DS p.41)")
+FLD(F_AP_FIFOEMPTY, R_AP_C, 4, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.fifo_empty", "FIFO empty", "1 = Extended mode FIFO empty (0 bytes loaded) (DS p.41)")
+FLD(F_AP_FIFOHE, R_AP_C, 3, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.fifo_half", "FIFO half empty", "1 = FIFO half empty, an Extended mode flag: set with 0-127 bytes in the FIFO for DAC and 128-256 bytes for ADC (DS p.41)")
+FLD(F_AP_DSPIRQ, R_AP_C, 2, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.irq_dsp", "DSP interrupt request", "1 = the ES1869 processor generated an interrupt request, e.g. Compatibility mode DMA complete (DS p.41)")
+FLD(F_AP_HEIRQ, R_AP_C, 1, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.irq_fifo", "FIFO half-empty IRQ", "1 = interrupt request from a FIFO half-empty flag change, used by programmed I/O in Extended mode (DS p.41)")
+FLD(F_AP_CNTIRQ, R_AP_C, 0, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.irq_dma", "DMA counter IRQ", "1 = interrupt request from a DMA counter overflow in Extended mode (DS p.41)")
+
+/* ================= configuration device I/O ports (BK_CPORT) ================= */
+
+REG(R_CP_5, BK_CPORT, 0, 0x05, 0, "Status", 39)
+FLD(F_CP_EEPROM, R_CP_5, 4, 2, K_ENUM, T_RO, 0, E_EEPROM, PG_STATUS, FMT_NONE, "cfg.eeprom", "PnP data source", "EEPROM type indicator: internal ROM or 512 x 8-bit serial EEPROM; 01 and 10 are reserved (DS p.39)")
+FLD(F_CP_STATE, R_CP_5, 2, 2, K_ENUM, T_RO, 0, E_PNPSTATE, PG_STATUS, FMT_NONE, "cfg.state", "PnP state", "ES1869 Plug and Play operating state (DS p.39)")
+FLD(F_CP_PNPOK, R_CP_5, 1, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.pnpok", "PNPOK", "PNPOK bit (DS p.39)")
+FLD(F_CP_RSTBUSY, R_CP_5, 0, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.reset_busy", "Reset sequence busy", "Reset sequence busy bit (DS p.39)")
+
+/* the interrupt status is read before the Config_Base+7h mask is applied (DS p.18) */
+REG(R_CP_6, BK_CPORT, 0, 0x06, 0, "Interrupt status", 39)
+FLD(F_CP_ISR_GP, R_CP_6, 6, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.isr.gp", "GP interrupt", "General-purpose interrupt: the GPI input pin (DS p.39)")
+FLD(F_CP_ISR_MODEM, R_CP_6, 5, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.isr.modem", "Modem interrupt", "Modem interrupt: the MMIRQ input pin AND'ed with the inverse of MMIEB (DS p.39)")
+FLD(F_CP_ISR_CD, R_CP_6, 4, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.isr.cdrom", "CD-ROM interrupt", "CD-ROM interface interrupt: the CDIRQ input pin (DS p.39)")
+FLD(F_CP_ISR_MPU, R_CP_6, 3, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.isr.mpu401", "MPU-401 interrupt", "MPU-401 receive interrupt request AND'ed with bit 6 of mixer register 64h (DS p.39)")
+FLD(F_CP_ISR_HWV, R_CP_6, 2, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.isr.hwvol", "HW volume interrupt", "Hardware volume interrupt request AND'ed with bit 1 of mixer register 64h (DS p.39)")
+FLD(F_CP_ISR_A2, R_CP_6, 1, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.isr.audio2", "Audio 2 interrupt", "Audio 2 interrupt request AND'ed with bit 6 of mixer register 7Ah (DS p.39)")
+FLD(F_CP_ISR_A1, R_CP_6, 0, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.isr.audio1", "Audio 1 interrupt", "Audio 1 interrupt request (DS p.39)")
+
+/* each mask bit is AND'ed with its interrupt source: 0 forces the source to zero without floating the pin; all ones after hardware reset (DS p.39) */
+REG(R_CP_7, BK_CPORT, 0, 0x07, 0, "Interrupt mask", 39)
+FLD(F_CP_IMR_GP, R_CP_7, 6, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.imr.gp", "GP IRQ mask (1 = on)", "General-purpose interrupt mask bit, AND'ed with the GPI interrupt source (DS p.39)")
+FLD(F_CP_IMR_MODEM, R_CP_7, 5, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.imr.modem", "Modem IRQ mask (1 = on)", "Modem interrupt mask bit, AND'ed with the modem interrupt source (DS p.39)")
+FLD(F_CP_IMR_CD, R_CP_7, 4, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.imr.cdrom", "CD-ROM IRQ mask (1 = on)", "CD-ROM interface interrupt mask bit, AND'ed with the CD-ROM interrupt source (DS p.39)")
+FLD(F_CP_IMR_MPU, R_CP_7, 3, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.imr.mpu401", "MPU-401 IRQ mask (1 = on)", "MPU-401 interrupt mask bit, AND'ed with the MPU-401 interrupt source (DS p.39)")
+FLD(F_CP_IMR_HWV, R_CP_7, 2, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.imr.hwvol", "HW volume IRQ mask (1 = on)", "Hardware volume interrupt mask bit, AND'ed with the hardware volume interrupt source (DS p.39)")
+FLD(F_CP_IMR_A2, R_CP_7, 1, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.imr.audio2", "Audio 2 IRQ mask (1 = on)", "Audio 2 interrupt mask bit, AND'ed with the Audio 2 interrupt source (DS p.39)")
+FLD(F_CP_IMR_A1, R_CP_7, 0, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_STATUS, FMT_NONE, "cfg.imr.audio1", "Audio 1 IRQ mask (1 = on)", "Audio 1 interrupt mask bit, AND'ed with the Audio 1 interrupt source (DS p.39)")
+
+/* ===================== PnP card-level registers (BK_PNPCARD) ===================== */
+
+REG(R_PC_00, BK_PNPCARD, 0, 0x00, 0, "Set RD_DATA port", 29)
+FLD(F_PC_RDPORT, R_PC_00, 0, 8, K_HEX, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.rd_data_port", "RD_DATA port bits 9:2", "Bits 9:2 of the PnP RD_DATA port (bits 1:0 are always one); readable only in Configuration mode (DS p.29)")
+
+REG(R_PC_05, BK_PNPCARD, 0, 0x05, 0, "Status", 30)
+FLD(F_PC_RDSTATUS, R_PC_05, 0, 1, K_RO, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.resource_ready", "Resource data ready", "1 = ready to read resource data in register 04h; only works in Configuration mode (DS p.30)")
+
+REG(R_PC_06, BK_PNPCARD, 0, 0x06, 0, "Card select number", 30)
+FLD(F_PC_CSN, R_PC_06, 0, 8, K_HEX, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.csn", "Card select number", "PnP card select number; reads only work in Configuration mode (DS p.30)")
+
+/* 20h-26h are loaded from the configuration ROM header after PnP reset; unused IRQ pins get IRQ 1 and unused DRQ pins DRQ 2 (DS p.30) */
+REG(R_PC_20, BK_PNPCARD, 0, 0x20, 0, "IRQB, IRQA", 30)
+FLD(F_PC_IRQB, R_PC_20, 4, 4, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.pin.irqb", "IRQ of pin IRQB", "IRQ number assigned to interrupt pin IRQB (DS p.30)")
+FLD(F_PC_IRQA, R_PC_20, 0, 4, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.pin.irqa", "IRQ of pin IRQA", "IRQ number assigned to interrupt pin IRQA (DS p.30)")
+
+REG(R_PC_21, BK_PNPCARD, 0, 0x21, 0, "IRQD, IRQC", 30)
+FLD(F_PC_IRQD, R_PC_21, 4, 4, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.pin.irqd", "IRQ of pin IRQD", "IRQ number assigned to interrupt pin IRQD (DS p.30)")
+FLD(F_PC_IRQC, R_PC_21, 0, 4, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.pin.irqc", "IRQ of pin IRQC", "IRQ number assigned to interrupt pin IRQC (DS p.30)")
+
+REG(R_PC_22, BK_PNPCARD, 0, 0x22, 0, "IRQF, IRQE", 30)
+FLD(F_PC_IRQF, R_PC_22, 4, 4, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.pin.irqf", "IRQ of pin IRQF", "IRQ number assigned to interrupt pin IRQF (DS p.30)")
+FLD(F_PC_IRQE, R_PC_22, 0, 4, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.pin.irqe", "IRQ of pin IRQE", "IRQ number assigned to interrupt pin IRQE (DS p.30)")
+
+REG(R_PC_23, BK_PNPCARD, 0, 0x23, 0, "DRQB, DRQA", 30)
+FLD(F_PC_DRQB, R_PC_23, 4, 4, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.pin.drqb", "DMA channel of pin DRQB", "DRQ number assigned to DMA request pin DRQB (DS p.30)")
+FLD(F_PC_DRQA, R_PC_23, 0, 4, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.pin.drqa", "DMA channel of pin DRQA", "DRQ number assigned to DMA request pin DRQA (DS p.30)")
+
+REG(R_PC_24, BK_PNPCARD, 0, 0x24, 0, "DRQD, DRQC", 30)
+FLD(F_PC_DRQD, R_PC_24, 4, 4, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.pin.drqd", "DMA channel of pin DRQD", "DRQ number assigned to DMA request pin DRQD (DS p.30)")
+FLD(F_PC_DRQC, R_PC_24, 0, 4, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.pin.drqc", "DMA channel of pin DRQC", "DRQ number assigned to DMA request pin DRQC (DS p.30)")
+
+REG(R_PC_25, BK_PNPCARD, 0, 0x25, 0, "Configuration ROM header 0", 30)
+FLD(F_PC_DRQLATCH, R_PC_25, 7, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.drq_latch", "DRQ latch", "1 = DRQ latch feature enabled, 0 = disabled (DS p.30)")
+FLD(F_PC_BOARD, R_PC_25, 5, 2, K_ENUM, T_RO, 0, E_BOARD, PG_PNP, FMT_NONE, "pnp.board", "Motherboard or card", "ES1869 is on the motherboard or an add-on card; bits 6:5 also pick one of the four bypass key sequences of p.28 (DS p.30)")
+FLD(F_PC_GPLOC, R_PC_25, 3, 2, K_ENUM, T_RO, 0, E_GPLOC, PG_PNP, FMT_NONE, "pnp.gp_device", "General-purpose device", "General-purpose location: not present, or present as LDN 3-6 using 4, 8 or 16 addresses (DS p.30)")
+FLD(F_PC_MODEM, R_PC_25, 2, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.modem_present", "Modem device present", "1 = the modem is LDN 3, 4 or 5; 0 = the modem is not present (DS p.30)")
+FLD(F_PC_CDROM, R_PC_25, 1, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.cdrom_present", "CD-ROM device present", "1 = the CD-ROM is LDN 3 or 4; 0 = the CD-ROM is not present (DS p.31)")
+FLD(F_PC_MPU, R_PC_25, 0, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.mpu401_ldn3", "MPU-401 is LDN 3", "1 = MPU-401 is LDN 3 and does not share audio interrupt 1 or 2; 0 = it is part of LDN 1 and shares it (DS p.31)")
+
+REG(R_PC_26, BK_PNPCARD, 0, 0x26, 0, "Configuration ROM header 1", 31)
+FLD(F_PC_EXTDMAMASK, R_PC_26, 4, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ext_dma_mask", "External DMA mask", "1 = external DMA mask enabled, 0 = disabled (DS p.31)")
+FLD(F_PC_A2DMAMASK, R_PC_26, 3, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.a2_dma_mask", "Audio 2 DMA mask", "1 = Audio 2 DMA mask enabled, 0 = disabled (DS p.31)")
+FLD(F_PC_A1DMAMASK, R_PC_26, 2, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.a1_dma_mask", "Audio 1 DMA mask", "1 = Audio 1 DMA mask enabled, 0 = disabled (DS p.31)")
+FLD(F_PC_GPO1DACK, R_PC_26, 1, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.gpo1_is_dack", "GPO1 pin is DACK", "1 = the GPO1 pin is an external DACK and GPI an external DRQ; 0 = the GPO1 pin is GPO1 (DS p.31)")
+FLD(F_PC_GPO0GPCS, R_PC_26, 0, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.gpo0_is_gpcs", "GPO0 pin is GPCS", "1 = the GPO0 pin is the GPCS chip select; 0 = the GPO0 pin is GPO0 (DS p.31)")
+
+/* note: 27h and 28h are headed "(R)" on DS p.31, but p.18 assigns these interrupts by writing them; tiered EXPERT */
+REG(R_PC_27, BK_PNPCARD, 0, 0x27, 0, "Hardware volume IRQ number", 31)
+FLD(F_PC_HWVIRQ, R_PC_27, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.hwvol_irq", "HW volume IRQ number", "IRQ number of the hardware volume interrupt, which must be shared with Audio 1 or Audio 2; reset to 0 by PnP reset (DS p.31)")
+
+REG(R_PC_28, BK_PNPCARD, 0, 0x28, 0, "MPU-401 IRQ number", 31)
+FLD(F_PC_MPUIRQ, R_PC_28, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.mpu401_irq", "MPU-401 IRQ number", "MPU-401 IRQ number; the same physical register as register 70h of the MPU-401 device (LDN 3) (DS p.31)")
+
+REG(R_PC_29, BK_PNPCARD, 0, 0x29, 0, "PnP enable", 31)
+FLD(F_PC_PNPEN, R_PC_29, 0, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.enable", "PnP enable", "1 = PnP enabled; 0 = the ES1869 does not respond to any PnP command. Set high by hardware reset (DS p.31)")
+
+/* ================== PnP logical device registers (BK_PNPLDN) ================== */
+/* note: LDNs 3-6 follow the data sheet sections (3 MPU-401, 4 CD-ROM, 5 modem, 6 general-purpose); card register 25h says which optional devices exist, which can move them (DS p.30-32) */
+/* Base address low-byte fields cover bits 7:0; bits below the decoder alignment read as 0 (DS p.32-37) */
+/* note: 74h/75h are headed "(R)" with "Returns 4" for every LDN (DS p.32-37) while Table 11 gives "default = 4" (p.31); LDN 1-6 ones are tiered EXPERT */
+
+/* LDN 0: configuration device.  Relocate it only with the bypass key: writing its 60h is unreliable (DS p.29) */
+REG(R_PL0_30, BK_PNPLDN, 0, 0x30, 0, "Config device activate", 32)
+FLD(F_PL0_ACT, R_PL0_30, 0, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn0.active", "Config device active", "Activate bit of the configuration device (DS p.32)")
+
+REG(R_PL0_60, BK_PNPLDN, 0, 0x60, 0, "Config device I/O base 11:8", 32)
+FLD(F_PL0_IO_HI, R_PL0_60, 0, 4, K_HEX, T_RO, 0, E_NONE, PG_PNP, FMT_PORTHI, "pnp.ldn0.io.hi", "Config_Base bits 11:8", "Bits 11:8 of Config_Base (eight ports); zero disables the device (DS p.32)")
+
+REG(R_PL0_61, BK_PNPLDN, 0, 0x61, 0, "Config device I/O base 7:3", 32)
+FLD(F_PL0_IO_LO, R_PL0_61, 0, 8, K_HEX, T_RO, 0, E_NONE, PG_PNP, FMT_PORTLO, "pnp.ldn0.io.lo", "Config_Base bits 7:0", "Bits 7:3 of Config_Base; bits 2:0 are 0 (DS p.32)")
+
+REG(R_PL0_74, BK_PNPLDN, 0, 0x74, 0, "Config device DMA channel select 0", 32)
+FLD(F_PL0_DMA0, R_PL0_74, 0, 3, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn0.dma0", "DMA channel 0", "DMA channel in use for DMA 0; returns 4 (no DMA channel selected) (DS p.32)")
+
+REG(R_PL0_75, BK_PNPLDN, 0, 0x75, 0, "Config device DMA channel select 1", 32)
+FLD(F_PL0_DMA1, R_PL0_75, 0, 3, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn0.dma1", "DMA channel 1", "DMA channel in use for DMA 1; returns 4 (no DMA channel selected) (DS p.32)")
+
+/* LDN 1: audio device (audio, FM and MPU-401) */
+REG(R_PL1_30, BK_PNPLDN, 1, 0x30, 0, "Audio device activate", 33)
+FLD(F_PL1_ACT, R_PL1_30, 0, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn1.active", "Audio device active", "1 = activate the audio device; 0 after reset or a PnP configuration reset (DS p.33)")
+
+REG(R_PL1_60, BK_PNPLDN, 1, 0x60, 0, "Audio processor I/O base 11:8", 33)
+FLD(F_PL1_IO_HI, R_PL1_60, 0, 4, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTHI, "pnp.ldn1.io.hi", "Audio_Base bits 11:8", "Bits 11:8 of Audio_Base (sixteen ports); zero makes the device inaccessible (DS p.33)")
+
+REG(R_PL1_61, BK_PNPLDN, 1, 0x61, 0, "Audio processor I/O base 7:4", 33)
+FLD(F_PL1_IO_LO, R_PL1_61, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTLO, "pnp.ldn1.io.lo", "Audio_Base bits 7:0", "Bits 7:4 of Audio_Base; bits 3:0 are 0 (DS p.33)")
+
+REG(R_PL1_62, BK_PNPLDN, 1, 0x62, 0, "FM alias I/O base 11:8", 33)
+FLD(F_PL1_FM_HI, R_PL1_62, 0, 4, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTHI, "pnp.ldn1.fm.hi", "FM alias base bits 11:8", "Bits 11:8 of the FM alias base (four ports); zero makes it inaccessible (DS p.33)")
+
+REG(R_PL1_63, BK_PNPLDN, 1, 0x63, 0, "FM alias I/O base 7:2", 33)
+FLD(F_PL1_FM_LO, R_PL1_63, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTLO, "pnp.ldn1.fm.lo", "FM alias base bits 7:0", "Bits 7:2 of the FM alias base; bits 1:0 are 0 (DS p.33)")
+
+REG(R_PL1_64, BK_PNPLDN, 1, 0x64, 0, "MPU-401 I/O base 11:8", 33)
+FLD(F_PL1_MPU_HI, R_PL1_64, 0, 4, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTHI, "pnp.ldn1.mpu.hi", "MPU-401 base bits 11:8", "Bits 11:8 of the MPU-401 base (two ports); zero makes it inaccessible. The MPU-401 may also be reached through LDN 3 (DS p.33)")
+
+REG(R_PL1_65, BK_PNPLDN, 1, 0x65, 0, "MPU-401 I/O base 7:2", 33)
+FLD(F_PL1_MPU_LO, R_PL1_65, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTLO, "pnp.ldn1.mpu.lo", "MPU-401 base bits 7:0", "Bits 7:2 of the MPU-401 base; bits 1:0 are 0 (DS p.33)")
+
+REG(R_PL1_70, BK_PNPLDN, 1, 0x70, 0, "Audio interrupt channel 1 select", 33)
+FLD(F_PL1_IRQ1, R_PL1_70, 0, 4, K_UINT, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn1.irq1", "Audio 1 IRQ", "Interrupt used for the channel 1 IRQ, which is the Audio 1 interrupt (DS p.33)")
+
+REG(R_PL1_71, BK_PNPLDN, 1, 0x71, 0, "Audio interrupt type select 1", 33)
+FLD(F_PL1_IRQTYPE1, R_PL1_71, 0, 8, K_HEX, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn1.irq1_type", "IRQ channel 1 type", "Interrupt request type select 1; returns 2 (low-to-high transition) (DS p.33)")
+
+REG(R_PL1_72, BK_PNPLDN, 1, 0x72, 0, "Audio interrupt channel 2 select", 33)
+FLD(F_PL1_IRQ2, R_PL1_72, 0, 4, K_UINT, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn1.irq2", "Audio 2 IRQ", "Interrupt used for the channel 2 IRQ, which is the optional Audio 2 interrupt (DS p.33)")
+
+REG(R_PL1_73, BK_PNPLDN, 1, 0x73, 0, "Audio interrupt type select 2", 34)
+FLD(F_PL1_IRQTYPE2, R_PL1_73, 0, 8, K_HEX, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn1.irq2_type", "IRQ channel 2 type", "Interrupt request type select 2; returns 2 (low-to-high transition) (DS p.34)")
+
+REG(R_PL1_74, BK_PNPLDN, 1, 0x74, 0, "Audio DMA channel 1 select", 34)
+FLD(F_PL1_DMA1, R_PL1_74, 0, 3, K_UINT, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn1.dma1", "DMA channel 1", "DMA channel in use for the channel 1 DRQ; 4 = no DMA channel selected (DS p.34)")
+
+REG(R_PL1_75, BK_PNPLDN, 1, 0x75, 0, "Audio DMA channel 2 select", 34)
+FLD(F_PL1_DMA2, R_PL1_75, 0, 3, K_UINT, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn1.dma2", "DMA channel 2", "DMA channel in use for the channel 2 DRQ; 4 = no DMA channel selected (DS p.34)")
+
+/* LDN 2: joystick device */
+REG(R_PL2_30, BK_PNPLDN, 2, 0x30, 0, "Joystick activate", 34)
+FLD(F_PL2_ACT, R_PL2_30, 0, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn2.active", "Joystick active", "1 = activate the joystick device; 0 after reset or a PnP configuration reset (DS p.34)")
+
+REG(R_PL2_60, BK_PNPLDN, 2, 0x60, 0, "Joystick I/O base 11:8", 34)
+FLD(F_PL2_IO_HI, R_PL2_60, 0, 4, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTHI, "pnp.ldn2.io.hi", "Joystick port bits 11:8", "Bits 11:8 of the joystick port (one location); zero disables the device (DS p.34)")
+
+REG(R_PL2_61, BK_PNPLDN, 2, 0x61, 0, "Joystick I/O base 7:0", 34)
+FLD(F_PL2_IO_LO, R_PL2_61, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTLO, "pnp.ldn2.io.lo", "Joystick port bits 7:0", "Bits 7:0 of the joystick port (DS p.34)")
+
+/* LDN 3: MPU-401 device (optional; normally the MPU-401 is part of LDN 1) */
+REG(R_PL3_30, BK_PNPLDN, 3, 0x30, 0, "MPU-401 device activate", 34)
+FLD(F_PL3_ACT, R_PL3_30, 0, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn3.active", "MPU-401 device active", "1 = activate the stand-alone MPU-401 device; 0 after reset or a PnP configuration reset (DS p.34)")
+
+REG(R_PL3_60, BK_PNPLDN, 3, 0x60, 0, "MPU-401 device I/O base 11:8", 35)
+FLD(F_PL3_IO_HI, R_PL3_60, 0, 4, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTHI, "pnp.ldn3.io.hi", "MPU-401 port bits 11:8", "Bits 11:8 of the MPU-401 base (two locations); zero disables the device (DS p.35)")
+
+REG(R_PL3_61, BK_PNPLDN, 3, 0x61, 0, "MPU-401 device I/O base 7:0", 35)
+FLD(F_PL3_IO_LO, R_PL3_61, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTLO, "pnp.ldn3.io.lo", "MPU-401 port bits 7:0", "Bits 7:0 of the MPU-401 base (DS p.35)")
+
+REG(R_PL3_70, BK_PNPLDN, 3, 0x70, 0, "MPU-401 interrupt select", 35)
+FLD(F_PL3_IRQ, R_PL3_70, 0, 4, K_UINT, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn3.irq", "MPU-401 IRQ", "Interrupt used for the MPU-401 IRQ; the same physical register as card register 28h (DS p.35)")
+
+REG(R_PL3_71, BK_PNPLDN, 3, 0x71, 0, "MPU-401 interrupt type select", 35)
+FLD(F_PL3_IRQTYPE, R_PL3_71, 0, 8, K_HEX, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn3.irq_type", "MPU-401 IRQ type", "Interrupt request type select 0; returns 2 (low-to-high transition) (DS p.35)")
+
+/* LDN 4: CD-ROM device (optional) */
+REG(R_PL4_30, BK_PNPLDN, 4, 0x30, 0, "CD-ROM activate", 35)
+FLD(F_PL4_ACT, R_PL4_30, 0, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn4.active", "CD-ROM device active", "1 = activate the CD-ROM device; 0 after reset or a PnP configuration reset (DS p.35)")
+
+REG(R_PL4_60, BK_PNPLDN, 4, 0x60, 0, "CD-ROM I/O decoder 0 base 11:8", 35)
+FLD(F_PL4_IO_HI, R_PL4_60, 0, 4, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTHI, "pnp.ldn4.io.hi", "CD-ROM range 1 bits 11:8", "Bits 11:8 of the first CD-ROM address range (eight locations); zero makes it inaccessible (DS p.35)")
+
+REG(R_PL4_61, BK_PNPLDN, 4, 0x61, 0, "CD-ROM I/O decoder 0 base 7:0", 35)
+FLD(F_PL4_IO_LO, R_PL4_61, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTLO, "pnp.ldn4.io.lo", "CD-ROM range 1 bits 7:0", "Bits 7:0 of the first CD-ROM address range (DS p.35)")
+
+REG(R_PL4_62, BK_PNPLDN, 4, 0x62, 0, "CD-ROM I/O decoder 1 base 11:8", 35)
+FLD(F_PL4_IO2_HI, R_PL4_62, 0, 4, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTHI, "pnp.ldn4.io2.hi", "CD-ROM range 2 bits 11:8", "Bits 11:8 of the second CD-ROM address range (two locations); zero makes it inaccessible (DS p.35)")
+
+REG(R_PL4_63, BK_PNPLDN, 4, 0x63, 0, "CD-ROM I/O decoder 1 base 7:0", 35)
+FLD(F_PL4_IO2_LO, R_PL4_63, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTLO, "pnp.ldn4.io2.lo", "CD-ROM range 2 bits 7:0", "Bits 7:0 of the second CD-ROM address range (DS p.35)")
+
+REG(R_PL4_70, BK_PNPLDN, 4, 0x70, 0, "CD-ROM interrupt select", 35)
+FLD(F_PL4_IRQ, R_PL4_70, 0, 4, K_UINT, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn4.irq", "CD-ROM IRQ", "Interrupt used for the CD-ROM IRQ (DS p.35)")
+
+REG(R_PL4_71, BK_PNPLDN, 4, 0x71, 0, "CD-ROM interrupt type select", 35)
+FLD(F_PL4_IRQTYPE, R_PL4_71, 0, 8, K_HEX, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn4.irq_type", "CD-ROM IRQ type", "Interrupt request type select 0; returns 2 (low-to-high transition) (DS p.35)")
+
+REG(R_PL4_74, BK_PNPLDN, 4, 0x74, 0, "CD-ROM DMA channel select", 35)
+FLD(F_PL4_DMA, R_PL4_74, 0, 3, K_UINT, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn4.dma", "CD-ROM DMA channel", "DMA channel in use for the CD-ROM DRQ; 4 = no DMA channel selected (DS p.35)")
+
+/* LDN 5: modem device (optional) */
+REG(R_PL5_30, BK_PNPLDN, 5, 0x30, 0, "Modem activate", 36)
+FLD(F_PL5_ACT, R_PL5_30, 0, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn5.active", "Modem device active", "1 = activate the modem device; 0 after reset or a PnP configuration reset (DS p.36)")
+
+REG(R_PL5_60, BK_PNPLDN, 5, 0x60, 0, "Modem I/O base 11:8", 36)
+FLD(F_PL5_IO_HI, R_PL5_60, 0, 4, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTHI, "pnp.ldn5.io.hi", "Modem base bits 11:8", "Bits 11:8 of the modem address range (eight locations); zero makes it inaccessible (DS p.36)")
+
+REG(R_PL5_61, BK_PNPLDN, 5, 0x61, 0, "Modem I/O base 7:0", 36)
+FLD(F_PL5_IO_LO, R_PL5_61, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTLO, "pnp.ldn5.io.lo", "Modem base bits 7:0", "Bits 7:0 of the modem address range (DS p.36)")
+
+REG(R_PL5_70, BK_PNPLDN, 5, 0x70, 0, "Modem interrupt select", 36)
+FLD(F_PL5_IRQ, R_PL5_70, 0, 4, K_UINT, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn5.irq", "Modem IRQ", "Interrupt used for the modem IRQ (DS p.36)")
+
+REG(R_PL5_71, BK_PNPLDN, 5, 0x71, 0, "Modem interrupt type select", 36)
+FLD(F_PL5_IRQTYPE, R_PL5_71, 0, 8, K_HEX, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn5.irq_type", "Modem IRQ type", "Interrupt request type select 0; returns 2 (low-to-high transition) (DS p.36)")
+
+REG(R_PL5_74, BK_PNPLDN, 5, 0x74, 0, "Modem DMA channel select", 36)
+FLD(F_PL5_DMA, R_PL5_74, 0, 3, K_UINT, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn5.dma", "Modem DMA channel", "DMA channel in use for the modem DRQ; 4 = no DMA channel selected (DS p.36)")
+
+/* LDN 6: general-purpose device (optional) */
+REG(R_PL6_30, BK_PNPLDN, 6, 0x30, 0, "GP device activate", 36)
+FLD(F_PL6_ACT, R_PL6_30, 0, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn6.active", "GP device active", "1 = activate the general-purpose device; 0 after reset or a PnP configuration reset (DS p.36)")
+
+REG(R_PL6_60, BK_PNPLDN, 6, 0x60, 0, "GP device I/O base 11:8", 37)
+FLD(F_PL6_IO_HI, R_PL6_60, 0, 4, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTHI, "pnp.ldn6.io.hi", "GP base bits 11:8", "Bits 11:8 of the general-purpose address range (4, 8 or 16 locations); zero makes it inaccessible (DS p.37)")
+
+REG(R_PL6_61, BK_PNPLDN, 6, 0x61, 0, "GP device I/O base 7:0", 37)
+FLD(F_PL6_IO_LO, R_PL6_61, 0, 8, K_HEX, T_EXPERT, 0, E_NONE, PG_PNP, FMT_PORTLO, "pnp.ldn6.io.lo", "GP base bits 7:0", "Bits 7:0 of the general-purpose address range (DS p.37)")
+
+REG(R_PL6_70, BK_PNPLDN, 6, 0x70, 0, "GP device interrupt select", 37)
+FLD(F_PL6_IRQ, R_PL6_70, 0, 4, K_UINT, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn6.irq", "GP device IRQ", "Interrupt used for the general-purpose device IRQ (DS p.37)")
+
+REG(R_PL6_71, BK_PNPLDN, 6, 0x71, 0, "GP device interrupt type select", 37)
+FLD(F_PL6_IRQTYPE, R_PL6_71, 0, 8, K_HEX, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn6.irq_type", "GP device IRQ type", "Interrupt request type select 0; returns 2 (low-to-high transition) (DS p.37)")
+
+REG(R_PL6_74, BK_PNPLDN, 6, 0x74, 0, "GP device DMA channel select", 37)
+FLD(F_PL6_DMA, R_PL6_74, 0, 3, K_UINT, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ldn6.dma", "GP device DMA channel", "DMA channel in use for the general-purpose device DRQ; 4 = no DMA channel selected (DS p.37)")
