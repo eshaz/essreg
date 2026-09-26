@@ -48,7 +48,7 @@ const unsigned ess_enumv_count =
     sizeof(ess_enumvs) / sizeof(ess_enumvs[0]) - 1;
 
 const char *const ess_page_names[PG_COUNT] = {
-    "Output mixer",       "Master & hardware volume",
+    "Output mixer",       "Master volume",
     "Record",             "3-D, mic, MONO, I2S",
     "Serial / telegaming", "Audio 2 channel",
     "Audio 1 controller", "ADC offset & power",

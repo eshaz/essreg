@@ -13,11 +13,15 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 cp -r "$ROOT/src" "$ROOT"/*.mk1 "$ROOT/Makefile" "$WORK/"
+mkdir -p "$WORK/tools" "$WORK/bin"
+cp "$ROOT/tools/nestamp.c" "$WORK/tools/"
+# the makefile runs "nestamp essctl.exe": use a native build of it here
+cc -O -o "$WORK/bin/nestamp" "$ROOT/tools/nestamp.c"
 cd "$WORK"
 # wmake on Linux wants forward slashes and explicit object extensions
 sed -i -e 's#\\#/#g' -e 's/libf cstart_t\([^.]\)/libf cstart_t.obj\1/' \
     -e 's/\r$//' ./*.mk1 Makefile
-export WATCOM="$OW" PATH="$OW/binl64:$PATH" INCLUDE="$OW/h"
+export WATCOM="$OW" PATH="$WORK/bin:$OW/binl64:$PATH" INCLUDE="$OW/h"
 wmake -h "$@"
 mkdir -p "$ROOT/out/ow2"
 for f in ./*.exe ./*.com; do
