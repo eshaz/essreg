@@ -1,19 +1,22 @@
-; vxdcall.asm -- far calls into a VxD's protected-mode API from 16-bit
-; Windows (Watcom large model, __cdecl).
+; Far calls into a VxD's protected mode API from 16-bit Windows
+; (Watcom large model, __cdecl).
 ;
+; Usage:
 ;   void __far * __far __cdecl vxd_get_entry(unsigned device_id);
-;       INT 2Fh AX=1684h: the PM API entry point of a VxD, or 0:0.
+;     INT 2Fh AX=1684h, returns the PM API entry point of a VxD or 0:0
 ;
 ;   int __far __cdecl vxd_raw_call(void __far *entry, vxd_regs __far *r);
-;       Loads EAX, EBX, ECX, EDX, ESI, EDI and ES from *r, calls entry,
-;       stores the registers and FLAGS back into *r and returns 1 if the
-;       carry flag was set, else 0.  Every other register, including the
-;       upper halves of the 32-bit ones, is preserved.
+;     loads EAX, EBX, ECX, EDX, ESI, EDI and ES from *r, calls entry,
+;     stores the registers and FLAGS back into *r and returns 1 if the
+;     carry flag was set, else 0
+;     every other register is preserved, including the upper halves of
+;     the 32-bit ones
 ;
 ; vxd_regs (src/vxdapi.h):
 ;   +0 eax  +4 ebx  +8 ecx  +12 edx  +16 esi  +20 edi  +24 es  +26 flags
 ;
-; (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
 ; Licensed under GPL Version 3.0
 
         .386
@@ -68,7 +71,7 @@ _vxd_raw_call proc far
         mov     ds,[bp-2]               ; back to the caller's DS
         call    dword ptr [bp+6]
 
-        ; the API may change BP: address the frame from SP (= B-40)
+        ; the API may change BP, so address the frame from SP (= B-40)
         pushf
         push    es
         push    esi

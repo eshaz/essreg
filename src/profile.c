@@ -1,7 +1,8 @@
 /*
- * profile.c -- save and restore ES1869 settings (see profile.h).
+ * Saves and restores ES1869 settings, see profile.h.
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -79,7 +80,7 @@ int prof_save(const struct prof_io *io, struct prof_report *rep) {
   return rep->failed ? -1 : 0;
 }
 
-/* write all wanted fields of one register with a single read-modify-write */
+// write all wanted fields of one register with one read-modify-write
 static void apply_register(int reg, struct prof_report *rep) {
   int raw, i, tries;
   u8 value;
@@ -151,7 +152,7 @@ int prof_load(const struct prof_io *io, struct prof_report *rep) {
     want[f] = 1;
     want_value[f] = v;
   }
-  /* registers in catalog order: plain registers, then DSP registers */
+  // go through the registers in catalog order, plain ones before DSP ones
   for (pass = 0; pass < 2; pass++)
     for (i = 0; i < R_COUNT; i++) {
       int j, needed = 0;

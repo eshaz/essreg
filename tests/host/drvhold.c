@@ -1,17 +1,24 @@
-/* drvhold.c -- 16-bit Windows helper for tests/test_wine.py.
+/*
+ * drvhold is a 16-bit Windows helper for tests/test_wine.py.
  *
+ * Usage:
  *   drvhold <driver> <outdir> <command line>
  *
- * Loads the MIDI driver and sends DRV_LOAD and DRV_ENABLE to its
+ * It loads the MIDI driver and sends DRV_LOAD and DRV_ENABLE to its
  * DriverProc, as OpenDriver does (ESFM.DRV copies its bank into memory on
- * DRV_ENABLE), writes the bank it holds to <outdir>\BEFORE.BIN, runs the
- * command (WinExec keeps it in this Win16 process, so it sees the driver),
- * waits for it to finish, writes the bank again to AFTER.BIN and closes
- * the driver.  DRVM_INIT gives the driver a device structure, as when
- * Windows finds the ES1869.  Progress goes to <outdir>\DRVHOLD.LOG.
+ * DRV_ENABLE), then DRVM_INIT to its modMessage, which gives the driver a
+ * device structure as when Windows finds the ES1869. It writes the bank
+ * the driver holds to <outdir>\BEFORE.BIN, runs the command, waits for it
+ * to finish, writes the bank again to AFTER.BIN and closes the driver.
+ * WinExec keeps the command in this Win16 process, so it sees the driver.
+ * Progress goes to <outdir>\DRVHOLD.LOG.
  *
- * The bank is found the way ESFM.DRV finds it: the far pointer at 0012h of
- * its data segment.
+ * The bank is found the way ESFM.DRV finds it, from the far pointer at
+ * 0012h of its data segment.
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
+ * Licensed under GPL Version 3.0
  */
 
 #include <windows.h>
@@ -33,8 +40,8 @@ static void note(const char *text) {
   }
 }
 
-/* the data segment (4) of ESFM.DRV, read from the module database: the
- * in-memory NE header, whose segment table entries end in the handle */
+// get the data segment (4) of ESFM.DRV from the module database: in the
+// in-memory NE header, each segment table entry ends in its handle
 static HGLOBAL esfm_dgroup(void) {
   HMODULE mod = GetModuleHandle("ESFM");
   BYTE FAR *ne;
@@ -97,7 +104,7 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   (void)show;
   if (sscanf(cmd, "%127s %127s %299[^\n]", driver, outdir, command) != 3)
     return 3;
-  /* the command may arrive quoted as one argument */
+  // the command may arrive quoted as one argument
   if (command[0] == '"') {
     memmove(command, command + 1, strlen(command));
     if (strchr(command, '"'))
@@ -114,8 +121,8 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   r2 = proc(1, (HDRVR)1, DRV_ENABLE, 0, 0);
   sprintf(text, "DRV_LOAD %ld, DRV_ENABLE %ld", r1, r2);
   note(text);
-  /* DRVM_INIT: the driver makes its device structure for a devnode (the
-   * ESFM page and essctl /dump show its voices) */
+  // DRVM_INIT makes the driver build its device structure for a devnode
+  // (essctl shows its voices on the ESFM page and in /dump)
   mod = (MODMESSAGE)GetProcAddress(lib, "MODMESSAGE");
   if (mod) {
     sprintf(text, "DRVM_INIT %lu", mod(0, 0x64, 0, 0, 0x1234));
@@ -125,7 +132,7 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   child = WinExec(command, SW_SHOWNORMAL);
   sprintf(text, "WinExec(%.300s): %04X", command, child);
   note(text);
-  /* wait until the child has exited (at most 30 s) */
+  // wait for the child to exit (at most 30 s)
   start = GetTickCount();
   while ((UINT)child > 32 && GetModuleUsage(child) > 0 &&
          GetTickCount() - start < 30000) {

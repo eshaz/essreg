@@ -1,17 +1,18 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""essctl.exe run as a 16-bit Windows program under Wine.
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Run essctl.exe as a 16-bit Windows program under Wine.
 
 Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
 
   ESSREG_WINE=1 OW2=/path/to/open-watcom python3 -m unittest tests.test_wine
 
 - profiles: /save and /load in batch mode against the simulated chip
-- ESFM: tests/host/drvhold.c loads the real driver/ESFM.DRV and enables
-  it, then starts "essctl /load" with a profile naming a bank larger than
-  the driver's own; the bank the driver holds is dumped before and after.
-- ESFM voices: "essctl /dump" with the ESS driver and the fixed build
-  loaded shows the driver's 18 voices and, for the fixed build, its
-  counters.
+- ESFM: tests/host/drvhold.c loads and enables the real driver/ESFM.DRV,
+  then starts "essctl /load" with a profile naming a bank larger than the
+  driver's own, and dumps the bank the driver holds before and after
+- ESFM voices: "essctl /dump" with the ESS driver, then the fixed build,
+  shows the driver's 18 voices and, for the fixed build, its counters
 
 Win16 wants 8.3 path names, so the work directory is reached through a
 short symbolic link in /tmp.

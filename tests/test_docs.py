@@ -1,5 +1,7 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""Generated documentation is in sync with its sources."""
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Check that the generated docs are in sync with their sources."""
 
 import os
 import re
@@ -19,8 +21,7 @@ class DocsTest(unittest.TestCase):
 
 
     def test_vxd_api_md_lists_every_function(self):
-        """the function table of docs/VXD_API.md has exactly the functions
-        of the dispatch tables in the VxD source"""
+        """docs/VXD_API.md has exactly the functions of the dispatch tables"""
         def table(path, label, end_re):
             lines = open(os.path.join(ROOT, "src", "vxd", path)).read()
             body = lines.split(label + ":", 1)[1]

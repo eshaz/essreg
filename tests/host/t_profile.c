@@ -1,5 +1,12 @@
-/* t_profile.c -- save a profile from the simulated ES1869, reset the chip,
- * load it back and compare; unknown, refused and invalid entries */
+/*
+ * t_profile saves a profile from the simulated ES1869, resets the chip,
+ * loads the profile back and compares. It also checks unknown, refused
+ * and invalid entries.
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
+ * Licensed under GPL Version 3.0
+ */
 
 #include <stdio.h>
 #include <string.h>
@@ -11,7 +18,7 @@
 #include "profile.h"
 #include "simhw.h"
 
-/* --- a tiny in-memory INI ------------------------------------------------ */
+// --- a tiny in-memory INI ------------------------------------------------
 
 #define MAX_ENTRIES 128
 
@@ -97,14 +104,14 @@ static void test_round_trip(void) {
   int n = persistable_count();
 
   chip();
-  simhw.mixer[0x50] = 0x0C;       /* 3-D on */
-  simhw.mixer[0x52] = 0x2A;       /* 3-D level 42 */
-  simhw.mixer[0x1C] = 0x06;       /* record source: line */
-  simhw.mixer[0x7D] = 0x0D;       /* MONO_OUT source 2, preamp on, MONO_IN */
+  simhw.mixer[0x50] = 0x0C;       // 3-D on
+  simhw.mixer[0x52] = 0x2A;       // 3-D level 42
+  simhw.mixer[0x1C] = 0x06;       // record source: line
+  simhw.mixer[0x7D] = 0x0D;       // MONO_OUT source 2, preamp on, MONO_IN
   simhw.mixer[0x60] = 0x2F;
-  simhw.mixer[0x62] = 0x6F;       /* right master muted */
-  simhw.ctrl[0xBA - 0xA0] = 0x33; /* no wake delay, offset -256 */
-  simhw.ctrl[0xBB - 0xA0] = 0x05; /* +320 */
+  simhw.mixer[0x62] = 0x6F;       // right master muted
+  simhw.ctrl[0xBA - 0xA0] = 0x33; // no wake delay, offset -256
+  simhw.ctrl[0xBB - 0xA0] = 0x05; // +320
   simhw.port7 = 0x09;
   memcpy(mixer, simhw.mixer, sizeof(mixer));
   memcpy(ctrl, simhw.ctrl, sizeof(ctrl));
@@ -122,12 +129,12 @@ static void test_round_trip(void) {
   CHECK(!strcmp(value_of("adc.off_l"), "-4"));
   CHECK(!strcmp(value_of("adc.off_r"), "5"));
   CHECK(!strcmp(value_of("pwr.analog_on"), "on"));
-  /* never saved: expert settings, status, actions */
+  // never saved: expert settings, status, actions
   CHECK_EQ(find(PROF_FIELDS, "a2.rate"), -1);
   CHECK_EQ(find(PROF_FIELDS, "stat.dsp_busy"), -1);
   CHECK_EQ(find(PROF_FIELDS, "mix.reset"), -1);
 
-  chip(); /* power cycle: registers back to their defaults */
+  chip(); // power cycle: registers back to their defaults
   CHECK(simhw.mixer[0x52] != 0x2A);
   CHECK_EQ(prof_load(&io, &rep), 0);
   CHECK_EQ(rep.applied, n);
@@ -152,10 +159,10 @@ static void test_bad_entries(void) {
   nini = 0;
   mem_put(0, PROF_FIELDS, "fx.3d.level", "20");
   mem_put(0, PROF_FIELDS, "no.such.setting", "1");
-  mem_put(0, PROF_FIELDS, "a2.rate", "F0h");       /* expert */
-  mem_put(0, PROF_FIELDS, "stat.dsp_busy", "0");   /* status */
-  mem_put(0, PROF_FIELDS, "fx.mic.boost", "maybe"); /* bad value */
-  mem_put(0, PROF_FIELDS, "adc.off_l", "-17");     /* out of range */
+  mem_put(0, PROF_FIELDS, "a2.rate", "F0h");       // expert
+  mem_put(0, PROF_FIELDS, "stat.dsp_busy", "0");   // status
+  mem_put(0, PROF_FIELDS, "fx.mic.boost", "maybe"); // bad value
+  mem_put(0, PROF_FIELDS, "adc.off_l", "-17");     // out of range
   CHECK(prof_load(&io, &rep) != 0 || rep.applied == 1);
   CHECK_EQ(rep.applied, 1);
   CHECK_EQ(rep.unknown, 1);
@@ -163,7 +170,7 @@ static void test_bad_entries(void) {
   CHECK_EQ(rep.invalid, 2);
   CHECK_EQ(simhw.mixer[0x52] & 0x3F, 20);
   CHECK(rep.problem[0] != 0);
-  CHECK_EQ(simhw.mixer[0x70], 0); /* the expert key was not applied */
+  CHECK_EQ(simhw.mixer[0x70], 0); // the expert key was not applied
 }
 
 static void test_dsp_busy(void) {
@@ -173,12 +180,12 @@ static void test_dsp_busy(void) {
   nini = 0;
   mem_put(0, PROF_FIELDS, "adc.off_r", "3");
   mem_put(0, PROF_FIELDS, "fx.3d.level", "7");
-  simhw.busy_stuck = 1; /* the DSP never becomes ready */
+  simhw.busy_stuck = 1; // the DSP never becomes ready
   CHECK(prof_load(&io, &rep) != 0);
-  CHECK_EQ(rep.applied, 1); /* the mixer setting still went through */
+  CHECK_EQ(rep.applied, 1); // the mixer setting still went through
   CHECK_EQ(rep.failed, 1);
   CHECK_EQ(simhw.ctrl[0xBB - 0xA0] & 0x1F, 0);
-  CHECK_EQ(esshw.dsp_desync, 0); /* refused before the first byte */
+  CHECK_EQ(esshw.dsp_desync, 0); // refused before the first byte
 }
 
 int main(void) {

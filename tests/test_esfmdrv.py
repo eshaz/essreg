@@ -1,16 +1,20 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""ESFM.DRV rebuilt from src/esfm.
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Test ESFM.DRV rebuilt from src/esfm.
 
-RebuildTest: the stock build must be byte-identical to driver/ESFM.DRV,
-and the fixed build a valid driver with the same bank loader (so that
-esfmpat and essctl keep working with it).
+RebuildTest: the stock build must match driver/ESFM.DRV byte for byte, and
+the fixed build must be a valid driver with the same bank loader, so
+esfmpat and essctl keep working with it.
 
 StuckNoteTest runs both builds in a CPU emulator (tests/esfmemu.py) and
-reproduces the stuck notes of the ESS driver: messages that arrive while
-the driver is busy are refused, and the lost note offs leave notes
-sounding; closing with the sustain pedal down leaves notes on; a message
-from an interrupt during close splits an FM address/data pair.  The fixed
-build must pass every scenario the stock build fails.
+reproduces the stuck notes of the ESS driver:
+- messages that arrive while the driver is busy are refused, and the lost
+  note offs leave notes sounding
+- closing with the sustain pedal down leaves notes on
+- a message from an interrupt during close splits an FM address/data pair
+
+The fixed build must pass every case the stock build fails.
 """
 
 import os
@@ -187,8 +191,8 @@ class StuckNoteTest(unittest.TestCase):
         self.assertUnlocked(emu)
 
     def sweep(self, which, step):
-        """Note off from an interrupt at every step-th instruction of a
-        note on; count the trials that leave a note sounding."""
+        """Send a note off from an interrupt at every step-th instruction
+        of a note on, and count the trials that leave a note sounding."""
         emu = self.emu(which)
         stuck = 0
         for k in range(0, 10300, step):

@@ -1,7 +1,8 @@
 /*
- * pageesfm.c -- the ESFM patch bank page and menu commands.
+ * The ESFM patch bank page and the ESFM menu commands.
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -18,7 +19,7 @@
 static HWND text, voices;
 static char voice_text[1400];
 
-/* the driver's voices, and what the chip says (see esfm_diag_text) */
+// show the driver's voices and what the chip says (see esfm_diag_text)
 static void show_voices(void) {
   static char buf[1400];
   struct esfm_diag d;

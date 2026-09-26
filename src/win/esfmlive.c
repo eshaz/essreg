@@ -1,15 +1,22 @@
 /*
- * esfmlive.c -- replace the FM patch bank of the running ESFM.DRV (see
+ * Replaces the FM patch bank of the running ESFM.DRV (see
  * esfmlive.h and docs/ESFM_BANK.md).
  *
- * The driver's data segment holds a far pointer to its bank at 0012h
- * (offset, always 0) and 0014h (the GlobalAlloc handle, used directly as a
- * selector).  Before touching anything, the driver's file is checked to be
- * the build whose loader is known (esfm_drv_inspect) and the data segment
- * to have the known layout.  A larger bank grows the driver's own block
- * with GlobalReAlloc, so it stays owned by the driver and is freed by it.
+ * Notes:
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * The driver's data segment holds a far pointer to its bank
+ * at 0012h (offset, always 0) and 0014h (the GlobalAlloc
+ * handle, used directly as a selector).
+ *
+ * Before touching anything, check that the driver file is the
+ * build with the known loader (esfm_drv_inspect) and that its
+ * data segment has the known layout.
+ *
+ * A larger bank grows the driver's own block with
+ * GlobalReAlloc, so the driver still owns and frees it.
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -27,11 +34,11 @@
 
 #define DG_BANK_OFF 0x12
 #define DG_BANK_SEL 0x14
-#define DG_NAME1 0x47 /* "Undefined": file name of the dormant RIFF loader */
-#define DG_NAME2 0x51 /* "Undefined": what it is compared with */
-#define DG_DEVICES 0x3C /* first device structure */
+#define DG_NAME1 0x47 // "Undefined", file name of the dormant RIFF loader
+#define DG_NAME2 0x51 // "Undefined", what it is compared with
+#define DG_DEVICES 0x3C // first device structure
 
-/* device structure (src/esfm/esfmdev.inc) */
+// device structure (src/esfm/esfmdev.inc)
 #define DEV_FM_PORT 0x00A
 #define DEV_ACTIVE 0x014
 #define DEV_OPEN 0x016
@@ -41,7 +48,7 @@
 #define DEV_FLAGS 0x30E
 #define DEV_SIZE 0x311
 #define VOICE_SIZE 0x21
-#define FM_KEYON 0x240 /* key-on registers, 0x250-0x253 for voices 16, 17 */
+#define FM_KEYON 0x240 // key-on registers, 0x250-0x253 for voices 16, 17
 
 char esfm_last_bank[144];
 
@@ -57,10 +64,10 @@ static HGLOBAL bank_handle(const struct live *lv) {
   return (HGLOBAL)*(u16 __far *)(lv->dg + DG_BANK_SEL);
 }
 
-/* handle of segment `seg` of a loaded module: ToolHelp, or else the module
- * database itself, which is the NE header in memory with 10-byte segment
- * table entries ending in the segment's handle (ToolHelp's
- * GlobalEntryModule is a stub in Wine) */
+// handle of segment seg of a loaded module, from ToolHelp or else from the
+// module database (ToolHelp's GlobalEntryModule is a stub in Wine)
+// the module database is the NE header in memory, its 10-byte segment table
+// entries end in the segment's handle
 static HGLOBAL module_segment(HMODULE mod, unsigned seg) {
   GLOBALENTRY ge;
   u8 __far *ne;
@@ -129,7 +136,7 @@ static int open_live(struct live *lv, char *why) {
 
 static void close_live(struct live *lv) { GlobalUnlock(lv->dgroup); }
 
-/* copy n bytes into the driver's bank, growing its block if needed */
+// copy n bytes into the driver's bank, growing its block if needed
 static int put_bank(struct live *lv, const u8 __far *src, u16 n, char *why) {
   HGLOBAL h = bank_handle(lv), h2;
   u8 __far *dst;
@@ -152,7 +159,7 @@ static int put_bank(struct live *lv, const u8 __far *src, u16 n, char *why) {
     strcpy(why, "cannot lock the bank");
     return -1;
   }
-  /* no MIDI callback may see half a patch */
+  // interrupts off so no MIDI callback sees half a patch
   _disable();
   _fmemcpy(dst, src, n);
   _enable();
@@ -279,10 +286,10 @@ static u32 rd32(const u8 *p) {
   return p[0] | ((u16)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
 }
 
-/* read an ESFM register in native mode: FM_Base+2/+3 select it, +1 reads
- * it.  Interrupts are off so that the driver cannot move the address in
- * between; the driver always writes both address bytes, so it is not
- * disturbed. */
+// read an ESFM register in native mode, FM_Base+2/+3 select it and +1
+// reads it
+// interrupts are off so the driver cannot move the address in between, and
+// since the driver always writes both address bytes it is not disturbed
 static u8 fm_read(u16 port, u16 reg) {
   u8 v;
 
@@ -312,7 +319,7 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
     strcpy(d->why, "the driver has no ES1869 device");
     return -1;
   }
-  /* a consistent copy: MIDI callbacks change it at interrupt time */
+  // copy with interrupts off, MIDI callbacks change it at interrupt time
   _disable();
   _fmemcpy(dev, lv.dg + devoff, DEV_SIZE);
   _enable();

@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""Build ESFM.DRV from the reassemblable source in src/esfm.
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Build ESFM.DRV from the source in src/esfm.
 
 usage: build_esfm.py [--stock] [--verify] [--bank FILE] [-o OUTPUT]
 
-  (default)  ESFM_FIX=1: the ESS driver with the stuck-note fixes,
-             written to build/ESFM.DRV
-  --stock    ESFM_FIX=0: the original driver, written to out/ESFM.DRV
-  --verify   with --stock: fail unless the result is byte-identical to
+  (default)  the ESS driver with the stuck-note fixes (ESFM_FIX=1),
+             to build/ESFM.DRV
+  --stock    the original driver (ESFM_FIX=0), to out/ESFM.DRV
+  --verify   with --stock, fail unless it's byte-identical to
              driver/ESFM.DRV
-  --bank     put another patch bank (raw, as in esfm_patch_banks/) in the
-             driver instead of the stock one
+  --bank     put another patch bank (raw, as in esfm_patch_banks/) in
+             the driver instead of the stock one
 
-Requires NASM 2.14 or later and Python 3.
+Needs NASM 2.14 or later and Python 3.
 """
 
 import argparse

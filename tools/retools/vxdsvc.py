@@ -1,11 +1,13 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
 """Windows 9x VxD device IDs, service names and control messages.
 
-The tables cover the services referenced by the ESS drivers.  Names come from
-the Windows 3.1/95 DDK service tables (vmm.inc, vpicd.inc, vdmad.inc,
-shell.inc, vxdldr.inc, configmg.h, mmdevldr.h).  Services whose number could
-not be matched with certainty are left unnamed; ``service_name`` then returns
-a generic ``<DEV>_Service_<nnnn>`` name.
+The tables cover the services the ESS drivers use.  The names come from the
+Windows 3.1/95 DDK service tables (vmm.inc, vpicd.inc, vdmad.inc,
+shell.inc, vxdldr.inc, configmg.h, mmdevldr.h).  Services whose number
+couldn't be matched for sure are left unnamed, and service_name gives them
+a generic <DEV>_Service_<nnnn> name.
 """
 
 DEVICES = {
@@ -180,7 +182,7 @@ def device_name(dev):
 
 
 def service_name(dev, svc):
-    """Symbolic name of VxD service ``svc`` of device ``dev`` (no jmp bit)."""
+    """Symbolic name of VxD service svc of device dev (without the jmp bit)."""
     table = SERVICES.get(dev)
     if table and svc < len(table):
         name = table[svc]

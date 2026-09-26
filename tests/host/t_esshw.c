@@ -1,4 +1,10 @@
-/* t_esshw.c -- esshw protocols against the simulated ES1869 */
+/*
+ * t_esshw tests the esshw protocols against the simulated ES1869.
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
+ * Licensed under GPL Version 3.0
+ */
 
 #include <string.h>
 
@@ -15,7 +21,7 @@ static void setup(u8 flags) {
   esshw.dsp_desync = 0;
 }
 
-/* values written to a port, in order */
+// get the values written to a port, in order
 static int writes(u16 port, u8 *out, int max) {
   int i, n = 0;
   for (i = 0; i < simhw.nlog; i++)
@@ -42,7 +48,7 @@ static void test_mixer(void) {
   CHECK_EQ(simhw.mixer[0x50], 0x0C);
   CHECK_EQ(simhw.mixer_index, 0x36);
 
-  setup(ESSHW_LEGACY); /* the original essreg leaves the index selected */
+  setup(ESSHW_LEGACY); // the original essreg leaves the index selected
   simhw.mixer[0x52] = 0x11;
   simhw.mixer_index = 0x36;
   CHECK_EQ(esshw_mixer_read(0x52), 0x11);
@@ -61,7 +67,7 @@ static void test_controller_safe(void) {
   CHECK_EQ(w[0], 0xC6);
   CHECK_EQ(w[1], 0xC0);
   CHECK_EQ(w[2], 0xBA);
-  CHECK_EQ(simhw.irq_clears, 0); /* never touches Audio_Base+Eh */
+  CHECK_EQ(simhw.irq_clears, 0); // never touches Audio_Base+Eh
 
   simhw.nlog = 0;
   CHECK_EQ(esshw_ctrl_write(0xBB, 0x05), 0);
@@ -78,13 +84,13 @@ static void test_controller_legacy(void) {
   u8 w[8];
 
   setup(ESSHW_LEGACY);
-  simhw.ext_mode = 1; /* as left by the Windows driver */
+  simhw.ext_mode = 1; // as left by the Windows driver
   simhw.ctrl[0xA1 - 0xA0] = 0xF0;
   CHECK_EQ(esshw_ctrl_read(0xA1), 0xF0);
-  CHECK_EQ(writes(0x22C, w, 8), 2); /* C0h, A1h: no C6h */
+  CHECK_EQ(writes(0x22C, w, 8), 2); // C0h, A1h: no C6h
   CHECK_EQ(w[0], 0xC0);
   CHECK_EQ(w[1], 0xA1);
-  CHECK(simhw.irq_clears > 0); /* polls Audio_Base+Eh like essreg did */
+  CHECK(simhw.irq_clears > 0); // polls Audio_Base+Eh like essreg did
 }
 
 static void test_controller_errors(void) {
@@ -94,7 +100,7 @@ static void test_controller_errors(void) {
   CHECK_EQ(reads(0x22A), 0);
   {
     u8 w[4];
-    CHECK_EQ(writes(0x22C, w, 4), 0); /* precheck: nothing written */
+    CHECK_EQ(writes(0x22C, w, 4), 0); // precheck: nothing written
   }
   CHECK_EQ(esshw.dsp_desync, 0);
 
@@ -139,7 +145,7 @@ static void test_ports_and_pnp(void) {
   CHECK_EQ(esshw.config_base, 0x250);
 }
 
-/* VxD extension backend with a fake API */
+// VxD extension backend with a fake API
 static u16 last_fn;
 static u8 last_bl, last_bh, last_al;
 static int fake_err;
@@ -172,7 +178,7 @@ static void test_vxd_backend(void) {
   fake_err = ESSHW_EINUSE;
   CHECK_EQ(esshw_ctrl_read(0xBA), -ESSHW_EINUSE);
   CHECK_EQ(esshw_mixer_write(0x50, 0), -ESSHW_EINUSE);
-  CHECK_EQ(simhw.nlog, 0); /* no direct port access */
+  CHECK_EQ(simhw.nlog, 0); // no direct port access
 }
 
 int main(void) {

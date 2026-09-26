@@ -1,4 +1,8 @@
-; Macros for the reassemblable NE source (tools/ne2asm.py)
+; Macros for the reassemblable NE source that tools/ne2asm.py generates.
+;
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
+; Licensed under GPL Version 3.0
 
 %ifndef NE16_INC
 %define NE16_INC

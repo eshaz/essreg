@@ -1,4 +1,4 @@
-# nestamp.exe: marks essctl.exe for Windows 4.0 (see tools\nestamp.c)
+# nestamp.exe marks essctl.exe for Windows 4.0 (see tools\nestamp.c)
 
 nestamp.obj : tools\nestamp.c .AUTODEPEND
  *wcc tools\nestamp.c -i="$(%watcom)/h" -w4 -e10 -zq -bt=dos -ms -fo=nestamp.obj

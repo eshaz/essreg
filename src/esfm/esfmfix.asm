@@ -1,23 +1,28 @@
-; esfmfix.asm -- stuck-note fixes for ESFM.DRV (assembled when ESFM_FIX=1)
+; Stuck-note fixes for ESFM.DRV, assembled when ESFM_FIX=1.  The code is
+; appended to segment 1 (fixed code, callable at interrupt time).
 ;
-; Appended to segment 1: fixed code, callable at interrupt time.
+; Notes:
 ;
-; 1. modMessage no longer refuses MODM_DATA, MODM_LONGDATA or MODM_RESET.
-;    The ESS driver answers a message that arrives while it is still
+; 1. modMessage doesn't refuse MODM_DATA, MODM_LONGDATA or MODM_RESET
+;    anymore.  When a message arrives while the ESS driver is still
 ;    handling another one (from an interrupt-time callback, or from the
-;    client's MOM_DONE callback) with MIDIERR_NOTREADY, and the caller
-;    drops it: a lost note off leaves the note sounding.  Here the message
-;    is queued, and the call that holds the driver handles the queue, in
-;    order, before it returns.
-; 2. MODM_OPEN and MODM_CLOSE hold the driver too, so that a message from
-;    an interrupt cannot write FM registers between the address and the
-;    data write of the chip reset or of the silencing at close.  Queued
-;    messages of a client that has been closed are dropped.
+;    client's MOM_DONE callback), it answers MIDIERR_NOTREADY and the
+;    caller drops the message.  A lost note off leaves the note sounding.
+;    Here the message is queued instead, and the call that holds the
+;    driver handles the queue, in order, before it returns.
+; 2. MODM_OPEN and MODM_CLOSE hold the driver too, so a message from an
+;    interrupt can't write FM registers between the address and the data
+;    write of the chip reset or of the silencing at close.  Queued
+;    messages of a closed client are dropped.
 ; 3. all_notes_off (close, power suspend) keys off every voice and lifts
-;    the sustain pedal of every channel.  The ESS code sent note offs, and
-;    notes held by the pedal went on sounding after the close.
+;    the sustain pedal of every channel.  The ESS code sent note offs, so
+;    notes held by the pedal kept sounding after the close.
 ; 4. chip_reset holds the driver as well (it also runs for DRV_POWER and
 ;    DRVM_DISABLE).
+;
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
+; Licensed under GPL Version 3.0
 
 MODM_OPEN       equ 3
 MODM_CLOSE      equ 4
@@ -77,8 +82,8 @@ modMessage:
         jmp     .ret
 
 .hold:
-        ; OPEN and CLOSE come at task time; if the driver is held already,
-        ; it is held by the caller itself (a callback), so just count
+        ; OPEN and CLOSE come at task time, so if the driver is already
+        ; held, the caller itself holds it (a callback): just count
         inc     word [fix_lock]
         call    call_orig
         cmp     word [ARG_MSG],MODM_CLOSE
@@ -102,7 +107,7 @@ modMessage:
         pop     bp
         retf    0x10
 
-; IF back on if it was set in the flags in DX
+; turn IF back on if it's set in the flags in DX
 restore_if:
         test    dh,0x02
         jz      .off
@@ -124,8 +129,8 @@ call_orig:
         call    modMessage_orig
         ret
 
-; queue this call's message; interrupts are off.  AX = result for the
-; caller.
+; queue this call's message (interrupts are off)
+; AX = result for the caller
 q_put:
         cmp     word [ARG_MSG],MODM_LONGDATA
         jne     .put
@@ -184,7 +189,7 @@ q_put:
         ret
 
 ; drop the queued messages of the client that was just closed (dwUser of
-; this call); a queued long message is marked done
+; this call) and mark its queued long messages done
 q_purge:
         push    si
         push    di
@@ -222,14 +227,14 @@ q_purge:
         pop     si
         ret
 
-; hold the driver (counted; the outermost fix_unlock releases it)
+; hold the driver (counted, the outermost fix_unlock releases it)
 fix_enter:
         inc     word [fix_lock]
         ret
 
-; let go of the driver: the outermost holder first handles every queued
-; message, then releases it with interrupts off, so that nothing can be
-; queued after the last look at the queue
+; let go of the driver: the outermost holder handles every queued message
+; first, then releases it with interrupts off so nothing can be queued
+; after the last look at the queue
 fix_unlock:
         push    si
         push    di

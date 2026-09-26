@@ -1,11 +1,14 @@
 /*
- * pageraw.c -- raw register listing per bank and the bit editor.
+ * The raw registers page and the bit editor. The page lists
+ * the catalog registers of one bank in hex and binary.
  *
- * Lists the catalog registers of one bank as hex and binary.  Writing a
- * whole register bypasses the per-field tiers, so the bit editor only
- * writes in Expert mode.
+ * Notes:
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * Writing a whole register bypasses the per-field tiers, so
+ * the bit editor only writes in Expert mode.
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -27,7 +30,7 @@ struct view {
 
 static struct view views[MAX_VIEWS];
 static int nviews, cur_view;
-static int line_reg[MAX_LINES]; /* catalog register of each list line */
+static int line_reg[MAX_LINES]; // catalog register of each list line
 static int line_raw[MAX_LINES];
 static int nlines;
 static HWND list, bank_cb;
@@ -163,13 +166,13 @@ void raw_refresh(int how) {
     if (flags & (RF_READ_SIDEFX | RF_WRITEONLY))
       line_raw[i] = -1;
     else if ((flags & RF_NEEDS_IDLE) && how < 2)
-      continue; /* the DSP channel only on the Read button */
+      continue; // DSP channel only on the Read button
     else
       line_raw[i] = err < 0 ? err : ess_read(line_reg[i]);
   }
   winio_end();
   fill_list();
-  /* no device: the rows say so, the status line says why */
+  // with no device the rows say so, otherwise the status line says why
   if (err < 0 && err != -ESSHW_ENODEV)
     set_status("%s", esshw_strerror(err));
 }
@@ -197,7 +200,7 @@ void raw_command(int id, int code, HWND ctl) {
   }
 }
 
-/* --- bit editor ---------------------------------------------------------- */
+// --- bit editor -------------------------------------------------------------
 
 static struct {
   int reg;

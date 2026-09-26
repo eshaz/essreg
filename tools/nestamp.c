@@ -1,18 +1,23 @@
 /*
- * nestamp.c -- set the "expected Windows version" of a 16-bit Windows
- * executable (NE header offset 3Eh).
+ * nestamp sets the "expected Windows version" of a 16-bit
+ * Windows executable (NE header offset 3Eh).
  *
- *   nestamp file.exe [major.minor]      default 4.0
+ * Notes:
  *
- * Windows 95 draws dialogs of 16-bit programs marked for version 4.0 with
- * 3-D controls and the gray dialog color, like those of 32-bit programs.
- * The Watcom resource compiler only knows versions 3.0 and 3.1, so the
- * build stamps the program after binding its resources.
+ * Windows 95 draws the dialogs of 16-bit programs marked for
+ * version 4.0 with 3-D controls and the gray dialog color,
+ * like those of 32-bit programs. The Watcom resource compiler
+ * only knows versions 3.0 and 3.1, so the build stamps the
+ * program after binding its resources.
  *
- * Builds with Watcom C for DOS (tools/nestamp.mk1) and with any hosted C
- * compiler.
+ * Builds with Watcom C for DOS (nestamp.mk1) and with any
+ * hosted C compiler.
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * Usage:
+ *   `nestamp file.exe [major.minor]` (default 4.0)
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 

@@ -1,12 +1,15 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
 """Run ES1869.VXD API code in a CPU emulator against a simulated chip.
 
 The LE objects are loaded at fixed addresses with their fixups applied.
 INT 20h dynamic links are emulated for the few VMM services the tested
-paths use, and every IN/OUT instruction goes to FakeES1869, a small model
-of the ES1869 port interface (mixer index/data, DSP command channel,
-configuration device with PnP index and logical device registers).
-Requires the unicorn package.
+code uses. Every IN/OUT goes to FakeES1869, a small model of the ES1869
+ports: mixer index/data, the DSP command channel and the configuration
+device with its PnP index and logical device registers.
+
+Needs the unicorn package.
 """
 
 import struct
@@ -211,7 +214,7 @@ class VxDEmu:
         uc.reg_write(UC_X86_REG_EIP, eip + 4)
 
     def call(self, addr, client, vm=VM_SYS):
-        """Call a V86/PM API procedure; client = dict of Client_* values."""
+        """Call a V86/PM API procedure, client is a dict of Client_* values."""
         blob = bytearray(0x48)
         for name, value in client.items():
             size = 2 if name in ("ES", "DS") else 4

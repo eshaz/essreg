@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
 """Generate reassemblable NASM source from a Windows 9x VxD (LE file).
 
-The output assembles with ``nasm -f elf32`` and links back with
-``tools/lelink.py`` into a byte-identical VxD.  Code is found by recursive
-descent from the DDB, the API/control dispatch tables and the entries of the
-names file; everything else is emitted as data.  Fixups become symbolic
-references, relative branches become labels and ``INT 20h`` dynamic links
-become ``VxDCall``/``VxDJmp`` macros, so the source can be edited and
-rebuilt.  After generation the source is assembled, linked and compared
-with the original; any instruction that does not reproduce exactly is
-re-emitted as bytes (keeping its fixups and branches symbolic) until the
-rebuild matches.
-
 usage: vxd2asm.py driver/ES1869.VXD -n src/vxd/names.txt -o src/vxd
+
+The source assembles with nasm -f elf32 and links back into the same VxD,
+byte for byte, with tools/lelink.py.  Code is found by recursive descent
+from the DDB, the API and control dispatch tables and the names file.
+Everything else is data.  Fixups become symbolic references, relative
+branches labels and INT 20h dynamic links VxDCall/VxDJmp macros, so the
+source can be edited and rebuilt.  The source is then assembled, linked
+and compared with the original, and any instruction that comes out
+different is emitted as bytes (fixups and branches stay symbolic) until
+the rebuild matches.
 """
 
 import argparse
@@ -207,8 +208,8 @@ class Disassembler:
     # -- discovery ----------------------------------------------------------
 
     def discover(self, entries, tentative=False):
-        """Decode from ``entries``; with ``tentative`` each entry is only
-        accepted when its whole reachable path decodes cleanly."""
+        """Decode from entries.  With tentative, an entry is only kept when
+        everything reachable from it decodes cleanly."""
         if tentative:
             for ent in entries:
                 self._try_entry(ent)
@@ -429,9 +430,9 @@ class Emitter:
     def fixup_ref(self, f):
         """Operand text for a type-7 fixup.
 
-        Plain references are section-relative in NASM's ELF output and lelink
-        writes zero in place, as LINK did.  The few references whose image
-        bytes hold an addend use ``wrt ..sym`` so the addend stays in place.
+        Plain references are section-relative in NASM's ELF output, and
+        lelink writes zero in place like LINK did.  The few references whose
+        image bytes hold an addend use wrt ..sym so the addend stays there.
         """
         img = self.le.objects[f.obj - 1].data
         (inplace,) = struct.unpack_from("<i", img, f.off)
@@ -511,7 +512,7 @@ class Emitter:
             return None
         s, e, _v = cand
         repl = ref
-        # a "+0x4" displacement keeps its sign; bare absolute gets the symbol
+        # a "+0x4" displacement keeps its sign, a bare absolute gets the symbol
         return mn + " " + ops[:s] + repl + ops[e:]
 
     # -- data ---------------------------------------------------------------
@@ -949,11 +950,11 @@ def _listing_bytes(hx):
 
 
 def check_listing(path, le, sect_obj, masks=None, detail=None):
-    """Compare every listed source line that carries an original-offset
-    comment against the original object bytes.  Bytes produced by macro
-    expansions are attributed to the invoking line.  ``masks`` maps
-    (obj, off) -> set of byte indexes not to compare (branch displacements).
-    Returns the set of (obj, off) that differ."""
+    """Compare each listed source line that has an original-offset comment
+    with the original object bytes, and return the set of (obj, off) that
+    differ.  Bytes from a macro expansion count for the line that invoked
+    it.  masks maps (obj, off) -> set of byte indexes not to compare
+    (branch displacements)."""
     masks = masks or {}
     section = None
     items = []
@@ -1004,8 +1005,8 @@ LOAD_MACROS = {"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp", "mov"}
 
 
 def variants(text):
-    """Alternative spellings of an instruction that select other encodings.
-    Returns a list of variant descriptors (applied with apply_variant)."""
+    """Other spellings of an instruction that select other encodings, as a
+    list of variant descriptors for apply_variant."""
     out = []
     mn, _, ops = text.partition(" ")
     parts = ops.split(",")
@@ -1049,9 +1050,9 @@ def apply_variant(text, var):
 
 
 def search_encodings(tmp, texts, want, masks):
-    """Find, for each key, a variant whose encoding matches ``want[key]``.
+    """Find, for each key, a variant whose encoding matches want[key].
 
-    texts: key -> instruction text; want: key -> original bytes.
+    texts: key -> instruction text, want: key -> original bytes.
     Returns key -> variant descriptor."""
     cands = []
     for key, text in texts.items():
@@ -1188,7 +1189,7 @@ def generate(le_path, names_path, outdir, keep_going=True, verbose=True):
                 f.write(render_main(le, files, le_name))
             with open(os.path.join(tmp, "essext.asm"), "w") as f:
                 f.write("; placeholder\n")
-            # finish layout: entry symbols
+            # finish the layout: entry symbols
             for e in layout["entries"]:
                 e["symbol"] = em.labels[tuple(e["_at"])]
             write_layout(tmp, layout, le)

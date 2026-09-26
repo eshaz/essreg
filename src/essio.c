@@ -1,7 +1,8 @@
 /*
- * essio.c -- catalog register access (see essio.h).
+ * Catalog register and field access, see essio.h.
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -60,8 +61,8 @@ int ess_field_read(int field, u8 *value, u8 *raw) {
   return 0;
 }
 
-/* a few microseconds between the edges of a pulse (the DSP reset needs
- * 3 us): status reads of Audio_Base+Ch take about 1 us each on ISA */
+// wait a few microseconds between pulse edges (the DSP reset needs 3 us)
+// each status read of Audio_Base+Ch takes about 1 us on ISA
 static void pulse_delay(void) {
   int i;
   for (i = 0; i < 8; i++)
@@ -76,9 +77,9 @@ int ess_field_write(int field, u8 value, int expert) {
 
   if (!cat_writable(f, expert))
     return -ESSIO_ETIER;
-  /* write-only registers have nothing to keep, and reading a register with
-   * read side effects would change it (Audio_Base+6h returns status bits
-   * that must be written as 0): both are written from 0 */
+  // start from 0 for write-only registers, which have nothing to keep, and
+  // for ones that change when read (Audio_Base+6h returns status bits that
+  // must be written as 0)
   if (!(r->flags & (RF_WRITEONLY | RF_READ_SIDEFX))) {
     raw = ess_read(f->reg);
     if (raw < 0)

@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
 """Run all host-side tests.
 
-  python3 tests/run_tests.py
+usage: python3 tests/run_tests.py
 
-- Python tests (tests/test_*.py): LE tooling, byte-identical VxD rebuild,
-  the VxD register API in a CPU emulator (needs nasm and unicorn).
-- C tests (tests/host/t_*.c) built with gcc against the simulated ES1869:
+- Python tests (tests/test_*.py): LE tooling, the byte-identical VxD
+  rebuild and the VxD register API in a CPU emulator (needs nasm and
+  unicorn)
+- C tests (tests/host/t_*.c), built with gcc against the simulated ES1869:
   esshw protocols, the VxD API wrappers, the register catalog, profiles,
   ESFM patch banks and driver patching, and an old-versus-new port trace
-  of essreg's register functions.
-- With Open Watcom in $OW2: the 16-bit VxD call thunk in a CPU emulator.
+  of essreg's register functions
+- with Open Watcom in $OW2: the 16-bit VxD call thunk in a CPU emulator
 """
 
 import os
@@ -66,7 +69,7 @@ def c_tests(tmp):
         sys.stdout.write(out + err)
         failures += code != 0
 
-    # essreg: original regs.c versus the refactored one on esshw
+    # trace essreg's original regs.c and the refactored one on esshw
     old = os.path.join(tmp, "old")
     os.makedirs(old, exist_ok=True)
     for name in ("regs.c", "regs.h", "debug.h"):

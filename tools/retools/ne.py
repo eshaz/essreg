@@ -1,4 +1,6 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
 """Reader for 16-bit Windows NE executables and drivers (ESFM.DRV,
 ES1869.DRV, ESSMPU.DRV, essctl.exe).
 
@@ -8,7 +10,7 @@ ES1869.DRV, ESSMPU.DRV, essctl.exe).
   ne.entries              {ordinal: (segment, offset, flags)}
   ne.resident / nonresident names, ne.modules (imported module names)
 
-Only reading is needed by the tools; esfmpat edits files itself (in C).
+The tools only read these files.  esfmpat edits them itself (in C).
 """
 
 import struct

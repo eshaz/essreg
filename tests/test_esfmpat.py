@@ -1,6 +1,10 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""esfmpat on a copy of ESFM.DRV: in-place and relocated banks, backups,
-and refusals.  The patched driver is checked with the NE reader."""
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Run esfmpat on a copy of ESFM.DRV and check the result with the NE reader.
+
+Covers in-place and relocated banks, backups and refusals.
+"""
 
 import os
 import shutil
@@ -148,8 +152,8 @@ class EsfmpatTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.dir, "ESFM.BAK")))
 
     def test_fixed_driver(self):
-        # build/ESFM.DRV, rebuilt from src/esfm with the stuck-note fixes,
-        # keeps the bank loader: esfmpat patches it like the ESS driver
+        # build/ESFM.DRV (src/esfm with the stuck-note fixes) keeps the bank
+        # loader, so esfmpat patches it like the ESS driver
         sys.path.insert(0, os.path.join(ROOT, "tools"))
         import build_esfm
         fixed = build_esfm.build(True, workdir=self.dir)

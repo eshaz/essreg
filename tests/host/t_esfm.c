@@ -1,6 +1,13 @@
-/* t_esfm.c -- patch banks and ESFM.DRV patching on a copy of the driver.
+/*
+ * t_esfm tests patch banks and ESFM.DRV patching on a copy of the driver.
  *
- * usage: t_esfm ESFM.DRV bank.bin workdir */
+ * Usage:
+ *   t_esfm ESFM.DRV bank.bin workdir
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
+ * Licensed under GPL Version 3.0
+ */
 
 #include <stdlib.h>
 #include <string.h>
@@ -45,20 +52,20 @@ static void test_bank_check(const u8 *bank, long size) {
   CHECK_EQ(info.patches, 175);
   CHECK_EQ(info.two, 41);
 
-  CHECK(bank_check(bank, 100, &info) != 0); /* shorter than the table */
+  CHECK(bank_check(bank, 100, &info) != 0); // shorter than the table
   CHECK(bank_check(bank, BANK_MAX + 2, &info) != 0);
 
   memcpy(bad, bank, (size_t)size);
-  bad[2 * 5] = 0x10; /* entry 5 inside the table */
+  bad[2 * 5] = 0x10; // entry 5 points inside the table
   bad[2 * 5 + 1] = 0x00;
   CHECK(bank_check(bad, (u32)size, &info) != 0);
 
   memcpy(bad, bank, (size_t)size);
-  /* last patch cut short */
+  // last patch cut short
   CHECK(bank_check(bad, (u32)size - 10, &info) != 0);
 
   memset(bad, 0, BANK_TABLE);
-  CHECK(bank_check(bad, BANK_TABLE, &info) != 0); /* no patches */
+  CHECK(bank_check(bad, BANK_TABLE, &info) != 0); // no patches
   free(bad);
 }
 
@@ -72,15 +79,15 @@ static void test_riff(const u8 *bank, long size) {
   CHECK_EQ(bank_unwrap(file, (u32)size + 20, &off, &len), 0);
   CHECK_EQ(off, 20);
   CHECK_EQ(len, size);
-  CHECK_EQ(bank_unwrap(bank, (u32)size, &off, &len), 0); /* raw bank */
+  CHECK_EQ(bank_unwrap(bank, (u32)size, &off, &len), 0); // raw bank
   CHECK_EQ(off, 0);
   CHECK_EQ(len, size);
-  memcpy(file + 12, "abcd", 4); /* no fm4 chunk */
+  memcpy(file + 12, "abcd", 4); // no fm4 chunk
   CHECK(bank_unwrap(file, (u32)size + 20, &off, &len) != 0);
   free(file);
 }
 
-/* bytes that differ between two images, outside [skip0, skip1) */
+// count the bytes that differ between two images, outside [skip0, skip1)
 static int diffs(const u8 *a, const u8 *b, long n, long skip0, long skip1) {
   long i;
   int d = 0;
@@ -114,9 +121,9 @@ static void test_driver(const char *drvpath, const u8 *bank, long bsize,
   CHECK_EQ(d.bank_size, BANK_ORIG_SIZE);
   CHECK_EQ(d.seg3, 0x44A0);
   CHECK_EQ(d.autodata, 4);
-  CHECK(!memcmp(orig + d.bank_off, bank, (size_t)bsize)); /* bnk_com.bin */
+  CHECK(!memcmp(orig + d.bank_off, bank, (size_t)bsize)); // bnk_com.bin
 
-  /* same size: in place, only the bank bytes change */
+  // same size: written in place, only the bank bytes change
   big = malloc(BANK_MAX);
   memcpy(big, bank, (size_t)bsize);
   big[0x200 + 10] ^= 0x5A;
@@ -130,12 +137,12 @@ static void test_driver(const char *drvpath, const u8 *bank, long bsize,
   CHECK(!memcmp(now + 0x2400, big, (size_t)bsize));
   free(now);
 
-  /* larger: 40 more patches appended to the bank */
+  // larger: 40 more patches appended to the bank
   bigsize = (u16)(bsize + 40 * BANK_VOICE);
   memcpy(big, bank, (size_t)bsize);
   for (i = 0; i < 40; i++) {
     memcpy(big + bsize + i * BANK_VOICE, bank + 0x200, BANK_VOICE);
-    big[bsize + i * BANK_VOICE] &= (u8)~6; /* one voice */
+    big[bsize + i * BANK_VOICE] &= (u8)~6; // one voice
     big[2 * (216 + i)] = (u8)(bsize + i * BANK_VOICE);
     big[2 * (216 + i) + 1] = (u8)((bsize + i * BANK_VOICE) >> 8);
   }
@@ -154,8 +161,8 @@ static void test_driver(const char *drvpath, const u8 *bank, long bsize,
   now = load(path, &nsize);
   CHECK_EQ(nsize, (long)(d.bank_off + d.bank_len));
   CHECK(!memcmp(now + d.bank_off, big, bigsize));
-  /* the old image is unchanged except the resource entry (4 bytes) and
-   * the four size constants (8 bytes) */
+  // the old image is unchanged except the resource entry (4 bytes) and
+  // the four size constants (8 bytes)
   CHECK_EQ(diffs(orig, now, osize, 0, 0) <= 12, 1);
   CHECK_EQ(rd16(now + d.seg3 + ESFM_K_ALLOC), bigsize);
   CHECK_EQ(rd16(now + d.seg3 + ESFM_K_WORDS), bigsize / 2);
@@ -165,14 +172,14 @@ static void test_driver(const char *drvpath, const u8 *bank, long bsize,
   CHECK_EQ(rd16(now + d.res_entry + 2), d.bank_len >> 4);
   free(now);
 
-  /* the patched driver is still recognized, with the new bank */
+  // the patched driver is still recognized, with the new bank
   f = fopen(path, "rb");
   CHECK_EQ(esfm_drv_inspect(f, &d2), 0);
   fclose(f);
   CHECK_EQ(d2.bank_off, d.bank_off);
   CHECK_EQ(d2.bank_size, bigsize);
 
-  /* patching again (smaller) reuses the moved resource in place */
+  // patching again with a smaller bank reuses the moved resource in place
   f = fopen(path, "r+b");
   CHECK_EQ(esfm_drv_inspect(f, &d2), 0);
   CHECK_EQ(esfm_drv_patch(f, &d2, bank, (u16)bsize), 0);
@@ -180,9 +187,9 @@ static void test_driver(const char *drvpath, const u8 *bank, long bsize,
   CHECK_EQ(d2.bank_off, d.bank_off);
   CHECK_EQ(d2.bank_size, bsize);
 
-  /* something else is refused untouched */
+  // a different driver build is refused and left alone
   memcpy(big, orig, (size_t)osize);
-  big[0x44A0 + 0x06FE] = 0x90; /* rep movsw replaced */
+  big[0x44A0 + 0x06FE] = 0x90; // rep movsw replaced
   save(path, big, osize);
   f = fopen(path, "rb");
   CHECK(esfm_drv_inspect(f, &d) != 0);

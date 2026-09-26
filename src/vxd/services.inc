@@ -1,5 +1,9 @@
-; VxD services referenced by the source (int 20h dynamic links).
-; value = (device ID << 16) | service number
+; VxD services called by the ES1869.VXD source (int 20h dynamic links).
+; Each value is (device ID << 16) | service number.
+;
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
+; Licensed under GPL Version 3.0
 
 Get_Cur_VM_Handle                        equ 0x00010001
 Get_Sys_VM_Handle                        equ 0x00010003

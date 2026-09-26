@@ -1,7 +1,8 @@
-# essctl.exe: ES1869 control panel for Windows 95 (16-bit Windows, large
-# model).  Needs the 16-bit Windows target of Watcom C (h\win, lib286\win).
-# Objects are prefixed w_ because the shared sources are also compiled for
-# DOS by the other makefiles.
+# essctl.exe is the ES1869 control panel for Windows 95 (16-bit Windows,
+# large model) and needs the 16-bit Windows target of Watcom C (h\win,
+# lib286\win)
+# the other makefiles also build the shared sources for DOS, so the objects
+# here get a w_ prefix
 
 WIN_CFLAGS=-i="$(%watcom)/h;$(%watcom)/h/win;src;src\win" -bt=windows -ml -zW -zc -3 -osbhl+kp -w4 -e10 -zq
 

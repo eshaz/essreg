@@ -1,16 +1,17 @@
-# Symbol names and disassembly hints for ES1869.VXD (tools/vxd2asm.py)
+# Symbol names and disassembly hints for ES1869.VXD, read by tools/vxd2asm.py
 #
 # format:  obj:offset  kind  name  [size]  [; comment]
-#   kind  code    code entry point (label + follow it as code)
+#   kind  code    code entry point (label it and follow it as code)
 #         label   label only
-#         data    label; the next <size> bytes are data (never decoded as code)
+#         data    label, the next <size> bytes are data (never decoded as code)
 #         ddb     the VxD_Desc_Block (formatted field by field)
 #         client  <size> bytes of code whose [ebp+n] operands are Client_Reg_Struc
 #         ctlmsg  <size> bytes of code comparing EAX with control message numbers
-# Offsets are relative to the LE object (o1 = LCOD ... o7 = ICOD).  Names of the
-# no-DMA ("ND") routines come from the COFF symbol table of nodma.obj that the
-# linker left in the file's unused pages 15-21 (anchored _PTEXT = o5:24D0,
-# PNP = o4:0C60, abNDOneOpndBypass = o1:02F4).
+#
+# Offsets are relative to the LE object (o1 = LCOD ... o7 = ICOD).  The names
+# of the no-DMA ("ND") routines come from the COFF symbol table of nodma.obj,
+# which the linker left in the file's unused pages 15-21 (anchored at
+# _PTEXT = o5:24D0, PNP = o4:0C60, abNDOneOpndBypass = o1:02F4).
 
 # --- LCOD (object 1): locked code and data --------------------------------
 1:0000 data DS_GUIDs 0x1a0              ; DirectSound HAL interface GUIDs
@@ -53,15 +54,15 @@
 5:1312 code Get_AUDDRV_Version          ; -> EAX = 0404h
 5:135c code AUDDRV_API_Proc             ; V86/PM API: DX = function (DH group, DL index)
 5:135c client - 0x5ff
-5:138c code API_0005_GPO                ; EAX=0: set GPO1/GPO0 from BL; else read into EBX
-5:13cd code API_0006_SetHwVolCallback   ; EAX = 16:16 callback (0 = none); never call from apps
-5:1404 code API_0009_SetCallback2       ; EAX = 16:16 callback; never call from apps
+5:138c code API_0005_GPO                ; EAX=0: set GPO1/GPO0 from BL, else read them into EBX
+5:13cd code API_0006_SetHwVolCallback   ; EAX = 16:16 callback (0 = none), never call from apps
+5:1404 code API_0009_SetCallback2       ; EAX = 16:16 callback, never call from apps
 5:142a code API_0007_SetupPIOBuffer     ; internal to ES1869.DRV
 5:1459 code API_0008_GetConfigPort      ; -> DX = PnP configuration port
 5:148b code API_0004_GetDMACount        ; BX = 0 (audio 1) or 1 (audio 2) -> AX
 5:14f2 code API_x000_GetVersion         ; 0000, 0100, 0300 -> AX = 0404h
 5:14fd code API_0002_Acquire            ; BX=1: DSP (AX = audio base), BX=2: FM (AX = FM port)
-5:155d code API_0003_Release            ; resets the DSP; never call from apps
+5:155d code API_0003_Release            ; resets the DSP, never call from apps
 5:15da code API_0001_GetInfo            ; copy the ADI struct to ES:BX (dword 0 = size)
 5:1654 code API_0102_FM_Acquire
 5:1691 code API_0103_FM_Release

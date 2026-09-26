@@ -1,15 +1,22 @@
 /*
- * esfmtest.c -- ESFM stress test (see esfmtest.h and docs/ESFM_MIDI.md).
+ * ESFM stress test (see esfmtest.h and docs/ESFM_MIDI.md).
  *
- * MMSYSTEM's stream player sends the events of a dense MIDI stream to the
- * ESFM device from a timer at interrupt time, the way the MCI sequencer
- * and games play music, while essctl sends controller changes to the same
- * device from the program.  Every note on of the stream has its note off,
- * and every sustain pedal is released, so when the stream is done no voice
- * should be sounding.  ESS's ESFM.DRV drops a message that arrives while
- * it is still busy with another one; a dropped note off leaves a voice on.
+ * Notes:
+ *
+ * MMSYSTEM's stream player sends the events of a dense MIDI
+ * stream to the ESFM device from a timer at interrupt time,
+ * the way the MCI sequencer and games play music. While it
+ * plays, essctl sends controller changes to the same device
+ * from the program.
+ *
+ * Every note on in the stream has its note off and every
+ * sustain pedal is released, so no voice should be sounding
+ * when the stream is done. ESS's ESFM.DRV drops a message that
+ * arrives while it is still busy with another one, and a
+ * dropped note off leaves a voice on.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -22,7 +29,7 @@
 #include "esfmlive.h"
 #include "esfmtest.h"
 
-/* MIDI streams came with Windows 95: not in the Windows 3.1 headers */
+// MIDI streams came with Windows 95, not in the Windows 3.1 headers
 typedef struct {
   LPSTR lpData;
   DWORD dwBufferLength;
@@ -40,7 +47,7 @@ typedef struct {
   DWORD dwTimeDiv;
 } MIDIPROPTIMEDIV;
 
-#define MEVT_LONGMSG 0x80000000L /* MEVT_F_LONG | (MEVT_LONGMSG << 24) */
+#define MEVT_LONGMSG 0x80000000L // MEVT_F_LONG | (MEVT_LONGMSG << 24)
 #define MIDIPROP_SET 0x80000000L
 #define MIDIPROP_TIMEDIV 0x00000001L
 
@@ -50,7 +57,7 @@ typedef UINT(FAR PASCAL *STREAMOUT)(UINT, MIDIHDR95 FAR *, UINT);
 typedef UINT(FAR PASCAL *STREAMPROP)(UINT, BYTE FAR *, DWORD);
 typedef UINT(FAR PASCAL *STREAMCTL)(UINT);
 
-#define TICKS 700       /* 48 per quarter note at 120 bpm: 7.3 s */
+#define TICKS 700       // 48 per quarter note at 120 bpm, 7.3 s
 #define CHANNELS 12
 #define MAX_OFFS 96
 #define BUF_BYTES 60000U
@@ -86,8 +93,8 @@ static int put_sysex(DWORD tick, const BYTE *b, unsigned n) {
   return 0;
 }
 
-/* a dense arrangement: overlapping notes on 12 channels, pitch bend,
- * volume, the sustain pedal and a SysEx now and then */
+// build a dense arrangement: overlapping notes on 12 channels, pitch bend,
+// volume, the sustain pedal and a SysEx now and then
 static int make_stream(void) {
   static const BYTE gm_on[] = {0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7};
   struct {
@@ -104,7 +111,7 @@ static int make_stream(void) {
     if (put_short(0, (BYTE)(0xC0 | c), (BYTE)(c * 7), 0))
       return -1;
   for (t = 0; t < TICKS; t++) {
-    /* note offs that are due */
+    // note offs that are due
     for (i = 0; i < noffs;) {
       if (off[i].tick == t) {
         if (put_short(t, (BYTE)(0x80 | off[i].ch), off[i].note, 0))
@@ -115,7 +122,7 @@ static int make_stream(void) {
       }
     }
     if (t + 8 >= TICKS)
-      continue; /* the end: only note offs */
+      continue; // only note offs at the end
     for (c = 0; c < CHANNELS; c++) {
       BYTE note;
       if ((t + c) % 3 || noffs >= MAX_OFFS)
@@ -142,7 +149,7 @@ static int make_stream(void) {
     if (t % 48 == 24 && put_sysex(t, gm_on, sizeof(gm_on)))
       return -1;
   }
-  /* pedals up, bends centered */
+  // pedals up, bends centered
   for (c = 0; c < CHANNELS; c++)
     if (put_short(TICKS, (BYTE)(0xB0 | c), 64, 0) ||
         put_short(TICKS, (BYTE)(0xE0 | c), 0, 0x40))
@@ -234,7 +241,7 @@ int esfm_stress_test(char *report, unsigned size) {
   }
   esfm_diag_read(&before, 0);
 
-  r = s_open(&hms, &id, 1, 0, 0, 0 /* CALLBACK_NULL */);
+  r = s_open(&hms, &id, 1, 0, 0, 0); // CALLBACK_NULL
   if (r) {
     sprintf(text, "Cannot open the ESFM device (error %u)%s.", r,
             r == MMSYSERR_ALLOCATED ? ": it is in use, stop other MIDI "
@@ -261,8 +268,8 @@ int esfm_stress_test(char *report, unsigned size) {
 
   old = SetCursor(LoadCursor(0, IDC_WAIT));
   start = GetTickCount();
-  /* controller changes from the program while the stream plays: volume
-   * and expression, which rewrite the levels of every sounding voice */
+  // send controller changes from the program while the stream plays,
+  // volume and expression rewrite the levels of every sounding voice
   while (!(hdr.dwFlags & MHDR_DONE) && GetTickCount() - start < 20000) {
     BYTE c = (BYTE)(sent % CHANNELS);
     BYTE cc = (BYTE)(sent & 16 ? 11 : 7);
@@ -273,7 +280,7 @@ int esfm_stress_test(char *report, unsigned size) {
       refused++;
   }
   took = GetTickCount() - start;
-  wait_ms(400); /* releases */
+  wait_ms(400); // wait for the releases
   SetCursor(old);
   esfm_diag_read(&after, 1);
 

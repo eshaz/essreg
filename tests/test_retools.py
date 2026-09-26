@@ -1,7 +1,9 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""Tests for the reverse-engineering tools and the reassembled VxD.
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Test the reverse-engineering tools and the reassembled VxD.
 
-Run: python3 -m unittest discover -s tests -p "test_*.py"
+usage: python3 -m unittest discover -s tests -p "test_*.py"
 """
 
 import os
@@ -64,7 +66,8 @@ class LEFileTest(unittest.TestCase):
             self.assertNotIn((1, off + field), fix)
 
     def test_control_messages(self):
-        # Control_Proc: cmp eax, imm8 / jz near ... ; no W32_DEVICEIOCONTROL
+        # Control_Proc is a cmp eax, imm8 / jz near per message, and has no
+        # W32_DEVICEIOCONTROL
         img = self.le.objects[0].data
         msgs = []
         pos = 0x3E0

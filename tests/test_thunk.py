@@ -1,13 +1,14 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""Run the VxD call thunks of essctl (src/win/vxdcall.asm) in a 16-bit CPU
-emulator.
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Run essctl's VxD call thunks (src/win/vxdcall.asm) in a 16-bit CPU emulator.
 
 tests/host/thunkhar.asm calls vxd_raw_call with a fake API entry point and
-vxd_get_entry with an emulated INT 2Fh; the test checks the registers the
-fake entry point received, the values stored back, the carry-flag result
-and that every other register survived, including upper halves.
+vxd_get_entry with an emulated INT 2Fh. The tests check the registers the
+fake entry point got, the values stored back, the carry flag result and
+that every other register survived, upper halves included.
 
-Needs Open Watcom (wasm, wlink; directory in $OW2 or $WATCOM) and unicorn.
+Needs Open Watcom (wasm and wlink, in $OW2 or $WATCOM) and unicorn.
 """
 
 import os
@@ -40,7 +41,7 @@ def find_watcom():
 
 
 def load_mz(data):
-    """(image, cs, ip, ss, sp) of an MZ executable relocated to LOAD_SEG."""
+    """Load an MZ executable at LOAD_SEG, return (image, cs, ip, ss, sp)."""
     (magic, cblp, cp, crlc, cparhdr, _min, _max, ss, sp, _csum, ip, cs,
      lfarlc) = struct.unpack_from("<2s12H", data)
     assert magic == b"MZ"

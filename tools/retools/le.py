@@ -1,28 +1,30 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""Reader and writer for LE (Linear Executable) files as used by Windows 9x VxDs.
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Reader and writer for the LE (Linear Executable) files of Windows 9x VxDs.
 
-The reader decodes every structure of a VxD while keeping enough raw data
-(MZ stub, header, linker slack) that ``LEFile.to_bytes()`` rebuilds the file
-byte for byte.  The same writer is used by ``tools/lelink.py`` to build a VxD
-from reassembled objects, so its fixup encoding reproduces the conventions of
-Microsoft LINK /VXD:
+The reader decodes every structure of a VxD and keeps enough raw data (MZ
+stub, header, linker slack) for LEFile.to_bytes() to rebuild the file byte
+for byte.  tools/lelink.py builds a VxD from reassembled objects with the
+same writer, so its fixup encoding follows Microsoft LINK /VXD:
 
-* every fixup is an internal reference with an 8-bit object number and a
-  16-bit target offset (32-bit/16-bit flags are only set when needed);
-* per page, fixups are visited in ascending source order; a fixup whose
-  (type, target) matches an earlier record of the same page is appended to
-  that record's source list, otherwise a new record is *prepended*;
-* a fixup that straddles a page boundary is also recorded in the next page
-  with a negative source offset;
-* the image bytes at a fixup site hold the addend of the original reference
-  (almost always zero); the loader overwrites them.
+- every fixup is an internal reference with an 8-bit object number and a
+  16-bit target offset (the 32-bit/16-bit flags are only set when needed)
+- per page, fixups are visited in ascending source order.  A fixup whose
+  (type, target) matches an earlier record of the same page is added to
+  that record's source list, otherwise a new record goes in front of the
+  others
+- a fixup that straddles a page boundary is also recorded in the next page
+  with a negative source offset
+- the image bytes at a fixup site hold the addend of the original
+  reference (almost always zero), which the loader overwrites
 """
 
 import struct
 
 LE_HDR_SIZE = 0xC4
 
-# (name, offset, struct format) of every LE header field, VxD variant.
+# (name, offset, struct format) of every LE header field, VxD variant
 HDR_FIELDS = [
     ("sig", 0x00, "2s"), ("border", 0x02, "B"), ("worder", 0x03, "B"),
     ("level", 0x04, "I"), ("cpu", 0x08, "H"), ("os", 0x0A, "H"),
@@ -44,12 +46,12 @@ HDR_FIELDS = [
     ("ddkver", 0xC2, "H"),
 ]
 
-# Object flags
+# object flags
 OBJ_READ, OBJ_WRITE, OBJ_EXEC, OBJ_RSRC = 0x1, 0x2, 0x4, 0x8
 OBJ_DISCARD, OBJ_SHARED, OBJ_PRELOAD, OBJ_INVALID = 0x10, 0x20, 0x40, 0x80
 OBJ_BIG = 0x2000
 
-# Fixup source types
+# fixup source types
 FIX_OFF32 = 7  # 32-bit offset
 FIX_REL32 = 8  # 32-bit self-relative
 FIXUP_WIDTH = {7: 4, 8: 4, 5: 2, 2: 2, 3: 4, 6: 6, 0: 1}
@@ -81,7 +83,7 @@ class LEObject:
 
 
 class Fixup:
-    """An internal fixup: ``obj:off`` (source) refers to ``tobj:toff``."""
+    """An internal fixup: obj:off (source) refers to tobj:toff."""
 
     __slots__ = ("obj", "off", "type", "tobj", "toff")
 
@@ -155,9 +157,9 @@ def _encode_name_table(names):
 def encode_fixup_pages(pages, fixups, pagesize):
     """Encode fixups into per-page record lists (MS LINK conventions).
 
-    ``pages`` is a list with one entry per page-map entry: ``(obj_index,
-    page_in_object)`` or None for pages that belong to no object.  Returns a
-    list of lists of FixupRecord, one per page.
+    pages has one entry per page-map entry: (obj_index, page_in_object),
+    or None for a page that belongs to no object.  Returns a list of
+    FixupRecord lists, one per page.
     """
     by_obj = {}
     for f in fixups:
@@ -369,7 +371,7 @@ class LEFile:
     # -- writing ------------------------------------------------------------
 
     def to_bytes(self, keep_gap=True):
-        """Serialise the (possibly edited) model."""
+        """Serialize the (possibly edited) model."""
         return build_le(self.stub, self.hdr, self.objects, self.fixups,
                         self.resident_names, self.entry_raw, self.nonres_names,
                         self.winres, gap=self.gap if keep_gap else b"",
@@ -392,10 +394,10 @@ def build_le(stub, hdr_in, objects, fixups, resident_names, entry_raw,
              nonres_names, winres, gap=b"", orphan_pages=None):
     """Build an LE/VxD file from its parts.
 
-    ``hdr_in`` supplies the fields that are not derived from the contents
+    hdr_in supplies the fields that don't come from the contents
     (signature, CPU/OS, module flags, page size, device ID, DDK version...).
-    ``orphan_pages`` maps an object index to a list of raw pages placed
-    right after that object (0 = before the first object).
+    orphan_pages maps an object index to a list of raw pages placed right
+    after that object (0 = before the first object).
     """
     orphan_pages = orphan_pages or {}
     hdr = dict(hdr_in)
@@ -425,7 +427,7 @@ def build_le(stub, hdr_in, objects, fixups, resident_names, entry_raw,
     if owner[-1] is not None:
         o = objects[owner[-1][0] - 1]
         used = len(o.data) - owner[-1][1] * pagesize
-        # the header holds the used size; the file data is dword padded
+        # the header holds the used size, the file data is dword padded
         lastpagesize = used
         last = last[:(used + 3) & ~3]
     else:

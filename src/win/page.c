@@ -1,7 +1,8 @@
 /*
- * page.c -- the page area of the main dialog (see essctl.h).
+ * The page area of the main dialog (see essctl.h).
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -13,7 +14,7 @@
 #define MAX_CTLS 420
 
 int area_w, area_h;
-static int area_x, area_y; /* page area origin in dialog units */
+static int area_x, area_y; // page area origin in dialog units
 static HWND ctls[MAX_CTLS];
 static int nctls;
 static int cur_kind = -1, cur_arg;
@@ -29,8 +30,8 @@ void dlu_to_px(int *x, int *y) {
   *y = rc.bottom;
 }
 
-/* the placeholder IDC_PAGEAREA in the template marks the area; its size in
- * dialog units comes from converting its pixel size back */
+// the hidden IDC_PAGEAREA placeholder in the dialog template marks the page
+// area, convert its pixel rectangle back to dialog units
 void page_init(void) {
   RECT rc;
   POINT p;
@@ -80,7 +81,7 @@ void page_move(HWND ctl, int x, int y, int w, int h, int show) {
   ShowWindow(ctl, SW_SHOWNA);
 }
 
-/* the page area's scroll bar: rows first..first+visible of count */
+// page area scroll bar, showing rows first..first+visible of count
 void page_scrollbar(int first, int count, int visible) {
   HWND sb = GetDlgItem(g_main, IDC_PGSCROLL);
 
@@ -96,8 +97,8 @@ void page_scrollbar(int first, int count, int visible) {
 static void destroy_controls(void) {
   int i;
 
-  /* hide first: destroying a focused control moves the focus through the
-   * remaining ones */
+  // hide the controls before destroying them, destroying a focused control
+  // moves the focus through the remaining ones
   if (GetFocus() && GetParent(GetFocus()) == g_main &&
       GetDlgCtrlID(GetFocus()) >= IDC_PG_EDIT)
     SetFocus(GetDlgItem(g_main, IDC_PAGES));
@@ -181,7 +182,7 @@ void page_vscroll(int code, int pos) {
     fields_vscroll(code, pos);
 }
 
-/* a click on the dialog itself (statics let clicks through) */
+// click on the dialog itself (statics let clicks through)
 void page_click(int x, int y) {
   int ux = 100, uy = 100;
 

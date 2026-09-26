@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
 """Generate reassemblable NASM source from a 16-bit Windows NE module.
 
-Written for ESFM.DRV.  The output assembles with ``nasm -f bin`` and links
-back with ``tools/nelink.py`` into a byte-identical file:
+usage: ne2asm.py driver/ESFM.DRV -n src/esfm/names.txt -o src/esfm
+
+Written for ESFM.DRV.  The source assembles with nasm -f bin and links
+back into the same file, byte for byte, with tools/nelink.py:
 
   <name>.asm      top file: one section per segment, then the link trailer
   segN.asm        segment N: code and data, then its relocation table
@@ -11,16 +15,14 @@ back with ``tools/nelink.py`` into a byte-identical file:
   ne16.inc        macros
   layout.json     MZ stub, header fields, tables, resources, file order
 
-Code is found by recursive descent from the entry table, the start address,
-far calls between segments, jump tables and the entries of the names file;
-everything else is data.  Relocation sites keep their chain links as labels
-(``Rs_OOOO: dw next site``), far calls into other segments name their target,
-so code can be inserted and the module relinked.  After generation the
-source is assembled and compared with the original; an instruction that
-does not reproduce exactly is tried with another encoding, else emitted as
-bytes, until the rebuild matches.
-
-usage: ne2asm.py driver/ESFM.DRV -n src/esfm/names.txt -o src/esfm
+Code is found by recursive descent from the entry table, the start
+address, far calls between segments, jump tables and the names file.
+Everything else is data.  Relocation sites keep their chain links as
+labels (Rs_OOOO: dw next site) and far calls into other segments name
+their target, so code can be inserted and the module relinked.  The
+source is then assembled and compared with the original, and an
+instruction that comes out different is tried with another encoding,
+else emitted as bytes, until the rebuild matches.
 """
 
 import argparse
@@ -92,10 +94,10 @@ class Site:
 
 
 class Names:
-    """names.txt: ``seg:off kind name [size] ; comment``
+    """names.txt: seg:off kind name [size] ; comment
 
     kinds: code (an entry point), data (bytes, with a size), var (a DGROUP
-    variable: absolute operands [off] are written with the name), imm (the
+    variable, absolute operands [off] are written with the name), imm (the
     immediate of the instruction at seg:off is the offset of the label
     given as name), label (a name only)."""
 
@@ -412,7 +414,7 @@ class Emitter:
             text = strict_word(text)
         if img[ins.off] in (0x26, 0x2E, 0x36, 0x3E) and \
                 not re.search(r"\[(cs|ds|es|ss):", text):
-            return None     # a segment prefix ndisasm did not show
+            return None     # a segment prefix ndisasm didn't show
         return text
 
     def emit_insn(self, seg, ins, out):
@@ -872,7 +874,7 @@ def strict_word(text):
 
 
 def _batch(tmp, texts):
-    """Assemble instruction texts one after another; return their bytes."""
+    """Assemble instruction texts one after another and return their bytes."""
     lines = ["        bits 16", '%include "ne16.inc"']
     for i, text in enumerate(texts):
         lines.append("I%d: %s" % (i, text))
@@ -898,9 +900,9 @@ def _batch(tmp, texts):
 
 
 def check_encodings(tmp, dis, em, forced, variants, verbose):
-    """Check every plain instruction's encoding in one batch.  Where NASM
-    picks another encoding, try the load form of reg,reg instructions and a
-    16-bit immediate; failing that, the instruction is emitted as bytes."""
+    """Check the encoding of every plain instruction in one batch.  Where
+    NASM picks another encoding, try the load form of reg,reg instructions
+    and a 16-bit immediate, else emit the instruction as bytes."""
     cands = []
     for seg, insns in dis.insns.items():
         img = dis.data[seg]

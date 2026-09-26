@@ -1,22 +1,23 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
 """Run ESFM.DRV in a 16-bit CPU emulator against a model of the FM chip.
 
-The driver's segments are loaded at fixed paragraphs, its relocations are
-applied, and every import (KERNEL, MMSYSTEM) and the ES1869.VXD entry point
-is a stub that stops the emulator so Python can answer it.  FM port writes
-go to FMChip, which records every write together with the call it came
-from, so a test can see keys left on and address/data pairs split by an
-interrupt.
+The driver's segments are loaded at fixed paragraphs with their relocations
+applied. Every import (KERNEL, MMSYSTEM) and the ES1869.VXD entry point is
+a stub that stops the emulator so Python can answer it. FMChip records
+each FM port write with the call it came from, so a test can see keys left
+on and address/data pairs split by an interrupt.
 
-Interrupts are simulated: a nested modMessage call can be injected after the
-N-th FM port write or the N-th instruction of the running call (only where
-IF is set, as the hardware would), or from inside DriverCallback, the way a
-client sends MIDI data from its MOM_DONE callback.
+A nested modMessage call can be injected like an interrupt, after the N-th
+FM port write or the N-th instruction of the running call (held until IF
+is set, as on the hardware), or from DriverCallback, the way a client
+sends MIDI data from its MOM_DONE callback.
 
     emu = ESFMEmu(open("build/ESFM.DRV", "rb").read())
     emu.open()
     emu.data(0x403C90)                     # note on
-    emu.data(0x003C80, inject=Inject(after_writes=5, msg=MODM_DATA, dw1=...))
+    emu.data(0x003C80, injects=[Inject(MODM_DATA, dw1=..., after_writes=5)])
     emu.keyed_voices()                     # voices keyed on in the chip
 """
 
@@ -57,7 +58,7 @@ MOM_OPEN, MOM_CLOSE, MOM_DONE = 0x3C7, 0x3C8, 0x3C9
 MIDIERR_NOTREADY = 0x43
 MHDR_DONE, MHDR_PREPARED = 1, 2
 
-# import stubs: name -> bytes of arguments (Pascal: popped by the callee)
+# import stubs: (module, ordinal) -> argument bytes the callee pops (Pascal)
 STUB_ARGS = {
     ("KERNEL", 5): 4,       # LocalAlloc(flags, size)
     ("KERNEL", 7): 2,       # LocalFree(h)
@@ -83,7 +84,7 @@ class FMChip:
         self.addr = 0
         self.events = []        # (depth, port offset, value)
         self.splits = []        # (register written, intended register)
-        self.pending = {}       # depth -> [low set, high set] of this writer
+        self.pending = {}       # depth -> address bytes set by that writer
         self.writes = 0
 
     def out(self, port, value, depth):
@@ -102,7 +103,7 @@ class FMChip:
                     want["reg"] != self.addr:
                 self.splits.append((self.addr, want["reg"]))
             self.regs[self.addr & 0x7FF] = value
-        # writes of other writers in between invalidate what this one set
+        # an address write clobbers what writers at other depths set
         for d, w in self.pending.items():
             if d != depth and off in (2, 3):
                 w["clobbered"] = True
@@ -322,8 +323,8 @@ class ESFMEmu:
         return w
 
     def call(self, target, args, injects=()):
-        """Far call target (para, off) with word arguments pushed in order;
-        returns DX:AX."""
+        """Far call target (para, off) with the word arguments pushed in
+        order and return DX:AX."""
         uc = self.uc
         self.injects = list(injects)
         self.icount = 0
@@ -362,7 +363,7 @@ class ESFMEmu:
                     if uc.reg_read(UC_X86_REG_EFLAGS) & IF_FLAG:
                         cs, ip = self._inject(inj, cs, ip, True)
                     else:
-                        # interrupts are off: the interrupt waits; run one
+                        # IF is clear, so the interrupt waits: step one
                         # instruction at a time until IF is set again
                         inj.deferred = True
                         inj.started = True
@@ -508,7 +509,7 @@ class ESFMEmu:
                          injects) & 0xFFFF
 
     def open(self, callback=True, injects=()):
-        """DRVM_INIT and DRVM_ENABLE (a devnode arrives), then
+        """Send DRVM_INIT and DRVM_ENABLE (a devnode arrives), then
         MODM_OPEN with a callback function."""
         if self.modmessage(0x64, 0, DEVNODE, user=0) != 0:
             raise EmuError("DRVM_INIT failed")
@@ -548,7 +549,8 @@ class ESFMEmu:
         return r, flags
 
     def header(self, data, at=0xD800):
-        """A prepared MIDIHDR with data in the stub segment; far pointer."""
+        """Write a prepared MIDIHDR with data into the stub segment and
+        return its far pointer."""
         buf = at + 0x40
         self.wr(STUB_PARA, buf, data)
         self.wr(STUB_PARA, at, struct.pack("<IIIII", (STUB_PARA << 16) | buf,
@@ -567,7 +569,7 @@ class ESFMEmu:
         return self.modmessage(MODM_CLOSE, 0, 0, injects=injects)
 
     def driverproc(self, msg, lp1=0, lp2=0, injects=()):
-        """DriverProc(dwDriverID, hDriver, msg, lParam1, lParam2)."""
+        """Call DriverProc(dwDriverID, hDriver, msg, lParam1, lParam2)."""
         seg, off, _f = self.ne.entries[2]
         return self.call((SEG_PARA[seg], off), [
             0, 1, 1, msg, lp1 >> 16, lp1 & 0xFFFF, lp2 >> 16, lp2 & 0xFFFF],

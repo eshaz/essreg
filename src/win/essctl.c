@@ -1,22 +1,31 @@
 /*
- * essctl.c -- ES1869 control panel for Windows 95 (16-bit Windows program).
+ * essctl is a control panel for the ES1869 in Windows 95,
+ * written as a 16-bit Windows program.
  *
- *   essctl [options]
- *     /load file   apply a profile saved with File > Save profile
- *     /save file   save the current settings as a profile
- *     /dump file   write every readable register to a text file
- *     /ui          open the window after /load, /save or /dump
- *     /q           no message boxes; problems go to ESSCTL.LOG only
- *     /sim         use a simulated ES1869 (no hardware access)
- *     /base=220    Audio_Base (hex), /cfg=800 Config_Base (hex)
- *     /novxd       direct port I/O even with the extended ES1869.VXD
+ * Usage:
+ *   `essctl [options]`
  *
- * Relative file names are taken from essctl's own directory.  Put
- * "essctl /load C:\ESS\MY.INI" in the StartUp group to restore the
- * settings at every start of Windows.  Exit codes of the batch actions:
- * 0 done, 1 done with problems, 2 failed, 3 bad command line.
+ *   /load file   apply a profile saved with File > Save profile
+ *   /save file   save the current settings as a profile
+ *   /dump file   write every readable register to a text file
+ *   /ui          open the window after /load, /save or /dump
+ *   /q           no message boxes, problems only go to ESSCTL.LOG
+ *   /sim         use a simulated ES1869 (no hardware access)
+ *   /base=220    Audio_Base (hex)
+ *   /cfg=800     Config_Base (hex)
+ *   /novxd       direct port I/O even with the extended ES1869.VXD
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * Notes:
+ *
+ * Relative file names are taken from essctl's own directory.
+ * Put `essctl /load C:\ESS\MY.INI` in the StartUp group to
+ * restore the settings every time Windows starts.
+ *
+ * Exit codes of the batch actions: 0 done, 1 done with
+ * problems, 2 failed, 3 bad command line.
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -43,7 +52,7 @@ int g_expert;
 static int quiet;
 static char log_path[144];
 
-/* --- messages and log ---------------------------------------------------- */
+// --- messages and log -------------------------------------------------------
 
 static void log_line(const char *text) {
   FILE *f;
@@ -78,7 +87,7 @@ int confirm(HWND owner, const char *text) {
                     MB_YESNO | MB_ICONEXCLAMATION | MB_DEFBUTTON2) == IDYES;
 }
 
-/* NAME in the directory of essctl.exe */
+// path to name in essctl.exe's directory
 void app_dir_file(const char *name, char *path, unsigned size) {
   char *slash;
 
@@ -91,7 +100,7 @@ void app_dir_file(const char *name, char *path, unsigned size) {
   strcat(path, name);
 }
 
-/* --- profiles in INI files ----------------------------------------------- */
+// --- profiles in INI files --------------------------------------------------
 
 static int ini_get(void *ctx, const char *section, const char *key, char *buf,
                    unsigned size) {
@@ -112,8 +121,8 @@ static int ini_keys(void *ctx, const char *section, char *buf,
                                  (const char *)ctx);
 }
 
-/* profile functions want absolute paths: a bare name would be looked up
- * in the Windows directory */
+// the profile functions look up a bare file name in the Windows directory,
+// so make the path absolute
 static void full_path(const char *in, char *out, unsigned size) {
   if (in[0] && (in[1] == ':' || in[0] == '\\')) {
     strncpy(out, in, size - 1);
@@ -159,7 +168,7 @@ int profile_save_file(const char *path, char *report, unsigned size) {
   io.put = ini_put;
   io.keys = ini_keys;
   io.ctx = full;
-  WritePrivateProfileString(PROF_FIELDS, 0, 0, full); /* drop old keys */
+  WritePrivateProfileString(PROF_FIELDS, 0, 0, full); // drop old keys
   if ((err = winio_begin()) < 0) {
     strncpy(report, esshw_strerror(err), size - 1);
     report[size - 1] = 0;
@@ -167,18 +176,18 @@ int profile_save_file(const char *path, char *report, unsigned size) {
   }
   prof_save(&io, &rep);
   winio_end();
-  /* the ESFM bank loaded in this session, if any */
+  // save the ESFM bank loaded in this session, if any
   WritePrivateProfileString("ESFM", 0, 0, full);
   if (esfm_last_bank[0])
     WritePrivateProfileString("ESFM", "Bank", esfm_last_bank, full);
-  WritePrivateProfileString(0, 0, 0, full); /* flush the cache */
+  WritePrivateProfileString(0, 0, 0, full); // flush the profile cache
   report_text(&rep, 0, report, size);
   if (!rep.saved)
     return 2;
   return rep.failed ? 1 : 0;
 }
 
-/* wait without blocking Windows (never inside a winio bracket) */
+// wait without blocking Windows (never inside a winio bracket)
 static void pause_ms(DWORD ms) {
   DWORD start = GetTickCount();
   MSG msg;
@@ -192,8 +201,8 @@ static void pause_ms(DWORD ms) {
     }
 }
 
-/* [ESFM] Bank=file of a profile: load it into the running ESFM.DRV and
- * append the outcome to the report; 1 if that failed */
+// load the profile's [ESFM] Bank=file into the running ESFM.DRV and add
+// the result to the report, returns 1 if that failed
 static int load_esfm(const char *profile, char *report, unsigned size) {
   char bank[144], msg[160];
   int rc;
@@ -225,8 +234,8 @@ int profile_load_file(const char *path, char *report, unsigned size) {
   io.put = ini_put;
   io.keys = ini_keys;
   io.ctx = full;
-  /* DSP registers are refused while Windows plays a sound (at startup,
-   * the startup sound): try again a little later */
+  // DSP registers are refused while Windows plays a sound (at startup, the
+  // startup sound), so try again a little later
   for (attempt = 0;; attempt++) {
     if ((err = winio_begin()) < 0) {
       memset(&rep, 0, sizeof(rep));
@@ -250,7 +259,7 @@ int profile_load_file(const char *path, char *report, unsigned size) {
              : 0;
 }
 
-/* --- register dump ------------------------------------------------------- */
+// --- register dump ----------------------------------------------------------
 
 int dump_file(const char *path) {
   static char info[2048];
@@ -302,7 +311,7 @@ int dump_file(const char *path) {
   return 0;
 }
 
-/* --- command line -------------------------------------------------------- */
+// --- command line -----------------------------------------------------------
 
 struct cmdline {
   struct winio_opts io;
@@ -310,7 +319,7 @@ struct cmdline {
   int ui, bad;
 };
 
-/* next word of the command line (quotes group), or 0 at the end */
+// next word of the command line (quoted text is one word), 0 at the end
 static LPSTR next_word(LPSTR p, char *out, unsigned size) {
   unsigned n = 0;
   int quoted = 0;
@@ -380,7 +389,7 @@ static void parse_cmdline(LPSTR p, struct cmdline *c) {
   }
 }
 
-/* every batch action is logged; problems also show a message unless /q */
+// log every batch action, problems also show a message unless /q
 static void batch_result(const char *line, int r) {
   log_line(line);
   if (r && !quiet)
@@ -412,12 +421,12 @@ static int run_batch(const struct cmdline *c) {
   return rc;
 }
 
-/* --- main ---------------------------------------------------------------- */
+// --- main -------------------------------------------------------------------
 
 static BOOL register_classes(void) {
   WNDCLASS wc;
 
-  /* the main dialog gets its own class so that it has an icon */
+  // the main dialog gets its own class so it has an icon
   memset(&wc, 0, sizeof(wc));
   wc.lpfnWndProc = DefDlgProc;
   wc.cbWndExtra = DLGWINDOWEXTRA;
@@ -454,7 +463,7 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
       return rc;
   }
   if (prev) {
-    /* one window is enough: bring the running one to the front */
+    // only one window, bring the running one to the front
     HWND other = FindWindow("EssCtlDlg", 0);
     if (other) {
       BringWindowToTop(other);
@@ -483,7 +492,7 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
       TranslateMessage(&msg);
       DispatchMessage(&msg);
     }
-    /* the help line follows the keyboard focus */
+    // the help line follows the keyboard focus
     if (GetFocus() != focus) {
       focus = GetFocus();
       page_focus(focus);

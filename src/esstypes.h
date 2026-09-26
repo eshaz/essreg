@@ -1,11 +1,14 @@
 /*
- * esstypes.h -- fixed-size types and platform glue shared by essreg,
- * essctl and the host-side tests.
+ * Fixed-size types and platform glue shared by essreg, essctl and the host
+ * tests.
  *
- * Targets: Watcom C 11 / Open Watcom (DOS and 16-bit Windows) and gcc
- * (host tests, built with -DESS_HOST).  C89 only.
+ * Notes:
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * Builds with Watcom C 11 / Open Watcom (DOS and 16-bit Windows) and with
+ * gcc for the host tests (-DESS_HOST). Keep the code C89.
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 

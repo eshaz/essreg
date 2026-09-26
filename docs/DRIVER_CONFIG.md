@@ -1,16 +1,16 @@
 # ESS driver settings and the registers Windows sets
 
-This page lists the registry values that the Windows 95 drivers of the ES1869
-read, `ES1869.VXD` and `ES1869.DRV`, what each one does to the chip, and the
-registers `ES1869.DRV` writes while Windows runs. It was worked out from the
-files in `driver/`: `ES1869.VXD` from its source in `src/vxd`, `ES1869.DRV`
-by disassembling it with `ndisasm` after resolving its NE relocation chains
-with `tools/retools/ne.py`. Register meanings are in
-[REGISTERS.md](REGISTERS.md), the VxD's programming interface in
-[VXD_API.md](VXD_API.md).
+This page lists:
+* the registry values the ES1869's Windows 95 drivers (`ES1869.VXD` and `ES1869.DRV`) read, and what each one does to the chip
+* the registers `ES1869.DRV` writes while Windows runs
 
-**Addresses.** `3:3E8F` is segment 3, offset 3E8Fh of `ES1869.DRV`. Segments
-are numbered from 1 in the order of the NE segment table:
+It was worked out from the files in `driver/`:
+* `ES1869.VXD` from its source in `src/vxd`
+* `ES1869.DRV` by disassembling it with `ndisasm`, after resolving its NE relocation chains with `tools/retools/ne.py`
+
+Register meanings are in [REGISTERS.md](REGISTERS.md), and the VxD's programming interface is in [VXD_API.md](VXD_API.md).
+
+**Addresses.** `3:3E8F` is segment 3, offset 3E8Fh of `ES1869.DRV`. Segments are numbered from 1 in the order of the NE segment table:
 
 | Segment | Contents |
 |---|---|
@@ -24,45 +24,30 @@ are numbered from 1 in the order of the NE segment table:
 
 `o5:2122` is an address in object 5 of `ES1869.VXD`, as in `src/vxd`.
 
-**Confidence** of each row: *verified* means the code was followed from the
-registry read to the register write, or to a non-register effect that is
-described; *likely* means the read and the flag were followed but the purpose
-of the code using the flag is inferred; *unknown* means not established.
+**Confidence** of each row:
+* *verified*: the code was followed from the registry read to the register write, or to a non-register effect that is described.
+* *likely*: the read and the flag were followed, but the purpose of the code using the flag is inferred.
+* *unknown*: not established.
 
 ## Where the settings live
 
-Both drivers use the device's software key,
-`HKLM\System\CurrentControlSet\Services\Class\Media\<nnnn>\Config`, which
-OEMSETUP.INF writes as `HKR,Config,...`.
+Both drivers use the device's software key, `HKLM\System\CurrentControlSet\Services\Class\Media\<nnnn>\Config`, which OEMSETUP.INF writes as `HKR,Config,...`.
 
-- **ES1869.VXD** reads its values with CONFIGMG
-  `CM_Read_Registry_Value(devnode, "Config", name, REG_BINARY, ...,
-  CM_REGISTRY_SOFTWARE)` when the device starts (o5:0000).
-- **ES1869.DRV** gets the key name from CONFIGMG's protected-mode API
-  (INT 2Fh AX=1684h BX=0033h; function 3Dh `CM_Get_DevNode_Key(devnode, NULL,
-  buffer, 100h, CM_REGISTRY_SOFTWARE)` in the wrapper 3:09EA). It appends
-  `\Config` or `\Config\GPO Selections` and opens that under
-  HKEY_LOCAL_MACHINE with KERNEL's `RegOpenKey` and `RegQueryValueEx`
-  (ordinals 217 and 225). Two values go through CONFIGMG instead: "Telegaming
-  Vol" (function 3Eh, 6:1FD6) and "Single Mode DMA" in the configuration
-  dialog (read with 3Eh at 3:44E6, written with 3Fh `CM_Write_Registry_Value`
-  at 3:4549).
-- ES1869.DRV's `RegQueryValueEx` calls pass no type pointer, so any value
-  type is accepted. Each value is read into a buffer that already holds the
-  default. A missing value keeps the default, and most likely so does a value
-  longer than the buffer. A shorter one overwrites only the first bytes: a
-  1-byte "Disable Mic Preamp" of 00 turns the default 1 into 0.
-- ES1869.DRV also **writes** the key. Routine 3:0D54 saves the mixer state
-  (section 2.3) as 4-byte REG_BINARY values. It runs when the last of its
-  devices is disabled (DRVM_DISABLE, 3:4D2C; most likely at shutdown) and
-  before an APM suspend (3:4C8A).
+* **ES1869.VXD** reads its values with CONFIGMG `CM_Read_Registry_Value(devnode, "Config", name, REG_BINARY, ..., CM_REGISTRY_SOFTWARE)` when the device starts (o5:0000).
+* **ES1869.DRV** gets the key name from CONFIGMG's protected-mode API (INT 2Fh AX=1684h BX=0033h; function 3Dh `CM_Get_DevNode_Key(devnode, NULL, buffer, 100h, CM_REGISTRY_SOFTWARE)` in the wrapper 3:09EA).
+  * It appends `\Config` or `\Config\GPO Selections` and opens that under HKEY_LOCAL_MACHINE with KERNEL's `RegOpenKey` and `RegQueryValueEx` (ordinals 217 and 225).
+  * Two values go through CONFIGMG instead: "Telegaming Vol" (function 3Eh, 6:1FD6) and "Single Mode DMA" in the configuration dialog (read with 3Eh at 3:44E6, written with 3Fh `CM_Write_Registry_Value` at 3:4549).
+* ES1869.DRV's `RegQueryValueEx` calls pass no type pointer, so any value type is accepted.
+  * Each value is read into a buffer that already holds the default.
+  * A missing value keeps the default, and most likely so does a value longer than the buffer.
+  * A shorter one overwrites only the first bytes: a 1-byte "Disable Mic Preamp" of 00 turns the default 1 into 0.
+* ES1869.DRV also **writes** the key. Routine 3:0D54 saves the mixer state (section 2.3) as 4-byte REG_BINARY values. It runs when the last of its devices is disabled (DRVM_DISABLE, 3:4D2C; most likely at shutdown) and before an APM suspend (3:4C8A).
 
 ## 1. ES1869.VXD settings
 
-All are read once, when the device starts (o5:0000, called at o5:060E).
-Byte values are read with a length of 1 and dwords with 4. The resulting
-flags go to the device structure (ADI): low word at offset 04h, high word at
-13h.
+* All are read once, when the device starts (o5:0000, called at o5:060E).
+* Byte values are read with a length of 1 and dwords with 4.
+* The resulting flags go to the device structure (ADI): low word at offset 04h, high word at 13h.
 
 | Value | Size | Flag | Effect | Confidence |
 |---|---|---|---|---|
@@ -78,15 +63,14 @@ flags go to the device structure (ADI): low word at offset 04h, high word at
 
 ## 2. ES1869.DRV settings
 
-ES1869.DRV reads 97 value names: 16 configuration values and 8 values in
-`Config\GPO Selections` (2.2), 59 mixer-state values (2.3) and 14 volume maps
-(2.4).
+ES1869.DRV reads 97 value names:
+* 16 configuration values and 8 values in `Config\GPO Selections` (2.2)
+* 59 mixer-state values (2.3)
+* 14 volume maps (2.4)
 
 ### 2.1 When the values are read
 
-All four message entry points (mixer, wave in, wave out, aux) pass
-DRVM_INIT, DRVM_ENABLE and DRVM_DISABLE to the same shared routines, which
-count the calls, so the work is done once per device.
+All four message entry points (mixer, wave in, wave out, aux) pass DRVM_INIT, DRVM_ENABLE and DRVM_DISABLE to the same shared routines. These count the calls, so the work is done once per device.
 
 | When | Routine | Reads |
 |---|---|---|
@@ -121,28 +105,23 @@ The "Read at" column gives the `RegQueryValueEx` call.
 | GPO0 Default, GPO1 Default | 3:3AFD, 3:3C9D | dword, current pin level | If present, or if Show is set, sets the pin: Audio_Base+7 bit 0 or 1 through VxD function 0005 (5:39C0). On Compaq devices GPO1 is inverted. Saved at shutdown if Show is set (3:1874). | verified |
 | GPO0/GPO1 LongLabel, Label | 3:3BBA, 3:3BF7, 3:3C27; 3:3D5A, 3:3D97, 3:3DC7 | string, 64 / 16 bytes | Only with Show: LongLabel (or Label if it is missing) becomes the control's long name, Label its short name. | verified |
 
-A device whose ID contains CPQB023, CPQB0AB, CPQB0AC or CPQB0AD (CONFIGMG
-function 07h, 3:0B92-3:0CA0) is treated as a Compaq. On a Compaq, Treble and
-Bass go to `SetEqzrCtrls` in CPQVAPI.DLL (5:0000, 5:3A74), except on
-CPQB0AB and CPQB0AC, where they are hidden. There is no ES1869 register for
-treble and bass.
+**Compaq.** A device whose ID contains CPQB023, CPQB0AB, CPQB0AC or CPQB0AD (CONFIGMG function 07h, 3:0B92-3:0CA0) is treated as a Compaq.
+* On a Compaq, Treble and Bass go to `SetEqzrCtrls` in CPQVAPI.DLL (5:0000, 5:3A74), except on CPQB0AB and CPQB0AC, where they're hidden.
+* There's no ES1869 register for treble and bass.
 
 ### 2.3 Mixer state
 
-These values hold the state of ES1869.DRV's mixer controls. They are
-restored at every enable and resume (3:18EC) through the driver's own
-set-control-details path (5:17CA) and saved back when the device is disabled
-and at suspend (3:0D54). The number in the Control column is the control ID.
-Volumes are the 16-bit mixer value (0-FFFFh) in the low word of a dword.
-Pairs such as Left/RightMasterVol are one value per channel. The conversions:
+* These values hold the state of ES1869.DRV's mixer controls.
+* They're restored at every enable and resume (3:18EC) through the driver's own set-control-details path (5:17CA), and saved back when the device is disabled and at suspend (3:0D54).
+* The number in the Control column is the control ID.
+* Volumes are the 16-bit mixer value (0-FFFFh) in the low word of a dword. Pairs such as Left/RightMasterVol are one value per channel.
 
-- 4-bit registers: nibble = map[value >> 12], left channel in bits 7:4,
-  right in 3:0. The map is the volume map of section 2.4.
-- Master: 60h/62h bits 5:0 = HwVolumeMap[value >> 10]; bit 6 = Master Mute.
-- PC speaker: 3Ch = (value x max(master left, master right) / FFFFh) >> 13,
-  and 0 while the master is muted.
-- A muted or deselected source gets 00h in its register.
-- Bitmasks: bit i is source i of the destination, in the order given below.
+The conversions:
+* 4-bit registers: nibble = map[value >> 12], left channel in bits 7:4, right in 3:0. The map is the volume map of section 2.4.
+* Master: 60h/62h bits 5:0 = HwVolumeMap[value >> 10]; bit 6 = Master Mute.
+* PC speaker: 3Ch = (value x max(master left, master right) / FFFFh) >> 13, and 0 while the master is muted.
+* A muted or deselected source gets 00h in its register.
+* Bitmasks: bit i is source i of the destination, in the order given below.
 
 | Value(s) | Read at | Default | Control | Register effect | Confidence |
 |---|---|---|---|---|---|
@@ -174,26 +153,23 @@ Pairs such as Left/RightMasterVol are one value per channel. The conversions:
 | 3D Effect (fallback SpatializerEffect) | 3:30FD, 3:32D0, 3:331A, 3:343C | FFFFFFFFh (BFFFBFFFh for software 3-D) | 3D Effect (42) | 52h = low word >> 10 (5:3B90); the high word is the right channel and is ignored | verified |
 | Treble, Bass | 3:319D, 3:3237 | 7FFF7FFFh | Treble (43), Bass (44) | Compaq only: CPQVAPI.DLL; no register | verified |
 
-Source order: **playback** (Mixer:Output, MutesOut) bit 0 Line-In, 1 Wave,
-2 Microphone, 3 CD Audio, 4 Synthesizer, 5 AuxB, 6 IIS, 7 PC Speaker.
-**Recording** (Mixer:Wave) 0 Line-In, 1 Microphone, 2 CD Audio, 3 AuxB,
-4 Synthesizer, 5 Wave. **Voice** (Mixer:Voice) 0 Line-In, 1 Microphone,
-2 CD Audio, 3 AuxB, 4 Wave. The INF's "Mixer:Output" 5Bh turns off Mic, AuxB
-and PC speaker; its "MutesOut" 44h mutes Mic and IIS.
+Source order:
+* **Playback** (Mixer:Output, MutesOut): bit 0 Line-In, 1 Wave, 2 Microphone, 3 CD Audio, 4 Synthesizer, 5 AuxB, 6 IIS, 7 PC Speaker.
+* **Recording** (Mixer:Wave): 0 Line-In, 1 Microphone, 2 CD Audio, 3 AuxB, 4 Synthesizer, 5 Wave.
+* **Voice** (Mixer:Voice): 0 Line-In, 1 Microphone, 2 CD Audio, 3 AuxB, 4 Wave.
+* The INF's "Mixer:Output" 5Bh turns off Mic, AuxB and PC speaker. Its "MutesOut" 44h mutes Mic and IIS.
 
-The 3-D values take effect only if their controls exist, that is with Enable
-ES938 (the default) or Enable Software 3D Effect; the driver's
-set-control-details rejects disabled controls (5:08B0). Treble and Bass
-exist only on a Compaq that has CPQVAPI.DLL.
+Also:
+* The 3-D values take effect only if their controls exist, that is with Enable ES938 (the default) or Enable Software 3D Effect. The driver's set-control-details rejects disabled controls (5:08B0).
+* Treble and Bass exist only on a Compaq that has CPQVAPI.DLL.
 
 ### 2.4 Volume maps
 
-Each map must be exactly 16 bytes (checked at 3:356D and similar). Entry n is
-the 4-bit register value used for slider step n. Entries must be 00-0Fh: the
-right-channel entry is ORed in unmasked, so a larger value would corrupt the
-left nibble (for example 5:2697). The defaults at 7:0990-7:0A6F are the identity
-00, 01 ... 0F. The maps apply in the set-control-details path only (see
-Left/RightDACVol).
+* Each map must be exactly 16 bytes (checked at 3:356D and similar).
+* Entry n is the 4-bit register value used for slider step n.
+* Entries must be 00-0Fh. The right-channel entry is ORed in unmasked, so a larger value would corrupt the left nibble (for example 5:2697).
+* The defaults at 7:0990-7:0A6F are the identity 00, 01 ... 0F.
+* The maps apply in the set-control-details path only (see Left/RightDACVol).
 
 | Map | Table | Used for |
 |---|---|---|
@@ -203,18 +179,13 @@ Left/RightDACVol).
 
 ### 2.5 Names nobody reads
 
-- In ES1869.DRV but never referenced: StartupMuteMsg, MIDIInPersistence,
-  MonoInMicMute, LeftMonoInMic, RightMonoInMic, Do Not Want ES938.
-- In OEMSETUP.INF / `ess_windows_regs.txt` but read by neither driver:
-  "Telegaming". Only "Telegaming Vol" is read. Nothing in either driver sets
-  telegaming mode (mixer 48h bit 1).
-- ESSDC.EXE, the "DC Drift daemon" started by the INF, uses no registry value
-  names and was not analyzed further.
+* In ES1869.DRV but never referenced: StartupMuteMsg, MIDIInPersistence, MonoInMicMute, LeftMonoInMic, RightMonoInMic, Do Not Want ES938.
+* In OEMSETUP.INF / `ess_windows_regs.txt` but read by neither driver: "Telegaming". Only "Telegaming Vol" is read. Nothing in either driver sets telegaming mode (mixer 48h bit 1).
+* ESSDC.EXE, the "DC Drift daemon" started by the INF, uses no registry value names and wasn't analyzed further.
 
 ## 3. VxD calls made by ES1869.DRV
 
-ES1869.DRV stores the AUDDRV entry point (INT 2Fh AX=1684h BX=3B07h) at
-DS:0010 (3:0091) and passes the devnode in ECX.
+ES1869.DRV stores the AUDDRV entry point (INT 2Fh AX=1684h BX=3B07h) at DS:0010 (3:0091) and passes the devnode in ECX.
 
 | DX | Call | Wrapper | Called from | Purpose |
 |---|---|---|---|---|
@@ -233,10 +204,9 @@ DS:0010 (3:0091) and passes the devnode in ECX.
 
 ## 4. Registers ES1869.DRV writes
 
-Mixer registers go through 1:12B2 (index to Audio_Base+4h, data to +5h).
-Controller registers go through DSP commands: the register then the value,
-with read-modify-write as C0h, register, read. A register tool should expect
-Windows to overwrite everything below.
+* Mixer registers go through 1:12B2 (index to Audio_Base+4h, data to +5h).
+* Controller registers go through DSP commands: the register then the value, with read-modify-write as C0h, register, read.
+* A register tool should expect Windows to overwrite everything below.
 
 **At every device enable and APM resume** (3:4818, then the restore):
 
@@ -250,8 +220,7 @@ Windows to overwrite everything below.
 | from the restore | 3:18EC | 60h, 62h, 3Eh, 7Ch, 1Ah, 38h, 36h, 3Ah, 3Ch, 68h, 6Dh, 6Fh, 7Dh bits 3:1, 50h, 52h, Audio_Base+7 bits 1:0 |
 | 7Fh bit 0 | 3:4BDD (enable), 3:4CDA-3:4CF7 (resume) | set, unless ESSWaveTableChip; at resume cleared instead if FM or an ES689 had the music DAC (dev+117h) |
 
-**Mixer API** (MXDM_SETCONTROLDETAILS 5:17CA, per-control handlers at 5:2BA1).
-Every change acquires and releases the DSP around the write.
+**Mixer API** (MXDM_SETCONTROLDETAILS 5:17CA, per-control handlers at 5:2BA1). Every change acquires and releases the DSP around the write.
 
 | Register | Address | From |
 |---|---|---|
@@ -267,9 +236,7 @@ Every change acquires and releases the DSP around the write.
 | Audio_Base+7 bits 1:0 | via VxD 0005 | GPO0, GPO1 |
 | 7Fh bit 0 | 5:1FA3 (clear), 5:206D (set) | FM driver opens or closes (ESSFMMXD messages); also 3:4F7F / 3:4FD8 (ESMPUISR) and 3:4E39 (clear at disable) |
 
-At every playback start, 5:3BAC (6:2D5A) reads 60h and 62h back. If they
-changed, from the hardware buttons or a DOS program, it updates the Master
-Volume and Mute controls and so rewrites 60h and 62h.
+At every playback start, 5:3BAC (6:2D5A) reads 60h and 62h back. If they changed, from the hardware buttons or a DOS program, it updates the Master Volume and Mute controls and so rewrites 60h and 62h.
 
 **Playback** (Audio 2):
 
@@ -286,10 +253,9 @@ Volume and Mute controls and so rewrites 60h and 62h.
 | 78h, 7Ah, 7Ch | 1:16FE, 1:171B, 1:1739, 1:1744 | at stop: 78h bit 4 cleared then 00h, 7Ah bit 7 cleared, **7Ch = 00h**, so the Wave volume reads 00h while nothing plays |
 | 7Ah bit 7 | 3:0300 | cleared by the interrupt handler, which saves and restores the mixer index (3:02EF, 3:0307) |
 
-**Recording** (Audio 1). ES1869.DRV also resets the DSP itself (1:11A0:
-Audio_Base+6 = 03h then 00h, then command C6h) when it takes the DSP for
-recording: 6:05A8, 6:0811, 6:0D5E, 6:0DEB. That clears all controller
-registers.
+**Recording** (Audio 1):
+* ES1869.DRV also resets the DSP itself (1:11A0: Audio_Base+6 = 03h then 00h, then command C6h) when it takes the DSP for recording: 6:05A8, 6:0811, 6:0D5E, 6:0DEB.
+* That clears all controller registers.
 
 | Register | Address | Value |
 |---|---|---|
@@ -305,36 +271,21 @@ registers.
 | 1Ch, 68h, 69h, 6Ah, 6Bh, 6Ch, 6Eh, B4h, 7Dh bit 3 | 5:35AC, 5:365B | record source and record mix, see 2.3 |
 | B8h | 1:1626-1:1690 | at stop: bit 2 cleared, then B8h & 30h (or DSP D0h for some formats) |
 
-**Never written by ES1869.DRV** (apart from the mixer reset): the SB Pro
-views 04h-2Eh, 32h, 42h-4Eh (the VxD writes 48h bit 4), 64h (the VxD writes
-bits 5 and 3:2 at start and bits 1:0 for the hardware volume interrupt), 65h,
-66h, BAh, BBh, 7Fh bits 7:1, Audio_Base+7 bits 7:2.
+**Never written by ES1869.DRV** (apart from the mixer reset): the SB Pro views 04h-2Eh, 32h, 42h-4Eh (the VxD writes 48h bit 4), 64h (the VxD writes bits 5 and 3:2 at start and bits 1:0 for the hardware volume interrupt), 65h, 66h, BAh, BBh, 7Fh bits 7:1, Audio_Base+7 bits 7:2.
 
 ## 5. How to change a setting
 
-- Put the value in the device's software key,
-  `HKLM\System\CurrentControlSet\Services\Class\Media\<nnnn>\Config`, where
-  `<nnnn>` is the ES1869's instance (the one whose `Driver` value is
-  `es1869.vxd`). GPO values go in its subkey `GPO Selections`.
-- Use binary values, as in OEMSETUP.INF's `HKR,Config,"name",01,...` lines
-  (flag 01 = REG_BINARY). CONFIGMG reads, used by the VxD and for "Telegaming
-  Vol", ask for REG_BINARY. Dwords are 4 bytes, low byte first
-  (`01,00,00,00`). Byte values (Disable Warning, Multiple FM Support, Do Not
-  Want ES689, DOS MPU-401 Interrupts, Disable Mic Gain, Telegaming Vol)
-  should be exactly one byte. Maps must have exactly 16 bytes, HwVolumeMap
-  exactly 64. The GPO labels are strings (`HKR,"Config\GPO Selections","GPO0
-  Label",,"text"`).
-- Settings take effect when Windows starts again: the VxD and ES1869.DRV
-  read them only when the device starts.
-- **The mixer-state values of 2.3 and GPO0/GPO1 Default are overwritten** by
-  ES1869.DRV when it disables the device (most likely at shutdown) and at
-  suspend. Registry edits to them made while Windows runs are lost. Set them
-  with the Volume Control instead, or edit them while the driver is not
-  running, for example in Safe Mode. The values of sections 1 and 2.2 are
-  only read, never written, except Single Mode DMA, which the driver's own
-  Settings dialog writes ("Use single mode DMA": Multimedia control panel,
-  Advanced, the ES1869 audio device, Properties, Settings).
-- A setting made with essctl or essreg is undone by the mixer reset at the
-  next start or resume, and by the writes in section 4. An `essctl /load` in
-  the StartUp group runs after the driver's start-up writes, but the
-  playback, recording and mixer writes of section 4 still apply afterwards.
+* Put the value in the device's software key, `HKLM\System\CurrentControlSet\Services\Class\Media\<nnnn>\Config`, where `<nnnn>` is the ES1869's instance (the one whose `Driver` value is `es1869.vxd`). GPO values go in its subkey `GPO Selections`.
+* Use binary values, as in OEMSETUP.INF's `HKR,Config,"name",01,...` lines (flag 01 = REG_BINARY).
+  * The CONFIGMG reads (the VxD's, and the one for "Telegaming Vol") ask for REG_BINARY.
+  * Dwords are 4 bytes, low byte first (`01,00,00,00`).
+  * Byte values (Disable Warning, Multiple FM Support, Do Not Want ES689, DOS MPU-401 Interrupts, Disable Mic Gain, Telegaming Vol) should be exactly one byte.
+  * Maps must have exactly 16 bytes, HwVolumeMap exactly 64.
+  * The GPO labels are strings (`HKR,"Config\GPO Selections","GPO0 Label",,"text"`).
+* Settings take effect when Windows starts again: the VxD and ES1869.DRV read them only when the device starts.
+* **The mixer-state values of 2.3 and GPO0/GPO1 Default are overwritten** by ES1869.DRV when it disables the device (most likely at shutdown) and at suspend.
+  * Registry edits to them made while Windows runs are lost.
+  * Set them with the Volume Control instead, or edit them while the driver isn't running, for example in Safe Mode.
+* The values of sections 1 and 2.2 are only read, never written, except Single Mode DMA. The driver's own Settings dialog writes that one ("Use single mode DMA": Multimedia control panel, Advanced, the ES1869 audio device, Properties, Settings).
+* A setting made with essctl or essreg is undone by the mixer reset at the next start or resume, and by the writes in section 4.
+  * An `essctl /load` in the StartUp group runs after the driver's start-up writes, but the playback, recording and mixer writes of section 4 still apply afterwards.

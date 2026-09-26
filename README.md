@@ -1,24 +1,22 @@
 # essreg
 ES1869 Register Utility
 
-Tools for the ESS AudioDrive ES1869 sound card chipset: a Windows 95
-control panel for every register of the chip, a DOS register utility,
-a rebuilt Windows 95 driver with a register interface, and utilities
-for the FM synthesizer's patch banks.
+This repository contains utilities and drivers designed for the ESS AudioDrive ES1869 sound card chipset.
 
 ## [`essctl.exe`](build)
 * Windows 95 control panel for the ES1869 (a 16-bit Windows program).
-* Shows every register of the chip, 133 registers and 272 settings, on pages: output mixer, master volume, record, 3-D/mic/MONO/I2S, serial and telegaming, Audio 1 and 2, ADC offset and power, status, Plug and Play, SB compatible mixer, raw registers, ESFM patch bank.
-  * Each setting shows the decoded value (sample rates in Hz, ADC offsets in samples, named choices), with the register, bits and data sheet page in the help line.
-  * Every change is written and read back; the page shows what the chip returned.
+* Shows every register of the chip, 133 registers and 272 settings, on these pages: *Output mixer*, *Master volume*, *Record*, *3-D, mic, MONO, I2S*, *Serial / telegaming*, *Audio 2 channel*, *Audio 1 controller*, *ADC offset & power*, *Status & interrupts*, *Plug and Play*, *SB compatible mixer*, *Raw registers* and *ESFM patch bank*.
+  * Each setting shows the decoded value (sample rates in Hz, ADC offsets in samples, named choices). The help line shows the register, bits and data sheet page.
+  * Every change is written and read back, so the page shows what the chip returned.
 * Settings that can stop playback, hang the DSP or move the card to other resources are read-only until Options > *Expert mode* is turned on for the session.
 * Talks to the card in one of three ways:
-  * through the register interface of the rebuilt `ES1869.VXD` (below): nothing Windows or a DOS game is doing is disturbed;
-  * with the stock driver, directly: essctl borrows the sound device around each access and gives it back, so a DOS game gets "in use" only while essctl is actually reading;
+  * Through the register interface of the rebuilt `ES1869.VXD` (below). Nothing Windows or a DOS game is doing is disturbed.
+  * Directly, with the stock driver. essctl borrows the sound device around each access and gives it back, so a DOS game only gets "in use" while essctl is reading.
   * `/sim`: a simulated ES1869, to try essctl without the card.
-* **Profiles**: File > *Save profile* stores the 50 ordinary settings in an INI file; File > *Load profile* restores them. Put `essctl /load C:\ESS\MY.INI` in the StartUp group to restore them at every start of Windows: the ESS driver resets the mixer whenever Windows starts and puts back only its own settings ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)).
-* **ESFM**: *ESFM > Load patch bank* replaces the FM synthesizer's sounds while Windows runs.
-  * The ESFM page shows the synthesizer's 18 voices live and marks hanging notes; *Stress test* plays dense music to check for them ([docs/ESFM_MIDI.md](docs/ESFM_MIDI.md)).
+* **Profiles**: File > *Save profile* stores the 50 ordinary settings in an INI file, and File > *Load profile* restores them.
+  * The ESS driver resets the mixer whenever Windows starts and only puts back its own settings ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)). Put `essctl /load C:\ESS\MY.INI` in the StartUp group to restore yours at every start of Windows.
+* **ESFM**: ESFM > *Load patch bank* replaces the FM synthesizer's sounds while Windows runs.
+  * Check out the *ESFM patch bank* page! It shows the synthesizer's 18 voices live and marks hanging notes. *Stress test* plays dense music to check for them ([docs/ESFM_MIDI.md](docs/ESFM_MIDI.md)).
 
 ```
 essctl [/load file] [/save file] [/dump file] [/ui] [/q]
@@ -35,15 +33,18 @@ essctl [/load file] [/save file] [/dump file] [/ui] [/q]
 
 ## [`ES1869.VXD`](build) with a register interface
 * The Windows 95 driver of the ES1869, rebuilt from source in [`src/vxd`](src/vxd), with a register interface for programs added ([docs/VXD_API.md](docs/VXD_API.md)).
-* Otherwise it behaves exactly like the ESS driver: `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte for byte.
-* Install: keep a copy of `C:\WINDOWS\SYSTEM\ES1869.VXD`, copy `build\ES1869.VXD` over it, restart Windows. See [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#installing-the-extended-driver), including how to go back if something goes wrong.
-* The rebuilt driver no longer carries ESS's DirectX certification mark.
+* Otherwise it works exactly like the ESS driver. `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte for byte.
+* Install: keep a copy of `C:\WINDOWS\SYSTEM\ES1869.VXD`, copy `build\ES1869.VXD` over it and restart Windows.
+  * See [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#installing-the-extended-driver) for the steps, and how to go back if something goes wrong.
+* *Note: the rebuilt driver no longer carries ESS's DirectX certification mark.*
 
 ## [`ESFM.DRV`](build) without hanging notes
 * The Windows 95 MIDI driver of the ES1869's FM synthesizer, rebuilt from source in [`src/esfm`](src/esfm).
-* ESS's driver drops MIDI messages that come in while it is busy, so notes hang when the music gets busy. This one queues them instead, and also silences every voice when a program closes the device with the sustain pedal down. All in [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md).
-* Everything else is ESS's code: `python3 tools/build_esfm.py --stock --verify` rebuilds the original byte for byte, and `esfmpat` and essctl's banks work the same.
-* Install it from DOS (Windows has the driver open): keep a copy of `C:\WINDOWS\SYSTEM\ESFM.DRV`, copy `build\ESFM.DRV` over it, restart Windows.
+* ESS's driver drops MIDI messages that come in while it's busy, so notes hang when the music gets busy. This one queues them instead.
+* It also silences every voice when a program closes the device with the sustain pedal down.
+* See [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md) for the details.
+* Everything else is ESS's code. `python3 tools/build_esfm.py --stock --verify` rebuilds the original byte for byte, and `esfmpat` and essctl's banks work the same.
+* Install it from DOS, since Windows has the driver open: keep a copy of `C:\WINDOWS\SYSTEM\ESFM.DRV`, copy `build\ESFM.DRV` over it and restart Windows.
 
 ## [`essreg.exe`](build)
 * Utility to control otherwise unsupported registers for the ES1869 audio chip.
@@ -94,11 +95,12 @@ c:\>1869opl3.com "c:\path\to\game.exe"
 
 ## [`esfmpat.exe`](build)
 * Utility to write custom patch banks to the Windows ESFM VxD driver.
-* Banks larger than the driver's own (up to 32752 bytes) are supported: they are appended to the driver file and the driver is told the new size. The original driver is kept as `ESFM.BAK`.
-* Accepts raw banks and RIFF "Ptch" bank files; checks the bank and the driver before changing anything. See [docs/ESFM_BANK.md](docs/ESFM_BANK.md) for the bank format.
+* Patch banks that are larger than the existing bank work now, up to 32752 bytes. They're appended to the driver file and the driver is told the new size.
+* The original driver is kept as `ESFM.BAK`.
+* Accepts raw banks and RIFF "Ptch" bank files, and checks the bank and the driver before changing anything. See [docs/ESFM_BANK.md](docs/ESFM_BANK.md) for the bank format.
 * See the [ESFM patch banks](esfm_patch_banks) for the Windows 98, Windows NT4, and other custom patches.
 * See the [recordings](digital_recording) for ESFM patch comparisons.
-* To try a bank without restarting Windows, load it with essctl (*ESFM > Load patch bank*).
+* To try a bank without restarting Windows, load it with essctl (ESFM > *Load patch bank*).
 
 ```
 ESFM Patch Utility (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
@@ -114,8 +116,8 @@ Usage: esfmpat "c:\path\to\esfm.drv" "c:\path\to\patch.bin"
 ## Documentation
 * [docs/REGISTERS.md](docs/REGISTERS.md): every register and setting of the ES1869, generated from the catalog [`src/esscat.tbl`](src/esscat.tbl).
 * [docs/VXD_API.md](docs/VXD_API.md): the programming interface of `ES1869.VXD`, including the added register interface.
-* [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md): how the driver works; rebuilding and installing it.
-* [docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md): the registry settings of the ESS drivers and the registers Windows' driver sets.
+* [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md): how the driver works, and how to rebuild and install it.
+* [docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md): the registry settings of the ESS drivers, and the registers the Windows driver sets.
 * [docs/ESFM_BANK.md](docs/ESFM_BANK.md): FM patch banks and `ESFM.DRV`.
 * [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md): why ESFM notes hang, the MIDI driver stack, and the fixed `ESFM.DRV`.
 * [docs/RE_NOTES.md](docs/RE_NOTES.md): how the drivers were reverse-engineered.
@@ -126,19 +128,21 @@ Usage: esfmpat "c:\path\to\esfm.drv" "c:\path\to\patch.bin"
 
 ### Prerequisites
 * MSDOS like build environment (MS-DOS, Windows 9x, DOS-BOX, etc.)
-* [Watcom C 11.0](https://winworldpc.com/product/watcom-c-c/110b) with the DOS and 16-bit Windows targets
-* For the drivers: Python 3 and NASM (any operating system)
+* [Watcom C 11.0](https://winworldpc.com/product/watcom-c-c/110b)
+  * Install the DOS and 16-bit Windows targets.
+* Python 3 and NASM for the drivers (any operating system)
 
 ### Building
 * Clone this repo and copy it your build environment.
-* Run [`build.bat`](build.bat) to build the executables.
+* Run [`build.bat`](build.bat) to build the executables
 * Run `python3 tools/build_vxd.py` to build `build/ES1869.VXD`, and `python3 tools/build_esfm.py` to build `build/ESFM.DRV`.
 * On Linux, `tools/ow2build.sh <open-watcom-v2 directory>` builds the programs with Open Watcom v2 into `out/ow2/`.
-  The programs in [`build`](build), other than `1869opl3.com`, were built this way; `build.bat` builds the same programs with Watcom C 11.0.
+  * The programs in [`build`](build), other than `1869opl3.com`, were built this way. `build.bat` builds the same programs with Watcom C 11.0.
 
 ### Testing
-* `python3 tests/run_tests.py` runs the automated tests against a simulated ES1869; see [docs/TESTING.md](docs/TESTING.md).
-* essreg has been tested using a real ES1869 soundcard on I/O port 0x220. It probably won't work with any other ESS sound chips. [docs/TESTING.md](docs/TESTING.md) has a checklist for essctl and the rebuilt driver on real hardware.
+* This code has been tested using a real ES1869 soundcard on I/O port 0x220. It probably won't work with any other ESS sound chips.
+* For essctl and the rebuilt drivers, [docs/TESTING.md](docs/TESTING.md) has a checklist for real hardware.
+* `python3 tests/run_tests.py` runs the automated tests against a simulated ES1869.
 
 ## License
 * GPL 3.0

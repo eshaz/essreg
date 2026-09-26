@@ -1,10 +1,14 @@
-; thunkhar.asm -- harness for src/win/vxdcall.asm, run in a 16-bit CPU
-; emulator by tests/test_thunk.py.
+; thunkhar is a test harness for src/win/vxdcall.asm that tests/test_thunk.py
+; runs in a 16-bit CPU emulator.
 ;
-; Calls vxd_raw_call with a fake API entry point that checks the registers
-; it receives, clobbers BP and returns new values, then vxd_get_entry
-; (whose INT 2Fh the emulator answers).  The results are left in DATA for
-; the test to inspect; `int 3` ends the run.
+; It calls vxd_raw_call with a fake API entry point that records the
+; registers it gets, clobbers BP and returns new values, then calls
+; vxd_get_entry (the emulator answers its INT 2Fh). The results are left
+; in DATA for the test to read, and `int 3` ends the run.
+;
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
+; Licensed under GPL Version 3.0
 
         .386
 

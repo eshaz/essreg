@@ -1,6 +1,10 @@
-; Device structure of ESFM.DRV: one per ES1869 devnode, LocalAlloc'd in
-; DGROUP (311h bytes, zeroed), linked from device_list.  Offsets as used by
-; the code in seg1.asm and seg3.asm.
+; Device structure of ESFM.DRV.  There's one per ES1869 devnode,
+; LocalAlloc'd in DGROUP (311h bytes, zeroed) and linked from device_list.
+; The offsets are the ones the code in seg1.asm and seg3.asm uses.
+;
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
+; Licensed under GPL Version 3.0
 
 DEV_VXD_ENTRY   equ 0x000   ; dword: ES1869.VXD PM API entry point
 DEV_FM_COUNT    equ 0x004   ; dword: FM acquire count (0102/0103)

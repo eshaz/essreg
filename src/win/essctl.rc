@@ -1,7 +1,8 @@
 /*
- * essctl.rc -- resources of essctl (16-bit Windows resource script).
+ * Resources of essctl (16-bit Windows resource script).
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -54,8 +55,8 @@ BEGIN
     "^R", IDM_READDSP
 END
 
-/* The page area (IDC_PAGEAREA) is a hidden placeholder: the controls of a
- * page are created at run time over it; IDC_PGSCROLL scrolls long pages. */
+/* the page area (IDC_PAGEAREA) is a hidden placeholder, page controls are
+ * created over it at run time and IDC_PGSCROLL scrolls long pages */
 ESSCTL DIALOG 0, 0, 420, 262
 STYLE WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | DS_3DLOOK
 CLASS "EssCtlDlg"

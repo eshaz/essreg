@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""Link a NASM ``-f elf32`` object into a Windows 9x VxD (LE) file.
-
-Each ELF section named in the layout becomes one LE object.  Relocations
-become LE internal fixups:
-
-* ``R_386_32``   -> type 7 (32-bit offset); the image keeps the in-place
-  addend relative to the symbol (the original LINK convention);
-* ``R_386_PC32`` -> type 8 (32-bit self-relative) for cross-object calls
-  and jumps; the image bytes are zero, as LINK wrote them.
-
-Relocations should reference named (global) symbols so that the in-place
-addend is the displacement from that symbol.  References through section
-symbols are accepted, but their image bytes are written as zero.
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Link a NASM -f elf32 object into a Windows 9x VxD (LE) file.
 
 usage: lelink.py OBJECT.o LAYOUT.json -o OUT.VXD
+
+Each ELF section named in the layout becomes one LE object, and the
+relocations become LE internal fixups:
+
+  R_386_32    type 7 (32-bit offset), the image keeps the in-place addend
+              relative to the symbol (the original LINK convention)
+  R_386_PC32  type 8 (32-bit self-relative) for calls and jumps between
+              objects, the image bytes are zero as LINK wrote them
+
+Relocations should reference named (global) symbols, so the in-place
+addend is the displacement from that symbol.  References through section
+symbols work too, but their image bytes are written as zero.
 """
 
 import argparse

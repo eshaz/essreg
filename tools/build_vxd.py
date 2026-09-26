@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""Build ES1869.VXD from the reassemblable source in src/vxd.
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Build ES1869.VXD from the source in src/vxd.
 
 usage: build_vxd.py [--stock] [--verify] [-o OUTPUT]
 
-  (default)  ESSREG_EXT=1: the ESS driver plus the essreg register API,
-             written to build/ES1869.VXD
-  --stock    ESSREG_EXT=0: the original driver, written to out/ES1869.VXD
-  --verify   with --stock: fail unless the result is byte-identical to
+  (default)  the ESS driver plus the essreg register API (ESSREG_EXT=1),
+             to build/ES1869.VXD
+  --stock    the original driver (ESSREG_EXT=0), to out/ES1869.VXD
+  --verify   with --stock, fail unless it's byte-identical to
              driver/ES1869.VXD
 
-Requires NASM 2.14 or later and Python 3.
+Needs NASM 2.14 or later and Python 3.
 """
 
 import argparse

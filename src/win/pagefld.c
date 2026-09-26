@@ -1,6 +1,7 @@
 /*
- * pagefld.c -- pages built from the register catalog: one row per field
- * with its label, a control, the decoded value and its tier.
+ * Pages built from the register catalog. Each field gets a
+ * row with its label, a control, the decoded value and its
+ * tier. The control depends on the kind of field:
  *
  *   one bit             check box
  *   level / signed      scroll bar
@@ -9,11 +10,15 @@
  *   raw value           "Edit..." (bit editor)
  *   status              value only
  *
- * Every change is a read-modify-write of the register followed by a read
- * back; the row shows what the chip returned.  Controller registers go
- * through the DSP command channel and are only read on request.
+ * Notes:
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * Every change is a read-modify-write of the register and then
+ * a read back, so the row shows what the chip returned.
+ * Controller registers go through the DSP command channel and
+ * are only read on request.
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -27,7 +32,7 @@
 #include "winio.h"
 
 #define MAX_ROWS 96
-#define RH 13      /* row pitch, dialog units */
+#define RH 13      // row pitch in dialog units
 #define X_LABEL 0
 #define W_LABEL 120
 #define X_CTL 124
@@ -37,13 +42,13 @@
 #define X_TAG 286
 #define W_TAG 28
 
-#define NOT_READ (-100) /* register not read (yet) */
+#define NOT_READ (-100) // register not read (yet)
 
 struct row {
   int field;
   HWND lab, ctl, val, tag;
-  int raw; /* register value, NOT_READ or a negative error */
-  int lo, hi; /* scroll bar range */
+  int raw; // register value, NOT_READ or a negative error
+  int lo, hi; // scroll bar range
 };
 
 static struct row rows[MAX_ROWS];
@@ -133,7 +138,7 @@ static void create_row(int i, int field) {
   r->lab = page_control("STATIC", f->label, SS_LEFTNOWORDWRAP | SS_NOPREFIX,
                         0, 0, W_LABEL, 9, id);
   if (f->tier == T_RO || f->kind == K_RO) {
-    /* status: the value column only */
+    // status, only the value column
   } else if (is_bool(f)) {
     r->ctl = page_control("BUTTON", "", tab | BS_AUTOCHECKBOX, 0, 0, 12, 10,
                           id + 1);
@@ -267,7 +272,7 @@ static void show_row(int i) {
   }
 }
 
-/* rows showing register `reg` get value `raw` */
+// show raw in every row of register reg
 static void set_reg(int reg, int raw) {
   int i;
 
@@ -301,7 +306,7 @@ void fields_refresh(int how) {
     set_reg(reg, err < 0 ? err : ess_read(reg));
   }
   winio_end();
-  /* no device: the rows say so, the status line says why */
+  // with no device the rows say so, otherwise the status line says why
   if (err < 0 && err != -ESSHW_ENODEV)
     set_status("%s", esshw_strerror(err));
 }
@@ -327,7 +332,7 @@ static void help_for(int i) {
   set_help(text);
 }
 
-/* write field of row i and read the register back */
+// write the field of row i and read the register back
 static void write_row(int i, u8 value) {
   struct row *r = &rows[i];
   const struct ess_field *f = &ess_fields[r->field];
@@ -354,7 +359,7 @@ static void write_row(int i, u8 value) {
   if (err < 0) {
     set_status("%s: %s", f->label,
                err == -ESSIO_ETIER ? "needs Expert mode" : esshw_strerror(err));
-    show_row(i); /* back to what the chip had */
+    show_row(i); // back to what the chip had
     return;
   }
   set_reg(f->reg, raw);
@@ -453,7 +458,7 @@ void fields_hscroll(int code, int pos, HWND ctl) {
   if (!can_write(f))
     return;
   if (code == SB_THUMBTRACK && !winio_can_poll()) {
-    /* stock driver: write when the thumb is released */
+    // direct I/O with ES1869.VXD, only write when the thumb is released
     drag_row = i;
     cat_format(f, cat_set(f, 0, f->kind == K_SMAG ? cat_smag_code(f, cur)
                                                   : (u8)cur),
@@ -512,7 +517,7 @@ void fields_focus(HWND ctl) {
 
   if (i < 0)
     return;
-  /* keep the focused row visible */
+  // keep the focused row visible
   if (i < top || i >= top + nvis) {
     top = i < top ? i : i - nvis + 1;
     layout();

@@ -32,7 +32,9 @@ DS p.58; write-only
 
 DS p.56; Sound Blaster compatible view
 
-> SB Pro 3-bit views: bits 7:5 / 3:1 are the top bits of each nibble of the extended register; bits 4 and 0 are cleared by writes and read as 1 (DS p.53)
+> SB Pro 3-bit views: bits 7:5 and 3:1 are the top bits of each nibble of the extended register
+
+> bits 4 and 0 are cleared by writes and read as 1 (DS p.53)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -87,7 +89,7 @@ DS p.58
 
 DS p.58
 
-> note: the simplified 1Ch table on DS p.53 (x0x mic, 01x CD, 110 line, 111 mixer) differs from the register description on p.59; followed p.59
+> the simplified 1Ch table on DS p.53 (x0x mic, 01x CD, 110 line, 111 mixer) differs from the register description on p.59, which the catalog follows
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -187,7 +189,7 @@ DS p.59
 
 DS p.59; reading changes state
 
-> note: DS p.42 and p.59 say "A[11:0]" is the configuration base but list the reads as A[11:8], A[7:0]
+> DS p.42 and p.59 say "A[11:0]" is the configuration base but list the reads as A[11:8], A[7:0]
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -217,7 +219,7 @@ DS p.60
 
 DS p.60
 
-> note: the FDXO text calls 48h bit 6 the serial reset, but the 48h description puts serial reset in bit 5 (DS p.60)
+> the FDXO text calls 48h bit 6 the serial reset, but the 48h description puts serial reset in bit 5 (DS p.60)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -233,7 +235,7 @@ DS p.60
 
 DS p.60
 
-> note: the footnote on DS p.55 puts telegaming in 48h bit 0; the 48h description (p.61) and p.20 use bit 1 and reserve bit 0
+> the footnote on DS p.55 puts telegaming in 48h bit 0, but the 48h description (p.61) and p.20 use bit 1 and reserve bit 0
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -305,7 +307,7 @@ DS p.62
 
 DS p.62
 
-> 61h and 63h exist separately only in split mode (64h bit 7 = 1); otherwise they are combined with 60h and 62h (DS p.62)
+> 61h and 63h are only separate registers in split mode (64h bit 7 = 1), otherwise they're combined with 60h and 62h (DS p.62)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -334,7 +336,7 @@ DS p.62
 
 DS p.62
 
-> note: DS p.17 says the hardware volume interrupt is polled at 64h bit 3; the 64h description (p.62) uses bit 4
+> DS p.17 says the hardware volume interrupt is polled at 64h bit 3, but the 64h description (p.62) uses bit 4
 
 > ES1869.VXD rewrites 64h: bits 5 and 3:2 at device start, bits 1:0 in HwVol_Int_Enable/Disable, all of it in Save/Restore_DOS_Mixer
 
@@ -485,7 +487,7 @@ DS p.64
 
 DS p.64
 
-> note: Table 24 (DS p.58) names 78h bit 0 "Enable full-duplex mode"; the description (p.65) calls it "Enable FIFO to 2nd chan DAC"
+> Table 24 (DS p.58) names 78h bit 0 "Enable full-duplex mode", but the description (p.65) calls it "Enable FIFO to 2nd chan DAC"
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -498,9 +500,11 @@ DS p.64
 
 DS p.65
 
-> note: DS p.49 and p.53 say 7Ah bits 4:3 choose the playback or record mixer as the Mixer record source; the 7Ah description (p.65) reserves bits 5:3
+> DS p.49 and p.53 say 7Ah bits 4:3 pick the playback or record mixer as the Mixer record source, but the 7Ah description (p.65) reserves bits 5:3
 
-> 7Ah is reset to zero by hardware or software reset (DS p.65), hence FF_VOLATILE; ES1869.DRV also writes it for every playback
+> 7Ah is reset to zero by hardware or software reset (DS p.65), so it's FF_VOLATILE
+
+> ES1869.DRV also writes 7Ah for every playback
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -514,7 +518,7 @@ DS p.65
 
 DS p.65
 
-> note: DS p.51 says a software reset sets 7Ch to zero; the 7Ch description (p.65) names only hardware reset, so no FF_VOLATILE
+> DS p.51 says a software reset sets 7Ch to zero, but the 7Ch description (p.65) only names hardware reset, so no FF_VOLATILE
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -583,7 +587,7 @@ DS p.68; DSP channel
 
 DS p.68; DSP channel
 
-> A8h bit 4 must be written as 1 and bits 7:5 and 2 as 0; a read-modify-write keeps them (DS p.68)
+> A8h bit 4 must be written as 1 and bits 7:5 and 2 as 0, which a read-modify-write keeps (DS p.68)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -616,7 +620,9 @@ DS p.69; DSP channel
 
 DS p.69; DSP channel
 
-> DS p.67 and p.69 put the RIGHT record level in B4h bits 7:4 and LEFT in 3:0, unlike the mixer registers; ES1869.DRV writes it the same way (5:297A)
+> DS p.67 and p.69 put the RIGHT record level in B4h bits 7:4 and LEFT in 3:0, unlike the mixer registers
+
+> ES1869.DRV writes B4h the same way (5:297A)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -643,7 +649,7 @@ DS p.69; DSP channel
 
 DS p.69; DSP channel
 
-> note: Table 25 (DS p.67) shows B7h bit 0 as a fixed 1 and bit 5 as "Data type select"; followed the descriptions (p.69-70)
+> Table 25 (DS p.67) shows B7h bit 0 as a fixed 1 and bit 5 as "Data type select", but the catalog follows the descriptions (p.69-70)
 
 > B7h bit 4 must be written as 1 and bit 1 as 0 (DS p.70)
 
@@ -671,7 +677,7 @@ DS p.70; DSP channel
 
 DS p.70; DSP channel
 
-> note: the programming steps (DS p.48, p.50) give B9h 00 = single, 01 = demand 2, 11 = demand 4; followed the register description (p.70)
+> the programming steps (DS p.48, p.50) give B9h 00 = single, 01 = demand 2, 11 = demand 4, but the catalog follows the register description (p.70)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -681,7 +687,7 @@ DS p.70; DSP channel
 
 DS p.70; DSP channel
 
-> BAh and BBh are reset only by hardware reset, not by software reset (DS p.70)
+> BAh and BBh are only reset by hardware reset, not by software reset (DS p.70)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -704,9 +710,11 @@ Ports Audio_Base+0h to +Fh.
 
 DS p.40; reading changes state
 
-> Audio_Base+6h reads status but writes resets at the same bits; written bits 7:2 must be 0, so a write must not copy back the status read (DS p.40, p.43)
+> Audio_Base+6h reads status but writes resets at the same bits
 
-> note: DS p.75 lists other sources for the activity flags (flag 2: PnP, joystick, MPU-401, ...; flag 1: +4h/+5h); followed p.40
+> written bits 7:2 must be 0, so a write must never copy back the status it read (DS p.40, p.43)
+
+> DS p.75 lists other sources for the activity flags (flag 2: PnP, joystick, MPU-401, ...; flag 1: +4h/+5h), but the catalog follows p.40
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -723,9 +731,9 @@ DS p.40; reading changes state
 
 DS p.40
 
-> note: the bit 3 heading reads "Analog power-down" but its description sets or clears Analog_Stays_On (DS p.40)
+> the bit 3 heading reads "Analog power-down" but its description sets or clears Analog_Stays_On (DS p.40)
 
-> GPO0/GPO1 are CAUTION: boards may wire them to an amplifier mute or other circuitry
+> GPO0/GPO1 are CAUTION because boards may wire them to an amplifier mute or other circuitry
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -741,7 +749,7 @@ DS p.40
 
 DS p.41
 
-> Audio_Base+Ch is only read here: a write sends a command to the DSP (DS p.41)
+> Audio_Base+Ch is only read here, since a write sends a command to the DSP (DS p.41)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -789,7 +797,9 @@ DS p.39
 
 DS p.39
 
-> each mask bit is AND'ed with its interrupt source: 0 forces the source to zero without floating the pin; all ones after hardware reset (DS p.39)
+> each mask bit is AND'ed with its interrupt source, and 0 forces the source to zero without floating the pin
+
+> the mask is all ones after hardware reset (DS p.39)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -833,7 +843,9 @@ DS p.30
 
 DS p.30
 
-> 20h-26h are loaded from the configuration ROM header after PnP reset; unused IRQ pins get IRQ 1 and unused DRQ pins DRQ 2 (DS p.30)
+> 20h-26h are loaded from the configuration ROM header after PnP reset
+
+> unused IRQ pins get IRQ 1 and unused DRQ pins DRQ 2 (DS p.30)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -905,7 +917,7 @@ DS p.31
 
 DS p.31
 
-> note: 27h and 28h are headed "(R)" on DS p.31, but p.18 assigns these interrupts by writing them; tiered EXPERT
+> 27h and 28h are headed "(R)" on DS p.31, but p.18 assigns these interrupts by writing them, so they're tiered EXPERT
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -937,7 +949,9 @@ As the card registers, after selecting the logical device in register 07h; essct
 
 DS p.32
 
-> LDN 0: configuration device.  Relocate it only with the bypass key: writing its 60h is unreliable (DS p.29)
+> LDN 0: configuration device
+
+> only relocate it with the bypass key, since writing its 60h is unreliable (DS p.29)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
@@ -1117,7 +1131,7 @@ DS p.34
 
 DS p.34
 
-> LDN 3: MPU-401 device (optional; normally the MPU-401 is part of LDN 1)
+> LDN 3: MPU-401 device (optional, the MPU-401 is normally part of LDN 1)
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|

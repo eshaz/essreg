@@ -1,10 +1,15 @@
 /*
- * pageinfo.c -- what essctl found: driver, resources, owners.
+ * The device information page: the driver, resources and
+ * owners essctl found.
  *
- * Uses only the side-effect-free VxD functions (0000, 0001, 0004, 0005
- * read, 0008, 000A, 0101, 0301, and 0400/040C of the extension).
+ * Notes:
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * Only uses the VxD functions without side effects (0000,
+ * 0001, 0004, 0005 read, 0008, 000A, 0101, 0301, and
+ * 0400/040C of the extension).
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 

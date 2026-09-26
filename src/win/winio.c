@@ -1,7 +1,9 @@
 /*
- * winio.c -- access path selection for essctl (see winio.h).
+ * Picks the access path essctl uses to reach the ES1869 (see
+ * winio.h).
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -64,7 +66,7 @@ int winio_init(const struct winio_opts *opts) {
   if (!esshw.config_base || !winio_present) {
     int err;
     u16 known = esshw.config_base;
-    winio_present = 1; /* let winio_begin through for the detection */
+    winio_present = 1; // let winio_begin through for the detection
     if ((err = winio_begin()) < 0) {
       winio_present = 0;
       return err;
@@ -72,7 +74,7 @@ int winio_init(const struct winio_opts *opts) {
     err = esshw_detect_config();
     winio_end();
     if (known)
-      esshw.config_base = known; /* /cfg= wins over the chip's answer */
+      esshw.config_base = known; // /cfg= wins over the chip's answer
     winio_present = err == 0;
     return err;
   }
@@ -93,7 +95,7 @@ void winio_end(void) {
 }
 
 int winio_can_poll(void) {
-  /* on the stock driver every batch takes (and may release) the DSP */
+  // direct I/O with ES1869.VXD takes (and may release) the DSP every batch
   return winio_path != WIO_DIRECT_VXD;
 }
 

@@ -1,8 +1,11 @@
-; segment 1: code, 7894 bytes, flags 0D40h
+; Segment 1 of ESFM.DRV: code, 7894 bytes, flags 0D40h.
+; ESS's driver code, disassembled with tools/ne2asm.py.
 
         db 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 ; 0000
 
-; write an FM register: fm_write(dev, reg (9 bits), value).  Native mode: FM_Base+2 = register bits 7:0, +3 = bits 8:15, +1 = data, with fm_delay status reads after each write.  Not atomic.
+; write an FM register: fm_write(dev, reg (9 bits), value)
+; native mode: FM_Base+2 = register bits 7:0, +3 = bits 8:15, +1 = data,
+; with fm_delay status reads after each write (not atomic)
 fm_write:
         push bp                                         ; 0010
         mov_ bp,sp                                      ; 0011
@@ -64,7 +67,8 @@ fnum_table:
         db 0x02, 0x02, 0x20, 0x02, 0x41, 0x02, 0x63, 0x02, 0x87, 0x02, 0xAE, 0x02, 0xD7, 0x02, 0x02, 0x03 ; 0082
         db 0x30, 0x03, 0x60, 0x03, 0x94, 0x03, 0xCA, 0x03 ; 0092
 
-; reset the synthesizer (native mode, registers 000h-253h = 0) and the channel and voice state of dev
+; reset the synthesizer (native mode, registers 000h-253h = 0) and the
+; channel and voice state of dev
 chip_reset:
         push bp                                         ; 009A
         mov_ bp,sp                                      ; 009B
@@ -136,7 +140,8 @@ L1_00FF:
         pop bp                                          ; 0118
         retf 0x2                                        ; 0119
 
-; note_off for every voice's channel and note: close, suspend.  Voices held by the sustain pedal stay keyed on.
+; note_off for every voice's channel and note (close, suspend), but voices
+; held by the sustain pedal stay keyed on
 all_notes_off:
 %if ESFM_FIX
         jmp near fix_all_off
@@ -232,7 +237,9 @@ L1_018A:
         retf 0x4                                        ; 01BA
         db 0x90                                         ; 01BD
 
-; MIDI note off: note_off(dev, channel, note).  Keys off every voice of that note, or marks it (flag 4) while the channel's sustain pedal is down.
+; MIDI note off: note_off(dev, channel, note)
+; keys off every voice of that note, or marks it (flag 4) while the
+; channel's sustain pedal is down
 note_off:
         push bp                                         ; 01BE
         mov_ bp,sp                                      ; 01BF
@@ -276,7 +283,8 @@ L1_01FB:
         pop bp                                          ; 0208
         retf 0x6                                        ; 0209
 
-; pick the two oldest free voices for a note (dev+18h, dev+1Ah; FFh = none); keys off voices still playing the same note
+; pick the two oldest free voices for a note (dev+18h, dev+1Ah, FFh = none)
+; and key off voices still playing the same note
 find_voices:
         push bp                                         ; 020C
         mov_ bp,sp                                      ; 020D
@@ -485,7 +493,8 @@ L1_03D1:
         ret 0xa                                         ; 03D6
         db 0x90                                         ; 03D9
 
-; no free voice: take one (second voices first, then the highest channel, then the oldest) and key it off
+; no free voice: take one (second voices first, then the highest channel,
+; then the oldest) and key it off
 steal_voice:
         push bp                                         ; 03DA
         mov_ bp,sp                                      ; 03DB
@@ -842,7 +851,8 @@ L1_07F6:
         pop bp                                          ; 0804
         ret 0x6                                         ; 0805
 
-; write the 8 registers of one operator (level from velocity and volume, pitch from the note)
+; write the 8 registers of one operator (level from velocity and volume,
+; pitch from the note)
 program_operator:
         push bp                                         ; 0808
         mov_ bp,sp                                      ; 0809
@@ -1191,7 +1201,8 @@ L1_0AEB:
         pop bp                                          ; 0B0E
         retf                                            ; 0B0F
 
-; write a 36-byte patch voice to a hardware voice and mark it active (flag 1) with a new timestamp
+; write a 36-byte patch voice to a hardware voice and mark it active
+; (flag 1) with a new timestamp
 program_voice:
         push bp                                         ; 0B10
         mov_ bp,sp                                      ; 0B11
@@ -1325,7 +1336,8 @@ program_voice:
         pop bp                                          ; 0C46
         retf                                            ; 0C47
 
-; MIDI note on: note_on(velocity, note, channel, dev).  Channel 9 uses drum patches 128-255.
+; MIDI note on: note_on(velocity, note, channel, dev)
+; channel 9 uses drum patches 128-255
 note_on:
         push bp                                         ; 0C48
         mov_ bp,sp                                      ; 0C49
@@ -2521,7 +2533,7 @@ L1_154E:
         dec word [busy]                                 ; 154E
         jmp short L1_1501                               ; 1552
 
-; MODM_LONGDATA: parse the buffer; refused while busy
+; MODM_LONGDATA: parse the buffer, refused while busy
 modm_longdata:
         mov [bp-0x18],di                                ; 1554
         inc word [busy]                                 ; 1557
@@ -2749,7 +2761,7 @@ L1_170C:
         call driver_callback                            ; 1723
         jmp near L1_154E                                ; 1726
 
-; MODM_RESET: chip_reset; refused while busy
+; MODM_RESET: chip_reset, refused while busy
 modm_reset:
         inc word [busy]                                 ; 1729
         cmp word [busy],byte +0x1                       ; 172D

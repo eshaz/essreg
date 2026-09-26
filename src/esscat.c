@@ -1,7 +1,8 @@
 /*
- * esscat.c -- tables and helpers for the ES1869 register catalog.
+ * Tables and helpers for the ES1869 register catalog.
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -79,8 +80,8 @@ u8 cat_set(const struct ess_field *f, u8 raw, u8 value) {
   return (u8)((raw & ~mask) | ((value << f->shift) & mask));
 }
 
-/* sign in the top bit; negative codes mean -(magnitude + 1) as in the
- * ADC offset registers (DS p.71) */
+// sign in the top bit, and negative codes mean -(magnitude + 1) as in the
+// ADC offset registers (DS p.71)
 int cat_smag(const struct ess_field *f, u8 value) {
   u8 sign = (u8)(1u << (f->width - 1));
   int mag = value & (sign - 1);
@@ -103,26 +104,26 @@ const char *cat_enum_text(u8 enum_id, u8 value) {
 }
 
 u32 cat_rate_a1(u8 raw) {
-  /* DS p.67: 397.7 kHz / (128 - x) or 795.5 kHz / (256 - x) */
+  // DS p.67: 397.7 kHz / (128 - x) or 795.5 kHz / (256 - x)
   if (raw & 0x80)
     return 795500UL / (u32)(256 - raw);
   return 397700UL / (u32)(128 - raw);
 }
 
 u32 cat_rate_70(u8 raw) {
-  /* DS p.64: bit 7 selects the 768 kHz (48 kHz family) or 793.8 kHz
-   * (44.1 kHz family) master clock; bits 6:0 are the divider */
+  // DS p.64: bit 7 picks the 768 kHz (48 kHz family) or 793.8 kHz
+  // (44.1 kHz family) master clock, bits 6:0 are the divider
   u32 clock = (raw & 0x80) ? 768000UL : 793800UL;
   return clock / (u32)(128 - (raw & 0x7F));
 }
 
 u32 cat_filter(u8 raw) {
-  /* filter clock divider: 7.16 MHz / (256 - x) */
+  // filter clock divider: 7.16 MHz / (256 - x)
   return 7160000UL / (u32)(256 - raw);
 }
 
 int cat_adc_offset(u8 raw) {
-  /* DS p.71: 64 * bits[3:0], or -64 * (bits[3:0] + 1) when bit 4 is set */
+  // DS p.71: 64 * bits[3:0], or -64 * (bits[3:0] + 1) when bit 4 is set
   if (raw & 0x10)
     return -64 * ((raw & 0x0F) + 1);
   return 64 * (raw & 0x0F);
@@ -219,16 +220,16 @@ int cat_parse(const struct ess_field *f, const char *text, u8 *value) {
   if (!len)
     return -1;
   if (text[len - 1] == 'h' || text[len - 1] == 'H') {
-    n = strtol(text, &end, 16); /* "0Ch" */
+    n = strtol(text, &end, 16); // "0Ch"
     if (end != text + len - 1)
       return -1;
   } else {
-    n = strtol(text, &end, 0); /* "12", "0x0c", "-3" */
+    n = strtol(text, &end, 0); // "12", "0x0c", "-3"
     if (end != text + len)
       return -1;
   }
   if (f->kind == K_SMAG) {
-    /* signed values: -2^(w-1) .. 2^(w-1)-1 */
+    // signed values from -2^(w-1) to 2^(w-1)-1
     int lim = 1 << (f->width - 1);
     if (n < -lim || n >= lim)
       return -1;

@@ -1,8 +1,15 @@
-; adi.inc -- fields of the AUDDRV device instance (ADI) structure.
+; Fields of the AUDDRV device instance (ADI) structure.
 ;
-; One ADI is allocated per ES1869 devnode (ADI_Create, o4:01FC) and kept in
-; the list ADI_List.  API function 0001 copies it to the caller.  Only the
-; fields below are known with confidence; see docs/VXD_INTERNALS.md.
+; Notes:
+;
+; ES1869.VXD allocates one ADI per ES1869 devnode (ADI_Create, o4:01FC)
+; and keeps it in the list ADI_List.  API function 0001 copies it to the
+; caller.  Only the fields below are known for sure (see
+; docs/VXD_INTERNALS.md).
+;
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
+; Licensed under GPL Version 3.0
 
 %ifndef ADI_INC
 %define ADI_INC

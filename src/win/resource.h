@@ -1,7 +1,8 @@
 /*
- * resource.h -- resource identifiers of essctl.
+ * Resource IDs of essctl.
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -42,7 +43,7 @@
 #define IDC_BE_BIT7 317
 #define IDC_BE_FIELDS 320
 
-/* controls created at run time in the page window */
+/* controls created at run time in the page area */
 #define IDC_ROW 1000 /* IDC_ROW + 4 * row + column */
 #define IDC_PG_EDIT 900
 #define IDC_PG_BANK 901

@@ -1,6 +1,6 @@
-REM Watcom C 11.0 with the DOS and 16-bit Windows targets (essctl.exe
-REM needs %WATCOM%\H\WIN and %WATCOM%\LIB286\WIN; the makefiles name
-REM those directories themselves).
+REM Watcom C 11.0 with the DOS and 16-bit Windows targets
+REM essctl.exe needs %WATCOM%\H\WIN and %WATCOM%\LIB286\WIN, the makefiles
+REM add those directories themselves
 PATH C:\WINDOWS;C:\WINDOWS\COMMAND;C:\NETCOM;%PATH%;C:\WATCOM\BINNT;C:\WATCOM\BINW
 SET INCLUDE=C:\WATCOM\H;C:\WATCOM\MFC\INCLUDE;C:\WATCOM\H\NT
 SET WATCOM=C:\WATCOM

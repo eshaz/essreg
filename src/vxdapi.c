@@ -1,7 +1,8 @@
 /*
- * vxdapi.c -- ES1869.VXD V86/PM API wrappers (see vxdapi.h).
+ * ES1869.VXD V86/PM API wrappers, see vxdapi.h.
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -16,7 +17,7 @@
 
 struct vxd_state vxd;
 
-/* buffers are passed as ES:BX or ES:DI */
+// buffers are passed in ES:BX or ES:DI
 #ifdef ESS_HOST
 #define SET_ESBX(r, p) ((r)->host_buf = (void *)(p))
 #define SET_ESDI(r, p) ((r)->host_buf = (void *)(p))
@@ -45,8 +46,8 @@ int vxd_call(u16 fn, vxd_regs *r) {
   r->edx = fn;
   if (!vxd_raw_call(vxd.entry, r))
     return 0;
-  /* carry set: AX holds an error code for most functions, but some leave
-   * it unchanged or zero */
+  // carry set, AX has the error code for most functions but some leave it
+  // unchanged or zero
   ax = (u16)r->eax;
   return ax >= ESSHW_ENODEV && ax <= ESSHW_ENOCFG ? ax : ESSHW_EFAIL;
 }
@@ -65,7 +66,7 @@ int vxd_open(void) {
   if (vxd_read_adi() == 0)
     vxd.devnode = vxd_adi_dword(ADI_DEVNODE);
 
-  /* the stock driver rejects group 4 with the carry flag */
+  // the stock driver rejects group 4 with the carry flag
   regs_init(&r);
   if (vxd.devnode && vxd_call(ESSX_INFO, &r) == 0) {
     vxd.ext_version = (u16)r.eax;
@@ -79,8 +80,8 @@ int vxd_read_adi(void) {
   vxd_regs r;
   int err;
 
-  /* dword 0 of the buffer: bytes to copy; AX = 1 selects the device by
-   * the devnode in ECX, AX = 0 the first one */
+  // dword 0 of the buffer is the number of bytes to copy
+  // AX = 1 selects the device by the devnode in ECX, AX = 0 the first one
   put_u32(vxd.adi, ADI_COPY_SIZE);
   regs_init(&r);
   r.eax = vxd.devnode ? 1 : 0;
@@ -123,7 +124,7 @@ int vxd_gpo_read(u8 *bits) {
   int err;
 
   regs_init(&r);
-  r.eax = 1; /* EAX = 0 would write GPO0/GPO1 from BL */
+  r.eax = 1; // EAX = 0 would write GPO0/GPO1 from BL
   err = vxd_call(0x0005, &r);
   if (!err)
     *bits = (u8)(r.ebx & 3);
@@ -195,21 +196,21 @@ int vxd_dsp_begin(void) {
   vxd.dsp_taken = 0;
   if (!vxd.entry)
     return 0;
-  /* the owner field tells whether this acquire is the one that takes the
-   * DSP; 0002 alone does not (it succeeds for the current owner too) */
+  // the owner field tells if this acquire is the one that takes the DSP,
+  // 0002 alone can't since it also succeeds for the current owner
   if (vxd_read_adi() == 0)
     owner = vxd_adi_dword(ADI_DSP_OWNER);
   was_free = vxd.adi_valid && !owner;
   regs_init(&r);
-  r.eax = esshw.audio_base; /* AX: the device's Audio_Base */
-  r.ebx = 1;                /* BX = 1: the DSP */
+  r.eax = esshw.audio_base; // AX = the device's Audio_Base
+  r.ebx = 1;                // BX = 1, the DSP
   err = vxd_call(0x0002, &r);
   if (err == ESSHW_EINUSE)
-    return ESSHW_EINUSE; /* a DOS box owns it */
+    return ESSHW_EINUSE; // a DOS box owns it
   if (err)
-    return 0; /* not a port range of this driver: nothing is trapped */
+    return 0; // not a port range of this driver, so nothing is trapped
   vxd.dsp_taken = (u8)was_free;
-  /* the DSP now belongs to the caller's VM, which is Windows' */
+  // the DSP now belongs to the caller's VM, which is Windows
   if (!vxd.sys_vm) {
     if (owner)
       vxd.sys_vm = owner;

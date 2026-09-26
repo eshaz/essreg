@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
 """Generate docs/REGISTERS.md from the register catalog src/esscat.tbl.
 
+usage:
   python3 tools/regdoc.py            write docs/REGISTERS.md
   python3 tools/regdoc.py --check    fail if docs/REGISTERS.md is stale
 
-Every line of esscat.tbl holds one REG, FLD, ENUM or ENUMV macro call or a
-one-line comment; comments directly above a REG line become notes.
+Each line of esscat.tbl holds one REG, FLD, ENUM or ENUMV macro call or a
+one-line comment.  Comments right above a REG line become notes.
 """
 
 import os
@@ -52,7 +55,7 @@ FFLAGS = {"FF_PERSIST": "profile", "FF_DRVOWNED": "driver sets it",
           "FF_VOLATILE": "cleared by DSP reset"}
 
 def split_args(text):
-    """Arguments of a macro call; strings stay quoted."""
+    """Arguments of a macro call, with the strings still quoted."""
     args, cur, quoted, i = [], "", False, 0
     while i < len(text):
         c = text[i]

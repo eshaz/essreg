@@ -1,7 +1,8 @@
 /*
- * simhw.c -- a port-level model of the ES1869 (see simhw.h).
+ * A port-level model of the ES1869, see simhw.h.
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -12,7 +13,7 @@
 
 struct simhw_state simhw;
 
-/* mixer reset values that differ from zero (DS p.57-66) */
+// mixer reset values that aren't zero (DS p.57-66)
 static const u8 mixer_defaults[][2] = {
     {0x14, 0x88}, {0x32, 0x88}, {0x36, 0x88}, {0x38, 0x00}, {0x3C, 0x00},
     {0x60, 0x3F}, {0x62, 0x3F}, {0x7C, 0x88}, {0x04, 0x88}, {0x22, 0x88},
@@ -32,12 +33,12 @@ static void dsp_reset(void) {
   u8 bb = simhw.ctrl[0xBB - 0xA0];
 
   memset(simhw.ctrl, 0, sizeof(simhw.ctrl));
-  simhw.ctrl[0xBA - 0xA0] = ba; /* ADC offsets survive a software reset */
+  simhw.ctrl[0xBA - 0xA0] = ba; // ADC offsets survive a software reset
   simhw.ctrl[0xBB - 0xA0] = bb;
   simhw.ext_mode = 0;
   simhw.npending = 0;
   simhw.nrdata = 1;
-  simhw.rdata[0] = 0xAA; /* reset acknowledge */
+  simhw.rdata[0] = 0xAA; // reset acknowledge
 }
 
 void simhw_reset(u16 audio_base, u16 config_base) {
@@ -48,8 +49,8 @@ void simhw_reset(u16 audio_base, u16 config_base) {
   simhw.config_base = config_base;
   for (i = 0; i < ESS_ARRAY_SIZE(mixer_defaults); i++)
     simhw.mixer[mixer_defaults[i][0]] = mixer_defaults[i][1];
-  simhw.port7 = 0x08; /* analog stays on */
-  /* LDN1 (audio) resources: 220h, FM 388h, MPU 330h, IRQ 5, DMA 1 and 0 */
+  simhw.port7 = 0x08; // analog stays on
+  // LDN 1 (audio) resources: 220h, FM 388h, MPU 330h, IRQ 5, DMA 1 and 0
   simhw.pnp_ldn[1][0x30] = 0x01;
   simhw.pnp_ldn[1][0x60] = (u8)(audio_base >> 8);
   simhw.pnp_ldn[1][0x61] = (u8)audio_base;
@@ -190,7 +191,7 @@ static void sim_out(u16 port, u8 value) {
     simhw.port6 = value;
     break;
   case 0x07:
-    simhw.port7 = (u8)(value & ~0xC4); /* pulses and GPI read back as 0 */
+    simhw.port7 = (u8)(value & ~0xC4); // pulses and GPI read back as 0
     break;
   case 0x0C:
     dsp_write(value);

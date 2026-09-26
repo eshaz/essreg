@@ -1,11 +1,15 @@
-/* t_trace.c -- port-access trace of essreg's register functions.
+/*
+ * t_trace prints the port accesses of essreg's register functions.
  *
- * Built twice by tests/run_tests.py: against the original src/regs.c
- * (from git history, -DTRACE_OLD) and against the refactored regs.c on top
- * of esshw.  Both print the simulator's port log; the runner requires the
- * two logs to be identical, which proves the refactor kept the legacy
- * protocol.  Functions whose behaviour was deliberately fixed are not
- * traced here (they have their own tests).
+ * tests/run_tests.py builds it twice, against the original src/regs.c
+ * (from git history, -DTRACE_OLD) and against the refactored regs.c on
+ * esshw, and requires the two port logs to be identical. That proves the
+ * refactor kept the legacy protocol. Functions whose behavior was fixed on
+ * purpose are not traced here (they have their own tests).
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
+ * Licensed under GPL Version 3.0
  */
 
 #include <stdio.h>

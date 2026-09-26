@@ -1,15 +1,14 @@
-; essext.asm -- essreg register-access API for ES1869.VXD
+; Adds the essreg register API to ES1869.VXD, as group 4 of the V86/PM API
+; of the AUDDRV device (INT 2Fh AX=1684h BX=3B07h returns the entry point).
+; It's only assembled when ESSREG_EXT=1.  The stock driver answers DH=4
+; with CF set, which is how programs detect it.
 ;
-; Adds group 4 to the V86/PM API of the AUDDRV device (INT 2Fh AX=1684h
-; BX=3B07h returns the entry point).  Assembled only when ESSREG_EXT=1; the
-; stock driver answers DH=4 with CF set, which is how programs detect it.
-;
-; Calling convention, as for the ESS functions:
+; Calling convention (same as the ESS functions):
 ;   DX  = function (DH = 4, DL = index)
 ;   ECX = devnode of the ES1869 (offset 55h of the structure returned by
 ;         function 0001)
-;   AX, BX = inputs as listed; ES:DI = buffer for 040B
-;   CF clear on success; CF set and AX = ESSREG_E_* on failure
+;   AX, BX = inputs as listed, ES:DI = buffer for 040B
+;   CF clear on success, CF set and AX = ESSREG_E_* on failure
 ;
 ;   0400  extension info       -> AX = version, BX = feature bits,
 ;                                 DX = number of functions
@@ -28,12 +27,20 @@
 ;                                 (0 none, 1 caller's VM, 2 another VM),
 ;                                 BH = Audio_Base+Ch status, DX = ADI flags
 ;
-; Every port pair runs with interrupts disabled and restores the mixer
-; index (Audio_Base+4) or the PnP index and logical device number, so an
-; access cannot interleave with ES1869.DRV, a DOS program in another VM or
-; the VxD's own interrupt-time code.  Nothing here acquires the device, so
-; the DSP is never reset and no "in use" message appears.  Controller
-; registers are refused while another VM owns the DSP.
+; Notes:
+;
+; Every port pair runs with interrupts disabled and puts back the mixer
+; index (Audio_Base+4) or the PnP index and logical device number.  That
+; way an access can't interleave with ES1869.DRV, a DOS program in another
+; VM or the VxD's own interrupt-time code.
+;
+; Nothing here acquires the device, so the DSP is never reset and no
+; "in use" message shows up.  Controller registers are refused while
+; another VM owns the DSP.
+;
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
+; Licensed under GPL Version 3.0
 
 ESSREG_VERSION          equ 0x0100
 ESSREG_FEATURES         equ 0x007F      ; mixer, controller, ports, config,
@@ -52,8 +59,8 @@ section LCOD
 
 ; --- helpers --------------------------------------------------------------
 
-; EDI = ADI of the devnode in Client_ECX.  On failure CF is set and
-; Client_AX = ESSREG_E_NODEV.
+; EDI = ADI of the devnode in Client_ECX
+; on failure: CF set, Client_AX = ESSREG_E_NODEV
 ESSREG_Get_ADI:
         push    byte 0                  ; key type 0: devnode
         push    dword [ebp+Client_ECX]
@@ -66,14 +73,14 @@ ESSREG_Get_ADI:
 .none:  mov     ax,ESSREG_E_NODEV
         ; fall through
 
-; Return failure: Client_AX = AX, CF set.
+; return failure: Client_AX = AX, CF set
 ESSREG_Fail:
         mov     [ebp+Client_EAX],ax
         stc
         ret
 
-; CF and Client_AX = ESSREG_E_INUSE when a VM other than the caller's
-; (EBX) owns the DSP of the ADI in EDI.
+; CF set and Client_AX = ESSREG_E_INUSE when a VM other than the
+; caller's (EBX) owns the DSP of the ADI in EDI
 ESSREG_Check_DSP_Owner:
         mov     eax,[edi+ADI_DSPOwner]
         or      eax,eax
@@ -85,8 +92,8 @@ ESSREG_Check_DSP_Owner:
 .ok:    clc
         ret
 
-; Write AL to the DSP; EDX = Audio_Base+Ch.  CF if the write buffer stays
-; busy.  Clobbers EAX, ECX.
+; write AL to the DSP, EDX = Audio_Base+Ch
+; CF set if the write buffer stays busy, clobbers EAX and ECX
 ESSREG_DSP_Write:
         mov     ah,al
         mov     ecx,ESSREG_POLL
@@ -101,9 +108,9 @@ ESSREG_DSP_Write:
         clc
         ret
 
-; Wait for a DSP data byte and read it into AL; EDX = Audio_Base+Ch.
-; Polls bit 6 of Audio_Base+Ch, which mirrors the read-buffer flag without
-; clearing the interrupt request as reading Audio_Base+Eh would.
+; wait for a DSP data byte and read it into AL, EDX = Audio_Base+Ch
+; reading Audio_Base+Eh clears the interrupt request, so poll bit 6 of
+; Audio_Base+Ch instead (it mirrors the read-buffer flag)
 ESSREG_DSP_Read:
         mov     ecx,ESSREG_POLL
 .wait:  in      al,dx
@@ -118,8 +125,8 @@ ESSREG_DSP_Read:
         clc
         ret
 
-; EDX = configuration port of the ADI in EDI (cached per ADI).  CF and
-; Client_AX = ESSREG_E_NOCFG if it cannot be found.
+; EDX = configuration port of the ADI in EDI (cached per ADI)
+; CF set and Client_AX = ESSREG_E_NOCFG if it can't be found
 ESSREG_Get_Config_Port:
         cmp     edi,[ESSREG_Cfg_ADI]
         jne     .find
@@ -139,9 +146,10 @@ ESSREG_Get_Config_Port:
 .none:  mov     ax,ESSREG_E_NOCFG
         jmp     ESSREG_Fail
 
-; Select a PnP register with interrupts disabled.  EDX = config port,
-; SI = logical device (low byte, FFh = card level) and register (high
-; byte).  Returns CL = previous index, CH = previous logical device.
+; select a PnP register, call with interrupts disabled
+; EDX = config port, SI = logical device (low byte, FFh = card level) and
+; register (high byte)
+; returns CL = previous index, CH = previous logical device
 ESSREG_PnP_Select:
         in      al,dx
         mov     cl,al
@@ -161,7 +169,7 @@ ESSREG_PnP_Select:
         out     dx,al
         ret
 
-; Undo ESSREG_PnP_Select.  Clobbers EAX.
+; undo ESSREG_PnP_Select, clobbers EAX
 ESSREG_PnP_Restore:
         mov     eax,esi
         cmp     al,0xFF
@@ -176,7 +184,7 @@ ESSREG_PnP_Restore:
         out     dx,al
         ret
 
-; AL = 0 if EAX is 0, 1 if EAX is the caller's VM (EBX), 2 otherwise.
+; AL = 0 if EAX is 0, 1 if EAX is the caller's VM (EBX), 2 otherwise
 ESSREG_Owner_Class:
         or      eax,eax
         jz      .done
@@ -440,7 +448,7 @@ ESSREG_API_MixerBlock:
         mov     esi,eax
         xor     ecx,ecx
 .next:  xor     eax,eax
-        cmp     cl,0x40                 ; identification sequence: not read
+        cmp     cl,0x40                 ; identification sequence, not read
         je      .store
         pushfd
         cli
@@ -508,7 +516,7 @@ ESSREG_Group4_Funcs:
         dd ESSREG_API_Owners            ; 040C
 ESSREG_FUNC_COUNT equ ($ - ESSREG_Group4_Funcs) / 4
 
-; Replaces API_Group_Table (see AUDDRV_API_Proc in pcod.asm).
+; replaces API_Group_Table (see AUDDRV_API_Proc in pcod.asm)
 ESSREG_Group_Table:
         dd 12, API_Group0_Funcs
         dd 4, API_Group1_Funcs

@@ -1,12 +1,21 @@
-/* t_vxdapi.c -- vxdapi wrappers against a scripted stand-in for the
+/*
+ * t_vxdapi tests the vxdapi wrappers against a scripted stand-in for the
  * ES1869.VXD V86/PM API.
  *
- * The fake models what the wrappers depend on: 0001 copies an ADI whose
- * owner fields the test controls, 0002/0003 acquire and release the DSP
- * like Acquire_Resources/Release_Resources, group 4 exists only when
- * `ext` is set.  Every call is logged so the test can prove that functions
- * with side effects are called only when intended and that the callback
- * functions are never called at all. */
+ * The fake models what the wrappers depend on:
+ *   - 0001 copies an ADI whose owner fields the test controls
+ *   - 0002/0003 acquire and release the DSP like Acquire_Resources and
+ *     Release_Resources
+ *   - group 4 exists only when `ext` is set
+ *
+ * Every call is logged, so the test can prove that functions with side
+ * effects are called only when intended and that the callback functions
+ * are never called at all.
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
+ * Licensed under GPL Version 3.0
+ */
 
 #include <string.h>
 
@@ -26,7 +35,7 @@ static struct {
   u8 last_bl, last_bh, last_al;
 } fake;
 
-/* every function called during the whole run */
+// every function called during the whole run
 static u16 all_calls[512];
 static int nall;
 
@@ -45,7 +54,7 @@ static void fake_reset(int ext) {
   memset(&fake, 0, sizeof(fake));
   fake.present = 1;
   fake.ext = ext;
-  put32(fake.adi, 0x12345678);             /* overwritten size field */
+  put32(fake.adi, 0x12345678);             // overwritten size field
   fake.adi[ADI_AUDIO_BASE] = 0x20;
   fake.adi[ADI_AUDIO_BASE + 1] = 0x02;
   put32(fake.adi + ADI_DEVNODE, DEVNODE);
@@ -78,7 +87,7 @@ int vxd_raw_call(void *entry, vxd_regs *r) {
 
   if ((fn >> 8) == 4) {
     if (!fake.ext)
-      return 1; /* stock dispatcher: group out of range, AX unchanged */
+      return 1; // stock dispatcher: group out of range, AX unchanged
     if (r->ecx != DEVNODE)
       return fail(r, 1);
     switch (fn) {
@@ -94,8 +103,8 @@ int vxd_raw_call(void *entry, vxd_regs *r) {
       memset(buf, 0x33, 128);
       return 0;
     case 0x040C:
-      r->eax = 0x0201; /* DSP: caller's VM, FM: another VM */
-      r->ebx = 0x8000; /* MPU: none, status 80h */
+      r->eax = 0x0201; // DSP: caller's VM, FM: another VM
+      r->ebx = 0x8000; // MPU: none, status 80h
       r->edx = ADI_F_MPU_SHARED;
       return 0;
     }
@@ -114,7 +123,7 @@ int vxd_raw_call(void *entry, vxd_regs *r) {
     memcpy(buf, fake.adi, get32(buf));
     r->eax = 1;
     return 0;
-  case 0x0002: /* the system VM acquires the DSP */
+  case 0x0002: // the system VM acquires the DSP
     if ((r->eax & 0xFFFF) != 0x220 || (r->ebx & 0xFFFF) != 1)
       return fail(r, 1);
     owner = get32(fake.adi + ADI_DSP_OWNER);
@@ -134,7 +143,7 @@ int vxd_raw_call(void *entry, vxd_regs *r) {
     return 0;
   case 0x0005:
     if (r->eax == 0)
-      return 0; /* would write the GPO pins */
+      return 0; // would write the GPO pins
     r->ebx = 2;
     return 0;
   case 0x0008:
@@ -189,7 +198,7 @@ static void test_open_stock(void) {
   CHECK_EQ(vxd_mpu_info(&port, &irq), 0);
   CHECK_EQ(port, 0x330);
   CHECK_EQ(irq, 9);
-  /* group 4 is refused by the stock driver */
+  // the stock driver refuses group 4
   CHECK_EQ(vxd_ext_call(ESSX_MIXER_READ, 0x36, 0, 0, &v), ESSHW_EFAIL);
 }
 
@@ -217,9 +226,9 @@ static void test_open_ext(void) {
   CHECK_EQ(v, 0x5A);
   CHECK_EQ(fake.last_bl, 0x36);
   CHECK_EQ(vxd_ext_call(ESSX_PNP_WRITE, 0x01, 0x70, 0x05, 0), 0);
-  CHECK_EQ(fake.last_bl, 0x01); /* LDN */
-  CHECK_EQ(fake.last_bh, 0x70); /* register */
-  CHECK_EQ(fake.last_al, 0x05); /* value */
+  CHECK_EQ(fake.last_bl, 0x01); // LDN
+  CHECK_EQ(fake.last_bh, 0x70); // register
+  CHECK_EQ(fake.last_al, 0x05); // value
   CHECK_EQ(vxd_ext_mixer_block(block), 0);
   CHECK_EQ(block[127], 0x33);
   CHECK_EQ(vxd_ext_owners(&o), 0);
@@ -227,11 +236,11 @@ static void test_open_ext(void) {
   CHECK_EQ(o.fm, VXD_OWNER_OTHER);
   CHECK_EQ(o.mpu, VXD_OWNER_NONE);
   CHECK_EQ(o.status, 0x80);
-  /* group 4 calls never acquire anything */
+  // group 4 calls never acquire anything
   CHECK_EQ(count_calls(0x0002), 0);
   CHECK_EQ(count_calls(0x0003), 0);
-  /* direct port access (essctl /novxd) is bracketed like on the stock
-   * driver: the extended driver traps the ports too */
+  // direct port access (essctl /novxd) is bracketed like on the stock
+  // driver, since the extended driver traps the ports too
   CHECK_EQ(vxd_dsp_begin(), 0);
   vxd_dsp_end();
   CHECK_EQ(count_calls(0x0002), 1);
@@ -239,23 +248,23 @@ static void test_open_ext(void) {
 }
 
 static void test_dsp_bracket(void) {
-  /* free DSP: acquire, then release afterwards */
+  // free DSP: acquire, then release afterwards
   fake_reset(0);
   vxd_open();
   CHECK_EQ(vxd_owner_class(DOS_VM), VXD_OWNER_UNKNOWN);
   CHECK_EQ(vxd_dsp_begin(), 0);
   CHECK_EQ(get32(fake.adi + ADI_DSP_OWNER), SYS_VM);
-  CHECK_EQ(vxd.sys_vm, SYS_VM); /* learnt from the acquire */
+  CHECK_EQ(vxd.sys_vm, SYS_VM); // learned from the acquire
   CHECK_EQ(vxd_owner_class(SYS_VM), VXD_OWNER_SELF);
   CHECK_EQ(vxd_owner_class(DOS_VM), VXD_OWNER_OTHER);
   CHECK_EQ(vxd_owner_class(0), VXD_OWNER_NONE);
   vxd_dsp_end();
   CHECK_EQ(get32(fake.adi + ADI_DSP_OWNER), 0);
   CHECK_EQ(count_calls(0x0003), 1);
-  vxd_dsp_end(); /* a second end does nothing */
+  vxd_dsp_end(); // a second end does nothing
   CHECK_EQ(count_calls(0x0003), 1);
 
-  /* Windows already owns it (a wave device is open): never release */
+  // Windows already owns it (a wave device is open): never release
   fake_reset(0);
   put32(fake.adi + ADI_DSP_OWNER, SYS_VM);
   vxd_open();
@@ -265,17 +274,17 @@ static void test_dsp_bracket(void) {
   CHECK_EQ(get32(fake.adi + ADI_DSP_OWNER), SYS_VM);
   CHECK_EQ(count_calls(0x0003), 0);
 
-  /* a DOS box owns it: refuse before any port access */
+  // a DOS box owns it: refuse before any port access
   fake_reset(0);
   put32(fake.adi + ADI_DSP_OWNER, DOS_VM);
   vxd_open();
   CHECK_EQ(vxd_dsp_begin(), ESSHW_EINUSE);
-  CHECK_EQ(vxd.sys_vm, 0); /* a refusal teaches nothing */
+  CHECK_EQ(vxd.sys_vm, 0); // not learned from a refusal
   vxd_dsp_end();
   CHECK_EQ(get32(fake.adi + ADI_DSP_OWNER), DOS_VM);
   CHECK_EQ(count_calls(0x0003), 0);
 
-  /* a base the driver does not own: nothing is trapped, carry on */
+  // a base the driver does not own: nothing is trapped, carry on
   fake_reset(0);
   vxd_open();
   esshw.audio_base = 0x240;
@@ -284,8 +293,8 @@ static void test_dsp_bracket(void) {
   CHECK_EQ(count_calls(0x0003), 0);
 }
 
-/* after all other tests: functions with lasting side effects on the
- * driver were never called by any wrapper */
+// run after all other tests: no wrapper ever called a function with lasting
+// side effects on the driver
 static void test_never_called(void) {
   static const u16 forbidden[] = {0x0006, 0x0007, 0x0009, 0x000B,
                                   0x0200, 0x0201, 0x0102, 0x0103,

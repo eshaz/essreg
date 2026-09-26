@@ -1,16 +1,20 @@
-; vxd.inc -- macros and structures shared by the ES1869.VXD source.
+; Macros and structures shared by the ES1869.VXD source.
+;
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
+; Licensed under GPL Version 3.0
 
 %ifndef VXD_INC
 %define VXD_INC
 
-; Dynamic link to a VxD service: int 20h followed by (device << 16 | service).
-; VMM patches the six bytes into a direct call on first use.
+; dynamic link to a VxD service: int 20h, then (device << 16 | service)
+; VMM patches the six bytes into a direct call on first use
 %macro VxDCall 1
         int     0x20
         dd      %1
 %endmacro
 
-; Same, but the service is entered with a jump (bit 15 of the service number).
+; same, but the service is entered with a jump (bit 15 of the service number)
 %macro VxDJmp 1
         int     0x20
         dd      (%1) | 0x8000
@@ -18,9 +22,9 @@
 
 %include "services.inc"
 
-; Register-register instructions in the "load" encoding (op reg, r/m), which
-; MASM prefers and NASM does not emit by default.  "mov_ ebp,esp" assembles to
-; 8B EC where "mov ebp,esp" would give 89 E5; both do the same thing.
+; register-register instructions in the "load" encoding (op reg, r/m)
+; MASM prefers it and NASM doesn't emit it by default: "mov_ ebp,esp"
+; assembles to 8B EC where "mov ebp,esp" gives 89 E5 (same operation)
 %define REG_eax 0
 %define REG_ecx 1
 %define REG_edx 2
@@ -111,7 +115,7 @@
 %include "ctlmsg.inc"
 %include "adi.inc"
 
-; Client_Reg_Struc offsets (EBP points to it in V86/PM API procedures)
+; Client_Reg_Struc offsets (EBP points to it in the V86/PM API procedures)
 Client_EDI      equ 0x00
 Client_ESI      equ 0x04
 Client_EBP      equ 0x08

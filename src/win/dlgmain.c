@@ -1,8 +1,9 @@
 /*
- * dlgmain.c -- the main dialog: category list, menus, status lines and
- * the refresh timer.
+ * The main dialog of essctl: category list, menus, status
+ * lines and the refresh timer.
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -80,7 +81,7 @@ static void select_page(HWND dlg) {
     page_show(entries[sel].kind, entries[sel].arg);
 }
 
-/* --- file dialogs -------------------------------------------------------- */
+// --- file dialogs -----------------------------------------------------------
 
 static int file_dialog(HWND owner, int save, const char *filter,
                        const char *ext, char *path, unsigned size) {
@@ -188,7 +189,7 @@ static void on_command(HWND dlg, int id, int code, HWND ctl) {
     cmd_dump(dlg);
     return;
   case IDM_EXIT:
-  case IDCANCEL: /* Esc */
+  case IDCANCEL: // Esc
     DestroyWindow(dlg);
     return;
   case IDM_REFRESH:
@@ -235,7 +236,7 @@ BOOL CALLBACK __export main_dlg_proc(HWND dlg, UINT msg, WPARAM wp,
     if (winio_can_poll()) {
       CheckMenuItem(GetMenu(dlg), IDM_AUTOREFRESH, MF_BYCOMMAND | MF_CHECKED);
     } else {
-      /* the stock driver: reading takes the DSP, so no polling */
+      // direct I/O with ES1869.VXD takes the DSP on every read, so no polling
       auto_refresh = 0;
       EnableMenuItem(GetMenu(dlg), IDM_AUTOREFRESH, MF_BYCOMMAND | MF_GRAYED);
     }

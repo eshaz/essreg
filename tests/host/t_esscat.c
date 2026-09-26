@@ -1,5 +1,12 @@
-/* t_esscat.c -- consistency of the register catalog (src/esscat.tbl), its
- * helpers and the field writes of essio against the simulated ES1869 */
+/*
+ * t_esscat checks the register catalog (src/esscat.tbl) for consistency,
+ * then tests its helpers and the essio field writes against the simulated
+ * ES1869.
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
+ * Licensed under GPL Version 3.0
+ */
 
 #include <string.h>
 
@@ -29,7 +36,7 @@ static void test_tables(void) {
       CHECK(r->addr <= 0x0F);
     if (r->bank == BK_CPORT)
       CHECK(r->addr <= 0x07);
-    /* no register appears twice */
+    // no register appears twice
     for (j = 0; j < i; j++)
       CHECK(!(ess_regs[j].bank == r->bank && ess_regs[j].addr == r->addr &&
               ess_regs[j].ldn == r->ldn));
@@ -44,16 +51,16 @@ static void test_tables(void) {
           f->help[0]);
     CHECK(strlen(f->label) <= 32);
     page_fields[f->page]++;
-    /* fields of a register do not overlap */
+    // fields of a register do not overlap
     for (j = f->shift; j < f->shift + f->width; j++) {
       CHECK(!used[f->reg][j]);
       used[f->reg][j] = 1;
     }
-    /* keys are unique */
+    // keys are unique
     for (j = 0; j < i; j++)
       CHECK(strcmp(ess_fields[j].key, f->key) != 0);
     CHECK_EQ(cat_find_key(f->key), i);
-    /* enum fields name an enum with values; others none */
+    // enum fields name an enum with values, other fields none
     if (f->kind == K_ENUM) {
       CHECK(f->enum_id != E_NONE && f->enum_id < E_COUNT);
       for (n = 0, k = 0; k < ess_enumv_count; k++)
@@ -65,20 +72,20 @@ static void test_tables(void) {
     } else {
       CHECK_EQ(f->enum_id, E_NONE);
     }
-    /* live status is never written, and only settings are persisted */
+    // live status is never written, and only settings are persisted
     if (f->kind == K_RO)
       CHECK_EQ(f->tier, T_RO);
     if (f->flags & FF_PERSIST)
       CHECK((f->tier == T_SAFE || f->tier == T_CAUTION) &&
             f->kind != K_RO && f->kind != K_ACTION && f->kind != K_PULSE);
-    /* actions that reset or reconfigure things need Expert mode unless
-     * they only calibrate */
+    // actions that reset or reconfigure something need Expert mode, unless
+    // they only calibrate
     if (f->kind == K_PULSE)
       CHECK_EQ(f->tier, T_EXPERT);
-    /* registers reached through the DSP are never read by a timer */
+    // registers reached through the DSP are never read by a timer
     if (ess_regs[f->reg].bank == BK_CTRL)
       CHECK(ess_regs[f->reg].flags & RF_NEEDS_IDLE);
-    /* PnP resources are never changed below Expert mode */
+    // PnP resources are never changed below Expert mode
     if (ess_regs[f->reg].bank == BK_PNPCARD ||
         ess_regs[f->reg].bank == BK_PNPLDN)
       CHECK(f->tier == T_RO || f->tier == T_EXPERT);
@@ -122,15 +129,15 @@ static void test_formulas(void) {
 
   CHECK_EQ(cat_rate_70(0xF0), 48000);
   CHECK_EQ(cat_rate_70(0x6E), 44100);
-  CHECK_EQ(cat_rate_70(0xE0), 24000); /* 768000 / 32 */
-  CHECK_EQ(cat_rate_a1(0x6E), 22094); /* 397700 / 18 */
-  CHECK_EQ(cat_rate_a1(0xEE), 44194); /* 795500 / 18 */
+  CHECK_EQ(cat_rate_70(0xE0), 24000); // 768000 / 32
+  CHECK_EQ(cat_rate_a1(0x6E), 22094); // 397700 / 18
+  CHECK_EQ(cat_rate_a1(0xEE), 44194); // 795500 / 18
   CHECK_EQ(cat_filter(0xFF), 7160000);
   CHECK_EQ(cat_adc_offset(0x00), 0);
   CHECK_EQ(cat_adc_offset(0x0F), 960);
   CHECK_EQ(cat_adc_offset(0x10), -64);
   CHECK_EQ(cat_adc_offset(0x1F), -1024);
-  /* K_SMAG: 5 bits, -16..15 */
+  // K_SMAG: 5 bits, -16..15
   CHECK_EQ(off->width, 5);
   for (s = -16; s <= 15; s++)
     CHECK_EQ(cat_smag(off, cat_smag_code(off, s)), s);
@@ -188,7 +195,7 @@ static void test_parse(void) {
 
 static void test_tiers(void) {
   CHECK(cat_writable(field("fx.3d.level"), 0));
-  CHECK(cat_writable(field("ser.enable"), 0)); /* caution */
+  CHECK(cat_writable(field("ser.enable"), 0)); // caution
   CHECK(!cat_writable(field("ctl.sw_reset"), 0));
   CHECK(cat_writable(field("ctl.sw_reset"), 1));
   CHECK(!cat_writable(field("stat.dsp_busy"), 1));
@@ -210,18 +217,18 @@ static void test_essio(void) {
   esshw.flags = ESSHW_SAFE;
   esshw.dsp_timeout = 0x40;
 
-  /* read-modify-write keeps the other bits */
+  // read-modify-write keeps the other bits
   simhw.mixer[0x7D] = 0x09;
   CHECK_EQ(ess_field_write(cat_find_key("fx.monoout.source"), 2, 0), 0);
   CHECK_EQ(simhw.mixer[0x7D], 0x0D);
 
-  /* refused below the tier: no port access at all */
+  // refused below the tier: no port access at all
   simhw.nlog = 0;
   CHECK_EQ(ess_field_write(cat_find_key("ctl.fifo_reset"), 1, 0),
            -ESSIO_ETIER);
   CHECK_EQ(simhw.nlog, 0);
 
-  /* Audio_Base+6 pulses: never read first, written 02h then 00h */
+  // Audio_Base+6 pulses: never read first, written 02h then 00h
   simhw.nlog = 0;
   CHECK_EQ(ess_field_write(cat_find_key("ctl.fifo_reset"), 1, 1), 0);
   CHECK_EQ(count_port(0x226, 'i'), 0);
@@ -236,13 +243,13 @@ static void test_essio(void) {
     CHECK_EQ(seq[1], 0x00);
   }
 
-  /* power management pulse keeps GPO and Analog_Stays_On */
+  // power management pulse keeps GPO and Analog_Stays_On
   simhw.port7 = 0x0B;
   CHECK_EQ(ess_field_write(cat_find_key("pwr.pdn_request"), 1, 1), 0);
   CHECK_EQ(simhw.port7 & 0x0B, 0x0B);
   CHECK_EQ(simhw.port7 & 0x04, 0);
 
-  /* controller fields go through the DSP channel */
+  // controller fields go through the DSP channel
   simhw.ext_mode = 1;
   simhw.ctrl[0xBA - 0xA0] = 0x20;
   CHECK_EQ(ess_field_write(cat_find_key("adc.off_l"), 0x12, 0), 0);

@@ -1,5 +1,7 @@
 /*
- * esscat.h -- ES1869 register and field catalog.
+ * The ES1869 register and field catalog.
+ *
+ * Notes:
  *
  * The catalog is written once, in esscat.tbl, as X-macro lines:
  *
@@ -9,11 +11,12 @@
  *   ENUM(id)
  *   ENUMV(enum, value, "text")
  *
- * esscat.c turns it into tables; tools/regdoc.py turns it into the
- * register tables of docs/REGISTERS.md.  Every line holds exactly one
- * macro call so that both C and Python can read it.
+ * esscat.c builds its tables from it and tools/regdoc.py builds the
+ * register tables of docs/REGISTERS.md. Every line holds exactly one macro
+ * call so both C and Python can read it.
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -22,76 +25,76 @@
 
 #include "esstypes.h"
 
-/* how a register is reached */
+// how a register is reached
 enum ess_bank {
-  BK_MIXER,   /* mixer index/data at Audio_Base+4/+5 */
-  BK_CTRL,    /* controller register (A0h-BFh) through the DSP channel */
-  BK_APORT,   /* I/O port Audio_Base+addr */
-  BK_CPORT,   /* I/O port Config_Base+addr */
-  BK_PNPCARD, /* PnP card-level register */
-  BK_PNPLDN,  /* PnP logical-device register of logical device `ldn` */
+  BK_MIXER,   // mixer index/data at Audio_Base+4/+5
+  BK_CTRL,    // controller register (A0h-BFh) through the DSP channel
+  BK_APORT,   // I/O port Audio_Base+addr
+  BK_CPORT,   // I/O port Config_Base+addr
+  BK_PNPCARD, // PnP card-level register
+  BK_PNPLDN,  // PnP register of logical device ldn
   BK_COUNT
 };
 
-/* how a field is shown and edited */
+// how a field is shown and edited
 enum ess_kind {
-  K_BOOL,   /* one bit */
-  K_UINT,   /* unsigned level or number */
-  K_ENUM,   /* named values (see ENUM/ENUMV) */
-  K_RO,     /* read-only status */
-  K_ACTION, /* write the field's maximum value to trigger an action */
-  K_PULSE,  /* write 1 then 0 */
-  K_SMAG,   /* sign (top bit) and magnitude */
-  K_HEX     /* raw value */
+  K_BOOL,   // one bit
+  K_UINT,   // unsigned level or number
+  K_ENUM,   // named values (see ENUM/ENUMV)
+  K_RO,     // read-only status
+  K_ACTION, // write the field's maximum value to trigger an action
+  K_PULSE,  // write 1 then 0
+  K_SMAG,   // sign (top bit) and magnitude
+  K_HEX     // raw value
 };
 
-/* who may write it */
+// who can write it
 enum ess_tier {
-  T_RO,      /* never written */
-  T_SAFE,    /* ordinary settings */
-  T_CAUTION, /* can mute, distort or confuse the driver, but not hang */
-  T_EXPERT   /* can stop playback, hang the DSP or reconfigure the card */
+  T_RO,      // never written
+  T_SAFE,    // ordinary settings
+  T_CAUTION, // can mute, distort or confuse the driver, but not hang
+  T_EXPERT   // can stop playback, hang the DSP or reconfigure the card
 };
 
-/* register flags */
-#define RF_READ_SIDEFX 0x01 /* reading changes state: read on request only */
-#define RF_WRITEONLY 0x02   /* has no meaningful read-back */
-#define RF_NEEDS_IDLE 0x04  /* goes through the DSP command channel */
-#define RF_ALIAS 0x08       /* Sound Blaster compatible view of another reg */
+// register flags
+#define RF_READ_SIDEFX 0x01 // reading changes state, only read on request
+#define RF_WRITEONLY 0x02   // no meaningful read-back
+#define RF_NEEDS_IDLE 0x04  // goes through the DSP command channel
+#define RF_ALIAS 0x08       // Sound Blaster compatible view of another reg
 
-/* field flags */
-#define FF_PERSIST 0x01  /* stored in profiles */
-#define FF_DRVOWNED 0x02 /* the Windows driver rewrites it */
-#define FF_VOLATILE 0x04 /* cleared by a DSP software reset */
+// field flags
+#define FF_PERSIST 0x01  // stored in profiles
+#define FF_DRVOWNED 0x02 // the Windows driver rewrites it
+#define FF_VOLATILE 0x04 // cleared by a DSP software reset
 
-/* user-interface pages */
+// user interface pages
 enum ess_page {
-  PG_OUTPUT,  /* playback mixer */
-  PG_MASTER,  /* master volume and hardware volume control */
-  PG_RECORD,  /* record source and record mixer */
-  PG_EFFECTS, /* 3-D, microphone, MONO_IN/OUT, I2S */
-  PG_SERIAL,  /* serial / telegaming / ES689 interface */
-  PG_AUDIO2,  /* second audio channel */
-  PG_AUDIO1,  /* first audio channel controller registers */
-  PG_POWER,   /* ADC offset, power management, GPO */
-  PG_STATUS,  /* status and interrupt registers */
-  PG_PNP,     /* Plug and Play configuration */
-  PG_LEGACY,  /* Sound Blaster compatible mixer registers */
+  PG_OUTPUT,  // playback mixer
+  PG_MASTER,  // master volume and hardware volume control
+  PG_RECORD,  // record source and record mixer
+  PG_EFFECTS, // 3-D, microphone, MONO_IN/OUT, I2S
+  PG_SERIAL,  // serial / telegaming / ES689 interface
+  PG_AUDIO2,  // second audio channel
+  PG_AUDIO1,  // first audio channel controller registers
+  PG_POWER,   // ADC offset, power management, GPO
+  PG_STATUS,  // status and interrupt registers
+  PG_PNP,     // Plug and Play configuration
+  PG_LEGACY,  // Sound Blaster compatible mixer registers
   PG_COUNT
 };
 
-/* value formatting */
+// value formatting
 enum ess_fmt {
   FMT_NONE,
-  FMT_RATE_A1, /* Audio 1 sample rate from register A1h */
-  FMT_RATE_70, /* Audio 2 sample rate from mixer 70h */
-  FMT_FILTER,  /* filter clock from A2h / 72h */
-  FMT_ADCOFF,  /* ADC offset code (sign-magnitude, 64 per step) */
-  FMT_PORTHI,  /* I/O base bits 11:8 */
-  FMT_PORTLO   /* I/O base bits 7:0 */
+  FMT_RATE_A1, // Audio 1 sample rate from register A1h
+  FMT_RATE_70, // Audio 2 sample rate from mixer 70h
+  FMT_FILTER,  // filter clock from A2h / 72h
+  FMT_ADCOFF,  // ADC offset code (sign-magnitude, 64 per step)
+  FMT_PORTHI,  // I/O base bits 11:8
+  FMT_PORTLO   // I/O base bits 7:0
 };
 
-/* ids */
+// register, field and enum ids
 #define REG(id, bank, ldn, addr, rflags, name, dspage) id,
 #define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,    \
             label, help)
@@ -166,32 +169,32 @@ extern const char *const ess_page_names[PG_COUNT];
 extern const char *const ess_tier_names[4];
 extern const char *const ess_bank_names[BK_COUNT];
 
-/* field value <-> register byte */
+// field value to register byte and back
 u8 cat_mask(const struct ess_field *f);
 u8 cat_get(const struct ess_field *f, u8 raw);
 u8 cat_set(const struct ess_field *f, u8 raw, u8 value);
 u8 cat_max(const struct ess_field *f);
 
-/* signed value of a K_SMAG field, and the field value of a signed value */
+// signed value of a K_SMAG field, and the field value of a signed value
 int cat_smag(const struct ess_field *f, u8 value);
 u8 cat_smag_code(const struct ess_field *f, int step);
 
-/* text of an enum value, or NULL */
+// text of an enum value, or NULL
 const char *cat_enum_text(u8 enum_id, u8 value);
 
-/* format a field value (of register byte `raw`) for display */
+// format a field value (of register byte raw) for display
 void cat_format(const struct ess_field *f, u8 raw, char *buf, unsigned size);
 
-/* parse "12", "0x0c", "-128" (K_SMAG) or an enum text; 0 on success */
+// parse "12", "0x0c", "-128" (K_SMAG) or an enum text, 0 on success
 int cat_parse(const struct ess_field *f, const char *text, u8 *value);
 
-/* field id by persist key, or -1 */
+// field id by its profile key, or -1
 int cat_find_key(const char *key);
 
-/* 1 if the field may be written (expert: Expert mode is on) */
+// 1 if the field can be written (expert: Expert mode is on)
 int cat_writable(const struct ess_field *f, int expert);
 
-/* derived values used by the formats */
+// derived values used by the formats
 u32 cat_rate_a1(u8 raw);
 u32 cat_rate_70(u8 raw);
 u32 cat_filter(u8 raw);

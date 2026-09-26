@@ -1,4 +1,8 @@
 ; ESFM_FIX data, appended to DGROUP.  essctl finds it by the signature.
+;
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
+; Licensed under GPL Version 3.0
 
 fix_sig:        db 'ESFMFIX', 0
 fix_version:    dw 1

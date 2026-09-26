@@ -1,4 +1,6 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
 """Minimal reader for 32-bit little-endian ELF relocatable objects (NASM -f elf32)."""
 
 import struct

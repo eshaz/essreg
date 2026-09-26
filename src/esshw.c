@@ -1,7 +1,8 @@
 /*
- * esshw.c -- ES1869 hardware access (see esshw.h).
+ * ES1869 hardware access, see esshw.h.
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -13,19 +14,19 @@
 #endif
 
 esshw_ctx esshw = {
-    0x220,          /* audio_base */
-    0x250,          /* config_base: essreg's historical default */
-    0xFFF,          /* dsp_timeout */
-    0xF,            /* dsp_retries */
-    ESSHW_LEGACY,   /* flags */
-    ESSHW_DIRECT,   /* backend */
-    0,              /* dsp_desync */
-    0, 0, 0         /* ext_call, sim_in, sim_out */
+    0x220,          // audio_base
+    0x250,          // config_base, the original essreg's default
+    0xFFF,          // dsp_timeout
+    0xF,            // dsp_retries
+    ESSHW_LEGACY,   // flags
+    ESSHW_DIRECT,   // backend
+    0,              // dsp_desync
+    0, 0, 0         // ext_call, sim_in, sim_out
 };
 
-/* Interrupts are only masked for the protected protocol.  _enable() is
- * used rather than restoring the saved flags: at CPL 3 POPF cannot change
- * IF and would leave interrupts disabled. */
+// only mask interrupts with ESSHW_F_CRIT (the safe protocol)
+// _enable() instead of restoring the saved flags, since at CPL 3 POPF can't
+// change IF and would leave interrupts disabled
 #ifdef ESS_HOST
 #define CRIT_ENTER()
 #define CRIT_LEAVE()
@@ -68,7 +69,7 @@ static int ext(u16 fn, u8 bl, u8 bh, u8 al) {
   return err ? -err : result;
 }
 
-/* --- mixer ------------------------------------------------------------- */
+// mixer
 
 int esshw_mixer_read(u8 reg) {
   u16 port = esshw.audio_base + 4;
@@ -115,7 +116,7 @@ int esshw_mixer_id(u8 id[4]) {
   int i;
 
   if (esshw.backend == ESSHW_VXDEXT)
-    return -ESSHW_EPARAM; /* the API restores the index between reads */
+    return -ESSHW_EPARAM; // the API restores the index between reads
 
   CRIT_ENTER();
   if (esshw.flags & ESSHW_F_SAVE_MIXIDX)
@@ -141,9 +142,9 @@ int esshw_detect_config(void) {
   return esshw.config_base ? 0 : -ESSHW_ENOCFG;
 }
 
-/* --- DSP channel -------------------------------------------------------- */
+// DSP channel
 
-/* wait until Audio_Base+Ch bit 7 (busy) is clear */
+// wait until Audio_Base+Ch bit 7 (busy) is clear
 static int dsp_wait_ready(void) {
   u16 port = esshw.audio_base + 0x0C;
   u16 wait = 0;
@@ -157,7 +158,7 @@ static int dsp_wait_ready(void) {
   }
 }
 
-/* wait for read data: Audio_Base+Ch bit 6, or Audio_Base+Eh bit 7 */
+// wait for read data on Audio_Base+Ch bit 6 or Audio_Base+Eh bit 7
 static int dsp_wait_data(void) {
   int poll_c = (esshw.flags & ESSHW_F_POLL_C) != 0;
   u16 port = esshw.audio_base + (poll_c ? 0x0C : 0x0E);
@@ -191,8 +192,8 @@ int esshw_dsp_idle(void) {
   return !(status & 0xC0);
 }
 
-/* The original essreg protocol: wait for ready once, send C0h and the
- * register, wait for data on Audio_Base+Eh; retry the whole sequence. */
+// the original essreg protocol: wait for ready once, send C0h and the
+// register, wait for data on Audio_Base+Eh and retry the whole sequence
 static int ctrl_read_legacy(u8 reg) {
   u16 tries = 0;
 
@@ -289,7 +290,7 @@ done:
   return result;
 }
 
-/* --- ports ------------------------------------------------------------- */
+// ports
 
 int esshw_port_read(u8 offset) {
   if (offset > 0x0F)
@@ -333,7 +334,7 @@ int esshw_cfg_write(u8 offset, u8 value) {
   return 0;
 }
 
-/* --- PnP registers ------------------------------------------------------ */
+// PnP registers
 
 static int pnp_access(u8 ldn, u8 reg, int write, u8 value) {
   u16 cfg = esshw.config_base;

@@ -1,8 +1,10 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""Execute the essreg register API (V86/PM API group 4) of the rebuilt
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Run the essreg register API (V86/PM API group 4) of the rebuilt
 ES1869.VXD in a CPU emulator against a simulated ES1869.
 
-Run: python3 -m unittest tests.test_vxdext   (needs nasm and unicorn)
+usage: python3 -m unittest tests.test_vxdext   (needs nasm and unicorn)
 """
 
 import os
@@ -65,7 +67,7 @@ class ExtensionTest(unittest.TestCase):
                 syms[sym.name] = vxdemu.obj_base(secobj[sym.shndx]) + sym.value
         hw = vxdemu.FakeES1869()
         emu = vxdemu.VxDEmu(le, hw)
-        # one device instance in ADI_List; no config-device list
+        # one device instance in ADI_List and no config device list
         emu.write32(syms["ADI_List"], 0x5000)
         emu.set_list(0x5000, [vxdemu.LISTS + 0x100])
         emu.write32(vxdemu.LISTS + 0x100, vxdemu.ADI)

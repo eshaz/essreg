@@ -1,4 +1,11 @@
-/* check.h -- minimal assertions for the host-side C tests */
+/*
+ * Minimal assertions for the host-side C tests.
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
+ * Licensed under GPL Version 3.0
+ */
+
 #ifndef CHECK_H
 #define CHECK_H
 

@@ -1,4 +1,5 @@
-; segment 2: code, 84 bytes, flags 0D40h
+; Segment 2 of ESFM.DRV: code, 84 bytes, flags 0D40h.
+; ESS's driver code, disassembled with tools/ne2asm.py.
 
 WEP:
         mov ax,ds                                       ; 0000

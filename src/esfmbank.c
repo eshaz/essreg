@@ -1,7 +1,8 @@
 /*
- * esfmbank.c -- ESFM patch banks and ESFM.DRV (see esfmbank.h).
+ * ESFM patch banks and ESFM.DRV, see esfmbank.h.
  *
- * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  * Licensed under GPL Version 3.0
  */
 
@@ -32,7 +33,7 @@ static void set_why(char *why, const char *text, unsigned n) {
   strcpy(why, tmp);
 }
 
-/* --- banks --------------------------------------------------------------- */
+// banks
 
 int bank_check(const u8 *bank, u32 size, struct bank_info *info) {
   unsigned i, voices;
@@ -63,7 +64,7 @@ int bank_check(const u8 *bank, u32 size, struct bank_info *info) {
       voices = 1;
       break;
     case 3:
-      voices = 0; /* the driver ignores it */
+      voices = 0; // the driver ignores it
       break;
     default:
       voices = 2;
@@ -110,29 +111,29 @@ void bank_riff_header(u8 hdr[20], u16 size) {
   wr32(hdr + 16, size);
 }
 
-/* --- ESFM.DRV ------------------------------------------------------------ */
+// ESFM.DRV
 
-/* code of the bank loader (segment 3, DRV_ENABLE) around the constants */
+// bank loader code (segment 3, DRV_ENABLE) around the size constants
 static const struct {
   u16 off;
   u8 len;
   u8 bytes[14];
 } loader_sig[] = {
-    /* push bp; mov bp,sp; sub sp,134h; push di; push si;
-     * mov ax,2042h; push ax; mov ax, */
+    // push bp; mov bp,sp; sub sp,134h; push di; push si;
+    // mov ax,2042h; push ax; mov ax,
     {0x0662, 14, {0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x34, 0x01, 0x57, 0x56, 0xB8,
                   0x42, 0x20, 0x50, 0xB8}},
-    /* <size>; cwd; push dx; push ax; call far GlobalAlloc */
+    // <size>; cwd; push dx; push ax; call far GlobalAlloc
     {0x0672, 4, {0x99, 0x52, 0x50, 0x9A}},
-    /* mov word [12h],0; mov [14h],ax; or ax,[12h] */
+    // mov word [12h],0; mov [14h],ax; or ax,[12h]
     {0x067A, 13, {0xC7, 0x06, 0x12, 0x00, 0x00, 0x00, 0xA3, 0x14, 0x00, 0x0B,
                   0x06, 0x12, 0x00}},
-    /* mov ax,1234; cwd; push dx; push ax; mov ax,256 (FindResource) */
+    // mov ax,1234; cwd; push dx; push ax; mov ax,256 (FindResource)
     {0x06B4, 9, {0xB8, 0xD2, 0x04, 0x99, 0x52, 0x50, 0xB8, 0x00, 0x01}},
-    /* mov cx,<size/2>; rep movsw */
+    // mov cx,<size/2>; rep movsw
     {0x06FB, 1, {0xB9}},
     {0x06FE, 2, {0xF3, 0xA5}},
-    /* cmp word [bp-2Ch],<size>; jna; mov word [bp-2Ch],<size> */
+    // cmp word [bp-2Ch],<size>; jna; mov word [bp-2Ch],<size>
     {0x0779, 3, {0x81, 0x7E, 0xD4}},
     {0x077E, 5, {0x76, 0x08, 0xC7, 0x46, 0xD4}},
 };
@@ -175,8 +176,8 @@ int esfm_drv_inspect(FILE *f, struct esfm_drv *d) {
     goto io;
   d->seg3 = (u32)rd16(buf) << align;
 
-  /* resource table: shift, then per type {type, count, 4 reserved} and
-   * count entries {offset, length, flags, id, 4 reserved} */
+  // resource table: the shift, then for each type {type, count, 4 reserved}
+  // and count entries of {offset, length, flags, id, 4 reserved}
   if (!read_at(f, res, buf, 2))
     goto io;
   d->res_shift = rd16(buf);
@@ -251,11 +252,11 @@ int esfm_drv_patch(FILE *f, struct esfm_drv *d, const u8 *bank, u16 size) {
     return -1;
   }
   if (even <= d->bank_len) {
-    /* fits in the resource: overwrite it, clear what is left */
+    // fits in the resource, overwrite it and clear the rest
     at = d->bank_off;
     len = d->bank_len;
   } else {
-    /* append at the end, aligned, and move the resource entry there */
+    // append it at the end (aligned) and move the resource entry there
     at = (d->file_size + unit - 1) & ~(unit - 1);
     len = (even + unit - 1) & ~(unit - 1);
     if ((at >> d->res_shift) > 0xFFFF || (len >> d->res_shift) > 0xFFFF) {

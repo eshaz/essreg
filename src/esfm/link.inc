@@ -1,4 +1,8 @@
-; lengths and exported offsets for tools/nelink.py
+; Segment lengths and exported offsets for tools/nelink.py.
+;
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
+; Licensed under GPL Version 3.0
 
         db 'NELINK', 1, 0
         dw seg1_data_end, seg1_end

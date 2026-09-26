@@ -10,10 +10,10 @@
       ((byte)&0x08 ? '1' : '0'), ((byte)&0x04 ? '1' : '0'),                    \
       ((byte)&0x02 ? '1' : '0'), ((byte)&0x01 ? '1' : '0')
 
-/* register access, see esshw.h; negative return values are errors */
+// register access through esshw.h, negative return values are errors
 int read_mixer_reg(unsigned int reg_addr);
 void write_mixer_reg(unsigned int reg_addr, unsigned char reg_value);
-int read_audio_reg(unsigned int reg_addr); /* PnP register of LDN 1 */
+int read_audio_reg(unsigned int reg_addr); // PnP register of LDN 1
 int read_controller_reg(unsigned char reg_addr);
 int write_controller_reg(unsigned char reg_addr, unsigned char reg_value);
 

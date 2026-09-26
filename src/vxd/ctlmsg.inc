@@ -1,4 +1,8 @@
-; System control messages (EAX of a VxD Control_Proc)
+; System control messages, passed in EAX to a VxD's Control_Proc.
+;
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
+; Licensed under GPL Version 3.0
 
 Sys_Critical_Init            equ 0x00
 Device_Init                  equ 0x01

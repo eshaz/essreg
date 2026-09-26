@@ -6,7 +6,7 @@
 #include "regs.h"
 
 int read_audio_reg(unsigned int reg_addr) {
-  // PnP register of logical device 1 (audio); restores the index and LDN
+  // read from audio logical device (1), restoring the index and LDN after
   return esshw_pnp_read(1, (u8)reg_addr);
 }
 
@@ -297,8 +297,8 @@ unsigned long get_audio_2_filter_rate() {
   return rate;
 }
 
-// ADC offset adjust (BAh/BBh bits 4:0, DS p.71):
-// bit 4 = 0: offset = 64 * bits[3:0]; bit 4 = 1: -64 * (bits[3:0] + 1)
+// ADC offset adjust, BAh / BBh bits 4:0 (DS p.71)
+// offset = 64 * bits[3:0], or -64 * (bits[3:0] + 1) when bit 4 is set
 static int calc_offset_value(unsigned char offset_reg) {
   return offset_reg & 0x10 ? -64 * ((offset_reg & 0x0f) + 1)
                            : 64 * (offset_reg & 0x0f);
@@ -306,7 +306,7 @@ static int calc_offset_value(unsigned char offset_reg) {
 
 static unsigned char calc_offset_reg(int offset_value) {
   if (offset_value < 0) {
-    int steps = (-offset_value + 63) / 64; // -1..-64 -> 1
+    int steps = (-offset_value + 63) / 64; // -1 to -64 is 1 step
     if (steps > 16)
       steps = 16;
     return 0x10 | ((steps - 1) & 0x0f);
@@ -323,7 +323,7 @@ static int get_adc_offset(unsigned char reg, const char *label) {
     printf("ADC Offset %s: %s\n", label, esshw_strerror(value));
     return 0;
   }
-  // bit 5 of BAh (disable wake-up delay) is not part of the offset
+  // BAh bit 5 (disable wake-up delay) isn't part of the offset
   value = calc_offset_value((unsigned char)(value & 0x1f));
   printf("ADC Offset %s %d samples\n", label, value);
   return value;

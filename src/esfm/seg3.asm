@@ -1,4 +1,5 @@
-; segment 3: code, 2546 bytes, flags 1D10h
+; Segment 3 of ESFM.DRV: code, 2546 bytes, flags 1D10h.
+; ESS's driver code, disassembled with tools/ne2asm.py.
 
 DriverProc:
         push bp                                         ; 0000
@@ -205,7 +206,8 @@ L3_01A1:
         retf                                            ; 01A4
         db 0x90                                         ; 01A5
 
-; MODM_OPEN: acquire FM from ES1869.VXD, chip_reset, remember the client; only one client at a time (MMSYSERR_ALLOCATED)
+; MODM_OPEN: acquire FM from ES1869.VXD, chip_reset, remember the client
+; (one client at a time, a second open gets MMSYSERR_ALLOCATED)
 mod_open:
         push bp                                         ; 01A6
         mov_ bp,sp                                      ; 01A7
@@ -607,7 +609,8 @@ L3_0495:
         pop bp                                          ; 049A
         retf 0x4                                        ; 049B
 
-; DRVM_ENABLE (67h): find the VxD, read the FM port (0101), register the notification client (0200)
+; DRVM_ENABLE (67h): find the VxD, read the FM port (0101), register the
+; notification client (0200)
 dev_enable:
         push bp                                         ; 049E
         mov_ bp,sp                                      ; 049F

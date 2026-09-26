@@ -1,16 +1,19 @@
 /*
- * ESFM Patch writes a custom patch bank into ESFM.DRV, the FM MIDI driver
- * of the ES1869 for Windows 95.
+ * ESFM Patch is a program that writes custom patch
+ * banks into esfm.drv.
+ *
+ * Notes:
+ *
+ * esfm.drv is the Windows 95 FM MIDI driver of the ES1869, found in
+ * c:\windows\system. The bank can be a raw bank (256 offsets, then the
+ * patches) or a RIFF "Ptch" file. A bank that fits in the driver's resource
+ * is written in place. A larger one (up to 32752 bytes) is appended to the
+ * file, and the resource entry and the bank loader's size constants are
+ * updated. The first run keeps a copy of the original driver as ESFM.BAK.
  *
  * Usage:
- *   esfmpat "c:\windows\system\esfm.drv" "c:\path\to\patch.bin"
- *   esfmpat "c:\windows\system\esfm.drv"      (show the driver's bank)
- *
- * The bank may be a raw bank (256 offsets, then the patches) or a RIFF
- * "Ptch" file.  A bank no larger than the driver's resource is written in
- * place; a larger one (up to 32752 bytes) is appended to the file and the
- * resource entry and the bank loader's size constants are updated.  The
- * first run keeps a copy of the original driver as ESFM.BAK.
+ *   `esfmpat "c:\path\to\esfm.drv" "c:\path\to\patch.bin"`
+ *   `esfmpat "c:\path\to\esfm.drv"` (show the driver's patch bank)
  *
  * (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -35,7 +38,7 @@ static void usage(void) {
   printf("       esfmpat \"c:\\path\\to\\esfm.drv\"   (show its patch bank)\n");
 }
 
-/* the driver's name with the extension replaced by .BAK */
+// the driver's name with the extension replaced by .BAK
 static void backup_name(const char *path, char *out, unsigned size) {
   char *dot, *slash;
 

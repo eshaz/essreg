@@ -1,8 +1,12 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""Build every program with Open Watcom v2 (tools/ow2build.sh) and check
-the 16-bit Windows executable: expected Windows version 4.0 (3-D look on
-Windows 95), a single data segment (so that "essctl /load" can run while
-the window is open), discardable code, the imports and the resources.
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Build every program with Open Watcom v2 (tools/ow2build.sh).
+
+Then check the 16-bit Windows program essctl.exe: expected Windows version
+4.0 (3-D look on Windows 95), a single data segment (so "essctl /load" can
+run while the window is open), discardable code, the imports and the
+resources.
 
 Needs Open Watcom v2 in $OW2.
 """

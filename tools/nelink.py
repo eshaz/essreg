@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
-"""Link a 16-bit Windows NE module from ``nasm -f bin`` output.
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Link a 16-bit Windows NE module from nasm -f bin output.
+
+usage: data = link(binary, layout, srcdir)
 
 The source (see tools/ne2asm.py) assembles every segment into its own
-section; each section holds the segment's bytes followed by its relocation
-table, exactly as they appear in the file.  A last section, ``link``, holds
-the lengths the linker needs and the offsets of the exported entry points:
+section, which holds the segment's bytes and then its relocation table,
+exactly as they are in the file.  The last section, link, holds the
+lengths the linker needs and the offsets of the exported entry points:
 
     db 'NELINK', 1, 0
     dw <for each segment: data length, data + relocation table length>
     dw <for each symbol in layout["symbols"]: its offset>
 
-layout.json describes everything else: the MZ stub, the NE header fields,
-segment flags, resources, the name and entry tables, and the order of the
-segments and resources in the file.
-
-    data = link(binary, layout, srcdir)
+layout.json describes the rest: the MZ stub, the NE header fields, segment
+flags, resources, the name and entry tables, and the order of the segments
+and resources in the file.
 """
 
 import os
@@ -87,8 +89,8 @@ def link(binary, layout, srcdir):
             res_bytes[key] = data + b"\0" * pad
             items[key] = res_bytes[key]
 
-    # place items in file order; keep each original gap, shifting everything
-    # after an item that grew
+    # place the items in file order, keeping each original gap and shifting
+    # everything after an item that grew
     order = layout["order"]
     offsets = {}
     delta = 0
