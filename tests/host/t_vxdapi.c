@@ -227,11 +227,15 @@ static void test_open_ext(void) {
   CHECK_EQ(o.fm, VXD_OWNER_OTHER);
   CHECK_EQ(o.mpu, VXD_OWNER_NONE);
   CHECK_EQ(o.status, 0x80);
-  /* the extended driver never needs the ownership bracket */
-  CHECK_EQ(vxd_dsp_begin(), 0);
-  vxd_dsp_end();
+  /* group 4 calls never acquire anything */
   CHECK_EQ(count_calls(0x0002), 0);
   CHECK_EQ(count_calls(0x0003), 0);
+  /* direct port access (essctl /novxd) is bracketed like on the stock
+   * driver: the extended driver traps the ports too */
+  CHECK_EQ(vxd_dsp_begin(), 0);
+  vxd_dsp_end();
+  CHECK_EQ(count_calls(0x0002), 1);
+  CHECK_EQ(count_calls(0x0003), 1);
 }
 
 static void test_dsp_bracket(void) {

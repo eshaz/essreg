@@ -193,7 +193,7 @@ int vxd_dsp_begin(void) {
   int err;
 
   vxd.dsp_taken = 0;
-  if (!vxd.entry || vxd.ext_version)
+  if (!vxd.entry)
     return 0;
   /* the owner field tells whether this acquire is the one that takes the
    * DSP; 0002 alone does not (it succeeds for the current owner too) */

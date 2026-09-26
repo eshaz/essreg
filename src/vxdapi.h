@@ -120,7 +120,9 @@ int vxd_mpu_info(u16 *port, u8 *irq);      /* 0301 */
  * acquires the DSP explicitly (0002) before direct port access and fails
  * with ESSHW_EINUSE instead; vxd_dsp_end releases it (0003) only if it was
  * free before, which resets the DSP exactly as closing a wave device does.
- * Neither may be interleaved with a yield to other programs. */
+ * The extended driver traps ports the same way, so the bracket belongs to
+ * direct port access with either driver; the group 4 functions need none.
+ * Neither call may be interleaved with a yield to other programs. */
 int vxd_dsp_begin(void);
 void vxd_dsp_end(void);
 

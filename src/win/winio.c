@@ -106,8 +106,9 @@ void winio_path_text(char *buf, unsigned size) {
             vxd.ext_version >> 8, vxd.ext_version & 0xFF, esshw.audio_base);
     break;
   case WIO_DIRECT_VXD:
-    sprintf(tmp, "Direct I/O at %03Xh (stock ES1869.VXD %u.%02u)",
-            esshw.audio_base, vxd.version >> 8, vxd.version & 0xFF);
+    sprintf(tmp, "Direct I/O at %03Xh (%s ES1869.VXD %u.%02u)",
+            esshw.audio_base, vxd.ext_version ? "/novxd," : "stock",
+            vxd.version >> 8, vxd.version & 0xFF);
     break;
   case WIO_SIM:
     sprintf(tmp, "Simulated ES1869 at %03Xh", esshw.audio_base);
