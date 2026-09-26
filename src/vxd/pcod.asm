@@ -1842,11 +1842,19 @@ L5_1357:
 ; V86/PM API: DX = function (DH group, DL index)
 AUDDRV_API_Proc:
         movzx eax,word [ebp+Client_EDX]                 ; 135C
+%if ESSREG_EXT
+        cmp ah,ESSREG_API_GROUPS                        ; essreg: groups 0-4
+%else
         cmp ah,0x4                                      ; 1360
+%endif
         jnc short L5_1386                               ; 1363
         movzx ecx,ah                                    ; 1365
         shl ecx,byte 0x3                                ; 1368
+%if ESSREG_EXT
+        lea ecx,[ecx+ESSREG_Group_Table]                ; essreg: 5-entry table
+%else
         lea ecx,[ecx+API_Group_Table]                   ; 136B
+%endif
         movzx eax,al                                    ; 1371
         cmp eax,[ecx]                                   ; 1374
         jnc short L5_1386                               ; 1376

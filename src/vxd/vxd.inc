@@ -109,6 +109,7 @@
 %endmacro
 
 %include "ctlmsg.inc"
+%include "adi.inc"
 
 ; Client_Reg_Struc offsets (EBP points to it in V86/PM API procedures)
 Client_EDI      equ 0x00

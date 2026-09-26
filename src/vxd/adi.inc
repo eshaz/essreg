@@ -1,0 +1,24 @@
+; adi.inc -- fields of the AUDDRV device instance (ADI) structure.
+;
+; One ADI is allocated per ES1869 devnode (ADI_Create, o4:01FC) and kept in
+; the list ADI_List.  API function 0001 copies it to the caller.  Only the
+; fields below are known with confidence; see docs/VXD_INTERNALS.md.
+
+%ifndef ADI_INC
+%define ADI_INC
+
+ADI_Flags               equ 0x04    ; word: 0020h no-DMA (PIO) emulation, 2000h MPU IRQ shared
+ADI_AudioBase           equ 0x06    ; word: Audio_Base (e.g. 220h)
+ADI_FMBase              equ 0x08    ; word: FM port (e.g. 388h), FFFFh if none
+ADI_FMAlias             equ 0x0A    ; word: FM alias base, negative if none
+ADI_MPUBase             equ 0x0C    ; word: MPU-401 port (e.g. 330h), FFFFh if none
+ADI_MPUIRQ              equ 0x0E    ; byte
+ADI_DSPOwner            equ 0x35    ; dword: VM handle that owns the DSP, 0 = none
+ADI_DSPLastOwner        equ 0x39    ; dword: previous DSP owner
+ADI_FMOwner             equ 0x3D    ; dword: VM handle that owns the FM synthesizer
+ADI_FMLastOwner         equ 0x41
+ADI_MPUOwner            equ 0x45    ; dword: VM handle that owns the MPU-401
+ADI_MPULastOwner        equ 0x49
+ADI_DevNode             equ 0x55    ; dword: CONFIGMG devnode
+
+%endif
