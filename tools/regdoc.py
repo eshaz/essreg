@@ -54,6 +54,7 @@ RFLAGS = {"RF_READ_SIDEFX": "reading changes state",
 FFLAGS = {"FF_PERSIST": "profile", "FF_DRVOWNED": "driver sets it",
           "FF_VOLATILE": "cleared by DSP reset"}
 
+
 def split_args(text):
     """Arguments of a macro call, with the strings still quoted."""
     args, cur, quoted, i = [], "", False, 0

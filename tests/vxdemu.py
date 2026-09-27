@@ -17,8 +17,7 @@ import struct
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_INSN,
                      UC_HOOK_INTR)
 from unicorn.x86_const import (UC_X86_INS_IN, UC_X86_INS_OUT, UC_X86_REG_EAX,
-                               UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX,
-                               UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_EBP,
+                               UC_X86_REG_EBX, UC_X86_REG_ESI, UC_X86_REG_EBP,
                                UC_X86_REG_ESP, UC_X86_REG_EIP,
                                UC_X86_REG_EFLAGS)
 

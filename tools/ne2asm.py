@@ -1016,9 +1016,10 @@ def generate(path, names_path, outdir, verbose=True, res_map=None):
                     with open(os.path.join(outdir, res_map[(r.type, r.id)]),
                               "rb") as f:
                         if f.read() != raw[r.offset:r.offset + r.length]:
-                            raise RuntimeError("%s differs from resource "
-                                               "%s:%s" % (res_map[(r.type,
-                                                  r.id)], r.type, r.id))
+                            name = res_map[(r.type, r.id)]
+                            raise RuntimeError(
+                                "%s differs from resource %s:%s"
+                                % (name, r.type, r.id))
             res = assemble(tmp, main, {"ESFM_FIX": 0},
                            os.path.join(tmp, "out.bin"))
             if res.returncode != 0:

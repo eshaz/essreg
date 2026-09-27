@@ -267,7 +267,6 @@ class Disassembler:
                     break
                 pos = restart
 
-
     def _try_entry(self, ent):
         obj, start = ent
         if not self.is_exec(obj) or start in self.insns[obj]:
@@ -994,7 +993,6 @@ def check_listing(path, le, sect_obj, masks=None, detail=None):
             if detail is not None:
                 detail[(obj, off)] = (got, bytes(want), it["src"])
     return bad
-
 
 
 REG32 = "eax ecx edx ebx esp ebp esi edi".split()

@@ -19,7 +19,6 @@ class DocsTest(unittest.TestCase):
                               "--check"], capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
 
-
     def test_vxd_api_md_lists_every_function(self):
         """docs/VXD_API.md has exactly the functions of the dispatch tables"""
         def table(path, label, end_re):

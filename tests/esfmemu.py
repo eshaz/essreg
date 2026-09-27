@@ -34,10 +34,10 @@ from unicorn import (Uc, UC_ARCH_X86, UC_MODE_16, UC_HOOK_INTR,
                      UC_HOOK_INSN, UC_HOOK_CODE, UC_HOOK_MEM_WRITE)
 from unicorn.x86_const import (UC_X86_REG_AX, UC_X86_REG_BX, UC_X86_REG_CX,
                                UC_X86_REG_DX, UC_X86_REG_SI, UC_X86_REG_DI,
-                               UC_X86_REG_BP, UC_X86_REG_SP, UC_X86_REG_IP,
+                               UC_X86_REG_SP, UC_X86_REG_IP,
                                UC_X86_REG_CS, UC_X86_REG_DS, UC_X86_REG_ES,
                                UC_X86_REG_SS, UC_X86_REG_EFLAGS,
-                               UC_X86_REG_ECX, UC_X86_INS_IN, UC_X86_INS_OUT)
+                               UC_X86_INS_IN, UC_X86_INS_OUT)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -162,8 +162,8 @@ class Inject:
         self.msg, self.dw1, self.dw2 = msg, dw1, dw2
         self.after_writes, self.after_insns = after_writes, after_insns
         self.in_callback = in_callback      # MOM_* message to react to
-        self.on_lock = on_lock              # when the fixed driver takes
-                                            # its lock (fix_lock goes 0 -> 1)
+        # when the fixed driver takes its lock (fix_lock goes 0 -> 1)
+        self.on_lock = on_lock
         self.user = user
         self.result = None
         self.done = False
@@ -227,9 +227,9 @@ class ESFMEmu:
         self.files = {}          # path in upper case -> bytes
         self.ftimes = {}         # path -> (DOS date, DOS time), if not new
         self.handles = {}        # DOS handle -> [path, position, bytes]
-        self.lfn = True          # INT 21h 716Ch works, as on Windows 95;
-                                 # False: AX=7100h and the carry set, as on
-                                 # Windows 3.1, "nocarry": the carry clear
+        # INT 21h 716Ch works, as on Windows 95; False: AX=7100h and the
+        # carry set, as on Windows 3.1, "nocarry": the carry clear
+        self.lfn = True
         self.opens = []          # paths opened, in order
         self.reads = 0           # INT 21h 3Fh calls
         self._lock_seen = False
@@ -750,9 +750,9 @@ class ESFMEmu:
 
     def modmessage(self, msg, dw1=0, dw2=0, user=None, injects=()):
         user = user if user is not None else (self.client or 0)
-        return self.call(self.modmsg_addr, [0, msg, user >> 16, user & 0xFFFF,
-                                           dw1 >> 16, dw1 & 0xFFFF,
-                                           dw2 >> 16, dw2 & 0xFFFF],
+        return self.call(self.modmsg_addr,
+                         [0, msg, user >> 16, user & 0xFFFF,
+                          dw1 >> 16, dw1 & 0xFFFF, dw2 >> 16, dw2 & 0xFFFF],
                          injects) & 0xFFFF
 
     def open(self, callback=True, injects=()):
@@ -775,8 +775,8 @@ class ESFMEmu:
             CLIENT_OFF, flags >> 16, flags & 0xFFFF], injects) & 0xFFFF
         if r != 0:
             raise EmuError("MODM_OPEN failed: %#x" % r)
-        self.client = struct.unpack("<I", self.rd(STUB_PARA, CLIENT_OFF + 0x40,
-                                                   4))[0]
+        self.client = struct.unpack(
+            "<I", self.rd(STUB_PARA, CLIENT_OFF + 0x40, 4))[0]
         return r
 
     def data(self, msg, injects=()):
