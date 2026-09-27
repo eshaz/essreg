@@ -14,6 +14,7 @@ static void print_opts() {
   printf("| r=[path]           | Dump ES1869 Registers        default \"essreg.txt\"\n");
   printf("| c                  | Calibrate Op Amp\n");
   printf("| 3=[0,63; 0%%,100%%]  | 3D Amount                    Get / Set\n");
+  printf("| 3l=[1,0]           | 3D Limit (undocumented)      Enable / Disable\n");
   printf("| ol=[-1024,960]     | ADC Offset Samples Left      Get / Set\n");
   printf("| or=[-1024,960]     | ADC Offset Samples Right     Get / Set\n");
   printf("| a1s                | Audio 1 Sample Rate          Get\n");
@@ -48,8 +49,11 @@ int main(int argc, char *argv[]) {
     if (arg_data == NULL) {
       // getter
       if (argv[i][0] == '3') {
-        get_3d_mode();
-        get_3d_level();
+        if (argv[i][1] == 'l') get_3d_limit();
+        else {
+          get_3d_mode();
+          get_3d_level();
+        }
       }
 	  else if (argv[i][0] == 'o') {
 	    if (argv[i][1] == 'l') get_adc_offset_left();
@@ -87,6 +91,7 @@ int main(int argc, char *argv[]) {
 		else if (argv[i][1] == 0) {
           get_3d_mode();
           get_3d_level();
+          get_3d_limit();
           get_mono_in();
           get_mono_in_level();
           get_adc_offset_left();
@@ -109,7 +114,8 @@ int main(int argc, char *argv[]) {
       arg_data += 1;
 
       if (argv[i][0] == '3') {
-        if (strstr(arg_data, "%")) set_3d_level_pct(atoi(arg_data));
+        if (argv[i][1] == 'l') set_3d_limit(atoi(arg_data));
+        else if (strstr(arg_data, "%")) set_3d_level_pct(atoi(arg_data));
         else set_3d_level(atoi(arg_data));
       }
 	  else if (argv[i][0] == 'o') {

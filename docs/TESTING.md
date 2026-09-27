@@ -21,6 +21,7 @@ python3 tests/run_tests.py
   * the register catalog (`t_esscat`)
   * profiles (`t_profile`)
   * ess3d's command line and 3-D register changes (`t_ess3d`)
+  * essreg's register functions that the original didn't have, like the 3-D limit (`t_regs`)
   * patch banks (`t_esfm`)
   * a port trace proving that the refactored essreg talks to the chip exactly like the original did (`t_trace`)
 

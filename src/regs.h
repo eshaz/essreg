@@ -38,6 +38,9 @@ void set_telegaming_mode(unsigned char on_off);
 unsigned char get_3d_mode();
 void set_3d_mode(unsigned char on_off);
 
+unsigned char get_3d_limit();
+void set_3d_limit(unsigned char on_off);
+
 unsigned char get_3d_level();
 void set_3d_level(unsigned char level);
 void set_3d_level_pct(unsigned char level_pct);

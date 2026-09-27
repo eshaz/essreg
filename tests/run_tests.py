@@ -11,8 +11,8 @@ usage: python3 tests/run_tests.py
   unicorn)
 - C tests (tests/host/t_*.c), built with gcc against the simulated ES1869:
   esshw protocols, the VxD API wrappers, the register catalog, profiles,
-  ess3d's commands, ESFM patch banks and driver patching, and an
-  old-versus-new port trace of essreg's register functions
+  ess3d's commands, ESFM patch banks and driver patching, essreg's newer
+  register functions, and an old-versus-new port trace of its original ones
 - with Open Watcom in $OW2: the 16-bit VxD call thunk in a CPU emulator
 """
 
@@ -70,6 +70,14 @@ def c_tests(tmp):
         code, out, err = run([exe] + args)
         sys.stdout.write(out + err)
         failures += code != 0
+
+    # essreg's register functions that the original didn't have
+    regs_exe = os.path.join(tmp, "t_regs")
+    cc(regs_exe, [os.path.join(HOST, "t_regs.c")] +
+       src("regs.c", "esshw.c", "simhw.c"), ["-I" + SHIM])
+    code, out, err = run(regs_exe)
+    sys.stdout.write(out + err)
+    failures += code != 0
 
     # trace essreg's original regs.c and the refactored one on esshw
     old = os.path.join(tmp, "old")

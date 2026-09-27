@@ -5,15 +5,16 @@ This repository contains utilities and drivers designed for the ESS AudioDrive E
 
 ## [`essctl.exe`](build)
 * Windows 95 control panel for the ES1869 (a 16-bit Windows program).
-* Shows every register of the chip, 133 registers and 272 settings, on these pages: *Output mixer*, *Master volume*, *Record*, *3-D, mic, MONO, I2S*, *Serial / telegaming*, *Audio 2 channel*, *Audio 1 controller*, *ADC offset & power*, *Status & interrupts*, *Plug and Play*, *SB compatible mixer*, *Raw registers* and *ESFM patch bank*.
+* Shows every register of the chip, 137 registers and 279 settings, on these pages: *Output mixer*, *Master volume*, *Record*, *3-D, mic, MONO, I2S*, *Serial / telegaming*, *Audio 2 channel*, *Audio 1 controller*, *ADC offset & power*, *Status & interrupts*, *Plug and Play*, *SB compatible mixer*, *Raw registers* and *ESFM patch bank*.
   * Each setting shows the decoded value (sample rates in Hz, ADC offsets in samples, named choices). The help line shows the register, bits and data sheet page.
   * Every change is written and read back, so the page shows what the chip returned.
+  * Registers the data sheet leaves out, but ESS's drivers use, are there too, marked *(undocumented)*: the 3-D limit (mixer 50h bit 0), the 3-D registers 54h, 56h, 58h and 5Ah, and controller A8h bits 7:5 and 2. See [docs/REGISTERS.md](docs/REGISTERS.md).
 * Settings that can stop playback, hang the DSP or move the card to other resources are read-only until Options > *Expert mode* is turned on for the session.
 * Talks to the card in one of three ways:
   * Through the register interface of the rebuilt `ES1869.VXD` (below). Nothing Windows or a DOS game is doing is disturbed.
   * Directly, with the stock driver. essctl borrows the sound device around each access and gives it back, so a DOS game only gets "in use" while essctl is reading.
   * `/sim`: a simulated ES1869, to try essctl without the card.
-* **Profiles**: File > *Save profile* stores the 50 ordinary settings in an INI file, and File > *Load profile* restores them.
+* **Profiles**: File > *Save profile* stores the 55 ordinary settings in an INI file, and File > *Load profile* restores them.
   * The ESS driver resets the mixer whenever Windows starts and only puts back its own settings ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)). Put `essctl /load C:\ESS\MY.INI` in the StartUp group to restore yours at every start of Windows.
 * **ESFM**: ESFM > *Load patch bank* replaces the FM synthesizer's sounds while Windows runs.
   * Check out the *ESFM patch bank* page! It shows the synthesizer's 18 voices live and marks hanging notes. *Stress test* plays dense music to check for them ([docs/ESFM_MIDI.md](docs/ESFM_MIDI.md)).
@@ -117,6 +118,7 @@ ES1869 Register Utility (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
 | r=[path]           | Dump ES1869 Registers        default "essreg.txt"
 | c                  | Calibrate Op Amp
 | 3=[0,63; 0%,100%]  | 3D Amount                    Get / Set
+| 3l=[1,0]           | 3D Limit (undocumented)      Enable / Disable
 | ol=[-1024,960]     | ADC Offset Samples Left      Get / Set
 | or=[-1024,960]     | ADC Offset Samples Right     Get / Set
 | a1s                | Audio 1 Sample Rate          Get

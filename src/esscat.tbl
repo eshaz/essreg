@@ -256,9 +256,23 @@ FLD(F_SRX_ST, R_MX4E, 0, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_SERIAL, FMT_NONE, "
 REG(R_MX50, BK_MIXER, 0, 0x50, 0, "3-D enable", 62)
 FLD(F_3D_EN, R_MX50, 3, 1, K_BOOL, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.enable", "3-D effect", "1 = enable the Spatializer VBX 3-D effect, 0 = bypass it; the effect also needs bit 2 (released from reset) (DS p.62)")
 FLD(F_3D_RUN, R_MX50, 2, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.run", "3-D released from reset", "Active-low reset of the 3-D effect: 1 = release from reset, 0 = reset (DS p.62)")
+FLD(F_3D_LIMIT, R_MX50, 0, 1, K_BOOL, T_CAUTION, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.limit", "3-D limit (undocumented)", "Reserved in the data sheet (always write 0), but ESS's driver sets it from its 3D Limit setting, 0 unless changed in the registry (docs/DRIVER_CONFIG.md); what it does isn't documented")
 
 REG(R_MX52, BK_MIXER, 0, 0x52, 0, "3-D level", 62)
 FLD(F_3D_LEVEL, R_MX52, 0, 6, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.level", "3-D level", "Amount of 3-D effect: 0 = minimum, 3Fh = maximum; reset to zero by hardware reset (DS p.62)")
+
+/* ESS's driver writes 54h, 56h, 58h and 5Ah with 8Fh, 95h, 94h and 80h, after 50h and 52h, each time it enables the device with 3-D on (docs/DRIVER_CONFIG.md). They are probably settings of the Spatializer; what their bits do isn't known. */
+REG(R_MX54, BK_MIXER, 0, 0x54, 0, "3-D register 54h (undocumented)", 0)
+FLD(F_3D_R54, R_MX54, 0, 8, K_HEX, T_CAUTION, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.reg54", "3-D register 54h", "Undocumented; ESS's driver writes 8Fh when it enables 3-D")
+
+REG(R_MX56, BK_MIXER, 0, 0x56, 0, "3-D register 56h (undocumented)", 0)
+FLD(F_3D_R56, R_MX56, 0, 8, K_HEX, T_CAUTION, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.reg56", "3-D register 56h", "Undocumented; ESS's driver writes 95h when it enables 3-D")
+
+REG(R_MX58, BK_MIXER, 0, 0x58, 0, "3-D register 58h (undocumented)", 0)
+FLD(F_3D_R58, R_MX58, 0, 8, K_HEX, T_CAUTION, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.reg58", "3-D register 58h", "Undocumented; ESS's driver writes 94h when it enables 3-D")
+
+REG(R_MX5A, BK_MIXER, 0, 0x5A, 0, "3-D register 5Ah (undocumented)", 0)
+FLD(F_3D_R5A, R_MX5A, 0, 8, K_HEX, T_CAUTION, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.reg5a", "3-D register 5Ah", "Undocumented; ESS's driver writes 80h when it enables 3-D")
 
 REG(R_MX60, BK_MIXER, 0, 0x60, 0, "Left master volume and mute", 62)
 FLD(F_MVOL_L, R_MX60, 0, 6, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_MASTER, FMT_NONE, "master.vol.l", "Master volume L", "Left master volume presented to the analog output, 0.75 dB per step up to 63 (0 dB); 36h after hardware reset (DS p.62)")
@@ -400,6 +414,8 @@ FLD(F_A1_CNT_HI, R_CT_A5, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NO
 REG(R_CT_A8, BK_CTRL, 0, 0xA8, RF_NEEDS_IDLE, "Analog control", 68)
 FLD(F_A1_RECMON, R_CT_A8, 3, 1, K_BOOL, T_CAUTION, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_RECORD, FMT_NONE, "rec.monitor", "Record monitor", "1 = enable record monitor, so AOUT_L/R stay live while the CODEC records (ADC direction); cleared by software reset (DS p.68)")
 FLD(F_A1_CHAN, R_CT_A8, 0, 2, K_ENUM, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_A1CHAN, PG_AUDIO1, FMT_NONE, "a1.channels", "Audio 1 stereo/mono", "Operation mode of the first DMA converters: 01 = stereo, 10 = mono; 00 and 11 are reserved (DS p.68)")
+FLD(F_A8_HIGH, R_CT_A8, 5, 3, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.analog.bits7_5", "A8h bits 7:5 (undocumented)", "Reserved in the data sheet (write 0), but ESS's driver writes 111b when it starts recording (F5h or F6h, docs/DRIVER_CONFIG.md)")
+FLD(F_A8_BIT2, R_CT_A8, 2, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.analog.bit2", "A8h bit 2 (undocumented)", "Reserved in the data sheet (write 0), but ESS's driver writes 1 when it starts recording (F5h or F6h, docs/DRIVER_CONFIG.md)")
 
 REG(R_CT_B1, BK_CTRL, 0, 0xB1, RF_NEEDS_IDLE, "Legacy audio interrupt control", 68)
 FLD(F_A1_GAMEIRQ, R_CT_B1, 7, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.irq.game", "Game compatible IRQ", "Reserved for Compatibility mode; leave zero for Extended mode (DS p.68)")

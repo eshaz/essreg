@@ -16,6 +16,7 @@
 #
 # Win16 wants 8.3 path names, so DIR is reached through the link
 # /tmp/wshot.  The Wine prefix is $WINEPREFIX, /tmp/wshot-prefix if unset.
+# WSHOT_DESKTOP=shell gives the desktop Wine's taskbar, with the tray.
 #
 # (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 #
@@ -45,7 +46,8 @@ start)
   # the first run makes the prefix
   [ -d "$WINEPREFIX" ] || wineboot -i > /dev/null 2>&1
   cd "$LINK"
-  wine explorer "/desktop=essreg,${W}x$H" "$prog" "$@" > /dev/null 2>&1 &
+  wine explorer "/desktop=${WSHOT_DESKTOP:-essreg},${W}x$H" "$prog" "$@" \
+    > /dev/null 2>&1 &
   sleep 9
   ;;
 click)

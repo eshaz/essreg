@@ -168,6 +168,24 @@ void set_3d_mode(unsigned char on_off) {
   get_3d_mode();
 }
 
+unsigned char get_3d_limit() {
+  // mixer 50h bit 0 is reserved in the data sheet, ESS's driver sets it from
+  // its "3D Limit" setting
+  unsigned char on_off = read_mixer_reg(0x50) & 0x01;
+  if (on_off) {
+    printf("3D Limit Enabled\n");
+  } else {
+    printf("3D Limit Disabled\n");
+  }
+  return on_off;
+}
+
+void set_3d_limit(unsigned char on_off) {
+  unsigned char original_value = read_mixer_reg(0x50);
+  write_mixer_reg(0x50, (original_value & 0xfe) | (on_off ? 0x01 : 0x00));
+  get_3d_limit();
+}
+
 unsigned char get_3d_level() {
   unsigned char level = read_mixer_reg(0x52) & 0x3f;
   printf("3D Level: %u (%d%%)\n", level, level * 100 / 0x3f);

@@ -96,7 +96,7 @@ The "Read at" column gives the `RegQueryValueEx` call.
 | Single Mode DMA | 3:40D7 | dword, 0 | 0 sets flag 2Ah bit 15, meaning demand transfers: 8237 demand mode for recording (6:27B0, 6:27F0) and playback (6:2C8C, 6:2CD5), controller B9h = 02h for Audio 1 (6:28BF), mixer 78h = 93h instead of 13h for Audio 2 (6:2DFA). Nonzero gives single transfers, with B9h left as the DSP reset set it. | verified |
 | Enable AUXB | 3:411F | dword, 1 | 0: the AuxB source lines are reported disconnected to mixer programs (5:02F2). The AuxB registers are still written. UI only. | verified |
 | Enable ES938 | 3:41A1 | dword, see effect | Nonzero, or missing, enables the ES1869's own Spatializer 3-D: 50h-5Ah initialized at enable (3:48AC) and the Spatializer Enable / 3D Effect controls shown. Only an explicit 0 turns it off; the driver then never writes 50h or 52h. The ES938 is an external chip, so the name is historical. | verified |
-| 3D Limit | 3:41F9 | dword, 0 | Mixer 50h bit 0, undocumented in the data sheet (3:48D7, 5:3B55). | verified |
+| 3D Limit | 3:41F9 | dword, 0 | Mixer 50h bit 0, undocumented in the data sheet (3:48D7, 5:3B55). essctl shows it as `fx.3d.limit`, `essreg 3l=` and `ess3d limit` set it. | verified |
 | Enable IIS | 3:4247 | dword, 1 | 0: the IIS line is reported disconnected (5:0322). UI only. | verified |
 | Enable Software 3D Effect | 3:4293 | dword, 0 | Used only if Enable ES938 = 0. Stereo wave output gets a software 3-D effect in the buffer copy (1:0919, 1:09AB), driven by the Spatializer Enable and 3D Effect controls. No register. | verified |
 | ESSWaveTableChip | 3:42DF | dword, 0 | Nonzero: the driver never sets mixer 7Fh bit 0 (I2S owns the music DAC; 3:4BB9, 3:4CE3, 5:2022) and the IIS line is shown disconnected. | verified |
@@ -214,7 +214,7 @@ ES1869.DRV stores the AUDDRV entry point (INT 2Fh AX=1684h BX=3B07h) at DS:0010 
 |---|---|---|
 | mixer 00h | 6:1FA1 | 00h: mixer reset. Mixer registers return to their reset values; per the data sheet the record volumes are reset only by a hardware reset. |
 | 14h | 6:1FE8 | Telegaming Vol, only if the value exists |
-| 50h, 52h, 54h, 56h, 58h, 5Ah | 3:48C0-3:4936 | 50h = 00h then 0Ch with bit 0 = 3D Limit; 52h = 3Fh; 54h-5Ah = 8Fh, 95h, 94h, 80h (undocumented). Only with Enable ES938. |
+| 50h, 52h, 54h, 56h, 58h, 5Ah | 3:48C0-3:4936 | 50h = 00h then 0Ch with bit 0 = 3D Limit; 52h = 3Fh; 54h-5Ah = 8Fh, 95h, 94h, 80h (undocumented, `fx.3d.reg54` to `fx.3d.reg5a` in essctl). Only with Enable ES938. |
 | 7Dh | 3:485B, 3:4884 | 06h (MONO_OUT = record mono mix, MONO_IN direct off), then bit 3 from Disable Mic Preamp |
 | 1Ch | 3:4890 | 05h (record mixer, record mute off) |
 | from the restore | 3:18EC | 60h, 62h, 3Eh, 7Ch, 1Ah, 38h, 36h, 3Ah, 3Ch, 68h, 6Dh, 6Fh, 7Dh bits 3:1, 50h, 52h, Audio_Base+7 bits 1:0 |
@@ -264,7 +264,7 @@ At every playback start, 5:3BAC (6:2D5A) reads 60h and 62h back. If they changed
 | Audio_Base+6 | 6:28AC, 1:169B | 02h then 00h: FIFO reset at start and stop |
 | B9h | 6:28BF | 02h (demand 2), only without Single Mode DMA |
 | A4h, A5h | 6:28DE, 6:28F5 | minus the block length |
-| A8h | 6:291D, 6:2A9C | F5h (stereo) or F6h (mono), then bit 3 = record monitor. Bits 7:5 and 2 are written as 1 although the data sheet says to write 0. |
+| A8h | 6:291D, 6:2A9C | F5h (stereo) or F6h (mono), then bit 3 = record monitor. Bits 7:5 and 2 are written as 1 although the data sheet says to write 0 (`a1.analog.bits7_5`, `a1.analog.bit2` in essctl). |
 | B1h, B2h | 6:2934-6:2963, 6:296E-6:299D | ORed with 50h |
 | B7h | 6:29C1 | 90h, or 98h for stereo, plus 24h for 16-bit |
 | B8h | 6:29D8-6:2A09 | (B8h & 30h) or 0Fh: ADC, auto-initialize, DMA read, enable |

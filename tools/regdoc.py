@@ -189,7 +189,9 @@ def render(regs, fields, enums):
             head = "%s%02Xh %s" % (BANK_PREFIX[bank], r["addr"], r["name"])
             w("%s %s" % ("####" if bank == "BK_PNPLDN" else "###", head))
             w("")
-            w("DS p.%d%s" % (r["page"], ("; " + ", ".join(rf)) if rf else ""))
+            page = ("DS p.%d" % r["page"] if r["page"]
+                    else "Not in the data sheet")
+            w("%s%s" % (page, ("; " + ", ".join(rf)) if rf else ""))
             w("")
             for note in r["notes"]:
                 w("> %s" % md_escape(note))
