@@ -7,6 +7,7 @@ python3 tests/run_tests.py
 ```
 
 * Needs Python 3, gcc and NASM, plus the `unicorn` Python module for the CPU emulator tests.
+* On Claude Code on the web, [`.claude/hooks/session-start.sh`](../.claude/hooks/session-start.sh) installs all of it, Open Watcom and Wine included, and sets `OW2` and `ESSREG_WINE=1`.
 * **Python tests** (`tests/test_*.py`):
   * LE and NE tooling, and the byte-identical rebuilds of `ES1869.VXD` and `ESFM.DRV`
   * `ESFM.DRV` in a CPU emulator with an FM chip model and simulated interrupts: the hanging notes of ESS's driver, and the fixed driver (`test_esfmdrv`, [ESFM_MIDI.md](ESFM_MIDI.md))
@@ -37,6 +38,15 @@ tools/ow2build.sh /path/to/open-watcom     # binaries in out/ow2/
 * the ESFM live load against the real `ESFM.DRV`
 * the ESFM voice table of `essctl /dump`, with ESS's driver and the fixed one
 * the fixed `ESFM.DRV` loading the bank file named in `SYSTEM.INI` when the device is opened, and `essctl /load` naming it there
+
+**Screenshots.** `tools/wineshot.sh` runs essctl under Wine on a virtual screen, to click through it and see the pages:
+
+```
+tools/wineshot.sh start out/ow2 essctl.exe /sim
+tools/wineshot.sh click 60 216          # ESFM patch bank
+tools/wineshot.sh shot esfm.png
+tools/wineshot.sh stop
+```
 
 ## On the hardware
 
