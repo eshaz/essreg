@@ -9,4 +9,5 @@ copy 1869opl3.com build\1869opl3.com /y
 copy esfmpat.exe build\esfmpat.exe /y
 copy essctl.exe build\essctl.exe /y
 copy ess3d.exe build\ess3d.exe /y
+copy esfmrec.exe build\esfmrec.exe /y
 

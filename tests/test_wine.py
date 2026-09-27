@@ -25,6 +25,8 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   first and exits, and the first goes after the second one's time
 - ess3d's tray icon: a second "ess3d tray" opens the panel of the first,
   and "ess3d exit" closes it
+- esfmrec: /sim records the test tone for /t= seconds into a WAV file at
+  the music DAC's rate, and /raw writes the samples alone
 
 Win16 wants 8.3 path names, so the work directory is reached through a
 short symbolic link in /tmp.
@@ -68,6 +70,7 @@ class WineTest(unittest.TestCase):
                        check=True, capture_output=True)
         shutil.copy(os.path.join(ROOT, "out", "ow2", "essctl.exe"), work)
         shutil.copy(os.path.join(ROOT, "out", "ow2", "ess3d.exe"), work)
+        shutil.copy(os.path.join(ROOT, "out", "ow2", "esfmrec.exe"), work)
         shutil.copy(os.path.join(ROOT, "driver", "ESFM.DRV"), work)
         env = dict(os.environ, WATCOM=OW2, INCLUDE=os.path.join(OW2, "h"),
                    PATH=os.path.join(OW2, "binl64") + ":" + os.environ["PATH"])
@@ -347,6 +350,29 @@ class WineTest(unittest.TestCase):
         self.assertEqual([line.split(" ", 2)[2] for line in lines],
                          ["tray: started", "tray: panel",
                           "3-D on, level 0 of 63", "tray: closed"])
+
+    def test_esfmrec(self):
+        self.wine("esfmrec.exe", "/sim", "/t=2", "/q", "FM.WAV")
+        data = read(self.path("FM.WAV"))
+        # 2 s at 49,716 Hz, 16-bit stereo, after a 44-byte header
+        self.assertEqual(data[:4], b"RIFF")
+        self.assertEqual(struct.unpack("<IHHIIHH", data[16:36]),
+                         (16, 1, 2, 49716, 49716 * 4, 4, 16))
+        self.assertEqual(struct.unpack("<I", data[40:44])[0], 2 * 49716 * 4)
+        self.assertEqual(len(data), 44 + 2 * 49716 * 4)
+        pcm = struct.unpack("<%dh" % ((len(data) - 44) // 2), data[44:])
+        left, right = pcm[0::2], pcm[1::2]
+        rising = lambda s: sum(a < 0 <= b for a, b in zip(s, s[1:]))  # noqa
+        self.assertLessEqual(abs(rising(left) - 2000), 1)    # 1 kHz
+        self.assertLessEqual(abs(rising(right) - 1000), 1)   # 500 Hz
+        self.assertEqual(max(map(abs, left)), 16383)          # -6 dB
+        log = read(self.path("ESFMREC.LOG")).decode()
+        self.assertIn("FM.WAV: 2.0 s, 397728 bytes at 49716 Hz", log)
+        # /raw: the same samples without the header
+        self.wine("esfmrec.exe", "/sim", "/t=1", "/raw", "/q", "FM.PCM")
+        raw = read(self.path("FM.PCM"))
+        self.assertEqual(len(raw), 49716 * 4)
+        self.assertEqual(raw[:4000], data[44:4044])
 
 
 if __name__ == "__main__":

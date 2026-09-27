@@ -11,8 +11,9 @@ usage: python3 tests/run_tests.py
   unicorn)
 - C tests (tests/host/t_*.c), built with gcc against the simulated ES1869:
   esshw protocols, the VxD API wrappers, the register catalog, profiles,
-  ess3d's commands, ESFM patch banks and driver patching, essreg's newer
-  register functions, and an old-versus-new port trace of its original ones
+  ess3d's commands, ESFM patch banks and driver patching, esfmrec's WAV
+  header and resampler, essreg's newer register functions, and an
+  old-versus-new port trace of its original ones
 - with Open Watcom in $OW2: the 16-bit VxD call thunk in a CPU emulator
 """
 
@@ -31,9 +32,10 @@ BASELINE = "2f3cd6b"   # essreg before the esshw refactor
 CFLAGS = ["-std=gnu99", "-Wall", "-Wextra", "-Werror", "-DESS_HOST"]
 
 
-def cc(out, sources, extra=(), strict=True):
+def cc(out, sources, extra=(), strict=True, libs=()):
     cmd = ["gcc"] + (CFLAGS if strict else ["-std=gnu99", "-w", "-DESS_HOST"])
     cmd += list(extra) + ["-I" + SRC, "-I" + HOST, "-o", out] + sources
+    cmd += list(libs)
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode:
         raise RuntimeError("gcc failed:\n%s\n%s" % (" ".join(cmd), res.stderr))
@@ -63,10 +65,11 @@ def c_tests(tmp):
              ("t_esfm", src("esfmbank.c"),
               [os.path.join(ROOT, "driver", "ESFM.DRV"),
                os.path.join(ROOT, "esfm_patch_banks", "bnk_com.bin"),
-               esfm_work])]
+               esfm_work]),
+             ("t_fmrec", src("fmrec.c"), [])]
     for name, sources, args in tests:
         exe = os.path.join(tmp, name)
-        cc(exe, [os.path.join(HOST, name + ".c")] + sources)
+        cc(exe, [os.path.join(HOST, name + ".c")] + sources, libs=["-lm"])
         code, out, err = run([exe] + args)
         sys.stdout.write(out + err)
         failures += code != 0

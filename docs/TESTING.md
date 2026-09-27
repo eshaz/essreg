@@ -218,7 +218,26 @@ With the stock driver, and again with the extended driver (E) if it's installed.
    * In essctl's Expert mode, write FFh to each of 54h, 56h, 58h and 5Ah on the *Raw registers* page and read it back, then 00h. Note which bits stay.
    * With music playing, with a wide stereo image and with a mono voice: `ess3d mono toggle` and `ess3d limit toggle` at level 63, then `ess3d reg 54 00`, `ess3d reg 54 FF` and the same for 56, 58 and 5A. `ess3d defaults` puts ESS's values back.
 
-### I. Expert mode (last)
+### I. esfmrec
+
+Copy `build\esfmrec.exe` to `C:\ESSREG`.
+
+1. Play a MIDI file in the Media Player and start `C:\ESSREG\esfmrec.exe`.
+   * The window counts up, and the peaks follow the music.
+   * After a minute the rate line says "measured" within a few Hz of 49,716 Hz.
+   * *Stop*, then play `FMREC001.WAV` (on another computer if Windows can't play 49,716 Hz): the music at its pitch and speed, without clicks or gaps.
+2. Record again, and meanwhile:
+   * play a WAV file: it plays
+   * move the Synth or FM volume in the Windows mixer: the level in the file doesn't change, since the samples are digital
+   * open Sound Recorder and record: it says the device is in use.
+3. A DOS game with FM (AdLib) music, in a window: its music records.
+4. A DOS game with Sound Blaster sound:
+   * start the game and its sound, then esfmrec: esfmrec says a DOS program is playing Sound Blaster sound
+   * quit, start esfmrec, then the game: the game gets no digital sound, or a message that the device is in use, and its FM music records.
+5. From Start > *Run*, `C:\ESSREG\esfmrec.exe /t=10 /q /log=REC.LOG`: it records 10 s and exits. `REC.LOG` says "10.0 s".
+6. After esfmrec: Sound Recorder records the microphone as before, and essctl shows *Music DAC digital record* off.
+
+### J. Expert mode (last)
 
 Only with nothing playing:
 1. Options > *Expert mode*.

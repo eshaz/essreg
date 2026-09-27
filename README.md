@@ -116,6 +116,35 @@ ess3d reg 54 A0
   * A second `ess3d tray` opens the panel of the icon that's there, so the same command works on a key.
 * *Note: the tray icon needs Windows 95 or later. ess3d is a 16-bit program and reaches the tray through Windows 95's 32-bit shell.*
 
+## [`esfmrec.exe`](build)
+* Records the FM synthesizer digitally to a WAV file: the samples the chip makes, before any analog stage, at the music DAC's own rate of 49,716 Hz, 16-bit stereo.
+  * Nothing is resampled, converted or corrected, and the volume settings don't change them.
+* Records the FM of Windows programs and of DOS games in a DOS box, while they go on playing.
+* `esfmrec` starts recording to `FMREC001.WAV` next to esfmrec.exe (then 002 and so on). *Stop* saves the file, *Record* starts the next one.
+  * The window shows the time, the size, the rate the samples come in at and the peak levels.
+* How it works:
+  * Mixer 7Fh bit 4 sends the music DAC's samples to Audio 1's DMA, in place of the ADC's (DS p.65). esfmrec opens ESS's wave input like any recording program and sets the bit while it records.
+  * While it records, the music DAC belongs to FM (7Fh bit 0 off). Both bits go back to what they were at the end.
+  * It turns off ESS's DC offset correction (DCdrift) for the recording, and back on after ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)).
+* *Note: Audio 1 is also the channel Sound Blaster digital sound plays through, so a DOS game's Sound Blaster sound and a recording can't play at the same time. Its FM music records. While esfmrec records, the game gets no digital sound (Windows may say the device is in use); while the game plays digital sound, esfmrec can't start.*
+* Only one program can record at a time.
+
+```
+esfmrec [options] [file]
+
+file       the WAV file, FMREC001.WAV and up if left out
+/t=N       stop after N seconds, then exit
+/raw       the samples alone, without a WAV header
+/min       start minimized
+/q         no message boxes (problems go to ESFMREC.LOG)
+/log=file  append each result to a file, problems too
+/sim       simulated ES1869, with a test tone for the FM
+/base, /cfg, /novxd  as for essctl
+```
+
+* The log line says how long the file is. If the samples came in slower than 49,716 Hz, ESS's driver lost some, and it says that too.
+* *Note: with essctl's Options > FM keeps the music DAC, ESS's driver never gives the music DAC to I2S, between recordings either.*
+
 ## [`ES1869.VXD`](build) with a register interface
 * The Windows 95 driver of the ES1869, rebuilt from source in [`src/vxd`](src/vxd), with a register interface for programs added ([docs/VXD_API.md](docs/VXD_API.md)).
 * Otherwise it works exactly like the ESS driver. `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte for byte.
@@ -141,7 +170,7 @@ ess3d reg 54 A0
 * Utility to control otherwise unsupported registers for the ES1869 audio chip.
 * This program can be executed in native DOS or Windows DOS box environment.
 * Sound card with ES1869 chip is assumed to be on I/O port 220h.
-* Check out the `d` option that enables digital recording of the FM chip at 48kHz!
+* Check out `fmd=1`, which makes the chip record the FM digitally at its own rate, 49,716 Hz! In Windows, `esfmrec` (above) records it to a file.
   * [Examples!](digital_recording)
 
 ```
@@ -295,14 +324,14 @@ More checks are in [docs/TESTING.md](docs/TESTING.md) (G, G2 and G3).
 
 ### Building
 * Clone this repo and copy it your build environment.
-* Run [`build.bat`](build.bat) to build the executables: `essreg.exe`, `1869opl3.com`, `esfmpat.exe`, `essctl.exe` and `ess3d.exe`.
+* Run [`build.bat`](build.bat) to build the executables: `essreg.exe`, `1869opl3.com`, `esfmpat.exe`, `essctl.exe`, `ess3d.exe` and `esfmrec.exe`.
 * Run `python3 tools/build_vxd.py` to build `build/ES1869.VXD`, and `python3 tools/build_esfm.py` to build `build/ESFM.DRV`.
 * On Linux, `tools/ow2build.sh <open-watcom-v2 directory>` builds the programs with Open Watcom v2 into `out/ow2/`.
   * The programs in [`build`](build), other than `1869opl3.com`, were built this way. `build.bat` builds the same programs with Watcom C 11.0.
 
 ### Testing
 * This code has been tested using a real ES1869 soundcard on I/O port 0x220. It probably won't work with any other ESS sound chips.
-* For essctl, ess3d and the rebuilt drivers, [docs/TESTING.md](docs/TESTING.md) has a checklist for real hardware.
+* For essctl, ess3d, esfmrec and the rebuilt drivers, [docs/TESTING.md](docs/TESTING.md) has a checklist for real hardware.
 * `python3 tests/run_tests.py` runs the automated tests against a simulated ES1869.
 
 ## License
