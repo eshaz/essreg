@@ -7,7 +7,9 @@
  * It loads the MIDI driver and sends DRV_LOAD and DRV_ENABLE to its
  * DriverProc, as OpenDriver does (ESFM.DRV copies its bank into memory on
  * DRV_ENABLE), then DRVM_INIT to its modMessage, which gives the driver a
- * device structure as when Windows finds the ES1869. It writes the bank
+ * device structure as when Windows finds the ES1869, and MODM_OPEN. The
+ * open fails without ES1869.VXD, but the fixed driver reads the bank file
+ * named in SYSTEM.INI before it (src/esfm/esfmfile.asm). It writes the bank
  * the driver holds to <outdir>\BEFORE.BIN, runs the command, waits for it
  * to finish, writes the bank again to AFTER.BIN and closes the driver.
  * WinExec keeps the command in this Win16 process, so it sees the driver.
@@ -125,7 +127,13 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   // (essctl shows its voices on the ESFM page and in /dump)
   mod = (MODMESSAGE)GetProcAddress(lib, "MODMESSAGE");
   if (mod) {
+    static BYTE desc[32]; // MIDIOPENDESC, not used before the open fails
+    DWORD user = 0;
+
     sprintf(text, "DRVM_INIT %lu", mod(0, 0x64, 0, 0, 0x1234));
+    note(text);
+    sprintf(text, "MODM_OPEN %lu",
+            mod(0, 3, (DWORD)(LPVOID)&user, (DWORD)(LPVOID)desc, 0));
     note(text);
   }
   dump("BEFORE.BIN");

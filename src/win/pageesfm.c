@@ -61,8 +61,9 @@ static void show_status(void) {
     strcat(buf, "\r\nA bank is a file of 256 patch offsets followed by the "
                 "patches, as in esfm_patch_banks\\*.bin, or a RIFF \"Ptch\" "
                 "file.  This ESFM.DRV plays the bank file named in "
-                "SYSTEM.INI [" ESFM_INI_SECTION "] " ESFM_INI_KEY "=, and "
-                "loads it again when the file changes.  Load bank sets it, "
+                "SYSTEM.INI [" ESFM_INI_SECTION "] " ESFM_INI_KEY "=.  It "
+                "reads the file when a program opens the MIDI device, if "
+                "the file's date or time changed.  Load bank sets it, "
                 "Restore original removes it.");
   else
     strcat(buf, "\r\nA bank is a file of 256 patch offsets followed by the "

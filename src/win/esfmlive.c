@@ -370,8 +370,8 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
     d->file_size = *(u16 __far *)(fix + 34);
     d->file_loads = *(u16 __far *)(fix + 36);
     d->file_checks = *(u16 __far *)(fix + 38);
-    d->watch = *(u16 __far *)(fix + 40);
-    d->watch_err = *(u16 __far *)(fix + 42);
+    d->file_date = *(u16 __far *)(fix + 40);
+    d->file_time = *(u16 __far *)(fix + 42);
     _fmemcpy(d->file, fix + 44, sizeof(d->file) - 1);
   }
   close_live(&lv);
@@ -405,24 +405,26 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
   return 0;
 }
 
-// the bank file of the fixed driver, and how it's watched
+// the bank file of the fixed driver, as the last MODM_OPEN found it
 static void file_text(const struct esfm_diag *d, const char *nl, char *buf,
                       unsigned size) {
   static char line[240];
-  int n;
   const char *plays = d->file_used ? "its last good version plays"
                                    : "the driver's own bank plays";
 
   switch (d->file_state) {
   case ESFM_FILE_NONE:
-    sprintf(line, "Bank file: none in SYSTEM.INI, %s%s",
+    sprintf(line, "Bank file: none, %s%s",
             d->file_used ? "the last file's bank still plays"
                          : "the driver's own bank plays",
             nl);
     break;
   case ESFM_FILE_LOADED:
-    sprintf(line, "Bank file: %.110s, %u bytes%s", d->file, d->file_size,
-            nl);
+    // DOS date and time: year-1980:7 month:4 day:5, hour:5 minute:6
+    sprintf(line, "Bank file: %.110s, %u bytes, dated %u-%02u-%02u %02u:%02u%s",
+            d->file, d->file_size, (d->file_date >> 9) + 1980,
+            (d->file_date >> 5) & 15, d->file_date & 31, d->file_time >> 11,
+            (d->file_time >> 5) & 63, nl);
     break;
   case ESFM_FILE_MISSING:
     sprintf(line, "Bank file: cannot read %.110s, %s%s", d->file, plays, nl);
@@ -431,32 +433,14 @@ static void file_text(const struct esfm_diag *d, const char *nl, char *buf,
     sprintf(line, "Bank file: %.110s is not a patch bank, %s%s", d->file,
             plays, nl);
     break;
-  case ESFM_FILE_NOMEM:
+  default:
     sprintf(line, "Bank file: not enough memory for %.110s, %s%s", d->file,
             plays, nl);
-    break;
-  default:
-    sprintf(line, "Bank file: %.110s changed, loading it%s", d->file, nl);
   }
   strncat(buf, line, size - strlen(buf) - 1);
-  if (d->file_state == ESFM_FILE_NONE)
-    return;
-  n = sprintf(line, "Loaded %u time%s, ", d->file_loads,
-              d->file_loads == 1 ? "" : "s");
-  if (d->watch == ESFM_WATCH_RUNNING)
-    sprintf(line + n, "checked every second while a program has the device "
-                      "open (%u checks)%s",
-            d->file_checks, nl);
-  else if (d->watch == ESFM_WATCH_FAILED && d->watch_err == 0xFFFF)
-    sprintf(line + n, "checked when a program opens the device (no timer "
-                      "for the watcher task)%s",
-            nl);
-  else if (d->watch == ESFM_WATCH_FAILED)
-    sprintf(line + n, "checked when a program opens the device (no watcher "
-                      "task, mmTaskCreate error %u)%s",
-            d->watch_err, nl);
-  else
-    sprintf(line + n, "checked when a program opens the device%s", nl);
+  sprintf(line, "Read when a program opens the device, if its date or time "
+                "changed: %u checks, %u load%s%s",
+          d->file_checks, d->file_loads, d->file_loads == 1 ? "" : "s", nl);
   strncat(buf, line, size - strlen(buf) - 1);
 }
 

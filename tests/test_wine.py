@@ -14,8 +14,8 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
 - ESFM voices: "essctl /dump" with the ESS driver, then the fixed build,
   shows the driver's 18 voices and, for the fixed build, its counters
 - ESFM bank file: the fixed build loads the bank named in SYSTEM.INI
-  [ESFM.DRV] Bank= when it's enabled, and "essctl /load" of a profile with
-  a bank names it there
+  [ESFM.DRV] Bank= when a program opens the device, and "essctl /load" of
+  a profile with a bank names it there
 
 Win16 wants 8.3 path names, so the work directory is reached through a
 short symbolic link in /tmp.
@@ -170,8 +170,8 @@ class WineTest(unittest.TestCase):
                 f.write(b"\r\n[ESFM.DRV]\r\nBank=%s\\MARK.BIN\r\n" %
                         self.win.encode())
             text = self.esfm_dump(self.fixed_driver())
-            # the driver read SYSTEM.INI and the file through KERNEL when
-            # drvhold enabled it
+            # the driver read SYSTEM.INI, the file's date and the file
+            # through KERNEL when drvhold opened the device
             self.assertEqual(read(self.path("BEFORE.BIN"))[:len(bank)],
                              bytes(bank))
             self.assertIn("Bank file: %s\\MARK.BIN, %d bytes" %
@@ -213,7 +213,7 @@ class WineTest(unittest.TestCase):
         self.assertEqual(text.count("  free"), 18)
         text = self.esfm_dump(self.fixed_driver())
         self.assertIn("Fixed driver: 0 messages queued", text)
-        self.assertIn("Bank file: none in SYSTEM.INI", text)
+        self.assertIn("Bank file: none, the driver's own bank plays", text)
         self.assertEqual(text.count("  free"), 18)
 
 

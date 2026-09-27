@@ -10,7 +10,7 @@ python3 tests/run_tests.py
 * **Python tests** (`tests/test_*.py`):
   * LE and NE tooling, and the byte-identical rebuilds of `ES1869.VXD` and `ESFM.DRV`
   * `ESFM.DRV` in a CPU emulator with an FM chip model and simulated interrupts: the hanging notes of ESS's driver, and the fixed driver (`test_esfmdrv`, [ESFM_MIDI.md](ESFM_MIDI.md))
-  * the fixed driver's bank file in the same emulator, with `SYSTEM.INI`, files, the heap and the watcher task simulated
+  * the fixed driver's bank file in the same emulator, with `SYSTEM.INI`, files with dates and the global heap simulated
   * the register API of the rebuilt VxD, run in a CPU emulator against a simulated ES1869
   * `esfmpat` on copies of `ESFM.DRV`
   * that the generated documentation is current
@@ -36,7 +36,7 @@ tools/ow2build.sh /path/to/open-watcom     # binaries in out/ow2/
 * profile save/load against the simulated chip
 * the ESFM live load against the real `ESFM.DRV`
 * the ESFM voice table of `essctl /dump`, with ESS's driver and the fixed one
-* the fixed `ESFM.DRV` loading the bank file named in `SYSTEM.INI` when it's enabled, and `essctl /load` naming it there
+* the fixed `ESFM.DRV` loading the bank file named in `SYSTEM.INI` when the device is opened, and `essctl /load` naming it there
 
 ## On the hardware
 
@@ -110,16 +110,17 @@ See [ESFM_MIDI.md](ESFM_MIDI.md).
 
 With `build\ESFM.DRV` installed. See [ESFM_BANK.md](ESFM_BANK.md#bank-file-buildesfmdrv).
 
-1. Copy `esfm_patch_banks\bnk_com_better_square_wave.bin` to `C:\BANKS\TEST.BIN`. Add to `SYSTEM.INI` and restart:
+1. Copy `esfm_patch_banks\bnk_NT4.bin` to `C:\BANKS\TEST.BIN`. Add to `SYSTEM.INI`:
    ```
    [ESFM.DRV]
    Bank=C:\BANKS\TEST.BIN
    ```
-2. The *ESFM patch bank* page says `Bank file: C:\BANKS\TEST.BIN`. Play a MIDI file: the square-wave instruments play.
-3. While it plays, copy `esfm_patch_banks\bnk_com.bin` over `C:\BANKS\TEST.BIN`. The sound changes within about 2 seconds, and the page counts one more load.
-4. The page says "checked every second while a program has the device open". If it says "no watcher task" instead, the file is only checked when a program opens the device: check that `C:\WINDOWS\SYSTEM\MMTASK.TSK` exists.
-5. Delete `C:\BANKS\TEST.BIN` while music plays: the page says "cannot read", and the music keeps its sounds. Copy a bank back: it loads.
-6. ESFM > *Restore original bank*: the `Bank=` line is gone from `SYSTEM.INI` and the driver's own bank plays. ESFM > *Load patch bank* writes it again.
+2. Play a MIDI file. The *ESFM patch bank* page says `Bank file: C:\BANKS\TEST.BIN, 8288 bytes`, with the file's date, and the instruments sound like the NT4 bank, not the driver's own.
+3. Close the player and play the file again, without changing the bank file. The page counts one more check and no new load.
+4. Close the player. Copy `esfm_patch_banks\bnk_com.bin` over `C:\BANKS\TEST.BIN` and give it the current date in an MS-DOS prompt: `cd C:\BANKS`, then `copy /b TEST.BIN +,,`. Play again: the driver's usual sounds, and one more load.
+5. Change the file (step 4) while music plays: the sound doesn't change until the player closes and opens the device again.
+6. Delete `C:\BANKS\TEST.BIN` and play: the page says "cannot read", and the last bank keeps playing. Copy a bank back with a new date: it loads the next time a program opens the device.
+7. ESFM > *Restore original bank*: the `Bank=` line is gone from `SYSTEM.INI` and the driver's own bank plays. ESFM > *Load patch bank* writes it again.
 
 ### H. Expert mode (last)
 

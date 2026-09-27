@@ -89,7 +89,7 @@ A dropped note off leaves the voice keyed on until it's stolen for another note 
   * **Open, close and `chip_reset`** hold the driver too, so nothing can come in between the three port writes of a register. Queued messages of a program that has just closed the device are dropped.
   * **Close and power suspend** key off every voice and lift every sustain pedal.
   * **Counters.** A small block of counters at the end of the data segment, starting with `ESFMFIX`, for essctl.
-* **Bank file.** [`src/esfm/esfmfile.asm`](../src/esfm/esfmfile.asm) lets the driver play a patch bank straight from a file named in `SYSTEM.INI`, and load it again when the file changes. See [ESFM_BANK.md](ESFM_BANK.md#bank-file-buildesfmdrv).
+* **Bank file.** [`src/esfm/esfmfile.asm`](../src/esfm/esfmfile.asm) lets the driver play a patch bank straight from a file named in `SYSTEM.INI`. It reads the file when a program opens the device, if the file's date or time changed. See [ESFM_BANK.md](ESFM_BANK.md#bank-file-buildesfmdrv).
 
 Everything else is ESS's code, unchanged:
 * The bank loader is untouched, so `esfmpat` and essctl's *Load bank* work the same with the fixed driver.

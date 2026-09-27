@@ -6,16 +6,14 @@
 ; SYSTEM.INI [ESFM.DRV] Bank= names a patch bank file, raw or RIFF "Ptch"
 ; with an "fm4 " chunk (the files esfmpat takes).  The driver plays that
 ; bank instead of the one built into ESFM.DRV:
-; - DRV_ENABLE and every MODM_OPEN load the file if it changed
-; - while a program has the device open, a task checks the file every
-;   second and loads it when it changes, once two checks in a row read the
-;   same bytes (a file that is still being written isn't loaded)
+; - the file is checked when a program opens the device (MODM_OPEN), and
+;   read only if its name, date or time changed since it was last read
 ; - a file that is missing or isn't a patch bank keeps the bank that plays
 ; - without Bank= the driver goes back to its built-in bank
 ;
-; A new bank goes into a new block, swapped in while the driver is held,
-; so a note on never sees half a bank.  The status is in DGROUP after the
-; ESFMFIX counters (esfmfixd.asm), for essctl.
+; A new bank goes into a new block, swapped in while the driver is held.
+; The status is in DGROUP after the ESFMFIX counters (esfmfixd.asm), for
+; essctl.
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
@@ -23,13 +21,9 @@
 
 ; module references, in the order of layout.json
 KERNEL          equ 1
-MMSYSTEM        equ 3
 
 %define KERNEL_GlobalAlloc 15
 %define KERNEL_GlobalFree 17
-%define KERNEL_GlobalSize 20
-%define KERNEL_Yield 29
-%define KERNEL_GetCurrentTask 36
 %define KERNEL_FindResource 60
 %define KERNEL_LoadResource 61
 %define KERNEL_LockResource 62
@@ -41,11 +35,6 @@ MMSYSTEM        equ 3
 %define KERNEL_GetPrivateProfileString 128
 %define KERNEL_GlobalPageLock 191
 %define KERNEL_GlobalPageUnlock 192
-%define MMSYSTEM_timeSetEvent 602
-%define MMSYSTEM_timeKillEvent 603
-%define MMSYSTEM_mmTaskCreate 900
-%define MMSYSTEM_mmTaskBlock 902
-%define MMSYSTEM_mmTaskSignal 903
 
 ; far call to an import: each call site gets a relocation record, written
 ; by fix_file_relocs into the relocation table of segment 1
@@ -59,13 +48,8 @@ MMSYSTEM        equ 3
 %macro kernel 1
         import  KERNEL, KERNEL_%1
 %endmacro
-%macro mmsystem 1
-        import  MMSYSTEM, MMSYSTEM_%1
-%endmacro
 
 %macro fix_file_relocs 0
-        reloc 2, 0, ..@FIX_DS2, 0x0004, 0x0000          ; seg4
-        reloc 2, 0, ..@FIX_DS3, 0x0004, 0x0000          ; seg4
         reloc 2, 0, ..@FIX_S1A, 0x0003, 0x0000          ; seg3
 %assign i 1
 %rep FIX_NIMP
@@ -80,58 +64,41 @@ BANK_TABLE      equ 512         ; 256 offsets
 BANK_VOICE      equ 36
 BANK_MAX        equ 0x7FF0      ; the most esfmpat and essctl take
 FILE_MAX        equ 0xFFF0
-TIME_PERIODIC   equ 1
-WATCH_MS        equ 1000
 
 ; fix_bstate
-BS_NONE         equ 0           ; no Bank=, the built-in bank plays
+BS_NONE         equ 0           ; no bank file plays
 BS_LOADED       equ 1           ; the file's bank plays
 BS_MISSING      equ 2           ; the file can't be opened or read
 BS_BAD          equ 3           ; the file isn't a patch bank
 BS_NOMEM        equ 4           ; no memory for it
-BS_CHANGING     equ 5           ; changed, waiting for the next check
-
-; fix_bwatch
-WATCH_OFF       equ 0
-WATCH_STARTING  equ 1           ; task created, not running yet
-WATCH_RUNNING   equ 2
-WATCH_FAILED    equ 3           ; fix_bwerr says why
 
 ; DRV_ENABLE (DriverProc calls this instead of bank_load): the built-in
-; bank, then the bank file if there is one
-; DX:AX = 0 on success, like bank_load
+; bank, and forget the file that was read, so the next MODM_OPEN reads it
+; again
+; DX:AX from bank_load
 fix_drv_enable:
-        callf   bank_load, ..@FIX_S1A, ..@FIX_S1B
-        mov     cx,ax
-        or      cx,dx
-        jnz     .out
+        callf   bank_load, ..@FIX_S1A, 0xFFFF
         mov     word [fix_bsrc],0
-        xor     ax,ax
-        call    fix_bank_poll
-        xor     ax,ax
-        cwd
-.out:
+        mov     word [fix_bstate],BS_NONE
+        mov     byte [fix_bkey],0
         retf
 
-; DRV_DISABLE (instead of bank_free): stop the task before the driver can
-; be unloaded, then free the bank
-fix_drv_disable:
-        call    fix_watch_stop
-        callf   bank_free, ..@FIX_S1B, 0xFFFF
-        retf
-
-; check the bank file and load it if it's new or changed (task time)
-; AX = 1: load a changed file only once two checks read the same bytes
-fix_bank_poll:
+; MODM_OPEN, before ESS's code: load the bank file if it changed
+; nothing is checked while a program has the device open, that open is
+; refused and its bank stays
+fix_bank_check:
         cmp     word [fix_polling],0    ; a file call of another check yielded
         jne     .busy
+        call    fix_any_open
+        jnz     .busy
         mov     word [fix_polling],1
         push    bp
         mov     bp,sp
         push    si
         push    di
-        push    ax                      ; [bp-6] wait for two checks
-        inc     word [fix_bpolls]
+        sub     sp,6                    ; [bp-6] file, [bp-8] date,
+                                        ; [bp-10] time
+        inc     word [fix_bchecks]
         push    ds
         push    word fix_ini_sect
         push    ds
@@ -148,7 +115,7 @@ fix_bank_poll:
         jnz     .file
         ; no Bank=: back to the built-in bank
         mov     word [fix_bstate],BS_NONE
-        mov     word [fix_bpsize],0
+        mov     byte [fix_bkey],0
         cmp     word [fix_bsrc],0
         je      .done
         call    fix_builtin
@@ -157,11 +124,34 @@ fix_bank_poll:
         mov     word [fix_blen],0
         jmp     .done
 .file:
+        call    fix_open
+        jnc     .opened
+        mov     word [fix_bstate],BS_MISSING
+        jmp     .done
+.opened:
+        mov     [bp-6],ax
+        mov     bx,ax
+        mov     ax,0x5700               ; date and time of the last write
+        kernel  DOS3Call                ; CX = time, DX = date
+        jc      .ioerr
+        mov     [bp-8],dx
+        mov     [bp-10],cx
+        ; the file read last time, not written since: nothing to do
+        call    fix_same_file
+        jne     .changed
+        cmp     dx,[fix_bdate]
+        jne     .changed
+        cmp     cx,[fix_btime]
+        jne     .changed
+        mov     ax,[fix_bkstate]
+        mov     [fix_bstate],ax
+        jmp     .close
+.changed:
+        mov     bx,[bp-6]
         call    fix_read                ; SI = block, CX = bytes
         jnc     .read
         mov     [fix_bstate],ax
-        mov     word [fix_bpsize],0
-        jmp     .done
+        jmp     .close
 .read:
         mov     es,si
         call    fix_unwrap              ; DI = where the bank starts, CX = bytes
@@ -183,51 +173,24 @@ fix_bank_poll:
 .check:
         call    fix_valid
         jc      .bad
-        call    fix_same
-        jne     .changed
-        ; already playing it
-        mov     word [fix_bstate],BS_LOADED
-        mov     word [fix_bsrc],1
-        mov     [fix_blen],cx
-        mov     word [fix_bpsize],0
-        jmp     .free
-.changed:
-        call    fix_sum                 ; DX:AX
-        cmp     word [bp-6],0
-        je      .load
-        cmp     cx,[fix_bpsize]
-        jne     .pending
-        cmp     ax,[fix_bpsum]
-        jne     .pending
-        cmp     dx,[fix_bpsum+2]
-        je      .load
-.pending:
-        ; the file may still be being written, look again next time
-        mov     [fix_bpsize],cx
-        mov     [fix_bpsum],ax
-        mov     [fix_bpsum+2],dx
-        mov     word [fix_bstate],BS_CHANGING
-        jmp     .free
-.load:
-        cmp     word [fix_quit],0       ; the driver is being disabled
-        jne     .free
         push    cx
         mov     bx,si
         call    fix_install
         pop     cx
         jc      .nomem
-        mov     word [fix_bstate],BS_LOADED
         mov     word [fix_bsrc],1
         mov     [fix_blen],cx
         inc     word [fix_bloads]
-        mov     word [fix_bpsize],0
-        jmp     .done
+        mov     ax,BS_LOADED
+        call    .remember
+        jmp     .close
 .nomem:
         mov     word [fix_bstate],BS_NOMEM
         jmp     .free
 .bad:
-        mov     word [fix_bstate],BS_BAD
-        mov     word [fix_bpsize],0
+        ; remembered too, so it isn't read again until it changes
+        mov     ax,BS_BAD
+        call    .remember
 .free:
         ; no segment register may hold a selector that is freed: an
         ; interrupt handler that pops it would fault
@@ -235,27 +198,79 @@ fix_bank_poll:
         pop     es
         push    si
         kernel  GlobalFree
+        jmp     .close
+.ioerr:
+        mov     word [fix_bstate],BS_MISSING
+.close:
+        mov     ah,0x3E
+        mov     bx,[bp-6]
+        kernel  DOS3Call
 .done:
-        pop     ax
+        lea     sp,[bp-4]
         pop     di
         pop     si
         pop     bp
         mov     word [fix_polling],0
-        ; and the caller gets no freed selector in ES either (the old
-        ; bank's, from bank_load)
+        ; and the caller gets no freed selector in ES either
         push    ds
         pop     es
 .busy:
         ret
 
-; read the file named in fix_bpath into a new block
-; SI = block, CX = bytes, or CF and AX = BS_MISSING, BS_BAD or BS_NOMEM
-fix_read:
-        push    bp
-        mov     bp,sp
+; AX = what the file turned out to be, kept with its name, date and time
+.remember:
+        mov     [fix_bstate],ax
+        mov     [fix_bkstate],ax
+        mov     ax,[bp-8]
+        mov     [fix_bdate],ax
+        mov     ax,[bp-10]
+        mov     [fix_btime],ax
+        push    si
         push    di
-        push    word 0                  ; [bp-4] block
-        ; open it, with the long file name call first (Windows 95)
+        push    es
+        push    ds
+        pop     es
+        mov     si,fix_bpath
+        mov     di,fix_bkey
+        mov     cx,FIX_PATH
+        cld
+        rep     movsb
+        pop     es
+        pop     di
+        pop     si
+        ret
+
+; ZF set if Bank= (fix_bpath) names the file read last time (fix_bkey)
+fix_same_file:
+        push    si
+        push    di
+        push    es
+        push    ds
+        pop     es
+        mov     si,fix_bpath
+        mov     di,fix_bkey
+        cmp     byte [di],0
+        je      .differ
+.next:
+        lodsb
+        scasb
+        jne     .out
+        or      al,al
+        jnz     .next
+        jmp     .out
+.differ:
+        or      sp,sp                   ; ZF clear
+.out:
+        pop     es
+        pop     di
+        pop     si
+        ret
+
+; open the file named in fix_bpath to read it: AX = handle, or CF
+fix_open:
+        push    si
+        push    di
+        ; the long file name call first (Windows 95)
         mov     ax,0x716C
         mov     bx,0x0040               ; read only, deny none
         xor     cx,cx
@@ -266,18 +281,28 @@ fix_read:
         kernel  DOS3Call
         jc      .nolfn
         cmp     ax,0x7100               ; unknown call, and the carry clear
-        jne     .open
+        je      .dos
+        clc
+        jmp     .out
 .nolfn:
         cmp     ax,0x7100               ; no long file names
-        jne     .missing
+        stc
+        jne     .out
+.dos:
         mov     ax,0x3D40               ; open, read only, deny none
         mov     dx,fix_bpath
         kernel  DOS3Call
-        jc      .missing
-.open:
-        mov     si,ax                   ; SI = file
+.out:
+        pop     di
+        pop     si
+        ret
+
+; read the open file BX into a new block
+; SI = block, CX = bytes, or CF and AX = BS_MISSING, BS_BAD or BS_NOMEM
+fix_read:
+        push    di
+        push    bx
         mov     ax,0x4202               ; the size
-        mov     bx,si
         xor     cx,cx
         xor     dx,dx
         kernel  DOS3Call
@@ -289,8 +314,9 @@ fix_read:
         cmp     ax,BANK_TABLE
         jb      .toobig
         mov     di,ax                   ; DI = bytes
+        pop     bx
+        push    bx
         mov     ax,0x4200
-        mov     bx,si
         xor     cx,cx
         xor     dx,dx
         kernel  DOS3Call
@@ -301,54 +327,38 @@ fix_read:
         kernel  GlobalAlloc
         or      ax,ax
         jz      .nomem
-        mov     [bp-4],ax
+        mov     si,ax
+        pop     bx
+        push    bx
         push    ds
-        mov     ds,ax
+        mov     ds,si
         mov     ah,0x3F
-        mov     bx,si
         mov     cx,di
         xor     dx,dx
         kernel  DOS3Call
         pop     ds
-        jc      .ioerr
+        jc      .rderr
         cmp     ax,di
-        jne     .ioerr                  ; it got shorter, try again next time
-        call    .close
-        mov     si,[bp-4]
+        jne     .rderr                  ; it got shorter
         mov     cx,di
         clc
         jmp     .out
+.rderr:
+        push    si
+        kernel  GlobalFree
+.ioerr:
+        mov     ax,BS_MISSING
+        jmp     .fail
 .toobig:
-        mov     di,BS_BAD
+        mov     ax,BS_BAD
         jmp     .fail
 .nomem:
-        mov     di,BS_NOMEM
-        jmp     .fail
-.ioerr:
-        mov     di,BS_MISSING
+        mov     ax,BS_NOMEM
 .fail:
-        call    .close
-        mov     ax,[bp-4]
-        or      ax,ax
-        jz      .failed
-        push    ax
-        kernel  GlobalFree
-.failed:
-        mov     ax,di
-        stc
-        jmp     .out
-.missing:
-        mov     ax,BS_MISSING
         stc
 .out:
-        mov     di,[bp-2]
-        mov     sp,bp
-        pop     bp
-        ret
-.close:
-        mov     ah,0x3E
-        mov     bx,si
-        kernel  DOS3Call
+        pop     bx
+        pop     di
         ret
 
 ; find the bank in a bank file: the whole file, or the "fm4 " chunk of a
@@ -449,64 +459,6 @@ fix_valid:
         pop     si
         ret
 
-; ZF set if the bank that plays starts with the same bytes
-; ES:0 = bank, CX = bytes
-fix_same:
-        push    si
-        push    di
-        push    cx
-        push    es
-        mov     ax,[bank_ptr+2]
-        or      ax,ax
-        jz      .differ
-        push    ax
-        kernel  GlobalSize
-        pop     es
-        pop     cx
-        push    cx
-        push    es
-        or      dx,dx
-        jnz     .cmp
-        cmp     ax,cx
-        jb      .differ
-.cmp:
-        push    ds
-        mov     ax,[bank_ptr+2]
-        mov     ds,ax
-        xor     si,si
-        xor     di,di
-        cld
-        repe    cmpsb
-        pop     ds
-        jmp     .out
-.differ:
-        or      sp,sp                   ; ZF clear
-.out:
-        pop     es
-        pop     cx
-        pop     di
-        pop     si
-        ret
-
-; checksum of a bank, to tell whether the file changed between two checks
-; ES:0 = bank, CX = bytes; DX:AX = sum
-fix_sum:
-        push    si
-        push    cx
-        xor     ax,ax
-        xor     dx,dx
-        xor     bx,bx
-        xor     si,si
-.next:
-        mov     bl,[es:si]
-        inc     si
-        add     ax,bx
-        add     dx,ax
-        loop    .next
-        pop     cx
-        pop     si
-        ret
-
 ; make the bank in block BX the one that plays and free the old block
 ; CF if it can't be page-locked
 fix_install:
@@ -516,9 +468,8 @@ fix_install:
         mov     di,[bank_locks]
         or      di,di
         jz      .swap
-        ; a program has the device open, so the bank that plays is
-        ; page-locked for interrupt time: lock this one the same way
-        ; (bank_lock)
+        ; the bank that plays is page-locked for interrupt time (bank_lock):
+        ; lock this one the same way
         push    si
         kernel  GlobalWire
         push    si
@@ -617,20 +568,9 @@ fix_builtin:
         pop     ds
         push    word [bp-10]
         kernel  FreeResource
-        mov     es,[bp-8]
-        mov     cx,[bp-6]
-        call    fix_same
-        je      .same
         mov     bx,[bp-8]
         call    fix_install
         jc      .freeblk
-        jmp     .ok
-.same:
-        push    ds
-        pop     es
-        push    word [bp-8]
-        kernel  GlobalFree
-.ok:
         clc
         jmp     .out
 .freeres:
@@ -662,144 +602,3 @@ fix_any_open:
         jmp     .next
 .out:
         ret
-
-; start the task that checks the bank file, if it isn't running (after a
-; MODM_OPEN)
-fix_watch_start:
-        mov     ax,[fix_bwatch]
-        cmp     ax,WATCH_STARTING
-        je      .out
-        cmp     ax,WATCH_RUNNING
-        je      .out
-        mov     word [fix_quit],0
-        mov     word [fix_bwatch],WATCH_STARTING
-        push    cs
-        push    word fix_task_proc
-        push    ds
-        push    word fix_tasknew
-        push    word 0
-        push    word 0
-        mmsystem mmTaskCreate
-        or      ax,ax
-        jz      .out
-        mov     [fix_bwerr],ax
-        mov     word [fix_bwatch],WATCH_FAILED
-.out:
-        ret
-
-; end the task and wait for it, so it can't run code of a driver that is
-; being unloaded (DRV_DISABLE)
-fix_watch_stop:
-        push    si
-        mov     ax,[fix_bwatch]
-        cmp     ax,WATCH_STARTING
-        je      .stop
-        cmp     ax,WATCH_RUNNING
-        jne     .out
-.stop:
-        mov     word [fix_quit],1
-        mov     si,200
-.wait:
-        mov     ax,[fix_task]
-        or      ax,ax
-        jz      .yield
-        push    ax
-        mmsystem mmTaskSignal
-.yield:
-        kernel  Yield
-        mov     ax,[fix_bwatch]
-        cmp     ax,WATCH_STARTING
-        je      .again
-        cmp     ax,WATCH_RUNNING
-        jne     .out
-.again:
-        dec     si
-        jnz     .wait
-        ; it didn't end: at least stop its timer
-        mov     ax,[fix_timer]
-        or      ax,ax
-        jz      .out
-        push    ax
-        mmsystem timeKillEvent
-        mov     word [fix_timer],0
-.out:
-        pop     si
-        ret
-
-; the task (mmTaskCreate): wakes up every second from fix_tick, and checks
-; the bank file while a program has the device open
-; void FAR PASCAL fix_task_proc(DWORD dwInst)
-fix_task_proc:
-        push    bp
-        mov     bp,sp
-        push    ds
-        push    si
-        push    di
-        movsel  ax, ..@FIX_DS2, 0xFFFF
-        mov     ds,ax
-        kernel  GetCurrentTask
-        mov     [fix_task],ax
-        cmp     word [fix_quit],0
-        jne     .quit
-        push    word WATCH_MS
-        push    word 100
-        push    cs
-        push    word fix_tick
-        push    word 0
-        push    word 0
-        push    word TIME_PERIODIC
-        mmsystem timeSetEvent
-        mov     [fix_timer],ax
-        or      ax,ax
-        jnz     .run
-        mov     word [fix_bwerr],0xFFFF
-        mov     word [fix_bwatch],WATCH_FAILED
-        jmp     .gone
-.run:
-        mov     word [fix_bwatch],WATCH_RUNNING
-.wait:
-        cmp     word [fix_quit],0
-        jne     .quit
-        push    word [fix_task]
-        mmsystem mmTaskBlock
-        cmp     word [fix_quit],0
-        jne     .quit
-        call    fix_any_open
-        jz      .wait
-        mov     ax,1
-        call    fix_bank_poll
-        jmp     .wait
-.quit:
-        mov     ax,[fix_timer]
-        or      ax,ax
-        jz      .stopped
-        push    ax
-        mmsystem timeKillEvent
-        mov     word [fix_timer],0
-.stopped:
-        mov     word [fix_bwatch],WATCH_OFF
-.gone:
-        mov     word [fix_task],0
-        pop     di
-        pop     si
-        pop     ds
-        pop     bp
-        retf    4
-
-; timer callback (interrupt time): wake the task up
-; void FAR PASCAL fix_tick(UINT id, UINT msg, DWORD user, DWORD dw1, DWORD dw2)
-fix_tick:
-        push    bp
-        mov     bp,sp
-        push    ds
-        movsel  ax, ..@FIX_DS3, 0xFFFF
-        mov     ds,ax
-        mov     ax,[fix_task]
-        or      ax,ax
-        jz      .out
-        push    ax
-        mmsystem mmTaskSignal
-.out:
-        pop     ds
-        pop     bp
-        retf    16

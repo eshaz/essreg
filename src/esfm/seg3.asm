@@ -48,8 +48,9 @@ L3_003A:
 
 L3_0057:
 %if ESFM_FIX
-        ; DRV_ENABLE: the built-in bank, then the bank file (esfmfile.asm)
-        callf fix_drv_enable, FIX_S3A, FIX_S3B          ; 0057 far seg1
+        ; DRV_ENABLE: the built-in bank, and the bank file is read again at
+        ; the next MODM_OPEN (esfmfile.asm)
+        callf fix_drv_enable, FIX_S3A, 0xFFFF           ; 0057 far seg1
 %else
         callf bank_load, R3_005A, R3_0069               ; 0057 far seg3
 %endif
@@ -60,13 +61,7 @@ L3_0057:
         jmp short L3_009B                               ; 0064
 
 L3_0066:
-%if ESFM_FIX
-        ; DRV_DISABLE: end the task that watches the bank file, then free
-        ; the bank
-        callf fix_drv_disable, FIX_S3B, 0xFFFF          ; 0066 far seg1
-%else
         callf bank_free, R3_0069, R3_008D               ; 0066 far seg3
-%endif
         jmp short L3_0096                               ; 006B
 
 L3_006D:
@@ -382,8 +377,8 @@ vxd_notify:
         push word [bp+0xc]                              ; 02F0
         push word [bp+0xa]                              ; 02F3
 %if ESFM_FIX
-        ; the seg3 selector chain skips the two calls above, now to seg1
-        callf find_device, R3_02F9, R3_008D             ; 02F6 far seg3
+        ; the seg3 selector chain skips the DRV_ENABLE call, now to seg1
+        callf find_device, R3_02F9, R3_0069             ; 02F6 far seg3
 %else
         callf find_device, R3_02F9, R3_005A             ; 02F6 far seg3
 %endif

@@ -17,7 +17,8 @@ reproduces the stuck notes of the ESS driver:
 The fixed build must pass every case the stock build fails.
 
 BankFileTest: the fixed build plays the bank file named in SYSTEM.INI
-[ESFM.DRV] Bank=, and loads it again when it changes (src/esfm/esfmfile.asm).
+[ESFM.DRV] Bank=, read when a program opens the device if its date or time
+changed (src/esfm/esfmfile.asm).
 """
 
 import os
@@ -278,8 +279,7 @@ class StuckNoteTest(unittest.TestCase):
 
 
 # the bank file (esfmfile.asm)
-BS_NONE, BS_LOADED, BS_MISSING, BS_BAD, BS_NOMEM, BS_CHANGING = range(6)
-WATCH_OFF, WATCH_STARTING, WATCH_RUNNING, WATCH_FAILED = range(4)
+BS_NONE, BS_LOADED, BS_MISSING, BS_BAD, BS_NOMEM = range(5)
 PATH = r"C:\BANKS\MINE.BIN"
 
 
@@ -304,6 +304,7 @@ def riff(bank):
 @unittest.skipUnless(HAVE_UNICORN, "needs the unicorn module")
 class BankFileTest(unittest.TestCase):
     def emu(self, which="fixed", files=None, setting=PATH):
+        """The driver after DRV_ENABLE, with Bank= set to setting."""
         e = ESFMEmu(builds()[which])
         self.builtin = e.bank_res
         if setting is not None:
@@ -312,12 +313,19 @@ class BankFileTest(unittest.TestCase):
         self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
         return e
 
+    def base(self):
+        return ESFMEmu(builds()["fixed"]).bank_res
+
     def playing(self, emu):
         """Marks of the voices a note on of program 0 keys on."""
         emu.data(0x7F3C90)
         out = {emu.chip.regs[v * 32] for v in emu.keyed_voices() if v < 16}
         emu.data(0x003C80)
         return out
+
+    def reopen(self, emu):
+        emu.close()
+        emu.open()
 
     def state(self, emu):
         return {k: v for k, v in emu.fix_state().items()
@@ -329,47 +337,52 @@ class BankFileTest(unittest.TestCase):
         self.assertEqual(emu.handles, {})
         self.assertEqual(emu.freed_locked, [])
 
-    def watching(self, files, **kw):
-        emu = self.emu(files=files, **kw)
-        emu.open()
-        self.assertTrue(emu.run_task())         # starts, sets its timer
-        self.assertEqual(emu.fix_state()["bwatch"], WATCH_RUNNING)
-        return emu
+    # -- loading at open -----------------------------------------------------
 
-    # -- loading ---------------------------------------------------------
+    def test_enable_reads_no_file(self):
+        emu = self.emu(files={PATH: marked(self.base(), 0x5A)})
+        self.assertEqual(emu.opens, [])
+        self.assertEqual(emu.ini_reads, [])
+        self.assertEqual(emu.bank(len(self.builtin)), self.builtin)
+        self.assertEqual(emu.fix_state()["bstate"], BS_NONE)
 
-    def test_enable_loads_the_file(self):
-        bank = marked(self.emu(setting=None).bank_res, 0x5A)
+    def test_open_loads_the_file(self):
+        bank = marked(self.base(), 0x5A)
         emu = self.emu(files={PATH: bank})
+        emu.open()
         self.assertEqual(emu.bank(len(bank)), bank)
         st = self.state(emu)
-        self.assertEqual((st["bstate"], st["bsrc"], st["blen"], st["bloads"]),
-                         (BS_LOADED, 1, len(bank), 1))
+        self.assertEqual((st["bstate"], st["bsrc"], st["blen"], st["bloads"],
+                          st["bchecks"]), (BS_LOADED, 1, len(bank), 1, 1))
+        self.assertEqual((st["bdate"], st["btime"]),
+                         (esfmemu.FILE_DATE, esfmemu.FILE_TIME))
         self.assertEqual(st["bpath"], PATH)
         self.assertIn(("SYSTEM.INI", "ESFM.DRV", "Bank"), emu.ini_reads)
-        emu.open()
         self.assertEqual(self.playing(emu), {0x5A})
+        # the device was closed: nothing was page-locked or queued
+        self.assertEqual(emu.fix_state()["queued"], 0)
+        self.assertEqual(emu.plocks.get(emu.r16(4, 0x14)), 1)   # bank_lock
         self.assertClean(emu)
 
     def test_riff_file(self):
-        bank = marked(self.emu(setting=None).bank_res, 0x33)
+        bank = marked(self.base(), 0x33)
         emu = self.emu(files={PATH: riff(bank)})
+        emu.open()
         self.assertEqual(emu.bank(len(bank)), bank)
         self.assertEqual(emu.fix_state()["blen"], len(bank))
-        emu.open()
         self.assertEqual(self.playing(emu), {0x33})
 
     def test_larger_bank(self):
         # a copy of program 0 at the end, as program 1
-        base = bytearray(self.emu(setting=None).bank_res)
+        base = bytearray(self.base())
         off = struct.unpack_from("<H", base, 0)[0]
         two = (base[off] >> 1) & 3 not in (0, 3)
         patch = base[off:off + (72 if two else 36)]
         struct.pack_into("<H", base, 0, len(base))
         bank = marked(bytes(base + patch + bytes(4096)), 0x71)
         emu = self.emu(files={PATH: bank})
-        self.assertEqual(emu.fix_state()["blen"], len(bank))
         emu.open()
+        self.assertEqual(emu.fix_state()["blen"], len(bank))
         self.assertEqual(self.playing(emu), {0x71})
 
     def test_long_file_name_call_missing(self):
@@ -377,31 +390,31 @@ class BankFileTest(unittest.TestCase):
         # also when the carry comes back clear
         for lfn in (False, "nocarry"):
             with self.subTest(lfn):
-                emu = ESFMEmu(builds()["fixed"])
+                bank = marked(self.base(), 0x44)
+                emu = self.emu(files={PATH: bank})
                 emu.lfn = lfn
-                bank = marked(emu.bank_res, 0x44)
-                emu.ini[("esfm.drv", "bank")] = PATH
-                emu.files[PATH] = bank
-                emu.driverproc(DRV_ENABLE)
+                emu.open()
                 self.assertEqual(emu.bank(len(bank)), bank)
                 self.assertEqual(emu.opens, [PATH])
-                self.assertEqual(emu.handles, {})
+                self.assertClean(emu)
 
     def test_no_setting(self):
         emu = self.emu(setting=None, files={PATH: b"x" * 600})
+        emu.open()
         self.assertEqual(emu.bank(len(self.builtin)), self.builtin)
         self.assertEqual(emu.fix_state()["bstate"], BS_NONE)
         self.assertEqual(emu.opens, [])
 
     def test_missing_file(self):
         emu = self.emu(files={})
+        emu.open()
         self.assertEqual(emu.bank(len(self.builtin)), self.builtin)
         st = self.state(emu)
         self.assertEqual((st["bstate"], st["bsrc"]), (BS_MISSING, 0))
         self.assertClean(emu)
 
     def test_not_a_bank(self):
-        good = self.emu(setting=None).bank_res
+        good = self.base()
         off = struct.unpack_from("<H", good, 0)[0]
         cases = {
             "short": good[:300],
@@ -417,246 +430,171 @@ class BankFileTest(unittest.TestCase):
         for name, data in cases.items():
             with self.subTest(name):
                 emu = self.emu(files={PATH: data})
+                emu.open()
                 self.assertEqual(emu.fix_state()["bstate"], BS_BAD)
                 self.assertEqual(emu.bank(len(self.builtin)), self.builtin)
                 self.assertClean(emu)
 
     def test_no_memory(self):
-        emu = ESFMEmu(builds()["fixed"])
-        emu.ini[("esfm.drv", "bank")] = PATH
-        emu.files[PATH] = marked(emu.bank_res, 0x5A)
+        emu = self.emu(files={PATH: marked(self.base(), 0x5A)})
         emu.gmem_fail = True
         emu.open()
         self.assertEqual(emu.fix_state()["bstate"], BS_NOMEM)
-        self.assertEqual(emu.bank(len(emu.bank_res)), emu.bank_res)
+        self.assertEqual(emu.bank(len(self.builtin)), self.builtin)
         self.assertClean(emu)
         emu.gmem_fail = False
-        emu.close()
-        emu.open()                              # checks the file again
+        self.reopen(emu)                        # tried again
         self.assertEqual(self.playing(emu), {0x5A})
 
     def test_stock_driver_ignores_it(self):
-        emu = ESFMEmu(builds()["stock"])
-        emu.ini[("esfm.drv", "bank")] = PATH
-        emu.files[PATH] = marked(emu.bank_res, 0x5A)
-        self.assertEqual(emu.driverproc(DRV_ENABLE) & 0xFFFF, 1)
+        emu = self.emu("stock", files={PATH: marked(self.base(), 0x5A)})
         emu.open()
-        self.assertEqual(emu.bank(len(emu.bank_res)), emu.bank_res)
+        self.assertEqual(emu.bank(len(self.builtin)), self.builtin)
         self.assertEqual(emu.ini_reads, [])
 
-    # -- watching the file -----------------------------------------------
+    # -- the date and time decide --------------------------------------------
 
-    def test_changed_file_is_loaded_again(self):
-        base = self.emu(setting=None).bank_res
-        emu = self.watching({PATH: marked(base, 0x5A)})
-        blocks = len(emu.gblocks)
+    def test_same_date_is_not_read_again(self):
+        base = self.base()
+        emu = self.emu(files={PATH: marked(base, 0x5A)})
+        emu.open()
+        reads = emu.reads
+        # new bytes with the date and time of the file read before, like a
+        # copy of a file with the same date: not read
+        emu.files[PATH] = marked(base, 0x61)
+        for _ in range(3):
+            self.reopen(emu)
+        self.assertEqual(emu.reads, reads)
+        st = self.state(emu)
+        self.assertEqual((st["bstate"], st["bloads"], st["bchecks"]),
+                         (BS_LOADED, 1, 4))
+        self.assertEqual(self.playing(emu), {0x5A})
+        self.assertClean(emu)
+
+    def test_new_date_is_loaded(self):
+        base = self.base()
+        emu = self.emu(files={PATH: marked(base, 0x5A)})
+        emu.open()
         for mark in (0x61, 0x62, 0x63):
             emu.files[PATH] = marked(base, mark)
-            self.assertTrue(emu.tick())
-            self.assertEqual(emu.fix_state()["bstate"], BS_CHANGING)
-            self.assertTrue(emu.tick())
-            st = self.state(emu)
-            self.assertEqual(st["bstate"], BS_LOADED)
+            emu.touch(PATH)
+            self.reopen(emu)
             self.assertEqual(self.playing(emu), {mark})
+            self.assertEqual(emu.fix_state()["btime"],
+                             emu.ftimes[PATH][1])
         self.assertEqual(emu.fix_state()["bloads"], 4)
-        # the new bank is page-locked like the one it replaced, which is
-        # freed
-        sel = emu.r16(4, 0x14)
-        self.assertEqual(emu.plocks.get(sel), 1)
-        self.assertEqual(len(emu.gblocks), blocks)
         self.assertClean(emu)
 
-    def test_unchanged_file_is_left_alone(self):
-        base = self.emu(setting=None).bank_res
-        emu = self.watching({PATH: marked(base, 0x5A)})
-        sel, blocks = emu.r16(4, 0x14), dict(emu.gblocks)
-        for _ in range(5):
-            self.assertTrue(emu.tick())
-        st = self.state(emu)
-        self.assertEqual((st["bstate"], st["bloads"]), (BS_LOADED, 1))
-        self.assertEqual(st["bpolls"], 7)       # enable, open and 5 ticks
-        self.assertEqual((emu.r16(4, 0x14), emu.gblocks), (sel, blocks))
+    def test_not_checked_while_open(self):
+        base = self.base()
+        emu = self.emu(files={PATH: marked(base, 0x5A)})
+        emu.open()
+        emu.files[PATH] = marked(base, 0x66)
+        emu.touch(PATH)
+        # another program's open is refused and the bank that plays stays
+        user, desc = (esfmemu.STUB_PARA << 16) | (esfmemu.CLIENT_OFF + 0x40), \
+            (esfmemu.STUB_PARA << 16) | esfmemu.CLIENT_OFF
+        self.assertEqual(emu.modmessage(esfmemu.MODM_OPEN, desc, 0x00030000,
+                                        user=user), 4)
+        self.assertEqual(emu.fix_state()["bchecks"], 1)
+        self.assertEqual(self.playing(emu), {0x5A})
+        self.reopen(emu)                        # the next open loads it
+        self.assertEqual(self.playing(emu), {0x66})
         self.assertClean(emu)
 
-    def test_file_being_written(self):
-        # a file that differs at every check isn't loaded until it holds
-        # still for one more
-        base = self.emu(setting=None).bank_res
-        emu = self.watching({PATH: marked(base, 0x5A)})
-        for mark in range(0x70, 0x78):
-            emu.files[PATH] = marked(base, mark)
-            emu.tick()
-            self.assertEqual(emu.fix_state()["bstate"], BS_CHANGING)
-            self.assertEqual(self.playing(emu), {0x5A})
-        emu.tick()
-        self.assertEqual(self.playing(emu), {0x77})
-        # half a bank never plays, and one that is complete again loads
-        emu.files[PATH] = marked(base, 0x10)[:4000]
-        emu.tick()
+    def test_bad_file_is_not_read_again(self):
+        base = self.base()
+        emu = self.emu(files={PATH: marked(base, 0x5A)})
+        emu.open()
+        emu.files[PATH] = marked(base, 0x10)[:4000]      # half saved
+        emu.touch(PATH)
+        self.reopen(emu)
         self.assertEqual(emu.fix_state()["bstate"], BS_BAD)
-        emu.files[PATH] = marked(base, 0x10)
-        emu.tick()
-        emu.tick()
+        self.assertEqual(self.playing(emu), {0x5A})     # the bank stays
+        reads = emu.reads
+        self.reopen(emu)
+        self.assertEqual(emu.reads, reads)
+        self.assertEqual(emu.fix_state()["bstate"], BS_BAD)
+        emu.files[PATH] = marked(base, 0x10)            # saved again
+        emu.touch(PATH)
+        self.reopen(emu)
         self.assertEqual(self.playing(emu), {0x10})
+        self.assertEqual(emu.fix_state()["bstate"], BS_LOADED)
         self.assertClean(emu)
 
     def test_file_removed_then_back(self):
-        base = self.emu(setting=None).bank_res
-        emu = self.watching({PATH: marked(base, 0x5A)})
-        del emu.files[PATH]
-        emu.tick()
+        base = self.base()
+        emu = self.emu(files={PATH: marked(base, 0x5A)})
+        emu.open()
+        data = emu.files.pop(PATH)
+        self.reopen(emu)
         self.assertEqual(emu.fix_state()["bstate"], BS_MISSING)
         self.assertEqual(self.playing(emu), {0x5A})     # keeps playing it
+        # back as it was: nothing to read
+        emu.files[PATH] = data
+        reads = emu.reads
+        self.reopen(emu)
+        self.assertEqual(emu.reads, reads)
+        self.assertEqual(emu.fix_state()["bstate"], BS_LOADED)
+        # back with a new date: loaded
         emu.files[PATH] = marked(base, 0x22)
-        emu.tick()
-        emu.tick()
+        emu.touch(PATH)
+        self.reopen(emu)
         self.assertEqual(self.playing(emu), {0x22})
         self.assertClean(emu)
 
     def test_setting_removed(self):
-        base = self.emu(setting=None).bank_res
-        emu = self.watching({PATH: marked(base, 0x5A)})
+        base = self.base()
+        emu = self.emu(files={PATH: marked(base, 0x5A)})
+        emu.open()
         del emu.ini[("esfm.drv", "bank")]
-        emu.tick()
+        self.reopen(emu)
         st = self.state(emu)
         self.assertEqual((st["bstate"], st["bsrc"]), (BS_NONE, 0))
         self.assertEqual(emu.bank(len(base)), base)
-        self.assertEqual(emu.plocks.get(emu.r16(4, 0x14)), 1)
-        # another file
+        # another file, with the same date and time: a new name loads
         emu.ini[("esfm.drv", "bank")] = r"C:\OTHER.BNK"
         emu.files[r"C:\OTHER.BNK"] = riff(marked(base, 0x3C))
-        emu.tick()
-        emu.tick()
+        self.reopen(emu)
         self.assertEqual(self.playing(emu), {0x3C})
         self.assertClean(emu)
 
-    def test_note_on_during_the_swap(self):
-        base = self.emu(setting=None).bank_res
-        emu = self.watching({PATH: marked(base, 0x5A)})
-        emu.files[PATH] = marked(base, 0x61)
-        emu.tick()
-        inj = Inject(MODM_DATA, dw1=0x7F4090, on_lock=True)
-        emu.tick(injects=[inj])
-        self.assertTrue(inj.done)
-        self.assertEqual(inj.result, 0)
-        st = emu.fix_state()
-        self.assertEqual((st["queued"], st["bloads"]), (1, 2))
-        # it waited for the swap, and played the new bank
-        self.assertEqual({emu.chip.regs[v * 32] for v in emu.keyed_voices()
-                          if v < 16}, {0x61})
-        self.assertEqual(emu.chip.splits, [])
-        self.assertClean(emu)
-
-    def test_notes_while_checking(self):
-        base = self.emu(setting=None).bank_res
-        emu = self.watching({PATH: marked(base, 0x5A)})
-        for k in range(0, 60000, 4000):
-            emu.files[PATH] = marked(base, 0x40 + k // 4000)
-            emu.tick()
-            inj = Inject(MODM_DATA, dw1=0x7F3C90, after_insns=k)
-            emu.tick(injects=[inj])
-            if inj.started:
-                self.assertEqual(inj.result, 0)
-            emu.data(0x003C80)
-            self.assertEqual(emu.keyed_voices(), [])
-            self.assertEqual(emu.chip.splits, [])
-            self.assertEqual(self.playing(emu), {0x40 + k // 4000})
-        self.assertClean(emu)
-
-    def test_checks_only_while_open(self):
-        base = self.emu(setting=None).bank_res
-        emu = self.watching({PATH: marked(base, 0x5A)})
+    def test_enabled_again_reads_it_again(self):
+        base = self.base()
+        emu = self.emu(files={PATH: marked(base, 0x5A)})
+        emu.open()
         emu.close()
-        polls = emu.fix_state()["bpolls"]
-        emu.files[PATH] = marked(base, 0x66)
-        for _ in range(3):
-            emu.tick()
-        self.assertEqual(emu.fix_state()["bpolls"], polls)
-        emu.open()                              # loads it now
-        self.assertEqual(self.playing(emu), {0x66})
-        self.assertEqual(emu.tasks_created, 1)  # the same task goes on
+        emu.driverproc(DRV_DISABLE)
+        self.assertEqual(emu.driverproc(DRV_ENABLE) & 0xFFFF, 1)
+        self.assertEqual(emu.bank(len(base)), base)     # bank_load's
+        emu.open()                              # same date, read again
+        self.assertEqual(self.playing(emu), {0x5A})
+        self.assertEqual(emu.fix_state()["bloads"], 2)
         self.assertClean(emu)
 
     def test_no_freed_selector_in_a_register(self):
         # every way a bank block is freed, with a check at each instruction
         # that DS, ES and SS never hold a freed block
-        base = self.emu(setting=None).bank_res
+        base = self.base()
         emu = ESFMEmu(builds()["fixed"])
         emu.check_selectors = True
         emu.ini[("esfm.drv", "bank")] = PATH
         emu.files[PATH] = marked(base, 0x5A)
-        emu.driverproc(DRV_ENABLE)              # frees bank_load's block
-        emu.open()
-        emu.run_task()
+        emu.driverproc(DRV_ENABLE)
+        emu.open()                              # frees bank_load's block
         emu.files[PATH] = marked(base, 0x61)
-        emu.tick()
-        emu.tick()                              # frees the old file bank
-        emu.tick()                              # frees the unchanged copy
+        emu.touch(PATH)
+        self.reopen(emu)                        # frees the old file bank
         emu.files[PATH] = b"x" * 600
-        emu.tick()                              # frees a bad file
+        emu.touch(PATH)
+        self.reopen(emu)                        # frees a bad file
         del emu.ini[("esfm.drv", "bank")]
-        emu.tick()                              # the built-in bank back
+        self.reopen(emu)                        # the built-in bank back
         emu.close()
         emu.driverproc(DRV_DISABLE)
         self.assertEqual(emu.fix_state()["bloads"], 2)
         self.assertEqual(emu.stale, [])
         self.assertClean(emu)
-
-    # -- the task --------------------------------------------------------
-
-    def test_disable_ends_the_task(self):
-        base = self.emu(setting=None).bank_res
-        emu = self.watching({PATH: marked(base, 0x5A)})
-        emu.close()
-        self.assertEqual(emu.driverproc(DRV_DISABLE) & 0xFFFF, 1)
-        self.assertEqual(emu.task["state"], "done")
-        self.assertEqual(emu.timers, {})
-        st = emu.fix_state()
-        self.assertEqual(st["bwatch"], WATCH_OFF)
-        self.assertEqual(emu.r16(4, 0x14), 0)   # bank_free
-        self.assertClean(emu)
-        # enabled and opened again: a new task
-        self.assertEqual(emu.driverproc(DRV_ENABLE) & 0xFFFF, 1)
-        emu.open()
-        self.assertEqual(emu.tasks_created, 2)
-        self.assertTrue(emu.run_task())
-        self.assertEqual(emu.fix_state()["bwatch"], WATCH_RUNNING)
-
-    def test_disable_before_the_task_ran(self):
-        emu = self.emu(files={})
-        emu.open()
-        emu.close()
-        self.assertEqual(emu.task["state"], "new")
-        emu.driverproc(DRV_DISABLE)
-        self.assertEqual(emu.task["state"], "done")     # ran from the Yield
-        self.assertEqual(emu.timers, {})
-        self.assertNotIn(("MMSYSTEM", 602), emu.calls)
-        self.assertEqual(emu.fix_state()["bwatch"], WATCH_OFF)
-
-    def test_without_mmtask(self):
-        base = self.emu(setting=None).bank_res
-        emu = self.emu(files={PATH: marked(base, 0x5A)})
-        emu.mmtask_error = 2
-        emu.open()
-        st = emu.fix_state()
-        self.assertEqual((st["bwatch"], st["bwerr"]), (WATCH_FAILED, 2))
-        # the file is still checked at every open
-        emu.close()
-        emu.files[PATH] = marked(base, 0x66)
-        emu.open()
-        self.assertEqual(self.playing(emu), {0x66})
-        emu.close()
-        emu.driverproc(DRV_DISABLE)
-        self.assertClean(emu)
-
-    def test_without_timer(self):
-        emu = self.emu(files={})
-        emu.timer_fail = True
-        emu.open()
-        emu.run_task()
-        st = emu.fix_state()
-        self.assertEqual((st["bwatch"], st["bwerr"]), (WATCH_FAILED, 0xFFFF))
-        self.assertEqual(emu.task["state"], "done")
 
 
 if __name__ == "__main__":

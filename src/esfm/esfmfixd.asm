@@ -20,17 +20,13 @@ fix_bstate:     dw 0            ; BS_* in esfmfile.asm
 fix_bsrc:       dw 0            ; 1: the bank that plays came from the file
 fix_blen:       dw 0            ; bytes of the file's bank that plays
 fix_bloads:     dw 0            ; times the file was loaded
-fix_bpolls:     dw 0            ; times the file was checked
-fix_bwatch:     dw 0            ; WATCH_* in esfmfile.asm
-fix_bwerr:      dw 0            ; mmTaskCreate error, FFFFh: no timer
+fix_bchecks:    dw 0            ; times the file was checked (MODM_OPEN)
+fix_bdate:      dw 0            ; DOS date and time of the file read last
+fix_btime:      dw 0
 fix_bpath:      times FIX_PATH db 0     ; Bank= from SYSTEM.INI
-fix_task:       dw 0            ; the task that watches the file
-fix_timer:      dw 0            ; its timer
-fix_tasknew:    dw 0            ; handle from mmTaskCreate
-fix_quit:       dw 0            ; tells the task to end
+fix_bkey:       times FIX_PATH db 0     ; the file read last, "" for none
+fix_bkstate:    dw 0            ; and what it was, BS_LOADED or BS_BAD
 fix_polling:    dw 0            ; a check is running
-fix_bpsum:      dd 0            ; a change seen by one check: checksum
-fix_bpsize:     dw 0            ; and bytes, 0 if none
 fix_ini_sect:   db 'ESFM.DRV', 0
 fix_ini_key:    db 'Bank', 0
 fix_ini_file:   db 'SYSTEM.INI', 0

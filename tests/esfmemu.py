@@ -15,10 +15,9 @@ is set, as on the hardware), or from DriverCallback, the way a client
 sends MIDI data from its MOM_DONE callback.
 
 The bank file of the fixed driver has what it needs too: SYSTEM.INI
-(emu.ini), files (emu.files, read through DOS3Call), a global heap with
-page locks, the driver's resources, and the task that watches the file,
-which runs when it's signaled and a Yield or emu.run_task() lets it.
-emu.tick() fires the timers and then runs the task, like one second.
+(emu.ini), files with a date and time (emu.files, emu.touch(), read
+through DOS3Call), a global heap with page locks and the driver's
+resources.
 
     emu = ESFMEmu(open("build/ESFM.DRV", "rb").read())
     emu.open()
@@ -46,14 +45,13 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 from retools.ne import NEFile  # noqa: E402
 
 SEG_PARA = {1: 0x1000, 2: 0x2000, 3: 0x3000, 4: 0x5000}
-TASK_STACK_PARA = 0x6000    # stack of the watcher task
 BANK_PARA = 0x7000
 STUB_PARA = 0x8000
 STACK_PARA = 0x9000
 HEAP_PARA = 0xA000          # GlobalAlloc blocks, up to HEAP_END
 HEAP_END = 0xF000
-APP_TASK = 0x1111           # GetCurrentTask of the program
-WATCH_TASK = 0x2222         # and of the task mmTaskCreate starts
+FILE_DATE = 0x5A21          # DOS date and time of a new file (2025-01-01)
+FILE_TIME = 0x6000          # 12:00:00
 TRAMP_OFF = 0x8000          # trampolines in the stub segment
 CLIENT_OFF = 0xC000         # scratch data in the stub segment
 HEAP_START = 0x0400         # LocalAlloc arena in DGROUP
@@ -79,8 +77,6 @@ STUB_ARGS = {
     ("KERNEL", 15): 6,      # GlobalAlloc(flags, dwBytes)
     ("KERNEL", 17): 2,      # GlobalFree(h)
     ("KERNEL", 20): 2,      # GlobalSize(h)
-    ("KERNEL", 29): 0,      # Yield()
-    ("KERNEL", 36): 0,      # GetCurrentTask()
     ("KERNEL", 60): 10,     # FindResource(hInst, lpName, lpType)
     ("KERNEL", 61): 4,      # LoadResource(hInst, hRsrc)
     ("KERNEL", 62): 2,      # LockResource(hResData)
@@ -97,11 +93,6 @@ STUB_ARGS = {
     ("USER", 471): 8,       # lstrcmpi(s1, s2)
     ("MMSYSTEM", 31): 22,   # DriverCallback
     ("MMSYSTEM", 216): 12,  # midiOutMessage(h, msg, dw1, dw2)
-    ("MMSYSTEM", 602): 14,  # timeSetEvent(delay, res, lpfn, dwUser, flags)
-    ("MMSYSTEM", 603): 2,   # timeKillEvent(id)
-    ("MMSYSTEM", 900): 12,  # mmTaskCreate(lpfn, lph, dwInst)
-    ("MMSYSTEM", 902): 2,   # mmTaskBlock(h)
-    ("MMSYSTEM", 903): 2,   # mmTaskSignal(h)
 }
 
 
@@ -234,20 +225,13 @@ class ESFMEmu:
         self.ini = {}            # (section, key), lower case -> value
         self.ini_reads = []
         self.files = {}          # path in upper case -> bytes
+        self.ftimes = {}         # path -> (DOS date, DOS time), if not new
         self.handles = {}        # DOS handle -> [path, position, bytes]
         self.lfn = True          # INT 21h 716Ch works, as on Windows 95;
                                  # False: AX=7100h and the carry set, as on
                                  # Windows 3.1, "nocarry": the carry clear
         self.opens = []          # paths opened, in order
-        # the watcher task (mmTaskCreate) and the timers (timeSetEvent)
-        self.task = None
-        self.tasks_created = 0
-        self.mmtask_error = 0    # mmTaskCreate fails with this when nonzero
-        self.timer_fail = False
-        self.timers = {}         # id -> (callback, dwUser)
-        self._next_timer = 1
-        self.cur_task = APP_TASK
-        self.task_exit = self._stub(("TASK_EXIT", 0))
+        self.reads = 0           # INT 21h 3Fh calls
         self._lock_seen = False
 
     # --- memory -----------------------------------------------------------
@@ -413,18 +397,6 @@ class ESFMEmu:
         self.uc.reg_write(UC_X86_REG_SP, (sp + 2) & 0xFFFF)
         return w
 
-    _REGS = (UC_X86_REG_AX, UC_X86_REG_BX, UC_X86_REG_CX, UC_X86_REG_DX,
-             UC_X86_REG_SI, UC_X86_REG_DI, UC_X86_REG_BP, UC_X86_REG_SP,
-             UC_X86_REG_CS, UC_X86_REG_IP, UC_X86_REG_DS, UC_X86_REG_ES,
-             UC_X86_REG_SS, UC_X86_REG_EFLAGS)
-
-    def _save(self):
-        return [self.uc.reg_read(r) for r in self._REGS]
-
-    def _restore(self, regs):
-        for r, v in zip(self._REGS, regs):
-            self.uc.reg_write(r, v)
-
     def call(self, target, args, injects=()):
         """Far call target (para, off) with the word arguments pushed in
         order and return DX:AX."""
@@ -436,70 +408,10 @@ class ESFMEmu:
         uc.reg_write(UC_X86_REG_EFLAGS, 0x0202)
         self._push(*args)
         self._push(STUB_PARA, self.sentinel)
-        how, value = self._run(target, injects)
-        if how != "return":
-            raise EmuError("mmTaskBlock outside the task")
-        return value
-
-    def run_task(self, injects=()):
-        """Run the watcher task until it blocks or ends, if it can run: it
-        is new, or blocked in mmTaskBlock and signaled. True if it ran."""
-        t = self.task
-        if t is None or t["state"] not in ("new", "blocked"):
-            return False
-        uc = self.uc
-        if t["state"] == "blocked":
-            if not t["signals"]:
-                return False
-            t["signals"] -= 1
-            self._restore(t["ctx"])
-            target = (t["ctx"][8], t["ctx"][9])
-        else:
-            # MMTASK.TSK calls the task procedure with its own DS
-            uc.reg_write(UC_X86_REG_SS, TASK_STACK_PARA)
-            uc.reg_write(UC_X86_REG_SP, 0xFFF0)
-            uc.reg_write(UC_X86_REG_DS, STUB_PARA)
-            uc.reg_write(UC_X86_REG_ES, STUB_PARA)
-            uc.reg_write(UC_X86_REG_EFLAGS, 0x0202)
-            self._push(t["inst"] >> 16, t["inst"])
-            self._push(STUB_PARA, self.task_exit)
-            target = t["proc"]
-        t["state"] = "running"
-        t["runs"] += 1
-        prev, self.cur_task = self.cur_task, WATCH_TASK
-        try:
-            how, _value = self._run(target, injects)
-        finally:
-            self.cur_task = prev
-        t["state"] = "blocked" if how == "block" else "done"
-        return True
-
-    def tick(self, injects=()):
-        """One second: the timer callbacks (at interrupt time), then the
-        task if they signaled it. True if the task ran."""
-        for tid, (cb, user) in list(self.timers.items()):
-            self.call(cb, [tid, 0, user >> 16, user, 0, 0, 0, 0])
-        return self.run_task(injects)
-
-    def _yield(self):
-        """Yield from the program: let the task run, then go on where the
-        program was."""
-        t = self.task
-        if t is None or not (t["state"] == "new" or (
-                t["state"] == "blocked" and t["signals"])):
-            return
-        regs = self._save()
-        saved = self.injects, self.icount, self.depth
-        self.injects, self.depth = [], 0
-        try:
-            self.run_task()
-        finally:
-            self.injects, self.icount, self.depth = saved
-            self._restore(regs)
+        return self._run(target, injects)
 
     def _run(self, target, injects):
-        """Run from target until the sentinel (("return", DX:AX)), the end
-        of the task (("exit", None)) or mmTaskBlock (("block", None))."""
+        """Run from target until the sentinel and return DX:AX."""
         uc = self.uc
         saved_injects = self.injects
         self.injects = list(injects)
@@ -552,12 +464,10 @@ class ESFMEmu:
                 if scs != STUB_PARA:
                     raise EmuError("int 3 at %04x:%04x" % (scs, sip))
                 key = self.stubs[sip]
-                if key in (("SENTINEL", 0), ("TASK_EXIT", 0)):
+                if key == ("SENTINEL", 0):
                     if waiting is not None:
                         raise EmuError("interrupts still off at the return")
-                    if key == ("TASK_EXIT", 0):
-                        return "exit", None
-                    return "return", (uc.reg_read(UC_X86_REG_DX) << 16) | \
+                    return (uc.reg_read(UC_X86_REG_DX) << 16) | \
                         uc.reg_read(UC_X86_REG_AX)
                 if key == ("MARKER", 0):
                     inj = self._pending_marker.pop()
@@ -567,12 +477,7 @@ class ESFMEmu:
                     ip = self._pop()
                     cs = self._pop()
                     continue
-                nxt = self._handle_stub(key)
-                if nxt == "block":
-                    if waiting is not None:
-                        raise EmuError("interrupts off in mmTaskBlock")
-                    return "block", None
-                cs, ip = nxt
+                cs, ip = self._handle_stub(key)
         finally:
             self.injects = saved_injects
             self._lock_seen = saved_lock_seen
@@ -636,6 +541,11 @@ class ESFMEmu:
         self.wires.pop(h, None)
         self.wr(h, 0, b"\xCC" * size)       # catch reads of a freed bank
 
+    def touch(self, path):
+        """Give the file a later date and time, as saving it does."""
+        date, time = self.ftimes.get(path, (FILE_DATE, FILE_TIME))
+        self.ftimes[path] = (date, time + 1)    # 2 seconds later
+
     def rdstr(self, ptr):
         seg, off = ptr >> 16, ptr & 0xFFFF
         out = bytearray()
@@ -674,14 +584,18 @@ class ESFMEmu:
                 else:
                     out["AX"] = 2           # file not found
                     err = True
-        elif ax >> 8 in (0x3E, 0x3F, 0x42):
+        elif ax >> 8 in (0x3E, 0x3F, 0x42) or ax == 0x5700:
             f = self.handles.get(r["BX"])
             if f is None:
                 out["AX"] = 6               # invalid handle
                 err = True
+            elif ax == 0x5700:
+                out["DX"], out["CX"] = self.ftimes.get(
+                    f[0], (FILE_DATE, FILE_TIME))
             elif ax >> 8 == 0x3E:
                 del self.handles[r["BX"]]
             elif ax >> 8 == 0x3F:
+                self.reads += 1
                 data = f[2][f[1]:f[1] + r["CX"]]
                 self.wr(r["DS"], r["DX"], data)
                 f[1] += len(data)
@@ -763,10 +677,6 @@ class ESFMEmu:
             size = self.gblocks.get(arg(0), 0)
             size = (size + 15) & ~15
             ax, dx = size & 0xFFFF, size >> 16
-        elif key == ("KERNEL", 29):         # Yield
-            self._yield()
-        elif key == ("KERNEL", 36):         # GetCurrentTask
-            ax = self.cur_task
         elif key == ("KERNEL", 60):         # FindResource
             rtype, name = arg(0, 4), arg(4, 4)
             ax = 0x0B01 if (rtype, name) == (256, 1234) else 0
@@ -828,43 +738,6 @@ class ESFMEmu:
             if msg == 0x804:
                 self.wr(dw1 >> 16, dw1 & 0xFFFF, struct.pack("<H", 0x3B07))
             ax = 0
-        elif key == ("MMSYSTEM", 602):      # timeSetEvent
-            if not self.timer_fail:
-                lpfn, user = arg(6, 4), arg(2, 4)
-                ax = self._next_timer
-                self._next_timer += 1
-                self.timers[ax] = ((lpfn >> 16, lpfn & 0xFFFF), user)
-        elif key == ("MMSYSTEM", 603):      # timeKillEvent
-            self.timers.pop(arg(0), None)
-        elif key == ("MMSYSTEM", 900):      # mmTaskCreate
-            if self.mmtask_error:
-                ax = self.mmtask_error
-            else:
-                lpfn, lph, inst = arg(8, 4), arg(4, 4), arg(0, 4)
-                self.task = {"proc": (lpfn >> 16, lpfn & 0xFFFF),
-                             "inst": inst, "state": "new", "signals": 0,
-                             "ctx": None, "runs": 0}
-                self.tasks_created += 1
-                self.wr(lph >> 16, lph & 0xFFFF,
-                        struct.pack("<H", WATCH_TASK))
-        elif key == ("MMSYSTEM", 902):      # mmTaskBlock
-            t = self.task
-            if self.cur_task != WATCH_TASK or t is None:
-                raise EmuError("mmTaskBlock outside the task")
-            if t["signals"]:
-                t["signals"] -= 1
-            else:
-                # the task sleeps here until it's signaled
-                uc.reg_write(UC_X86_REG_AX, 0)
-                uc.reg_write(UC_X86_REG_SP, sp + 4 + pop)
-                t["ctx"] = self._save()
-                t["ctx"][8], t["ctx"][9] = ret_cs, ret_ip
-                return "block"
-        elif key == ("MMSYSTEM", 903):      # mmTaskSignal
-            if self.task is not None and arg(0) == WATCH_TASK and \
-                    self.task["state"] != "done":
-                self.task["signals"] += 1
-                ax = 1
         uc.reg_write(UC_X86_REG_AX, ax)
         uc.reg_write(UC_X86_REG_DX, dx)
         uc.reg_write(UC_X86_REG_SP, sp + 4 + pop)
@@ -963,8 +836,8 @@ class ESFMEmu:
         st = dict(zip(names, struct.unpack_from("<HHHHIIHHH", dgroup,
                                                 at + 8)))
         if st["version"] >= 2:
-            names = ("bstate", "bsrc", "blen", "bloads", "bpolls", "bwatch",
-                     "bwerr")
+            names = ("bstate", "bsrc", "blen", "bloads", "bchecks", "bdate",
+                     "btime")
             st.update(zip(names, struct.unpack_from("<7H", dgroup, at + 30)))
             path = dgroup[at + 44:at + 44 + 128]
             st["bpath"] = path.split(b"\0")[0].decode("latin-1")
