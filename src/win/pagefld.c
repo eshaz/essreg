@@ -423,6 +423,7 @@ static void write_row(int i, u8 value) {
     return;
   }
   set_reg(f->reg, raw);
+  tray_notify(f->reg);
   if (raw >= 0 && f->kind != K_ACTION && f->kind != K_PULSE &&
       cat_get(f, (u8)raw) != value)
     set_status("%s: wrote %u, the chip returns %u", f->label, value,

@@ -21,6 +21,8 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   the program's exit code
 - ess3d's display: a second ess3d hands its setting to the display of the
   first and exits, and the first goes after the second one's time
+- ess3d's tray icon: a second "ess3d tray" opens the panel of the first,
+  and "ess3d exit" closes it
 
 Win16 wants 8.3 path names, so the work directory is reached through a
 short symbolic link in /tmp.
@@ -280,6 +282,35 @@ class WineTest(unittest.TestCase):
         self.assertGreater(first_after, 4.5)
         self.assertLess(first_after, 15)
         self.assertEqual(len(read(self.path("E3D.LOG")).splitlines()), 2)
+
+    def test_ess3d_tray(self):
+        def logged(text):
+            deadline = time.time() + 60
+            while True:
+                path = self.path("E3T.LOG")
+                if os.path.exists(path) and text in read(path).decode():
+                    return
+                self.assertLess(time.time(), deadline, text)
+                time.sleep(0.1)
+
+        # no tray icon: exit does nothing
+        self.assertEqual(self.ess3d("/sim", "/q", "/log=E3T.LOG", "exit",
+                                    log="E3T.LOG"), [])
+        tray = subprocess.Popen(["wine", "ess3d.exe", "/sim", "/log=E3T.LOG",
+                                 "tray"], env=self.env, cwd=self.link,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        logged("tray: started")
+        # a second "tray" opens the first one's panel and exits
+        self.wine("ess3d.exe", "/sim", "/log=E3T.LOG", "tray")
+        logged("tray: panel")
+        # a command, then the icon closes
+        self.wine("ess3d.exe", "/sim", "/q", "/log=E3T.LOG", "on", "exit")
+        tray.wait(timeout=60)
+        lines = read(self.path("E3T.LOG")).decode().splitlines()
+        self.assertEqual([line.split(" ", 2)[2] for line in lines],
+                         ["tray: started", "tray: panel",
+                          "3-D on, level 0 of 63", "tray: closed"])
 
 
 if __name__ == "__main__":

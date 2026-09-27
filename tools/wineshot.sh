@@ -6,13 +6,16 @@
 #
 # Usage:
 #   `tools/wineshot.sh start DIR PROGRAM [ARGS...]`  run PROGRAM in DIR
+#   `tools/wineshot.sh run PROGRAM [ARGS...]`        another one, same desktop
 #   `tools/wineshot.sh click X Y`                    click at X,Y
 #   `tools/wineshot.sh key KEY`                      press KEY (xdotool names)
 #   `tools/wineshot.sh shot FILE.png`                screenshot of the desktop
 #   `tools/wineshot.sh stop`
 #
-# Example:
+# Examples:
 #   `tools/wineshot.sh start out/ow2 essctl.exe /sim`
+#   `tools/wineshot.sh start out/ow2 ess3d.exe /sim tray`, then
+#   `tools/wineshot.sh run ess3d.exe /sim tray` opens the tray's panel
 #
 # Win16 wants 8.3 path names, so DIR is reached through the link
 # /tmp/wshot.  The Wine prefix is $WINEPREFIX, /tmp/wshot-prefix if unset.
@@ -28,16 +31,28 @@ H=470
 export WINEPREFIX="${WINEPREFIX:-/tmp/wshot-prefix}" WINEARCH=win32
 export WINEDEBUG=-all DISPLAY="${WSHOT_DISPLAY:-:85}"
 
+# explorer doesn't look for the program in the current directory
+win_path() {
+  case "$1" in
+  *:* | *\\*) printf '%s\n' "$1" ;;
+  *) printf 'Z:\\tmp\\wshot\\%s\n' "$1" ;;
+  esac
+}
+
+# PROGRAM [ARGS...] on the virtual desktop, in the background
+desktop_run() {
+  prog=$(win_path "$1")
+  shift
+  cd "$LINK"
+  wine explorer "/desktop=${WSHOT_DESKTOP:-essreg},${W}x$H" "$prog" "$@" \
+    > /dev/null 2>&1 &
+}
+
 case "$1" in
 start)
   dir=$(cd "${2:?usage: $0 start DIR PROGRAM [ARGS...]}" && pwd)
   prog="${3:?usage: $0 start DIR PROGRAM [ARGS...]}"
   shift 3
-  # explorer doesn't look for the program in the current directory
-  case "$prog" in
-  *:* | *\\*) ;;
-  *) prog="Z:\\tmp\\wshot\\$prog" ;;
-  esac
   rm -f "$LINK"
   ln -s "$dir" "$LINK"
   Xvfb "$DISPLAY" -screen 0 "$((W + 20))x$((H + 20))x24" -nolisten tcp \
@@ -45,10 +60,15 @@ start)
   sleep 1.5
   # the first run makes the prefix
   [ -d "$WINEPREFIX" ] || wineboot -i > /dev/null 2>&1
-  cd "$LINK"
-  wine explorer "/desktop=${WSHOT_DESKTOP:-essreg},${W}x$H" "$prog" "$@" \
-    > /dev/null 2>&1 &
+  desktop_run "$prog" "$@"
   sleep 9
+  ;;
+run)
+  # on the same desktop, so the programs find each other's windows
+  prog="${2:?usage: $0 run PROGRAM [ARGS...]}"
+  shift 2
+  desktop_run "$prog" "$@"
+  sleep 5
   ;;
 click)
   xdotool mousemove "$2" "$3" click 1
@@ -67,8 +87,8 @@ stop)
   rm -f "$LINK"
   ;;
 *)
-  echo "usage: $0 start DIR PROGRAM [ARGS...] | click X Y | key KEY |" \
-    "shot FILE.png | stop" >&2
+  echo "usage: $0 start DIR PROGRAM [ARGS...] | run PROGRAM [ARGS...] |" \
+    "click X Y | key KEY | shot FILE.png | stop" >&2
   exit 1
   ;;
 esac

@@ -40,6 +40,7 @@ essctl [/load file] [/save file] [/dump file] [/ui] [/q]
   * Press the key again while the box is up and the box shows the new setting, no second box.
   * A click closes it.
 * Commands run in order, so `ess3d on level 40` switches 3-D on, then sets the level.
+* `ess3d tray` puts an icon in the taskbar's tray with a panel of every 3-D setting ([below](#the-tray-icon)).
 
 ```
 ess3d [options] command [command...]
@@ -52,7 +53,13 @@ level +N, -N      up or down N steps, stopping at 0 and 63
 up [N], down [N]  up or down N steps, 4 if N is left out
 reset             reset the effect, keeping on/off and the level
 hold              hold the effect in reset (on or reset releases it)
+limit on, off, toggle   the 3-D limit (mixer 50h bit 0, undocumented)
+reg XX YY         Spatializer register XX (54, 56, 58 or 5A) to YY, in hex
+defaults          what ESS's driver sets when Windows starts: 3-D on,
+                  level 63, limit off, 54h-5Ah 8Fh, 95h, 94h and 80h
 show              change nothing, show the setting
+tray              the tray icon, or the panel if it's already there
+exit              close the tray icon
 
 /q                no box and no message boxes (problems go to ESS3D.LOG,
                   or to the /log= file)
@@ -64,11 +71,14 @@ Examples:
 ess3d toggle
 ess3d up 8
 ess3d on level 50%
+ess3d limit toggle
+ess3d reg 54 A0
 ```
 
 * A bad command, or no ES1869, shows a message box (unless `/q`).
 * With the stock driver, ess3d can't reach the card while a DOS program has the sound device. It says so, and nothing changes. The rebuilt `ES1869.VXD` has no such limit.
 * Exit codes: 0 done, 1 the chip returned other values than were written, 2 failed, 3 bad command line.
+* *Note: the data sheet doesn't have the registers 54h-5Ah or the limit bit. ESS's driver sets them when Windows starts ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)), but what they do isn't known yet.*
 
 ### Putting ess3d on a key
 * **A shortcut's Shortcut key**, in Windows 98:
@@ -82,6 +92,21 @@ ess3d on level 50%
   * The mixer doesn't see ess3d's changes: its controls keep their own values.
   * ESS's driver writes its own 3-D setting back each time it's enabled: when Windows starts and when it resumes from standby.
 * *Note: full-screen DirectX games draw over the box, so it may not show there. The setting still changes.*
+
+### The tray icon
+* `ess3d tray` puts an icon in the taskbar's tray, next to the clock: a green *3D* while the effect is heard, gray while it's off or held in reset. Its tooltip shows the setting.
+* Click it, right or left, for a small panel with every 3-D setting:
+  * Check boxes for 3-D on, released from reset and the limit. *Reset* resets the effect.
+  * The level and each Spatializer register: a text field with a slider on its right. The slider moves in steps of one. The text field takes the level in decimal and the registers in hex, and writes on Enter or when you leave it.
+  * *Driver defaults* sets what ESS's driver sets when Windows starts.
+  * *Close tray icon* removes the icon, as does `ess3d exit`.
+* The panel closes when you click somewhere else, click the icon again or press Esc.
+* Every change is written and read back, so the panel shows what the chip returned.
+* The icon follows ess3d's commands and essctl's 3-D settings. With the rebuilt `ES1869.VXD` it also reads the setting every 3 seconds, so it follows the Windows mixer.
+* The panel has every Spatializer register in essctl's list, so a register found later shows up in the panel, in `ess3d reg` and in essctl.
+* **At every start of Windows:** put a shortcut with the command line `C:\ESSREG\ESS3D.EXE tray` in the Start menu's *Programs* > *StartUp* folder.
+  * A second `ess3d tray` opens the panel of the icon that's there, so the same command works on a key.
+* *Note: the tray icon needs Windows 95 or later. ess3d is a 16-bit program and reaches the tray through Windows 95's 32-bit shell.*
 
 ## [`ES1869.VXD`](build) with a register interface
 * The Windows 95 driver of the ES1869, rebuilt from source in [`src/vxd`](src/vxd), with a register interface for programs added ([docs/VXD_API.md](docs/VXD_API.md)).

@@ -13,7 +13,13 @@
  *   up [N], down [N]  up or down N steps, 4 without N
  *   reset             reset the effect, keeping on/off and the level
  *   hold              hold the effect in reset
+ *   limit on, off, toggle  the undocumented 3-D limit (50h bit 0)
+ *   reg XX YY         Spatializer register XX (54, 56, 58, 5A) to YY, hex
+ *   defaults          what ESS's driver sets when Windows starts
  *   show              change nothing, show the setting
+ *   tray              an icon in the taskbar's tray with a panel of every
+ *                     3-D setting (ess3dtr.c)
+ *   exit              close the tray icon
  *
  *   /q                no display and no message boxes, problems go to
  *                     ESS3D.LOG (or the /log= file)
@@ -44,6 +50,7 @@
 #include <time.h>
 
 #include "ess3d.h"
+#include "ess3dtr.h"
 #include "esshw.h"
 #include "winio.h"
 
@@ -64,7 +71,8 @@
 static const char usage[] =
     "ess3d [options] command [command...]\n\n"
     "Commands: on, off, toggle, level N (0 to 63, or N%), level +N, "
-    "level -N, up [N], down [N], reset, hold, show\n\n"
+    "level -N, up [N], down [N], reset, hold, limit on|off|toggle, "
+    "reg XX YY (hex), defaults, show, tray, exit\n\n"
     "Options: /q, /t=1500 (ms), /log=file, /sim, /base=220, /cfg=800, "
     "/novxd";
 
@@ -96,7 +104,7 @@ static void full_path(const char *name, char *path, unsigned size) {
   strncat(path, name, size - 1 - strlen(path));
 }
 
-static void log_line(const char *name, const char *text) {
+void ess3d_log(const char *name, const char *text) {
   char path[144], stamp[32];
   time_t now = time(0);
   FILE *f;
@@ -116,9 +124,9 @@ static void problem(const struct ess3d_cmd *c, const char *text,
   char box[512];
 
   if (c->log[0])
-    log_line(c->log, text);
+    ess3d_log(c->log, text);
   else if (c->quiet)
-    log_line("ESS3D.LOG", text);
+    ess3d_log("ESS3D.LOG", text);
   if (c->quiet)
     return;
   sprintf(box, "%s%s%s", text, with_usage ? "\n\n" : "",
@@ -272,6 +280,7 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev, LPSTR cmdline, int show) {
   struct winio_opts io;
   struct ess3d_state s;
   char text[64], line[160];
+  HWND tray;
   int err;
 
   (void)prev;
@@ -281,6 +290,15 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev, LPSTR cmdline, int show) {
     problem(&c, c.err, 1);
     return 3;
   }
+  // no commands for the chip: a running tray icon shows its panel, or
+  // closes
+  tray = tray_window();
+  if (!c.nact && tray && (c.tray || c.exit)) {
+    PostMessage(tray, c.exit ? WM_CLOSE : TRAY_PANEL, 0, 0);
+    return 0;
+  }
+  if (!c.nact && c.exit)
+    return 0;
 
   memset(&io, 0, sizeof(io));
   io.audio_base = c.audio_base;
@@ -288,6 +306,8 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev, LPSTR cmdline, int show) {
   io.sim = c.sim;
   io.novxd = c.novxd;
   err = winio_init(&io);
+  // with "tray" alone this only reads, so a card that doesn't answer is
+  // reported before the icon shows
   if (err == 0)
     err = winio_begin();
   if (err == 0) {
@@ -314,8 +334,19 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev, LPSTR cmdline, int show) {
     problem(&c, line, 0);
     return 1;
   }
-  if (c.log[0])
-    log_line(c.log, text);
+  if (c.log[0] && c.nact)
+    ess3d_log(c.log, text);
+  if (c.nact)
+    tray_changed();
+  if (c.exit && tray)
+    PostMessage(tray, WM_CLOSE, 0, 0);
+  if (c.tray) {
+    if (tray) {
+      PostMessage(tray, TRAY_PANEL, 0, 0);
+      return 0;
+    }
+    return tray_run(hinst, &c);
+  }
   if (!c.quiet)
     display(&s, c.time_ms);
   return 0;

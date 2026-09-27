@@ -36,6 +36,7 @@
 #include <time.h>
 
 #include "esfmlive.h"
+#include "ess3dtr.h"
 #include "essctl.h"
 #include "esshw.h"
 #include "essio.h"
@@ -218,6 +219,21 @@ static int load_esfm(const char *profile, char *report, unsigned size) {
   return rc != 0;
 }
 
+// ess3d's tray icon shows the 3-D setting: after a write to register reg,
+// or to any (-1), it reads the setting again
+void tray_notify(int reg) {
+  HWND tray = FindWindow(TRAY_CLASS, 0);
+  int i;
+
+  if (!tray)
+    return;
+  for (i = 0; reg >= 0 && i < F_COUNT; i++)
+    if (ess_fields[i].reg == reg && !strncmp(ess_fields[i].key, "fx.3d.", 6))
+      break;
+  if (i < F_COUNT)
+    PostMessage(tray, TRAY_CHANGED, 0, 0);
+}
+
 int profile_load_file(const char *path, char *report, unsigned size) {
   struct prof_io io;
   struct prof_report rep;
@@ -250,6 +266,7 @@ int profile_load_file(const char *path, char *report, unsigned size) {
     pause_ms(1000);
   }
   report_text(&rep, 1, report, size);
+  tray_notify(-1);
   esfm_failed = load_esfm(full, report, size);
   if (!rep.applied && (rep.failed || rep.invalid || rep.unknown))
     return 2;

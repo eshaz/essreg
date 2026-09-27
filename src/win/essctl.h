@@ -60,6 +60,7 @@ void app_dir_file(const char *name, char *path, unsigned size);
 int profile_save_file(const char *path, char *report, unsigned size);
 int profile_load_file(const char *path, char *report, unsigned size);
 int dump_file(const char *path);
+void tray_notify(int reg);
 
 // dlgmain.c
 BOOL CALLBACK __export main_dlg_proc(HWND dlg, UINT msg, WPARAM wp,

@@ -16,6 +16,53 @@
 
 int ess3d_level_max(void) { return cat_max(&ess_fields[F_3D_LEVEL]); }
 
+// --- the Spatializer registers ---------------------------------------------
+
+static int reg_fields[ESS3D_MAX_REGS];
+static int nregs = -1;
+
+// what ESS's driver writes when Windows starts (docs/DRIVER_CONFIG.md)
+static const u8 driver_regs[][2] = {
+    {0x54, 0x8F}, {0x56, 0x95}, {0x58, 0x94}, {0x5A, 0x80}};
+
+int ess3d_regs(void) {
+  int f;
+
+  if (nregs < 0) {
+    nregs = 0;
+    for (f = 0; f < F_COUNT && nregs < ESS3D_MAX_REGS; f++)
+      if (!strncmp(ess_fields[f].key, "fx.3d.", 6) && f != F_3D_EN &&
+          f != F_3D_RUN && f != F_3D_LIMIT && f != F_3D_LEVEL)
+        reg_fields[nregs++] = f;
+  }
+  return nregs;
+}
+
+int ess3d_reg_field(int i) { return i < ess3d_regs() ? reg_fields[i] : -1; }
+
+int ess3d_reg_default(int i) {
+  unsigned j;
+  u16 addr;
+
+  if (i >= ess3d_regs())
+    return -1;
+  addr = ess_regs[ess_fields[reg_fields[i]].reg].addr;
+  for (j = 0; j < sizeof(driver_regs) / sizeof(driver_regs[0]); j++)
+    if (driver_regs[j][0] == addr)
+      return driver_regs[j][1];
+  return -1;
+}
+
+// the register with this address, -1 if it isn't one
+static int reg_index(unsigned long addr) {
+  int i;
+
+  for (i = 0; i < ess3d_regs(); i++)
+    if (ess_regs[ess_fields[reg_fields[i]].reg].addr == addr)
+      return i;
+  return -1;
+}
+
 // --- command line ---------------------------------------------------------
 
 static int is_space(char ch) {
@@ -135,6 +182,46 @@ static void switch_word(char *w, struct ess3d_cmd *c) {
   }
 }
 
+// the register and value after "reg", in hex, into a
+// returns 0, or -1 with the problem in c->err
+static int reg_word(const char **p, struct ess3d_cmd *c,
+                    struct ess3d_action *a) {
+  char w[2][32], *end;
+  unsigned long v[2];
+  const char *after;
+  int i;
+
+  for (i = 0; i < 2; i++) {
+    after = next_word(*p, w[i], sizeof(w[i]));
+    if (!after) {
+      fail(c, "reg needs a register and a value in hex, like reg 54 8F", "");
+      return -1;
+    }
+    *p = after;
+    lower(w[i]);
+    v[i] = strtoul(w[i], &end, 16);
+    if (*end == 'h')
+      end++;
+    if (!w[i][0] || *end || v[i] > 0xFF) {
+      fail(c, "reg: %.20s is not a hex number from 0 to FF", w[i]);
+      return -1;
+    }
+  }
+  i = reg_index(v[0]);
+  if (i < 0) {
+    fail(c, "reg: %.20s is not a Spatializer register", w[0]);
+    return -1;
+  }
+  if (v[1] > cat_max(&ess_fields[reg_fields[i]])) {
+    fail(c, "reg: %.20s is too large for the register", w[1]);
+    return -1;
+  }
+  a->op = ESS3D_REG;
+  a->reg = (u8)i;
+  a->value = (u8)v[1];
+  return 0;
+}
+
 int ess3d_parse(const char *line, struct ess3d_cmd *c) {
   char word[128], arg[128];
   const char *p = line;
@@ -166,6 +253,32 @@ int ess3d_parse(const char *line, struct ess3d_cmd *c) {
       a->op = ESS3D_RESET;
     } else if (!strcmp(word, "show")) {
       a->op = ESS3D_SHOW;
+    } else if (!strcmp(word, "defaults")) {
+      a->op = ESS3D_DEFAULTS;
+    } else if (!strcmp(word, "tray")) {
+      c->tray = 1;
+      continue;
+    } else if (!strcmp(word, "exit")) {
+      c->exit = 1;
+      continue;
+    } else if (!strcmp(word, "limit")) {
+      after = next_word(p, arg, sizeof(arg));
+      if (after)
+        lower(arg);
+      if (!after ||
+          (strcmp(arg, "on") && strcmp(arg, "off") && strcmp(arg, "toggle"))) {
+        fail(c, "limit needs on, off or toggle", "");
+        if (after)
+          p = after;
+        continue;
+      }
+      p = after;
+      a->op = ESS3D_LIMIT;
+      a->arg = (s8)(arg[1] == 'n' ? 1 : arg[1] == 'f' ? 0 : 2);
+    } else if (!strcmp(word, "reg")) {
+      // reg XX YY, both in hex
+      if (reg_word(&p, c, a) < 0)
+        continue;
     } else if (!strcmp(word, "level")) {
       // absolute, or relative with a sign
       after = next_word(p, arg, sizeof(arg));
@@ -202,7 +315,7 @@ int ess3d_parse(const char *line, struct ess3d_cmd *c) {
     else
       c->nact++;
   }
-  if (!c->nact)
+  if (!c->nact && !c->tray && !c->exit)
     fail(c, "no command", "");
   return c->err[0] ? -1 : 0;
 }
@@ -211,12 +324,16 @@ int ess3d_parse(const char *line, struct ess3d_cmd *c) {
 
 int ess3d_read(struct ess3d_state *s) {
   u8 raw;
-  int err = ess_field_read(F_3D_EN, &s->enable, &raw);
+  int i, err = ess_field_read(F_3D_EN, &s->enable, &raw);
 
   if (err < 0)
     return err;
   s->run = cat_get(&ess_fields[F_3D_RUN], raw);
-  return ess_field_read(F_3D_LEVEL, &s->level, 0);
+  s->limit = cat_get(&ess_fields[F_3D_LIMIT], raw);
+  err = ess_field_read(F_3D_LEVEL, &s->level, 0);
+  for (i = 0; err == 0 && i < ess3d_regs(); i++)
+    err = ess_field_read(reg_fields[i], &s->reg[i], 0);
+  return err;
 }
 
 // write a field of the effect if it changes, *have is what the chip has
@@ -257,6 +374,21 @@ static int reset(struct ess3d_state *s) {
   return level == s->level ? 0 : ess_field_write(F_3D_LEVEL, s->level, 0);
 }
 
+// what ESS's driver sets when Windows starts: 3-D on, level 63, no
+// limit (its 3D Limit setting is 0 unless changed), and 54h-5Ah
+static int defaults(struct ess3d_state *s) {
+  int i, v, err = set(F_3D_LIMIT, &s->limit, 0);
+
+  if (err == 0)
+    err = turn_on(s);
+  if (err == 0)
+    err = set(F_3D_LEVEL, &s->level, (u8)ess3d_level_max());
+  for (i = 0; err == 0 && i < ess3d_regs(); i++)
+    if ((v = ess3d_reg_default(i)) >= 0)
+      err = set(reg_fields[i], &s->reg[i], (u8)v);
+  return err;
+}
+
 static int apply(const struct ess3d_action *a, struct ess3d_state *s) {
   int level;
 
@@ -283,6 +415,13 @@ static int apply(const struct ess3d_action *a, struct ess3d_state *s) {
     if (level > ess3d_level_max())
       level = ess3d_level_max();
     return set(F_3D_LEVEL, &s->level, (u8)level);
+  case ESS3D_LIMIT:
+    return set(F_3D_LIMIT, &s->limit,
+               (u8)(a->arg == 2 ? !s->limit : a->arg != 0));
+  case ESS3D_REG:
+    return set(reg_fields[a->reg], &s->reg[a->reg], a->value);
+  case ESS3D_DEFAULTS:
+    return defaults(s);
   }
   return 0;
 }
@@ -301,7 +440,9 @@ int ess3d_run(const struct ess3d_cmd *c, struct ess3d_state *s) {
   err = ess3d_read(s);
   if (err < 0)
     return err;
-  if (s->enable != want.enable || s->run != want.run || s->level != want.level)
+  if (s->enable != want.enable || s->run != want.run ||
+      s->level != want.level || s->limit != want.limit ||
+      memcmp(s->reg, want.reg, sizeof(s->reg)))
     return ESS3D_MISMATCH;
   return 0;
 }
@@ -309,9 +450,9 @@ int ess3d_run(const struct ess3d_cmd *c, struct ess3d_state *s) {
 void ess3d_text(const struct ess3d_state *s, char *buf, unsigned size) {
   char tmp[64];
 
-  sprintf(tmp, "3-D %s%s, level %u of %d", s->enable ? "on" : "off",
+  sprintf(tmp, "3-D %s%s, level %u of %d%s", s->enable ? "on" : "off",
           s->enable && !s->run ? ", held in reset" : "", s->level,
-          ess3d_level_max());
+          ess3d_level_max(), s->limit ? ", limit on" : "");
   strncpy(buf, tmp, size - 1);
   buf[size - 1] = 0;
 }

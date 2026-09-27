@@ -5,7 +5,7 @@ Tools and rebuilt drivers for the ESS ES1869 sound chip on DOS and Windows 9x. [
 ## Layout
 
 * `src/*.c`: the DOS programs (`essreg`, `1869opl3`, `esfmpat`) and the shared code: `esshw` (port protocols), `esscat` (register catalog, `esscat.tbl`), `profile`, `vxdapi`, `simhw` (a simulated ES1869 for the tests), `ess3d` (the commands of `ess3d.exe`).
-* `src/win/`: `essctl.exe`, the 16-bit Windows control panel, and `ess3dw.c`, the Windows side of `ess3d.exe` (the 3-D effect from the command line, for keys).
+* `src/win/`: `essctl.exe`, the 16-bit Windows control panel, and `ess3dw.c`, the Windows side of `ess3d.exe` (the 3-D effect from the command line, for keys). `ess3dtr.c` is ess3d's tray icon and panel. Its icons come from `tools/ess3dico.py`.
 * `src/vxd/`: `ES1869.VXD` as NASM source, from `tools/vxd2asm.py`. `essext.asm` adds the register API.
 * `src/esfm/`: `ESFM.DRV` as NASM source, from `tools/ne2asm.py`. `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm` and `esfmgm.asm` are the fixes and General MIDI, assembled with `ESFM_FIX=1`.
 * `driver/`: ESS's original drivers, the reference for the byte-identical rebuilds.
@@ -31,10 +31,12 @@ python3 tools/build_vxd.py --stock --verify
 tools/ow2build.sh $OW2                            # DOS and Win16 programs, into out/ow2/
 python3 tools/regdoc.py                           # docs/REGISTERS.md from src/esscat.tbl
 python3 tools/gmcheck.py                          # build/GMCHECK.MID
+python3 tools/ess3dico.py                         # the tray icons, src/win/ess3d*.ico
 flake8                                            # Python lint, clean
 clang-format --dry-run FILE.c                     # C style (.clang-format wants CRLF)
 tools/guard.py [REV]                              # only comments changed since REV
 tools/wineshot.sh start out/ow2 essctl.exe /sim   # screenshots under Wine
+tools/wineshot.sh run ess3d.exe /sim tray         # a second program on its desktop
 ```
 
 ## Rules
@@ -48,7 +50,8 @@ tools/wineshot.sh start out/ow2 essctl.exe /sim   # screenshots under Wine
   * State the fixed driver keeps for each device goes after ESS's fields (`DEV_GM_*`, `DEV_FIX_SIZE` in `esfmdev.inc`).
   * Watch the short jumps of ESS's code: code added between a `jmp short` and its target can put it out of range. Adding it right after the target's label keeps the distance.
 * **The status block** (`esfmfixd.asm`, found by `ESFMFIX`) is read by essctl at fixed offsets (`src/win/esfmlive.c`). A layout change bumps `fix_version`. The next one is 4.
-* **Ranged settings** (levels, signed and raw values) are a text field with a slider on its right, in steps of one, in essctl and its bit editor.
+* **Spatializer registers:** a new one goes in `src/esscat.tbl` as an `fx.3d.*` field on `PG_EFFECTS`. essctl, `ess3d reg` and the tray panel pick it up from there (`ess3d_regs()` in `src/ess3d.c`), up to `ESS3D_MAX_REGS`. Its value at Windows start goes in `driver_regs` for `ess3d defaults`.
+* **Ranged settings** (levels, signed and raw values) are a text field with a slider on its right, in steps of one, in essctl, its bit editor and the tray panel.
 * **The VxD API from essctl:** only the *info* functions, and 0002 and 0003 as [VXD_API.md](docs/VXD_API.md#ownership-and-port-trapping) describes. Never 0006, 0007, 0009, 000B, 0200 or 0201: they register callbacks into the caller's code.
 * **Text:** [docs/STYLE.md](docs/STYLE.md). Docs in the README voice, terse lowercase comments, the file header on new files, no em dashes, no "we".
 * **Git:** keep the configured git user. Commit messages start with `feat:`, `fix:`, `docs:`, `refactor:` or `chore:`. Don't commit other drivers or listings than `driver/`'s.

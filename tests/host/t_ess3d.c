@@ -2,7 +2,8 @@
  * t_ess3d checks ess3d's command line and its 3-D register changes against
  * the simulated ES1869: on, off and toggle, hold and reset on the run bit,
  * absolute and relative levels with clamping, several commands in a row,
- * and bad input.
+ * the limit bit, the Spatializer registers, the driver's defaults, and bad
+ * input.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -304,7 +305,7 @@ static void test_run_bit(void) {
   CHECK_EQ(writes(0x50, w, 8), 2);
   CHECK_EQ(w[0], 0x01);
   CHECK_EQ(w[1], 0x05);
-  CHECK(text_is(&s, "3-D off, level 0 of 63"));
+  CHECK(text_is(&s, "3-D off, level 0 of 63, limit on"));
 
   // reset releases an effect that was held
   chip(0x08, 12);
@@ -399,6 +400,81 @@ static void test_errors(void) {
   CHECK_EQ(simhw.mixer[0x50], 0x04);
 }
 
+static void test_limit_and_regs(void) {
+  struct ess3d_state s;
+  struct ess3d_cmd c;
+  u8 w[8];
+
+  // the Spatializer registers come from the catalog
+  CHECK_EQ(ess3d_regs(), 4);
+  CHECK_EQ(ess3d_reg_field(0), F_3D_R54);
+  CHECK_EQ(ess3d_reg_field(3), F_3D_R5A);
+  CHECK_EQ(ess3d_reg_field(4), -1);
+  CHECK_EQ(ess3d_reg_default(0), 0x8F);
+  CHECK_EQ(ess3d_reg_default(1), 0x95);
+  CHECK_EQ(ess3d_reg_default(2), 0x94);
+  CHECK_EQ(ess3d_reg_default(3), 0x80);
+
+  // limit: bit 0 of 50h, the other bits kept
+  chip(0x0C, 40);
+  CHECK_EQ(run("limit on", &s), 0);
+  CHECK_EQ(simhw.mixer[0x50], 0x0D);
+  CHECK(text_is(&s, "3-D on, level 40 of 63, limit on"));
+  CHECK_EQ(run("limit toggle", &s), 0);
+  CHECK_EQ(simhw.mixer[0x50], 0x0C);
+  CHECK_EQ(run("LIMIT Toggle limit off", &s), 0);
+  CHECK_EQ(simhw.mixer[0x50], 0x0C);
+  // on, off and toggle keep it
+  CHECK_EQ(run("limit on off", &s), 0);
+  CHECK_EQ(simhw.mixer[0x50], 0x05);
+  CHECK_EQ(run("toggle", &s), 0);
+  CHECK_EQ(simhw.mixer[0x50], 0x0D);
+
+  // reg: a register and a value in hex, written only if it changes
+  CHECK_EQ(run("reg 54 8f reg 5Ah 7Fh", &s), 0);
+  CHECK_EQ(simhw.mixer[0x54], 0x8F);
+  CHECK_EQ(simhw.mixer[0x5A], 0x7F);
+  CHECK_EQ(s.reg[0], 0x8F);
+  CHECK_EQ(s.reg[3], 0x7F);
+  CHECK_EQ(run("reg 54 8f", &s), 0);
+  CHECK_EQ(writes(0x54, w, 8), 0);
+  CHECK_EQ(run("reg 54 0", &s), 0);
+  CHECK_EQ(writes(0x54, w, 8), 1);
+  CHECK_EQ(w[0], 0x00);
+
+  // defaults: what ESS's driver sets when Windows starts
+  chip(0x01, 5);
+  CHECK_EQ(run("defaults", &s), 0);
+  CHECK_EQ(simhw.mixer[0x50], 0x0C);
+  CHECK_EQ(simhw.mixer[0x52], 63);
+  CHECK_EQ(simhw.mixer[0x54], 0x8F);
+  CHECK_EQ(simhw.mixer[0x56], 0x95);
+  CHECK_EQ(simhw.mixer[0x58], 0x94);
+  CHECK_EQ(simhw.mixer[0x5A], 0x80);
+  CHECK(text_is(&s, "3-D on, level 63 of 63"));
+
+  // tray and exit aren't commands for the chip
+  CHECK_EQ(ess3d_parse("tray", &c), 0);
+  CHECK(c.tray && !c.exit && !c.nact);
+  CHECK_EQ(ess3d_parse("/q exit", &c), 0);
+  CHECK(c.exit && c.quiet && !c.nact);
+  CHECK_EQ(ess3d_parse("on tray", &c), 0);
+  CHECK(c.tray && c.nact == 1);
+
+  // bad ones
+  CHECK_EQ(ess3d_parse("limit", &c), -1);
+  CHECK(!strcmp(c.err, "limit needs on, off or toggle"));
+  CHECK_EQ(ess3d_parse("limit maybe", &c), -1);
+  CHECK_EQ(ess3d_parse("reg 54", &c), -1);
+  CHECK(!strcmp(c.err,
+                "reg needs a register and a value in hex, like reg 54 8F"));
+  CHECK_EQ(ess3d_parse("reg 52 10", &c), -1); // the level has its command
+  CHECK(strstr(c.err, "not a Spatializer register") != 0);
+  CHECK_EQ(ess3d_parse("reg 54 100", &c), -1);
+  CHECK_EQ(ess3d_parse("reg zz 10", &c), -1);
+  CHECK(strstr(c.err, "zz") != 0);
+}
+
 int main(void) {
   test_parse();
   test_on_off();
@@ -407,5 +483,6 @@ int main(void) {
   test_levels();
   test_sequence();
   test_errors();
+  test_limit_and_regs();
   return CHECK_DONE("t_ess3d");
 }

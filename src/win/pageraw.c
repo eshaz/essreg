@@ -255,6 +255,7 @@ static void be_write(HWND dlg) {
     msg_error(dlg, "Could not write %s: %s", r->name, esshw_strerror(err));
     return;
   }
+  tray_notify(be.reg);
   if (raw >= 0 && raw != be.value)
     set_status("%s: wrote %02Xh, the chip returns %02Xh", r->name, be.value,
                raw);

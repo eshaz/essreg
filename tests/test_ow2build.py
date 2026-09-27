@@ -88,12 +88,14 @@ class OW2BuildTest(unittest.TestCase):
         self.assertIn(1, kinds[16])                    # version
 
     def test_ess3d(self):
-        # the display's window procedure is the only export
+        # the window procedures of the display, the tray icon and its panel
         self.check_windows_program(self.ne3d, "ESS3D",
-                                   ("KERNEL", "USER", "GDI"), {"OSD_PROC"})
+                                   ("KERNEL", "USER", "GDI"),
+                                   {"OSD_PROC", "TRAY_PROC", "PANEL_PROC"})
         kinds = self.resource_kinds(self.ne3d)
-        self.assertEqual(set(kinds), {3, 14, 16})      # icons, version
-        self.assertIn("ESS3D", kinds[14])
+        self.assertEqual(set(kinds), {3, 5, 14, 16})   # icons, dialog, version
+        self.assertEqual(kinds[14], {"ESS3D", "ICON_ON", "ICON_OFF"})
+        self.assertEqual(kinds[5], {"PANEL"})
         self.assertIn(1, kinds[16])
 
 

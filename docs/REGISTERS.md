@@ -285,7 +285,7 @@ DS p.62
 |---|---|---|---|---|---|---|
 | 3 | 3-D effect | `fx.3d.enable` | bit | safe | profile, driver sets it | 1 = enable the Spatializer VBX 3-D effect, 0 = bypass it; the effect also needs bit 2 (released from reset) (DS p.62) |
 | 2 | 3-D released from reset | `fx.3d.run` | bit | caution | driver sets it | Active-low reset of the 3-D effect: 1 = release from reset, 0 = reset (DS p.62) |
-| 0 | 3-D limit (undocumented) | `fx.3d.limit` | bit | caution | profile, driver sets it | Reserved in the data sheet (always write 0), but ESS's driver sets it from its 3D Limit setting, 0 unless changed in the registry (docs/DRIVER_CONFIG.md); what it does isn't documented |
+| 0 | 3-D limit (undocumented) | `fx.3d.limit` | bit | caution | profile, driver sets it | Reserved in the data sheet (always write 0), but ESS's driver sets it from its 3D Limit setting, 0 unless changed in the registry; what it does isn't documented (DS p.62, docs/DRIVER_CONFIG.md) |
 
 ### 52h 3-D level
 
@@ -303,7 +303,7 @@ Not in the data sheet
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:0 | 3-D register 54h | `fx.3d.reg54` | value | caution | profile, driver sets it | Undocumented; ESS's driver writes 8Fh when it enables 3-D |
+| 7:0 | 3-D register 54h | `fx.3d.reg54` | value | caution | profile, driver sets it | Undocumented; ESS's driver writes 8Fh when it enables 3-D (docs/DRIVER_CONFIG.md) |
 
 ### 56h 3-D register 56h (undocumented)
 
@@ -311,7 +311,7 @@ Not in the data sheet
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:0 | 3-D register 56h | `fx.3d.reg56` | value | caution | profile, driver sets it | Undocumented; ESS's driver writes 95h when it enables 3-D |
+| 7:0 | 3-D register 56h | `fx.3d.reg56` | value | caution | profile, driver sets it | Undocumented; ESS's driver writes 95h when it enables 3-D (docs/DRIVER_CONFIG.md) |
 
 ### 58h 3-D register 58h (undocumented)
 
@@ -319,7 +319,7 @@ Not in the data sheet
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:0 | 3-D register 58h | `fx.3d.reg58` | value | caution | profile, driver sets it | Undocumented; ESS's driver writes 94h when it enables 3-D |
+| 7:0 | 3-D register 58h | `fx.3d.reg58` | value | caution | profile, driver sets it | Undocumented; ESS's driver writes 94h when it enables 3-D (docs/DRIVER_CONFIG.md) |
 
 ### 5Ah 3-D register 5Ah (undocumented)
 
@@ -327,7 +327,7 @@ Not in the data sheet
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7:0 | 3-D register 5Ah | `fx.3d.reg5a` | value | caution | profile, driver sets it | Undocumented; ESS's driver writes 80h when it enables 3-D |
+| 7:0 | 3-D register 5Ah | `fx.3d.reg5a` | value | caution | profile, driver sets it | Undocumented; ESS's driver writes 80h when it enables 3-D (docs/DRIVER_CONFIG.md) |
 
 ### 60h Left master volume and mute
 

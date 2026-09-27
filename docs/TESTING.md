@@ -43,6 +43,8 @@ tools/ow2build.sh /path/to/open-watcom     # binaries in out/ow2/
 * ess3d's commands against the simulated chip, a bad command and no card, read from its `/log=` file
   * *Note: Wine drops the exit code of a 16-bit Windows program (its process always exits with 0), so the log is what the test checks.*
 * ess3d's box: a second ess3d hands its setting to the box of the first one and exits
+* ess3d's tray icon: a second `ess3d tray` opens the panel of the first one, and `ess3d exit` closes it
+  * *Note: Wine shows no tray icon for a 16-bit program, since its 16-bit and 32-bit icon handles differ. Windows 9x has one kind, so the icon only shows there.*
 
 **Screenshots.** `tools/wineshot.sh` runs essctl under Wine on a virtual screen, to click through it and see the pages:
 
@@ -58,6 +60,15 @@ It shows ess3d's box too, kept up with a long `/t=`:
 ```
 tools/wineshot.sh start out/ow2 ess3d.exe /sim /t=20000 on level 40
 tools/wineshot.sh shot ess3d.png
+tools/wineshot.sh stop
+```
+
+And the tray's panel: `run` starts a second program on the same desktop, here the `ess3d tray` that opens the panel of the first one.
+
+```
+tools/wineshot.sh start out/ow2 ess3d.exe /sim tray
+tools/wineshot.sh run ess3d.exe /sim tray
+tools/wineshot.sh shot panel.png
 tools/wineshot.sh stop
 ```
 
@@ -184,6 +195,18 @@ With the stock driver, and again with the extended driver (E) if it's installed.
 4. With the stock driver, play a DOS game with sound in a window and press the key: a message says the audio device is in use by another program, and the game's sound goes on. With the extended driver, the key works while the game plays.
 5. `ess3d bogus` shows the usage in a message box. `ess3d /q bogus` shows nothing, and `ESS3D.LOG` next to ess3d.exe says "unknown command: bogus".
 6. Change 3-D in the Windows mixer, then `ess3d show`: it shows the mixer's setting. Restart Windows and `ess3d show`: the driver's own setting is back.
+7. **The tray icon.** `C:\ESSREG\ESS3D.EXE tray` from Start > *Run*:
+   * A *3D* icon shows next to the clock, green if 3-D is on, gray if it's off. Point at it: the tooltip shows the setting.
+   * Right-click it: a panel opens above the icon with *3-D effect*, *3-D released from reset*, *3-D limit*, *3-D level* and the registers 54h-5Ah. A left click opens it too.
+   * Switch *3-D effect* on and click the level slider's arrows: the icon turns green, the music changes, and the text field counts in steps of one. Type 30 in the level's text field and press Enter: the slider moves.
+   * Click the desktop: the panel closes. Open it again and click the icon: it closes. Open it again and press Esc: it closes.
+   * `ess3d off` on a key: the icon turns gray. Change *3-D effect* in essctl: the icon follows.
+   * With the extended driver, change 3-D in the Windows mixer: the icon follows within 3 seconds.
+   * *Driver defaults*: 3-D on, level 63, the limit off, and 54h-5Ah 8Fh, 95h, 94h and 80h.
+   * A second `ess3d tray` opens the panel. *Close tray icon* removes the icon. `ess3d tray`, then `ess3d exit`: it goes too.
+   * Put a shortcut to `C:\ESSREG\ESS3D.EXE tray` in the StartUp folder and restart Windows: the icon is there after the start.
+   * If Explorer restarts (after a crash, or ended with Ctrl+Alt+Del), the icon comes back with the taskbar.
+8. **The undocumented settings.** With music playing, try `ess3d limit toggle` and `ess3d reg 54 00`, `ess3d reg 54 FF` and the same for 56, 58 and 5A, then `ess3d defaults`. Note what each one changes: no document says what they do.
 
 ### I. Expert mode (last)
 
