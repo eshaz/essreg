@@ -596,8 +596,9 @@ REG(R_PC_24, BK_PNPCARD, 0, 0x24, 0, "DRQD, DRQC", 30)
 FLD(F_PC_DRQD, R_PC_24, 4, 4, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.pin.drqd", "DMA channel of pin DRQD", "DRQ number assigned to DMA request pin DRQD (DS p.30)")
 FLD(F_PC_DRQC, R_PC_24, 0, 4, K_UINT, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.pin.drqc", "DMA channel of pin DRQC", "DRQ number assigned to DMA request pin DRQC (DS p.30)")
 
+/* 25h is headed "(R)" on DS p.30; the DRQ latch bit is tiered EXPERT so a write can be tried, the other bits stay read-only */
 REG(R_PC_25, BK_PNPCARD, 0, 0x25, 0, "Configuration ROM header 0", 30)
-FLD(F_PC_DRQLATCH, R_PC_25, 7, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.drq_latch", "DRQ latch", "1 = DRQ latch feature enabled, 0 = disabled (DS p.30)")
+FLD(F_PC_DRQLATCH, R_PC_25, 7, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.drq_latch", "DRQ latch", "1 = each audio DRQ stays high until the DMA controller answers it, so none is missed; 0 = off. It comes from the card's PnP ROM or EEPROM at power-up, and the data sheet has 25h as read-only: essctl reads a write back to show whether the chip took it (DS p.15, p.30, docs/AUDIO_PIPELINE.md)")
 FLD(F_PC_BOARD, R_PC_25, 5, 2, K_ENUM, T_RO, 0, E_BOARD, PG_PNP, FMT_NONE, "pnp.board", "Motherboard or card", "ES1869 is on the motherboard or an add-on card; bits 6:5 also pick one of the four bypass key sequences of p.28 (DS p.30)")
 FLD(F_PC_GPLOC, R_PC_25, 3, 2, K_ENUM, T_RO, 0, E_GPLOC, PG_PNP, FMT_NONE, "pnp.gp_device", "General-purpose device", "General-purpose location: not present, or present as LDN 3-6 using 4, 8 or 16 addresses (DS p.30)")
 FLD(F_PC_MODEM, R_PC_25, 2, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.modem_present", "Modem device present", "1 = the modem is LDN 3, 4 or 5; 0 = the modem is not present (DS p.30)")

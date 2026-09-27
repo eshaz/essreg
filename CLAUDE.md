@@ -11,7 +11,7 @@ Tools and rebuilt drivers for the ESS ES1869 sound chip on DOS and Windows 9x. [
 * `driver/`: ESS's original drivers, the reference for the byte-identical rebuilds.
 * `build/`: the committed binaries.
 * `tools/`: builders, RE tools, `guard.py`, `wineshot.sh`. `tests/`: Python tests, `tests/host/`: C tests.
-* `docs/`: [TESTING.md](docs/TESTING.md), [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md), [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md), [VXD_INTERNALS.md](docs/VXD_INTERNALS.md), [SPATIALIZER.md](docs/SPATIALIZER.md), [RE_NOTES.md](docs/RE_NOTES.md), [STYLE.md](docs/STYLE.md). `REGISTERS.md` is generated. `docs/datasheet/` has the ES1869, ES938 and ES1868 data sheets.
+* `docs/`: [TESTING.md](docs/TESTING.md), [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md), [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md), [VXD_INTERNALS.md](docs/VXD_INTERNALS.md), [SPATIALIZER.md](docs/SPATIALIZER.md), [DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md), [AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md), [RE_NOTES.md](docs/RE_NOTES.md), [STYLE.md](docs/STYLE.md). `REGISTERS.md` is generated. `docs/datasheet/` has the ES1869, ES938 and ES1868 data sheets.
 
 ## Environment
 

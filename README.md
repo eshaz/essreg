@@ -310,9 +310,10 @@ More checks are in [docs/TESTING.md](docs/TESTING.md) (G, G2 and G3).
 * [docs/SPATIALIZER.md](docs/SPATIALIZER.md): the 3-D effect, where it comes from (ESS's ES938), and its undocumented registers.
 * [docs/ESFM_BANK.md](docs/ESFM_BANK.md): FM patch banks and `ESFM.DRV`.
 * [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md): why ESFM notes hang, the MIDI driver stack, and the fixed `ESFM.DRV`.
+* [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md): where skipped samples come from, and what to try on the card.
 * [docs/RE_NOTES.md](docs/RE_NOTES.md): how the drivers were reverse-engineered.
 * [docs/TESTING.md](docs/TESTING.md): automated tests and a checklist for real hardware.
-* [docs/datasheet](docs/datasheet): the ES1869 data sheet.
+* [docs/datasheet](docs/datasheet): the ES1869, ES938 and ES1868 data sheets.
 
 ## Building
 

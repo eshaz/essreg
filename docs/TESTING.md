@@ -243,5 +243,6 @@ Only with nothing playing:
 1. Options > *Expert mode*.
 2. *Status & interrupts* > *DSP software reset*. The next WAV playback still works, because ES1869.DRV reprograms the DSP.
 3. In the raw register editor, write the value a register already has. Nothing should change.
+4. If sounds skip: *Plug and Play* > *DRQ latch*. Switch it on and note whether essctl reads it back on or says the chip returns 0. Then follow [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#finding-out-on-the-card).
 
 Report the essctl version, the access path in the title bar, and `ESSCTL.LOG` (or `ESS3D.LOG`) with any problem.

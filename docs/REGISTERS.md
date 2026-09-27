@@ -978,9 +978,11 @@ DS p.30
 
 DS p.30
 
+> 25h is headed "(R)" on DS p.30; the DRQ latch bit is tiered EXPERT so a write can be tried, the other bits stay read-only
+
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|
-| 7 | DRQ latch | `pnp.drq_latch` | bit | read-only |  | 1 = DRQ latch feature enabled, 0 = disabled (DS p.30) |
+| 7 | DRQ latch | `pnp.drq_latch` | bit | expert |  | 1 = each audio DRQ stays high until the DMA controller answers it, so none is missed; 0 = off. It comes from the card's PnP ROM or EEPROM at power-up, and the data sheet has 25h as read-only: essctl reads a write back to show whether the chip took it (DS p.15, p.30, docs/AUDIO_PIPELINE.md) |
 | 6:5 | Motherboard or card | `pnp.board` | choice | read-only |  | ES1869 is on the motherboard or an add-on card; bits 6:5 also pick one of the four bypass key sequences of p.28 (DS p.30) Values: 0 = Motherboard; 1 = Card. |
 | 4:3 | General-purpose device | `pnp.gp_device` | choice | read-only |  | General-purpose location: not present, or present as LDN 3-6 using 4, 8 or 16 addresses (DS p.30) Values: 0 = Not present; 1 = GP, 4 addresses; 2 = GP, 8 addresses; 3 = GP, 16 addresses. |
 | 2 | Modem device present | `pnp.modem_present` | bit | read-only |  | 1 = the modem is LDN 3, 4 or 5; 0 = the modem is not present (DS p.30) |
