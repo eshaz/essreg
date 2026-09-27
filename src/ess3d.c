@@ -32,7 +32,7 @@ int ess3d_regs(void) {
     nregs = 0;
     for (f = 0; f < F_COUNT && nregs < ESS3D_MAX_REGS; f++)
       if (!strncmp(ess_fields[f].key, "fx.3d.", 6) && f != F_3D_EN &&
-          f != F_3D_RUN && f != F_3D_LIMIT && f != F_3D_LEVEL)
+          f != F_3D_RUN && f != F_3D_MONO && f != F_3D_LIMIT && f != F_3D_LEVEL)
         reg_fields[nregs++] = f;
   }
   return nregs;
@@ -261,19 +261,20 @@ int ess3d_parse(const char *line, struct ess3d_cmd *c) {
     } else if (!strcmp(word, "exit")) {
       c->exit = 1;
       continue;
-    } else if (!strcmp(word, "limit")) {
+    } else if (!strcmp(word, "limit") || !strcmp(word, "mono")) {
+      // an undocumented bit: on, off or toggle
       after = next_word(p, arg, sizeof(arg));
       if (after)
         lower(arg);
       if (!after ||
           (strcmp(arg, "on") && strcmp(arg, "off") && strcmp(arg, "toggle"))) {
-        fail(c, "limit needs on, off or toggle", "");
+        fail(c, "%s needs on, off or toggle", word);
         if (after)
           p = after;
         continue;
       }
       p = after;
-      a->op = ESS3D_LIMIT;
+      a->op = word[0] == 'l' ? ESS3D_LIMIT : ESS3D_MONO;
       a->arg = (s8)(arg[1] == 'n' ? 1 : arg[1] == 'f' ? 0 : 2);
     } else if (!strcmp(word, "reg")) {
       // reg XX YY, both in hex
@@ -330,6 +331,7 @@ int ess3d_read(struct ess3d_state *s) {
     return err;
   s->run = cat_get(&ess_fields[F_3D_RUN], raw);
   s->limit = cat_get(&ess_fields[F_3D_LIMIT], raw);
+  s->mono = cat_get(&ess_fields[F_3D_MONO], raw);
   err = ess_field_read(F_3D_LEVEL, &s->level, 0);
   for (i = 0; err == 0 && i < ess3d_regs(); i++)
     err = ess_field_read(reg_fields[i], &s->reg[i], 0);
@@ -375,10 +377,12 @@ static int reset(struct ess3d_state *s) {
 }
 
 // what ESS's driver sets when Windows starts: 3-D on, level 63, no
-// limit (its 3D Limit setting is 0 unless changed), and 54h-5Ah
+// limit (its 3D Limit setting is 0 unless changed), mono off, and 54h-5Ah
 static int defaults(struct ess3d_state *s) {
   int i, v, err = set(F_3D_LIMIT, &s->limit, 0);
 
+  if (err == 0)
+    err = set(F_3D_MONO, &s->mono, 0);
   if (err == 0)
     err = turn_on(s);
   if (err == 0)
@@ -418,6 +422,8 @@ static int apply(const struct ess3d_action *a, struct ess3d_state *s) {
   case ESS3D_LIMIT:
     return set(F_3D_LIMIT, &s->limit,
                (u8)(a->arg == 2 ? !s->limit : a->arg != 0));
+  case ESS3D_MONO:
+    return set(F_3D_MONO, &s->mono, (u8)(a->arg == 2 ? !s->mono : a->arg != 0));
   case ESS3D_REG:
     return set(reg_fields[a->reg], &s->reg[a->reg], a->value);
   case ESS3D_DEFAULTS:
@@ -442,7 +448,7 @@ int ess3d_run(const struct ess3d_cmd *c, struct ess3d_state *s) {
     return err;
   if (s->enable != want.enable || s->run != want.run ||
       s->level != want.level || s->limit != want.limit ||
-      memcmp(s->reg, want.reg, sizeof(s->reg)))
+      s->mono != want.mono || memcmp(s->reg, want.reg, sizeof(s->reg)))
     return ESS3D_MISMATCH;
   return 0;
 }
@@ -450,9 +456,10 @@ int ess3d_run(const struct ess3d_cmd *c, struct ess3d_state *s) {
 void ess3d_text(const struct ess3d_state *s, char *buf, unsigned size) {
   char tmp[64];
 
-  sprintf(tmp, "3-D %s%s, level %u of %d%s", s->enable ? "on" : "off",
+  sprintf(tmp, "3-D %s%s, level %u of %d%s%s", s->enable ? "on" : "off",
           s->enable && !s->run ? ", held in reset" : "", s->level,
-          ess3d_level_max(), s->limit ? ", limit on" : "");
+          ess3d_level_max(), s->limit ? ", limit on" : "",
+          s->mono ? ", mono on" : "");
   strncpy(buf, tmp, size - 1);
   buf[size - 1] = 0;
 }

@@ -206,7 +206,10 @@ With the stock driver, and again with the extended driver (E) if it's installed.
    * A second `ess3d tray` opens the panel. *Close tray icon* removes the icon. `ess3d tray`, then `ess3d exit`: it goes too.
    * Put a shortcut to `C:\ESSREG\ESS3D.EXE tray` in the StartUp folder and restart Windows: the icon is there after the start.
    * If Explorer restarts (after a crash, or ended with Ctrl+Alt+Del), the icon comes back with the taskbar.
-8. **The undocumented settings.** With music playing, try `ess3d limit toggle` and `ess3d reg 54 00`, `ess3d reg 54 FF` and the same for 56, 58 and 5A, then `ess3d defaults`. Note what each one changes: no document says what they do.
+8. **The undocumented settings** ([SPATIALIZER.md](SPATIALIZER.md#finding-out-on-the-card)). No document says what they do, so note everything:
+   * Before Windows starts, from a cold boot to DOS: `essreg r=boot.txt`. Note 50h, 52h and 54h-5Ah: the chip's own reset values.
+   * In essctl's Expert mode, write FFh to each of 54h, 56h, 58h and 5Ah on the *Raw registers* page and read it back, then 00h. Note which bits stay.
+   * With music playing, with a wide stereo image and with a mono voice: `ess3d mono toggle` and `ess3d limit toggle` at level 63, then `ess3d reg 54 00`, `ess3d reg 54 FF` and the same for 56, 58 and 5A. `ess3d defaults` puts ESS's values back.
 
 ### I. Expert mode (last)
 

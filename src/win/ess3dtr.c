@@ -12,7 +12,8 @@
  * On Windows 9x a 16-bit window or icon handle is also the 32-bit one.
  *
  * The panel is built from the catalog like essctl's pages: a check box for
- * each 3-D bit, and a text field with a slider on its right for the level
+ * each 3-D bit (on, run, and the undocumented mono and limit), and a text
+ * field with a slider on its right for the level
  * and for each Spatializer register (ess3d_reg_field). A register added to
  * the catalog shows up here too. The sliders move in steps of one over the
  * field's range, the text field takes decimal for the level and hex for
@@ -87,6 +88,7 @@ typedef DWORD(FAR PASCAL *CALL32_2)(DWORD, DWORD, DWORD, DWORD, DWORD);
 #define IDC_P_DEFAULTS 105
 #define IDC_P_CLOSE 106
 #define IDC_P_STATUS 107
+#define IDC_P_MONO 108
 #define IDC_P_LABEL 200 // + row
 #define IDC_P_SLIDER 300
 #define IDC_P_EDIT 400
@@ -96,7 +98,7 @@ typedef DWORD(FAR PASCAL *CALL32_2)(DWORD, DWORD, DWORD, DWORD, DWORD);
 // panel layout in dialog units
 #define P_W 222
 #define P_ROW 14
-#define P_TOP 46 // first slider row
+#define P_TOP 59 // first slider row
 
 static struct {
   LOADLIB32 load;
@@ -270,6 +272,7 @@ static void panel_fill(void) {
     return;
   CheckDlgButton(panel, IDC_P_ON, cur.enable);
   CheckDlgButton(panel, IDC_P_RUN, cur.run);
+  CheckDlgButton(panel, IDC_P_MONO, cur.mono);
   CheckDlgButton(panel, IDC_P_LIMIT, cur.limit);
   for (r = 0; r < nsliders; r++) {
     if (r != drag)
@@ -414,8 +417,10 @@ static void panel_build(void) {
       130, 10, IDC_P_ON);
   add("BUTTON", ess_fields[F_3D_RUN].label, WS_TABSTOP | BS_AUTOCHECKBOX, 6, 17,
       130, 10, IDC_P_RUN);
+  add("BUTTON", ess_fields[F_3D_MONO].label, WS_TABSTOP | BS_AUTOCHECKBOX, 6,
+      30, 130, 10, IDC_P_MONO);
   add("BUTTON", ess_fields[F_3D_LIMIT].label, WS_TABSTOP | BS_AUTOCHECKBOX, 6,
-      30, 130, 10, IDC_P_LIMIT);
+      43, 130, 10, IDC_P_LIMIT);
   add("BUTTON", "&Reset", WS_TABSTOP | BS_PUSHBUTTON, P_W - 56, 4, 50, 14,
       IDC_P_RESET);
   nsliders = 1 + ess3d_regs();
@@ -529,6 +534,8 @@ BOOL CALLBACK __export panel_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
       do_action(IsDlgButtonChecked(dlg, id) ? ESS3D_ON : ESS3D_OFF);
     } else if (id == IDC_P_RUN && code == BN_CLICKED) {
       do_field(F_3D_RUN, IsDlgButtonChecked(dlg, id));
+    } else if (id == IDC_P_MONO && code == BN_CLICKED) {
+      do_field(F_3D_MONO, IsDlgButtonChecked(dlg, id));
     } else if (id == IDC_P_LIMIT && code == BN_CLICKED) {
       do_field(F_3D_LIMIT, IsDlgButtonChecked(dlg, id));
     } else if (id == IDC_P_RESET) {

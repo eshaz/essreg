@@ -1,4 +1,18 @@
-# ES1869 technical manual
+# Data sheets
+
+| File | Chip | Document | Used for |
+|---|---|---|---|
+| `es1869techmanual.pdf` | ES1869 AudioDrive | SAM0023-122898, 112 pages | the register catalog, cited as `DS p.NN` |
+| `es938datasheet.pdf` | ES938 3-D Audio Effects Processor | SAM0054-090497, 12 pages, 1997 | the 3-D effect's origin ([SPATIALIZER.md](../SPATIALIZER.md)) |
+| `es1868datasheet.pdf` | ES1868 AudioDrive | revision B, 72 pages, 1995-1996 | a second reading where the ES1869's text is unclear |
+
+* Copyright ESS Technology, Inc. They're included as the references for the register catalog and the docs.
+* SHA-256:
+  * `es938datasheet.pdf`: `e8fcbe00a2814c0a661a58092fbe63c31e63986f3286c8df794f84c3ddc53ad2`
+  * `es1868datasheet.pdf`: `b85192c1308b7d0272b0871d2984274d1722c69e02fd235ab9afc5f591097a9d`
+* The ES1868 has no 3-D effect: its mixer registers skip from 4Eh to 64h.
+
+## ES1869 technical manual
 
 * `es1869techmanual.pdf` is the ESS Technology **ES1869 AudioDrive data sheet**, document SAM0023-122898 (112 pages, PDFWriter 3.02, created 1999-02-25).
 * It's the same document that was published on [Phil's Computer Lab](https://www.philscomputerlab.com/ess-audiodrive-es1868.html).
@@ -6,7 +20,7 @@
 * SHA-256: `a876e64279206df048ea48525fba8336b152d6ac65d322c4b6d85fbe959a7ea9`
 * The other docs in this repository cite it as `DS p.NN`, where NN is the printed page number. The printed page number is also the PDF page number.
 
-## Page index
+### Page index
 
 | Topic | Page |
 |---|---|

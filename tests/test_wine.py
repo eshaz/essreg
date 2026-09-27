@@ -118,7 +118,7 @@ class WineTest(unittest.TestCase):
         self.assertIn("fx.3d.level=40", back)
         self.assertIn("rec.source=Line", back)
         log = read(self.path("ESSCTL.LOG")).decode()
-        self.assertIn("55 settings applied", log)
+        self.assertIn("56 settings applied", log)
 
     def test_esfm_live_load(self):
         bank = bytearray(read(os.path.join(ROOT, "esfm_patch_banks",

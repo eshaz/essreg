@@ -5,18 +5,18 @@ This repository contains utilities and drivers designed for the ESS AudioDrive E
 
 ## [`essctl.exe`](build)
 * Windows 95 control panel for the ES1869 (a 16-bit Windows program).
-* Shows every register of the chip, 147 registers and 298 settings, on these pages: *Output mixer*, *Master volume*, *Record*, *3-D, mic, MONO, I2S*, *Serial / telegaming*, *Audio 2 channel*, *Audio 1 controller*, *ADC offset & power*, *Status & interrupts*, *Plug and Play*, *SB compatible mixer*, *Raw registers* and *ESFM patch bank*.
+* Shows every register of the chip, 147 registers and 299 settings, on these pages: *Output mixer*, *Master volume*, *Record*, *3-D, mic, MONO, I2S*, *Serial / telegaming*, *Audio 2 channel*, *Audio 1 controller*, *ADC offset & power*, *Status & interrupts*, *Plug and Play*, *SB compatible mixer*, *Raw registers* and *ESFM patch bank*.
   * Each setting shows the decoded value (sample rates in Hz, ADC offsets in samples, named choices). The help line shows the register, bits and data sheet page.
   * Every change is written and read back, so the page shows what the chip returned.
   * Levels, signed values and raw values have a text field with a slider on its right. The slider moves in steps of one over the setting's range. The text field takes decimal, or hex for raw values, and writes on Enter or when you leave it.
-  * Registers the data sheet leaves out, but ESS's drivers use, are there too, marked *(undocumented)*: the 3-D limit (mixer 50h bit 0), the 3-D registers 54h, 56h, 58h and 5Ah, and controller A8h bits 7:5 and 2. See [docs/REGISTERS.md](docs/REGISTERS.md).
+  * Registers the data sheet leaves out, but drivers use, are there too, marked *(undocumented)*: the 3-D limit and mono bits (mixer 50h bits 0 and 1), the 3-D registers 54h, 56h, 58h and 5Ah, and controller A8h bits 7:5 and 2. See [docs/REGISTERS.md](docs/REGISTERS.md) and [docs/SPATIALIZER.md](docs/SPATIALIZER.md).
   * *Plug and Play* shows the optional logical devices (MPU-401, CD-ROM, modem, general-purpose) at the numbers the card's PnP header gives them, and "not present" for the ones it leaves out.
 * Settings that can stop playback, hang the DSP or move the card to other resources are read-only until Options > *Expert mode* is turned on for the session.
 * Talks to the card in one of three ways:
   * Through the register interface of the rebuilt `ES1869.VXD` (below). Nothing Windows or a DOS game is doing is disturbed.
   * Directly, with the stock driver. essctl borrows the sound device around each access and gives it back, so a DOS game only gets "in use" while essctl is reading.
   * `/sim`: a simulated ES1869, to try essctl without the card.
-* **Profiles**: File > *Save profile* stores the 55 ordinary settings in an INI file, and File > *Load profile* restores them.
+* **Profiles**: File > *Save profile* stores the 56 ordinary settings in an INI file, and File > *Load profile* restores them.
   * The ESS driver resets the mixer whenever Windows starts and only puts back its own settings ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)). Put `essctl /load C:\ESS\MY.INI` in the StartUp group to restore yours at every start of Windows.
 * **ESFM**: ESFM > *Load patch bank* replaces the FM synthesizer's sounds while Windows runs.
   * Check out the *ESFM patch bank* page! It shows the synthesizer's 18 voices live and marks hanging notes. *Stress test* plays dense music to check for them ([docs/ESFM_MIDI.md](docs/ESFM_MIDI.md)).
@@ -55,6 +55,7 @@ up [N], down [N]  up or down N steps, 4 if N is left out
 reset             reset the effect, keeping on/off and the level
 hold              hold the effect in reset (on or reset releases it)
 limit on, off, toggle   the 3-D limit (mixer 50h bit 0, undocumented)
+mono on, off, toggle    the 3-D mono bit (mixer 50h bit 1, undocumented)
 reg XX YY         Spatializer register XX (54, 56, 58 or 5A) to YY, in hex
 defaults          what ESS's driver sets when Windows starts: 3-D on,
                   level 63, limit off, 54h-5Ah 8Fh, 95h, 94h and 80h
@@ -79,7 +80,7 @@ ess3d reg 54 A0
 * A bad command, or no ES1869, shows a message box (unless `/q`).
 * With the stock driver, ess3d can't reach the card while a DOS program has the sound device. It says so, and nothing changes. The rebuilt `ES1869.VXD` has no such limit.
 * Exit codes: 0 done, 1 the chip returned other values than were written, 2 failed, 3 bad command line.
-* *Note: the data sheet doesn't have the registers 54h-5Ah or the limit bit. ESS's driver sets them when Windows starts ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)), but what they do isn't known yet.*
+* *Note: the data sheet doesn't have the registers 54h-5Ah or the limit and mono bits. ESS's drivers set them when Windows starts, but what they do isn't known yet. [docs/SPATIALIZER.md](docs/SPATIALIZER.md) has what's known and how to find out.*
 
 ### Putting ess3d on a key
 * **A shortcut's Shortcut key**, in Windows 98:
@@ -97,7 +98,7 @@ ess3d reg 54 A0
 ### The tray icon
 * `ess3d tray` puts an icon in the taskbar's tray, next to the clock: a green *3D* while the effect is heard, gray while it's off or held in reset. Its tooltip shows the setting.
 * Click it, right or left, for a small panel with every 3-D setting:
-  * Check boxes for 3-D on, released from reset and the limit. *Reset* resets the effect.
+  * Check boxes for 3-D on, released from reset, mono and the limit. *Reset* resets the effect.
   * The level and each Spatializer register: a text field with a slider on its right. The slider moves in steps of one. The text field takes the level in decimal and the registers in hex, and writes on Enter or when you leave it.
   * *Driver defaults* sets what ESS's driver sets when Windows starts.
   * *Close tray icon* removes the icon, as does `ess3d exit`.
@@ -271,6 +272,7 @@ More checks are in [docs/TESTING.md](docs/TESTING.md) (G, G2 and G3).
 * [docs/VXD_API.md](docs/VXD_API.md): the programming interface of `ES1869.VXD`, including the added register interface.
 * [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md): how the driver works, and how to rebuild and install it.
 * [docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md): the registry settings of the ESS drivers, and the registers the Windows driver sets.
+* [docs/SPATIALIZER.md](docs/SPATIALIZER.md): the 3-D effect, where it comes from (ESS's ES938), and its undocumented registers.
 * [docs/ESFM_BANK.md](docs/ESFM_BANK.md): FM patch banks and `ESFM.DRV`.
 * [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md): why ESFM notes hang, the MIDI driver stack, and the fixed `ESFM.DRV`.
 * [docs/RE_NOTES.md](docs/RE_NOTES.md): how the drivers were reverse-engineered.

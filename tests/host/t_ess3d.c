@@ -2,8 +2,8 @@
  * t_ess3d checks ess3d's command line and its 3-D register changes against
  * the simulated ES1869: on, off and toggle, hold and reset on the run bit,
  * absolute and relative levels with clamping, several commands in a row,
- * the limit bit, the Spatializer registers, the driver's defaults, and bad
- * input.
+ * the limit and mono bits, the Spatializer registers, the driver's
+ * defaults, and bad input.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -430,6 +430,14 @@ static void test_limit_and_regs(void) {
   CHECK_EQ(run("toggle", &s), 0);
   CHECK_EQ(simhw.mixer[0x50], 0x0D);
 
+  // mono: bit 1 of 50h, the other bits kept
+  CHECK_EQ(run("mono on", &s), 0);
+  CHECK_EQ(simhw.mixer[0x50], 0x0F);
+  CHECK(text_is(&s, "3-D on, level 40 of 63, limit on, mono on"));
+  CHECK_EQ(run("MONO toggle limit off", &s), 0);
+  CHECK_EQ(simhw.mixer[0x50], 0x0C);
+  CHECK(!s.mono && !s.limit);
+
   // reg: a register and a value in hex, written only if it changes
   CHECK_EQ(run("reg 54 8f reg 5Ah 7Fh", &s), 0);
   CHECK_EQ(simhw.mixer[0x54], 0x8F);
@@ -443,7 +451,7 @@ static void test_limit_and_regs(void) {
   CHECK_EQ(w[0], 0x00);
 
   // defaults: what ESS's driver sets when Windows starts
-  chip(0x01, 5);
+  chip(0x03, 5);
   CHECK_EQ(run("defaults", &s), 0);
   CHECK_EQ(simhw.mixer[0x50], 0x0C);
   CHECK_EQ(simhw.mixer[0x52], 63);
@@ -465,6 +473,8 @@ static void test_limit_and_regs(void) {
   CHECK_EQ(ess3d_parse("limit", &c), -1);
   CHECK(!strcmp(c.err, "limit needs on, off or toggle"));
   CHECK_EQ(ess3d_parse("limit maybe", &c), -1);
+  CHECK_EQ(ess3d_parse("mono", &c), -1);
+  CHECK(!strcmp(c.err, "mono needs on, off or toggle"));
   CHECK_EQ(ess3d_parse("reg 54", &c), -1);
   CHECK(!strcmp(c.err,
                 "reg needs a register and a value in hex, like reg 54 8F"));

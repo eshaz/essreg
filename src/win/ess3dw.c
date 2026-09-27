@@ -14,6 +14,7 @@
  *   reset             reset the effect, keeping on/off and the level
  *   hold              hold the effect in reset
  *   limit on, off, toggle  the undocumented 3-D limit (50h bit 0)
+ *   mono on, off, toggle   the undocumented 3-D mono bit (50h bit 1)
  *   reg XX YY         Spatializer register XX (54, 56, 58, 5A) to YY, hex
  *   defaults          what ESS's driver sets when Windows starts
  *   show              change nothing, show the setting
@@ -72,7 +73,7 @@ static const char usage[] =
     "ess3d [options] command [command...]\n\n"
     "Commands: on, off, toggle, level N (0 to 63, or N%), level +N, "
     "level -N, up [N], down [N], reset, hold, limit on|off|toggle, "
-    "reg XX YY (hex), defaults, show, tray, exit\n\n"
+    "mono on|off|toggle, reg XX YY (hex), defaults, show, tray, exit\n\n"
     "Options: /q, /t=1500 (ms), /log=file, /sim, /base=220, /cfg=800, "
     "/novxd";
 

@@ -9,13 +9,13 @@
  * around them: the access path (winio), the display and the messages.
  *
  * The effect is the fx.3d fields of the catalog: fx.3d.enable (mixer 50h
- * bit 3), fx.3d.run (50h bit 2, active-low reset), fx.3d.limit (50h bit
- * 0, undocumented), fx.3d.level (52h bits 5:0), and the Spatializer's
- * undocumented registers (54h-5Ah). Every other fx.3d field is one of
- * those registers, so a register added to the catalog is in the reg
- * command and the tray panel too. Only the fields that change are
- * written, read-modify-write, so the other bits keep what the driver put
- * there.
+ * bit 3), fx.3d.run (50h bit 2, active-low reset), fx.3d.mono and
+ * fx.3d.limit (50h bits 1 and 0, undocumented), fx.3d.level (52h bits
+ * 5:0), and the Spatializer's undocumented registers (54h-5Ah). Every
+ * other fx.3d field is one of those registers, so a register added to the
+ * catalog is in the reg command and the tray panel too. Only the fields
+ * that change are written, read-modify-write, so the other bits keep what
+ * the driver put there.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -44,13 +44,14 @@ enum ess3d_op {
   ESS3D_LEVEL,   // level N
   ESS3D_ADD,     // level +N, level -N, up, down
   ESS3D_LIMIT,   // limit on (arg 1), off (0) or toggle (2)
+  ESS3D_MONO,    // mono on (arg 1), off (0) or toggle (2)
   ESS3D_REG,     // reg XX YY: register reg (ess3d_reg_field) to value
   ESS3D_DEFAULTS // what ESS's driver sets when Windows starts
 };
 
 struct ess3d_action {
   u8 op;    // enum ess3d_op
-  s8 arg;   // ESS3D_LEVEL: 0-63, ESS3D_ADD: -63 to 63, ESS3D_LIMIT
+  s8 arg;   // ESS3D_LEVEL: 0-63, ESS3D_ADD: -63 to 63, ESS3D_LIMIT/MONO
   u8 reg;   // ESS3D_REG: index for ess3d_reg_field
   u8 value; // ESS3D_REG: the value
 };
@@ -75,6 +76,7 @@ struct ess3d_state {
   u8 run;                 // fx.3d.run, 0 = held in reset
   u8 level;               // fx.3d.level
   u8 limit;               // fx.3d.limit
+  u8 mono;                // fx.3d.mono
   u8 reg[ESS3D_MAX_REGS]; // the Spatializer registers, ess3d_reg_field
 };
 
@@ -87,7 +89,7 @@ int ess3d_parse(const char *line, struct ess3d_cmd *c);
 int ess3d_level_max(void);
 
 // the Spatializer registers: every fx.3d field of the catalog other than
-// enable, run, limit and level, in catalog order
+// enable, run, mono, limit and level, in catalog order
 // ess3d_regs is how many, ess3d_reg_field the field of register i
 int ess3d_regs(void);
 int ess3d_reg_field(int i);
