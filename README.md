@@ -42,10 +42,11 @@ essctl [/load file] [/save file] [/dump file] [/ui] [/q]
 * The Windows 95 MIDI driver of the ES1869's FM synthesizer, rebuilt from source in [`src/esfm`](src/esfm).
 * ESS's driver drops MIDI messages that come in while it's busy, so notes hang when the music gets busy. This one queues them instead.
 * It also silences every voice when a program closes the device with the sustain pedal down.
-* It can play a patch bank straight from a file named in `SYSTEM.INI`, and loads it again whenever the file changes. See [docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv).
+* It can play a patch bank straight from a file named in `SYSTEM.INI`. The file is read when a program opens the MIDI device, if its date or time changed. See [docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv).
 * See [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md) for the details.
 * Everything else is ESS's code. `python3 tools/build_esfm.py --stock --verify` rebuilds the original byte for byte, and `esfmpat` and essctl's banks work the same.
 * Install it from DOS, since Windows has the driver open: keep a copy of `C:\WINDOWS\SYSTEM\ESFM.DRV`, copy `build\ESFM.DRV` over it and restart Windows.
+  * Step by step: [Installing and testing on Windows 98](#installing-and-testing-on-windows-98).
 
 ## [`essreg.exe`](build)
 * Utility to control otherwise unsupported registers for the ES1869 audio chip.
@@ -113,6 +114,72 @@ as ESFM.BAK next to it.
 Usage: esfmpat "c:\path\to\esfm.drv" "c:\path\to\patch.bin"
        esfmpat "c:\path\to\esfm.drv"   (show its patch bank)
 ```
+
+## Installing and testing on Windows 98
+* `build\ESFM.DRV` is made from ESS's ES1869 AudioDrive driver 4.04.00.1319 in [`driver`](driver), which ESS made for Windows 95 and 98.
+* These steps install it and essctl on a Windows 98 machine, and test the hanging-note fix and the bank file.
+* *Note: the rebuilt `ES1869.VXD` isn't needed for this. See [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#installing-the-extended-driver) to install it too.*
+
+### Before you start
+* Check the ESS driver: in Explorer, right-click `C:\WINDOWS\SYSTEM\ESFM.DRV` > *Properties* > *Version*. It should say 4.04.00.1319.
+  * With another version, install ESS's driver from the [`driver`](driver) folder first: *Device Manager* > the ES1869 > *Properties* > *Driver* > *Update Driver*.
+* Copy these files to `C:\ESSREG` on the Windows 98 machine, from a floppy, CD or network share:
+  * `build\ESFM.DRV`
+  * `build\essctl.exe`
+  * `esfm_patch_banks\bnk_com.bin` and `esfm_patch_banks\bnk_NT4.bin`
+* *Note: keep folder names to 8 characters, since MS-DOS mode only sees short names.*
+
+### Installing
+`ESFM.DRV` is in use while Windows runs, so it's replaced from MS-DOS mode.
+
+1. Start > *Shut Down* > *Restart in MS-DOS mode*.
+2. Keep ESS's driver as `ESFM.ORG` and copy the fixed one over it:
+   ```
+   copy C:\WINDOWS\SYSTEM\ESFM.DRV C:\WINDOWS\SYSTEM\ESFM.ORG
+   copy C:\ESSREG\ESFM.DRV C:\WINDOWS\SYSTEM\ESFM.DRV
+   ```
+3. Type `exit` to go back to Windows.
+4. Control Panel > *Multimedia* > *MIDI*: *Single instrument* should be *ESFM Synthesis*, followed by the FM port.
+5. Start `C:\ESSREG\essctl.exe` and open the *ESFM patch bank* page. It should say `Fixed driver`.
+
+### Using a bank file
+1. Make a folder `C:\BANKS` and copy `C:\ESSREG\bnk_NT4.bin` into it as `TEST.BIN`.
+2. In essctl, ESFM > *Load patch bank* > `C:\BANKS\TEST.BIN`. It loads the bank now, and names the file in `SYSTEM.INI` for the driver:
+   ```
+   [ESFM.DRV]
+   Bank=C:\BANKS\TEST.BIN
+   ```
+   * Start > *Run* > `sysedit` shows it. You can also add these two lines yourself.
+* The driver reads the file when a program opens the MIDI device, if the file's date or time changed since it last read it. See [docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv).
+
+### Testing
+Keep essctl open on the *ESFM patch bank* page.
+
+1. Double-click a MIDI file to play it in Media Player, for example `C:\WINDOWS\MEDIA\CANYON.MID`. The page says `Bank file: C:\BANKS\TEST.BIN, 8288 bytes`, and the instruments sound like the NT4 bank.
+2. Close Media Player and play the file again. The page counts one more check and no new load.
+3. Close Media Player. Copy `C:\ESSREG\bnk_com.bin` over `C:\BANKS\TEST.BIN`, then give it the current date in an MS-DOS prompt (Start > *Programs* > *MS-DOS Prompt*):
+   ```
+   cd C:\BANKS
+   copy /b TEST.BIN +,,
+   ```
+   Play again: the driver's usual sounds, and one more load.
+   * *Note: a copied file keeps its date and time, and the driver only reads a file whose date or time changed.*
+4. Change the file this way while music plays. Nothing changes until Media Player is closed and plays again.
+5. Restart Windows and play: the bank file is read at the first play.
+6. Delete `C:\BANKS\TEST.BIN` and play: the page says "cannot read", and the last bank keeps playing.
+7. *Stress test* (button on the page): no voices left sounding.
+8. Play the MIDI files and games that used to hang notes.
+9. ESFM > *Restore original bank*: the `Bank=` line is gone from `SYSTEM.INI`, and the driver's own bank plays.
+
+More checks are in [docs/TESTING.md](docs/TESTING.md) (G and G2).
+
+### Going back
+1. Start > *Shut Down* > *Restart in MS-DOS mode*.
+2. `copy C:\WINDOWS\SYSTEM\ESFM.ORG C:\WINDOWS\SYSTEM\ESFM.DRV`
+3. Type `exit`.
+
+* ESS's driver doesn't read the `[ESFM.DRV]` section, so it can stay.
+* If Windows doesn't start: hold Ctrl while the computer starts and pick *Command prompt only* in the Startup Menu. Do step 2, remove the `[ESFM.DRV]` section with `edit C:\WINDOWS\SYSTEM.INI`, and restart.
 
 ## Documentation
 * [docs/REGISTERS.md](docs/REGISTERS.md): every register and setting of the ES1869, generated from the catalog [`src/esscat.tbl`](src/esscat.tbl).
