@@ -53,9 +53,19 @@ A dropped note off leaves the voice keyed on until it's stolen for another note 
 * So a message from an interrupt can land between the address and the data, and the data goes to the wrong register.
 * In the emulator this wrote register 24Dh instead of 24Eh and left voices keyed on after the close.
 
+### 4. A sustain pedal left down (found on the hardware)
+
+* **What the dump showed.** `essctl /dump` during music on Windows 98: channel 6's pedal down, and 12 voices *held by pedal*, on in the chip. All 12 were keyed 650 to 720 note ons earlier, in one burst, and channel 6 played nothing after them. Nothing was queued or refused, so this isn't cause 1.
+* **ESS's pedal follows the MIDI spec.** Controller 64 at 64 or more puts it down, below 64 lets it up (`sustain`, seg1:0E46). A note off while it's down keeps the voice keyed on.
+* **Nothing else lets it up.** Only controller 64, controller 121, MODM_RESET, open and close reset the pedal.
+  * A program change only stores the program (seg1:13C0).
+  * The long-message parser skips every SysEx byte (seg1:15BF), so a GM, GS or XG reset does nothing.
+* **FM doesn't fade.** On a sample synth, a piano note held by a forgotten pedal decays. An ESFM patch with a sustaining envelope sounds until the pedal goes up.
+  * So a pedal left down from an earlier part holds every note of the channel after it, forever, and those notes use up voices.
+
 ### Checked and fine
 
-* **Driver logic:** voice allocation, voice stealing, retriggering a note that's already playing, the sustain pedal, the controllers (including 120, 121 and 123-127), RPN pitch bend range, running status, the SysEx and long-message parser, and MODM_RESET, which silences everything.
+* **Driver logic:** voice allocation, voice stealing, retriggering a note that's already playing, controller 64 itself, the controllers (including 120, 121 and 123-127), RPN pitch bend range, running status, the long-message parser apart from SysEx (see 4), and MODM_RESET, which silences everything.
 * **The chip:** [ESFMu](https://github.com/Kagamiin/ESFMu), the hardware-accurate ESFM emulator, releases a key off that comes during an envelope delay right away. The chip doesn't hold notes on its own.
 * **`ES1869.VXD`:** once Windows owns FM, the VxD doesn't trap the FM ports at all.
 * **Not in the repository:** the Microsoft parts (`MMSYSTEM.DLL`, `MIDIMAP.DRV`, `MCISEQ.DRV`) are described here from their documented behaviour.
@@ -77,6 +87,8 @@ A dropped note off leaves the voice keyed on until it's stolen for another note 
 | Close with the sustain pedal down | voices on after the close | silent |
 | Power suspend with the pedal down | voices on | silent |
 | Note off fired at every 11th instruction of a note on (937 tries) | 914 hanging notes | 0 |
+| Pedal down, a chord let go, then a program change | notes held, pedal down | released, pedal up |
+| Pedals down on two channels, then a GM, GM2, GS or XG reset | notes held | released |
 
 ## The fix: `build/ESFM.DRV`
 
@@ -89,11 +101,15 @@ A dropped note off leaves the voice keyed on until it's stolen for another note 
   * **Open, close and `chip_reset`** hold the driver too, so nothing can come in between the three port writes of a register. Queued messages of a program that has just closed the device are dropped.
   * **Close and power suspend** key off every voice and lift every sustain pedal.
   * **Counters.** A small block of counters at the end of the data segment, starting with `ESFMFIX`, for essctl.
+* **Sustain pedal.** [`src/esfm/esfmped.asm`](../src/esfm/esfmped.asm):
+  * A program change lets go of the channel's pedal first, as controller 64 with 0 would. The MIDI spec keeps it down, but a pedal still down when a channel changes instrument is left over from the part before, and on FM it holds notes forever.
+  * A GM, GM2, GS or XG reset in a long message resets the controllers of every channel (121, the pedal up) and turns their notes off (123), as GM synths do.
+  * When each channel's pedal went down and up, what let it up, and when its program changed are kept for essctl.
 * **Bank file.** [`src/esfm/esfmfile.asm`](../src/esfm/esfmfile.asm) lets the driver play a patch bank straight from a file named in `SYSTEM.INI`. It reads the file when a program opens the device, if the file's date or time changed. See [ESFM_BANK.md](ESFM_BANK.md#bank-file-buildesfmdrv).
 
 Everything else is ESS's code, unchanged:
 * The bank loader is untouched, so `esfmpat` and essctl's *Load bank* work the same with the fixed driver.
-* The built-in patch bank is the stock one. `--bank FILE` builds the driver with another bank.
+* The built-in patch bank is [`esfm_patch_banks/bnk_com_better_square_wave.bin`](../esfm_patch_banks). `--stock` keeps ESS's `bnk_com.bin`, and `--bank FILE` builds the driver with another bank.
 
 ### Installing
 
@@ -112,6 +128,11 @@ To go back, copy `ESFM.ORG` over `ESFM.DRV` the same way.
 * **Chip column.** While a program has the MIDI device open, the Chip column reads the key-on bit back from the synthesizer.
 * **Stuck notes.** A voice that's `on` in the chip while the driver has it as free is marked **STUCK**. A voice that keeps *playing* after the music has stopped is a hanging note too.
 * **With the fixed driver:** the page also counts the messages that came in while it was busy. ESS's driver would have dropped every one of them.
+* **Sustain pedal.** For each channel whose pedal is down, the fixed driver's page says for how many note ons, and when the channel's program last changed. It also lists pedals that a program change or a reset let up:
+  ```
+  Channel 6: pedal down for 734 note ons, program changed 900 note ons ago
+  Channel 2: pedal let up by a program change 40 note ons ago
+  ```
 * **In a file:** `essctl /dump file` writes the same table.
 
 **Stress test** (button on the same page):

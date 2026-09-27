@@ -76,6 +76,7 @@ chip_reset:
         push si                                         ; 009E
 %if ESFM_FIX
         call fix_enter
+        call fix_ped_clear
 %endif
         mov di,[bp+0x6]                                 ; 009F
         xor_ ax,ax                                      ; 00A2
@@ -2178,7 +2179,11 @@ L1_1294:
         push ax                                         ; 129D
         push word [bp+0x8]                              ; 129E
         push cs                                         ; 12A1
+%if ESFM_FIX
+        call fix_sustain                                ; esfmped.asm
+%else
         call sustain                                    ; 12A2
+%endif
         add sp,byte +0x6                                ; 12A5
         jmp near L1_13FE                                ; 12A8
 
@@ -2238,6 +2243,13 @@ L1_1318:
         jmp near L1_13FE                                ; 1321
 
 L1_1324:
+%if ESFM_FIX
+        ; controller 121: keep the time if it lets the pedal up
+        mov al,[bp-0x3]
+        push ax
+        push word [bp+0x8]
+        call fix_ctl_reset
+%endif
         mov si,[bp+0x8]                                 ; 1324
         mov bl,[bp-0x3]                                 ; 1327
         sub_ bh,bh                                      ; 132A
@@ -2316,6 +2328,12 @@ L1_13C0:
         mov bx,[bp+0x8]                                 ; 13C6
         and si,0xff                                     ; 13C9
         mov [bx+si+0x20],al                             ; 13CD
+%if ESFM_FIX
+        ; a new program lets go of the channel's sustain pedal
+        push si
+        push bx
+        call fix_program
+%endif
         jmp short L1_13FE                               ; 13D0
 
 L1_13D2:
@@ -3733,6 +3751,7 @@ R1_1ECB: dw 0xFFFF, 0x0000                              ; 1ECB KERNEL.LocalSize
 %if ESFM_FIX
 %include "esfmfix.asm"
 %include "esfmfile.asm"
+%include "esfmped.asm"
 %endif
 
 seg1_data_end:

@@ -3,7 +3,7 @@
 * `ESFM.DRV` is the Windows 95 MIDI driver for the ES1869's FM synthesizer (ESFM native mode, 18 four-operator voices).
 * Every sound it plays comes from one *patch bank*. The bank is stored in the driver file and copied into memory when the driver is enabled.
 * This page covers the build shipped in `driver/ESFM.DRV` (20976 bytes, module `ESFM`, expected Windows version 4.0). Everything here was read from its code. Addresses are `segment:offset` within that file.
-* The fixed `build/ESFM.DRV` ([ESFM_MIDI.md](ESFM_MIDI.md)) has the same bank loader, so all of this applies to it too.
+* The fixed `build/ESFM.DRV` ([ESFM_MIDI.md](ESFM_MIDI.md)) has the same bank loader, so all of this applies to it too. Its built-in bank is `esfm_patch_banks/bnk_com_better_square_wave.bin` instead of ESS's `bnk_com.bin`.
 * The fixed driver can also play a bank file straight from disk, and reads it again when the file's date changes. See [Bank file](#bank-file-buildesfmdrv).
 
 ## Bank format

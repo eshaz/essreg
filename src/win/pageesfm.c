@@ -17,11 +17,11 @@
 #include "resource.h"
 
 static HWND text, voices;
-static char voice_text[2048];
+static char voice_text[3072];
 
 // show the driver's voices and what the chip says (see esfm_diag_text)
 static void show_voices(void) {
-  static char buf[2048];
+  static char buf[3072];
   struct esfm_diag d;
   int rc = esfm_diag_read(&d, 1);
 

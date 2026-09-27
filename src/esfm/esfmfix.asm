@@ -20,6 +20,8 @@
 ; 4. chip_reset holds the driver as well (it also runs for DRV_POWER and
 ;    DRVM_DISABLE).
 ; 5. MODM_OPEN loads the bank file first if it changed (esfmfile.asm).
+; 6. The sustain pedal is let up by a program change and by a GM, GS or
+;    XG reset (esfmped.asm).
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
@@ -130,7 +132,7 @@ call_orig:
         push    word [ARG_DW2+2]
         push    word [ARG_DW2]
         push    cs
-        call    modMessage_orig
+        call    fix_process             ; esfmped.asm
         ret
 
 ; queue this call's message (interrupts are off)
@@ -276,7 +278,7 @@ fix_unlock:
 .call:
         call    restore_if
         push    cs
-        call    modMessage_orig
+        call    fix_process             ; esfmped.asm
         jmp     .again
 .dropped:
         call    restore_if

@@ -42,6 +42,8 @@ essctl [/load file] [/save file] [/dump file] [/ui] [/q]
 * The Windows 95 MIDI driver of the ES1869's FM synthesizer, rebuilt from source in [`src/esfm`](src/esfm).
 * ESS's driver drops MIDI messages that come in while it's busy, so notes hang when the music gets busy. This one queues them instead.
 * It also silences every voice when a program closes the device with the sustain pedal down.
+* A sustain pedal that a song leaves down doesn't hold notes forever: a program change, or a GM, GS or XG reset, lets it up.
+* Its built-in patch bank is [`bnk_com_better_square_wave.bin`](esfm_patch_banks).
 * It can play a patch bank straight from a file named in `SYSTEM.INI`. The file is read when a program opens the MIDI device, if its date or time changed. See [docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv).
 * See [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md) for the details.
 * Everything else is ESS's code. `python3 tools/build_esfm.py --stock --verify` rebuilds the original byte for byte, and `esfmpat` and essctl's banks work the same.
@@ -162,13 +164,13 @@ Keep essctl open on the *ESFM patch bank* page.
    cd C:\BANKS
    copy /b TEST.BIN +,,
    ```
-   Play again: the driver's usual sounds, and one more load.
+   Play again: ESS's original sounds, and one more load.
    * *Note: a copied file keeps its date and time, and the driver only reads a file whose date or time changed.*
 4. Change the file this way while music plays. Nothing changes until Media Player is closed and plays again.
 5. Restart Windows and play: the bank file is read at the first play.
 6. Delete `C:\BANKS\TEST.BIN` and play: the page says "cannot read", and the last bank keeps playing.
 7. *Stress test* (button on the page): no voices left sounding.
-8. Play the MIDI files and games that used to hang notes.
+8. Play the MIDI files and games that used to hang notes. If a note hangs, the page says which channel's pedal is down, for how long, and when its program last changed. `essctl /dump` writes it to a file.
 9. ESFM > *Restore original bank*: the `Bank=` line is gone from `SYSTEM.INI`, and the driver's own bank plays.
 
 More checks are in [docs/TESTING.md](docs/TESTING.md) (G and G2).

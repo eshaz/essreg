@@ -841,7 +841,22 @@ class ESFMEmu:
             st.update(zip(names, struct.unpack_from("<7H", dgroup, at + 30)))
             path = dgroup[at + 44:at + 44 + 128]
             st["bpath"] = path.split(b"\0")[0].decode("latin-1")
+        if st["version"] >= 3:
+            # sustain pedal of each channel: note-on count when it went
+            # down, up, and the program changed, and what let it up
+            for name, off in (("ped_down", 172), ("ped_up", 204),
+                              ("ped_prog", 236)):
+                st[name] = list(struct.unpack_from("<16H", dgroup, at + off))
+            st["ped_why"] = list(dgroup[at + 268:at + 284])
         return st
+
+    def pedals(self):
+        """Channels (0-15) whose sustain pedal the driver has down."""
+        return [c for c in range(16) if self.r8(4, self.dev + 0x40 + c) & 1]
+
+    def clock(self):
+        """The device's note-on count (DEV_CLOCK), low word."""
+        return self.r16(4, self.dev + 0x1C)
 
     def bank(self, size=None):
         """The bank that plays: the block the driver points to (0012h)."""

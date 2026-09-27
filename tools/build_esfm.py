@@ -12,7 +12,8 @@ usage: build_esfm.py [--stock] [--verify] [--bank FILE] [-o OUTPUT]
   --verify   with --stock, fail unless it's byte-identical to
              driver/ESFM.DRV
   --bank     put another patch bank (raw, as in esfm_patch_banks/) in
-             the driver instead of the stock one
+             the driver instead of bnk_com_better_square_wave.bin (or,
+             with --stock, ESS's bnk_com.bin)
 
 Needs NASM 2.14 or later and Python 3.
 """
@@ -32,6 +33,9 @@ import nelink  # noqa: E402
 SRC = os.path.join(ROOT, "src", "esfm")
 ORIGINAL = os.path.join(ROOT, "driver", "ESFM.DRV")
 BANK = (256, 1234)
+# the bank built into the fixed driver, the stock build keeps ESS's
+FIX_BANK = os.path.join(ROOT, "esfm_patch_banks",
+                        "bnk_com_better_square_wave.bin")
 
 
 def build(fix, output=None, workdir=None, bank=None, defines=None):
@@ -49,6 +53,8 @@ def build(fix, output=None, workdir=None, bank=None, defines=None):
         raise SystemExit("build_esfm: nasm failed")
     with open(os.path.join(SRC, "layout.json")) as f:
         layout = json.load(f)
+    if bank is None and fix:
+        bank = FIX_BANK
     if bank:
         for t in layout["resources"]:
             for r in t["entries"]:

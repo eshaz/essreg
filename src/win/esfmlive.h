@@ -83,8 +83,20 @@ struct esfm_diag {
   u16 file_date;      // DOS date and time of the file it read last
   u16 file_time;
   char file[128];     // Bank= from SYSTEM.INI
+  int pedal_times;    // version 3: the times below are there
+  u16 clock;          // note ons so far (DEV_CLOCK)
+  u16 ped_down[16];   // note-on count when each channel's pedal went down,
+  u16 ped_up[16];     // went up, and its program changed, 0xFFFF for not
+  u16 ped_prog[16];   // since the last reset
+  u8 ped_why[16];     // what let the pedal up last, ESFM_PED_* below
   char why[96];       // why nothing could be read
 };
+
+// ped_why
+#define ESFM_PED_CC64 1    // controller 64 below 64
+#define ESFM_PED_PROGRAM 2 // a program change (fixed driver)
+#define ESFM_PED_SYSEX 3   // a GM, GS or XG reset (fixed driver)
+#define ESFM_PED_CC121 4   // controller 121
 
 // file_state: what the last MODM_OPEN found
 #define ESFM_FILE_NONE 0    // no bank file plays

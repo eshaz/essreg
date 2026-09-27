@@ -262,7 +262,7 @@ int profile_load_file(const char *path, char *report, unsigned size) {
 // --- register dump ----------------------------------------------------------
 
 int dump_file(const char *path) {
-  static char info[2048];
+  static char info[3072];
   char full[144];
   FILE *f;
   int i, j, v, err;

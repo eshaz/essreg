@@ -16,6 +16,9 @@ reproduces the stuck notes of the ESS driver:
 
 The fixed build must pass every case the stock build fails.
 
+SustainTest: a sustain pedal a song leaves down holds notes forever on FM.
+The fixed build lets it up at a program change and at a GM, GS or XG reset.
+
 BankFileTest: the fixed build plays the bank file named in SYSTEM.INI
 [ESFM.DRV] Bank=, read when a program opens the device if its date or time
 changed (src/esfm/esfmfile.asm).
@@ -80,8 +83,9 @@ class RebuildTest(unittest.TestCase):
         self.assertEqual(ne.module_name, "ESFM")
         self.assertEqual(ne.entries.keys(), orig.entries.keys())
         self.assertEqual(ne.modules, orig.modules)
-        self.assertEqual(ne.resource_data(256, 1234),
-                         orig.resource_data(256, 1234))
+        # the square-wave bank of esfm_patch_banks is built in
+        with open(build_esfm.FIX_BANK, "rb") as f:
+            self.assertEqual(ne.resource_data(256, 1234), f.read())
         # segment 3 (open, close and the bank loader) keeps its layout
         self.assertEqual(ne.segments[2].length, orig.segments[2].length)
         # DGROUP keeps its variables where they were
@@ -276,6 +280,152 @@ class StuckNoteTest(unittest.TestCase):
         emu.data(NOTE_A_OFF)
         self.assertSilent(emu)
         self.assertUnlocked(emu)
+
+
+# the sustain pedal (esfmped.asm)
+PED_CC64, PED_PROGRAM, PED_SYSEX, PED_CC121 = 1, 2, 3, 4
+GM_ON = bytes([0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7])
+GM2_ON = bytes([0xF0, 0x7E, 0x7F, 0x09, 0x03, 0xF7])
+GS_RESET = bytes([0xF0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7F, 0x00,
+                  0x41, 0xF7])
+XG_ON = bytes([0xF0, 0x43, 0x10, 0x4C, 0x00, 0x00, 0x7E, 0x00, 0xF7])
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs the unicorn module")
+class SustainTest(unittest.TestCase):
+    def emu(self, which):
+        e = ESFMEmu(builds()[which])
+        e.open()
+        return e
+
+    def hold(self, emu, channel, notes=(0x3C, 0x40, 0x43)):
+        """Pedal down on channel, a chord played and let go."""
+        emu.data(0x7F40B0 | channel)
+        for n in notes:
+            emu.data(0x7F0090 | channel | n << 8)
+            emu.data(0x000080 | channel | n << 8)
+        self.assertIn(channel, emu.pedals())
+        self.assertTrue(emu.keyed_voices())
+
+    # -- a pedal left down ---------------------------------------------------
+
+    def test_program_change_lets_the_pedal_up(self):
+        emu = self.emu("stock")
+        self.hold(emu, 5)
+        emu.data(0x0030C5)                      # program 48 on channel 6
+        self.assertEqual(emu.pedals(), [5])     # ESS: still down, still held
+        self.assertTrue(emu.keyed_voices())
+        emu = self.emu("fixed")
+        self.hold(emu, 5)
+        clock = emu.clock()
+        emu.data(0x0030C5)
+        self.assertEqual(emu.pedals(), [])
+        self.assertEqual(emu.keyed_voices(), [])
+        st = emu.fix_state()
+        self.assertEqual((st["ped_why"][5], st["ped_up"][5], st["ped_prog"][5]),
+                         (PED_PROGRAM, clock, clock))
+        # the new program plays and lets go as usual
+        emu.data(0x7F3C95)
+        emu.data(0x003C85)
+        self.assertEqual(emu.keyed_voices(), [])
+
+    def test_program_change_keeps_notes_that_are_held_down(self):
+        emu = self.emu("fixed")
+        emu.data(0x7F40B5)                      # pedal down
+        emu.data(0x7F3C95)                      # a key held down
+        emu.data(0x0030C5)                      # pedal let up
+        self.assertEqual([emu.voices()[v][2] for v in emu.keyed_voices()
+                          if v < 16][:1], [0x3C])
+        emu.data(0x003C85)                      # the key let go: released
+        self.assertEqual(emu.keyed_voices(), [])
+        self.assertEqual(emu.driver_active(), [])
+
+    def test_program_change_without_the_pedal(self):
+        emu = self.emu("fixed")
+        emu.data(0x7F3C95)
+        emu.data(0x0030C5)
+        self.assertTrue(emu.keyed_voices())     # plays on
+        emu.data(0x003C85)
+        self.assertEqual(emu.keyed_voices(), [])
+        self.assertEqual(emu.fix_state()["ped_why"][5], 0)
+
+    def test_reset_sysex_lets_every_pedal_up(self):
+        for name, sysex in (("GM", GM_ON), ("GM2", GM2_ON), ("GS", GS_RESET),
+                            ("XG", XG_ON)):
+            with self.subTest(name):
+                emu = self.emu("stock")
+                self.hold(emu, 0)
+                self.hold(emu, 5)
+                self.assertEqual(emu.longdata(sysex)[0], 0)
+                self.assertEqual(emu.pedals(), [0, 5])  # ESS skips SysEx
+                emu = self.emu("fixed")
+                self.hold(emu, 0)
+                self.hold(emu, 5, notes=(0x30, 0x34))
+                emu.data(0x7F3C92)              # a key held down, channel 3
+                r, flags = emu.longdata(sysex)
+                self.assertEqual((r, flags & 1), (0, 1))
+                self.assertEqual(emu.pedals(), [])
+                self.assertEqual(emu.keyed_voices(), [])        # notes off
+                st = emu.fix_state()
+                self.assertEqual((st["ped_why"][0], st["ped_why"][5]),
+                                 (PED_SYSEX, PED_SYSEX))
+                self.assertEqual(st["lock"], 0)
+
+    def test_other_sysex_changes_nothing(self):
+        for sysex in (bytes([0xF0, 0x7E, 0x7F, 0x09, 0x02, 0xF7]),  # GM off
+                      bytes([0xF0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x01, 0x30,
+                             0x00, 0x0F, 0xF7]),                    # GS reverb
+                      bytes([0xF0, 0x43, 0x10, 0x4C, 0x02, 0x01, 0x00, 0x01,
+                             0xF7]),                                # XG effect
+                      GM_ON[:5]):                                   # cut short
+            with self.subTest(sysex.hex()):
+                emu = self.emu("fixed")
+                self.hold(emu, 5)
+                emu.longdata(sysex)
+                self.assertEqual(emu.pedals(), [5])
+                self.assertTrue(emu.keyed_voices())
+
+    def test_reset_sysex_while_busy(self):
+        emu = self.emu("fixed")
+        self.hold(emu, 5)
+        hdr = emu.header(GM_ON)
+        inj = Inject(MODM_LONGDATA, dw1=hdr, dw2=0x20,
+                     after_writes=emu.chip.writes + 10)
+        emu.data(0x7F3C90, injects=[inj])      # a note on, channel 1
+        self.assertEqual(inj.result, 0)         # queued, then handled
+        self.assertEqual(emu.fix_state()["queued"], 1)
+        self.assertEqual(emu.pedals(), [])
+        self.assertEqual(emu.keyed_voices(), [])
+        self.assertEqual(emu.fix_state()["lock"], 0)
+
+    # -- the times kept for essctl -------------------------------------------
+
+    def test_pedal_times(self):
+        emu = self.emu("fixed")
+        st = emu.fix_state()
+        self.assertEqual(st["ped_down"], [0xFFFF] * 16)
+        emu.data(0x7F3C90)
+        down = emu.clock()
+        emu.data(0x7F40B2)                      # pedal down, channel 3
+        emu.data(0x7F3C92)
+        emu.data(0x003C92)
+        up = emu.clock()
+        emu.data(0x0040B2)                      # pedal up
+        st = emu.fix_state()
+        self.assertEqual((st["ped_down"][2], st["ped_up"][2], st["ped_why"][2]),
+                         (down, up, PED_CC64))
+        # the pedal let channel 3's note go, channel 1's still sounds
+        self.assertEqual({emu.voices()[v][1] for v in emu.keyed_voices()
+                          if v < 16}, {0})
+        emu.data(0x7F40B2)
+        emu.data(0x0079B2)                      # reset all controllers
+        st = emu.fix_state()
+        self.assertEqual(st["ped_why"][2], PED_CC121)
+        self.assertEqual(emu.pedals(), [])
+        emu.reset()                             # chip_reset forgets them
+        st = emu.fix_state()
+        self.assertEqual((st["ped_down"], st["ped_why"]),
+                         ([0xFFFF] * 16, [0] * 16))
 
 
 # the bank file (esfmfile.asm)

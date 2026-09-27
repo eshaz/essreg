@@ -105,6 +105,7 @@ See [ESFM_MIDI.md](ESFM_MIDI.md).
 3. Install `build\ESFM.DRV` from DOS (see [ESFM_MIDI.md](ESFM_MIDI.md#installing)) and restart.
 4. The page says "Fixed driver". Run the stress test again: no voice left sounding. The "queued while busy" count is what ESS's driver would have dropped.
 5. Play the same music again: no hanging notes. MIDI, the patch bank and *Load bank* work like before.
+6. Play music that uses the sustain pedal. When a song changes a channel's program with the pedal down, the page lists "pedal let up by a program change". After the music stops, no channel should keep its pedal down.
 
 ### G2. ESFM bank file
 
@@ -117,7 +118,7 @@ With `build\ESFM.DRV` installed. See [ESFM_BANK.md](ESFM_BANK.md#bank-file-build
    ```
 2. Play a MIDI file. The *ESFM patch bank* page says `Bank file: C:\BANKS\TEST.BIN, 8288 bytes`, with the file's date, and the instruments sound like the NT4 bank, not the driver's own.
 3. Close the player and play the file again, without changing the bank file. The page counts one more check and no new load.
-4. Close the player. Copy `esfm_patch_banks\bnk_com.bin` over `C:\BANKS\TEST.BIN` and give it the current date in an MS-DOS prompt: `cd C:\BANKS`, then `copy /b TEST.BIN +,,`. Play again: the driver's usual sounds, and one more load.
+4. Close the player. Copy `esfm_patch_banks\bnk_com.bin` over `C:\BANKS\TEST.BIN` and give it the current date in an MS-DOS prompt: `cd C:\BANKS`, then `copy /b TEST.BIN +,,`. Play again: ESS's original sounds, and one more load.
 5. Change the file (step 4) while music plays: the sound doesn't change until the player closes and opens the device again.
 6. Delete `C:\BANKS\TEST.BIN` and play: the page says "cannot read", and the last bank keeps playing. Copy a bank back with a new date: it loads the next time a program opens the device.
 7. ESFM > *Restore original bank*: the `Bank=` line is gone from `SYSTEM.INI` and the driver's own bank plays. ESFM > *Load patch bank* writes it again.
