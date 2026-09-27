@@ -18,15 +18,21 @@ This repository contains utilities and drivers designed for the ESS AudioDrive E
   * `/sim`: a simulated ES1869, to try essctl without the card.
 * **Profiles**: File > *Save profile* stores the 56 ordinary settings in an INI file, and File > *Load profile* restores them.
   * The ESS driver resets the mixer whenever Windows starts and only puts back its own settings ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)). Put `essctl /load C:\ESS\MY.INI` in the StartUp group to restore yours at every start of Windows.
+* **The music DAC**: ESS's driver gives the music DAC to the I2S input (mixer 7Fh bit 0) whenever no program has the MIDI synthesizer open. FM from a DOS box or another program then doesn't play, on cards whose MODE pin enables I2S, or plays at the IIS line's volume.
+  * Options > *FM keeps the music DAC*, or `essctl /i2s=off`, stops that: FM has the DAC at all times. `/i2s=on` goes back to ESS's default.
+  * It sets `ESSWaveTableChip` in the driver's registry settings, which ESS's driver reads when Windows starts ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)). essctl also clears 7Fh bit 0 right away.
+  * The Windows mixer then leaves out the IIS line. Until a program first opens the MIDI synthesizer, the FM volume (36h) is the chip's default; a profile loaded at startup sets it.
+  * *Note: only a card with a device on its I2S input (Zoom Video, MPEG audio) needs ESS's default.*
 * **ESFM**: ESFM > *Load patch bank* replaces the FM synthesizer's sounds while Windows runs.
   * Check out the *ESFM patch bank* page! It shows the synthesizer's 18 voices live and marks hanging notes. *Stress test* plays dense music to check for them ([docs/ESFM_MIDI.md](docs/ESFM_MIDI.md)).
 
 ```
 essctl [/load file] [/save file] [/dump file] [/ui] [/q]
-       [/sim] [/base=220] [/cfg=800] [/novxd]
+       [/i2s=off|on] [/sim] [/base=220] [/cfg=800] [/novxd]
 
 /load, /save  apply or save a profile without opening the window
 /dump         write every readable register to a text file
+/i2s=off      FM keeps the music DAC (/i2s=on: ESS's default)
 /ui           open the window after /load, /save or /dump
 /q            no message boxes (problems go to ESSCTL.LOG)
 /sim          simulated ES1869

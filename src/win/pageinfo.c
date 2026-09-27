@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "drvcfg.h"
 #include "essctl.h"
 #include "esshw.h"
 #include "resource.h"
@@ -44,10 +45,17 @@ void info_text(char *buf, unsigned size) {
   u16 port, count;
   u8 v, irq, id[4];
   u16 flags;
+  DWORD wt;
   int err;
 
   winio_path_text(path, sizeof(path));
   sprintf(p, "Access path:\t%s\r\n", path);
+  err = drvcfg_get(DRVCFG_WAVETABLE, &wt);
+  if (err >= 0)
+    sprintf(ADD, "Music DAC:\t%s\r\n",
+            err && wt ? "FM keeps it (ESSWaveTableChip)"
+                      : "I2S has it while no MIDI program is open "
+                        "(ESS's default)");
   if (!vxd.entry) {
     strcat(p, "ES1869.VXD:\tnot loaded\r\n");
   } else {

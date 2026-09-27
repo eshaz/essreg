@@ -102,6 +102,13 @@ tools/wineshot.sh stop
    2. Change a few values, then File > *Load profile*: they come back.
    3. Put `essctl /load C:\ESS\MY.INI` in the StartUp group and restart Windows. The settings are back, and `ESSCTL.LOG` next to essctl.exe says "... settings applied".
 
+5. **The music DAC.**
+   1. Play a MIDI file in the Media Player and stop it. *3-D, mic, MONO, I2S* shows *I2S drives music DAC* on (ESS's driver gives the DAC back to I2S), and *Device information* says "I2S has it while no MIDI program is open".
+   2. Options > *FM keeps the music DAC*. The check box on the page goes off, and *Device information* says "FM keeps it".
+   3. Restart Windows. Play and stop a MIDI file again: *I2S drives music DAC* stays off.
+   4. Start a DOS game that plays FM music in a window. The music plays, and follows *Music DAC (FM) volume* on the *Output mixer* page.
+   5. `essctl /i2s=on` and restart Windows to go back.
+
 ### C. DOS box contention
 
 1. Start a DOS game that uses the card (for example Doom's setup with sound test) in a window. While it plays, press F5 in essctl.

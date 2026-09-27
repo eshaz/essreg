@@ -14,6 +14,7 @@
 #include "essctl.h"
 
 #include <commdlg.h>
+#include "drvcfg.h"
 #include "esshw.h"
 #include "resource.h"
 #include "vxdapi.h"
@@ -159,6 +160,28 @@ static void cmd_expert(HWND dlg) {
   set_status("Expert mode %s", g_expert ? "on" : "off");
 }
 
+// the check mark shows ESSWaveTableChip; grayed without the ES1869's key
+static void fmdac_menu(HWND dlg) {
+  DWORD v;
+  int r = drvcfg_get(DRVCFG_WAVETABLE, &v);
+
+  EnableMenuItem(GetMenu(dlg), IDM_FMDAC,
+                 MF_BYCOMMAND | (r < 0 ? MF_GRAYED : MF_ENABLED));
+  CheckMenuItem(GetMenu(dlg), IDM_FMDAC,
+                MF_BYCOMMAND | (r > 0 && v ? MF_CHECKED : MF_UNCHECKED));
+}
+
+static void cmd_fmdac(HWND dlg) {
+  char report[200];
+  int on = !(GetMenuState(GetMenu(dlg), IDM_FMDAC, MF_BYCOMMAND) & MF_CHECKED);
+
+  if (fmdac_set(on, report, sizeof(report)) == 2)
+    msg_error(dlg, "%s.", report);
+  set_status("%s", report);
+  fmdac_menu(dlg);
+  page_refresh(REFRESH_USER);
+}
+
 static void cmd_about(HWND dlg) {
   char text[400], path[96];
 
@@ -207,6 +230,9 @@ static void on_command(HWND dlg, int id, int code, HWND ctl) {
   case IDM_EXPERT:
     cmd_expert(dlg);
     return;
+  case IDM_FMDAC:
+    cmd_fmdac(dlg);
+    return;
   case IDM_ESFM_LOAD:
     esfm_menu_load(dlg);
     return;
@@ -240,6 +266,7 @@ BOOL CALLBACK __export main_dlg_proc(HWND dlg, UINT msg, WPARAM wp,
       auto_refresh = 0;
       EnableMenuItem(GetMenu(dlg), IDM_AUTOREFRESH, MF_BYCOMMAND | MF_GRAYED);
     }
+    fmdac_menu(dlg);
     SetTimer(dlg, TIMER_ID, TIMER_MS, 0);
     select_page(dlg);
     update_owner_status();

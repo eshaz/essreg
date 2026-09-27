@@ -61,6 +61,10 @@ int profile_save_file(const char *path, char *report, unsigned size);
 int profile_load_file(const char *path, char *report, unsigned size);
 int dump_file(const char *path);
 void tray_notify(int reg);
+// fm_only 1: ES1869.DRV keeps the music DAC for FM from the next Windows
+// start, and 7Fh bit 0 is cleared now; 0: ESS's default again
+// returns 0, 1 done with problems, 2 failed
+int fmdac_set(int fm_only, char *report, unsigned size);
 
 // dlgmain.c
 BOOL CALLBACK __export main_dlg_proc(HWND dlg, UINT msg, WPARAM wp,

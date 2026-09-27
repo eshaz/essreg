@@ -8,6 +8,8 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   ESSREG_WINE=1 OW2=/path/to/open-watcom python3 -m unittest tests.test_wine
 
 - profiles: /save and /load in batch mode against the simulated chip
+- /i2s=off and /i2s=on: ESSWaveTableChip in the ES1869's software key,
+  and mixer 7Fh bit 0 cleared
 - ESFM: tests/host/drvhold.c loads and enables the real driver/ESFM.DRV,
   then starts "essctl /load" with a profile naming a bank larger than the
   driver's own, and dumps the bank the driver holds before and after
@@ -104,6 +106,11 @@ class WineTest(unittest.TestCase):
     def path(self, name):
         return os.path.join(self.link, name)
 
+    def reg(self, *args):
+        return subprocess.run(["wine", "reg"] + list(args), env=self.env,
+                              cwd=self.link, timeout=120,
+                              capture_output=True).stdout.decode("latin-1")
+
     def test_profile_round_trip(self):
         self.wine("essctl.exe", "/sim", "/save", "a.ini", "/q")
         text = read(self.path("a.ini")).decode()
@@ -119,6 +126,35 @@ class WineTest(unittest.TestCase):
         self.assertIn("rec.source=Line", back)
         log = read(self.path("ESSCTL.LOG")).decode()
         self.assertIn("56 settings applied", log)
+
+    def test_i2s_off(self):
+        key = r"HKLM\System\CurrentControlSet\Services\Class\Media\0003"
+        # without the ES1869's key nothing changes, and the log says why
+        self.wine("essctl.exe", "/sim", "/i2s=off", "/q")
+        log = read(self.path("ESSCTL.LOG")).decode()
+        self.assertIn("/i2s=off: the ES1869's driver settings aren't in the "
+                      "registry", log)
+        self.reg("add", key, "/v", "Driver", "/d", "es1869.vxd", "/f")
+        self.reg("add", key + r"\Config", "/v", "Disable Warning", "/t",
+                 "REG_BINARY", "/d", "ff", "/f")
+        # I2S has the music DAC, then /i2s=off takes it back for FM
+        with open(self.path("i2s.ini"), "w", newline="\r\n") as f:
+            f.write("[Fields]\nfx.i2s.enable=on\n")
+        self.wine("essctl.exe", "/sim", "/load", "i2s.ini", "/save",
+                  "i2s1.ini", "/q")
+        self.assertIn("fx.i2s.enable=on", read(self.path("i2s1.ini")).decode())
+        self.wine("essctl.exe", "/sim", "/load", "i2s.ini", "/i2s=off",
+                  "/save", "i2s2.ini", "/q")
+        self.assertIn("fx.i2s.enable=off",
+                      read(self.path("i2s2.ini")).decode())
+        values = self.reg("query", key + r"\Config")
+        self.assertIn("ESSWaveTableChip    REG_BINARY    01000000", values)
+        self.wine("essctl.exe", "/sim", "/i2s=on", "/q")
+        values = self.reg("query", key + r"\Config")
+        self.assertIn("ESSWaveTableChip    REG_BINARY    00000000", values)
+        log = read(self.path("ESSCTL.LOG")).decode()
+        self.assertIn("/i2s=off: FM has the music DAC now", log)
+        self.assertIn("/i2s=on: ESS's driver gives the music DAC to I2S", log)
 
     def test_esfm_live_load(self):
         bank = bytearray(read(os.path.join(ROOT, "esfm_patch_banks",

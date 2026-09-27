@@ -396,7 +396,7 @@ FLD(F_MUSIC_DREC, R_MX7F, 4, 1, K_BOOL, T_SAFE, FF_PERSIST, E_NONE, PG_RECORD, F
 FLD(F_I2S_DATAACT, R_MX7F, 3, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_EFFECTS, FMT_NONE, "fx.i2s.data_seen", "I2S data activity", "Latched high if IISDATA has been high at least once since it was last cleared by software (DS p.65)")
 FLD(F_I2S_CLKACT, R_MX7F, 2, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_EFFECTS, FMT_NONE, "fx.i2s.clock_seen", "I2S clock activity", "Latched high if IISCLK and IISLR have been high at the same time since it was last cleared by software (DS p.66)")
 FLD(F_MODE_PIN, R_MX7F, 1, 1, K_RO, T_RO, 0, E_NONE, PG_EFFECTS, FMT_NONE, "fx.i2s.mode_pin", "MODE pin", "Read-only state of the MODE input pin, which must be high for the I2S serial interface to be enabled (DS p.66)")
-FLD(F_I2S_EN, R_MX7F, 0, 1, K_BOOL, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.i2s.enable", "I2S drives music DAC", "1 = the I2S serial interface takes control of the music DAC; 0 = the FM synthesizer or ES689/ES69x interface uses it (DS p.66)")
+FLD(F_I2S_EN, R_MX7F, 0, 1, K_BOOL, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.i2s.enable", "I2S drives music DAC", "1 = the I2S serial interface takes control of the music DAC; 0 = the FM synthesizer or ES689/ES69x interface uses it. ESS's driver sets it while no program has the MIDI synthesizer open, unless Options > FM keeps the music DAC is on (DS p.66)")
 
 /* ======================= controller registers (BK_CTRL) ======================= */
 /* written with DSP commands Axh/Bxh and read with C0h after C6h */

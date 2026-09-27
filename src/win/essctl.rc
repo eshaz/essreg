@@ -35,6 +35,7 @@ BEGIN
     POPUP "&Options"
     BEGIN
         MENUITEM "&Expert mode", IDM_EXPERT
+        MENUITEM "&FM keeps the music DAC", IDM_FMDAC
     END
     POPUP "E&SFM"
     BEGIN

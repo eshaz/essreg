@@ -8,6 +8,8 @@
  *   /load file   apply a profile saved with File > Save profile
  *   /save file   save the current settings as a profile
  *   /dump file   write every readable register to a text file
+ *   /i2s=off     ESS's driver never gives the music DAC to the I2S
+ *                input, so FM keeps it (/i2s=on: ESS's default)
  *   /ui          open the window after /load, /save or /dump
  *   /q           no message boxes, problems only go to ESSCTL.LOG
  *   /sim         use a simulated ES1869 (no hardware access)
@@ -35,6 +37,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "drvcfg.h"
 #include "esfmlive.h"
 #include "ess3dtr.h"
 #include "essctl.h"
@@ -331,12 +334,49 @@ int dump_file(const char *path) {
   return 0;
 }
 
+// --- the music DAC ----------------------------------------------------------
+
+// ESSWaveTableChip, which ES1869.DRV reads when Windows starts
+int fmdac_set(int fm_only, char *report, unsigned size) {
+  char text[200];
+  int err, rc = 0;
+
+  if (drvcfg_set(DRVCFG_WAVETABLE, fm_only ? 1 : 0)) {
+    strcpy(text, "the ES1869's driver settings aren't in the registry");
+    rc = 2;
+  } else if (!fm_only) {
+    strcpy(text, "ESS's driver gives the music DAC to I2S again from the "
+                 "next Windows start");
+  } else {
+    // FM has the DAC now too, until a MIDI program closes before the restart
+    err = winio_begin();
+    if (err == 0) {
+      err = ess_field_write(F_I2S_EN, 0, 0);
+      winio_end();
+    }
+    if (err < 0) {
+      sprintf(text,
+              "FM keeps the music DAC from the next Windows start "
+              "(clearing 7Fh bit 0 now failed: %s)",
+              ess_strerror(err));
+      rc = 1;
+    } else {
+      strcpy(text, "FM has the music DAC now, and ESS's driver keeps it "
+                   "for FM from the next Windows start");
+    }
+  }
+  strncpy(report, text, size - 1);
+  report[size - 1] = 0;
+  return rc;
+}
+
 // --- command line -----------------------------------------------------------
 
 struct cmdline {
   struct winio_opts io;
   char load[128], save[128], dump[128];
   int ui, bad;
+  int i2s; // /i2s=: 1 off (FM keeps the music DAC), 2 on
 };
 
 // next word of the command line (quoted text is one word), 0 at the end
@@ -392,6 +432,10 @@ static void parse_cmdline(LPSTR p, struct cmdline *c) {
       c->io.audio_base = (u16)strtoul(arg, 0, 16);
     else if (!strcmp(word + 1, "cfg") && arg)
       c->io.config_base = (u16)strtoul(arg, 0, 16);
+    else if (!strcmp(word + 1, "i2s") && arg && !stricmp(arg, "off"))
+      c->i2s = 1;
+    else if (!strcmp(word + 1, "i2s") && arg && !stricmp(arg, "on"))
+      c->i2s = 2;
     else
       c->bad = 1;
     if (dest) {
@@ -423,6 +467,12 @@ static int run_batch(const struct cmdline *c) {
   if (c->load[0]) {
     r = profile_load_file(c->load, report, sizeof(report));
     sprintf(line, "/load %.120s: %s", c->load, report);
+    batch_result(line, r);
+    rc = r > rc ? r : rc;
+  }
+  if (c->i2s) {
+    r = fmdac_set(c->i2s == 1, report, sizeof(report));
+    sprintf(line, "/i2s=%s: %s", c->i2s == 1 ? "off" : "on", report);
     batch_result(line, r);
     rc = r > rc ? r : rc;
   }
@@ -471,13 +521,13 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   if (c.bad) {
     MessageBox(0,
                "essctl [/load file] [/save file] [/dump file] [/ui] [/q]\n"
-               "       [/sim] [/base=220] [/cfg=800] [/novxd]",
+               "       [/i2s=off|on] [/sim] [/base=220] [/cfg=800] [/novxd]",
                "ES1869 Control", MB_OK | MB_ICONINFORMATION);
     return 3;
   }
 
   err = winio_init(&c.io);
-  if (c.load[0] || c.save[0] || c.dump[0]) {
+  if (c.load[0] || c.save[0] || c.dump[0] || c.i2s) {
     rc = run_batch(&c);
     if (!c.ui)
       return rc;

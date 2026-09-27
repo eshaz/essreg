@@ -587,7 +587,7 @@ DS p.65
 | 3 | I2S data activity | `fx.i2s.data_seen` | bit | caution |  | Latched high if IISDATA has been high at least once since it was last cleared by software (DS p.65) |
 | 2 | I2S clock activity | `fx.i2s.clock_seen` | bit | caution |  | Latched high if IISCLK and IISLR have been high at the same time since it was last cleared by software (DS p.66) |
 | 1 | MODE pin | `fx.i2s.mode_pin` | status | read-only |  | Read-only state of the MODE input pin, which must be high for the I2S serial interface to be enabled (DS p.66) |
-| 0 | I2S drives music DAC | `fx.i2s.enable` | bit | safe | profile, driver sets it | 1 = the I2S serial interface takes control of the music DAC; 0 = the FM synthesizer or ES689/ES69x interface uses it (DS p.66) |
+| 0 | I2S drives music DAC | `fx.i2s.enable` | bit | safe | profile, driver sets it | 1 = the I2S serial interface takes control of the music DAC; 0 = the FM synthesizer or ES689/ES69x interface uses it. ESS's driver sets it while no program has the MIDI synthesizer open, unless Options > FM keeps the music DAC is on (DS p.66) |
 
 ## Controller registers
 

@@ -51,6 +51,9 @@ w_pageesfm.obj : src\win\pageesfm.c .AUTODEPEND
 w_winio.obj : src\win\winio.c .AUTODEPEND
  *wcc src\win\winio.c $(WIN_CFLAGS) -fo=w_winio.obj
 
+w_drvcfg.obj : src\win\drvcfg.c .AUTODEPEND
+ *wcc src\win\drvcfg.c $(WIN_CFLAGS) -fo=w_drvcfg.obj
+
 w_esfmlive.obj : src\win\esfmlive.c .AUTODEPEND
  *wcc src\win\esfmlive.c $(WIN_CFLAGS) -fo=w_esfmlive.obj
 
@@ -63,8 +66,8 @@ w_vxdcall.obj : src\win\vxdcall.asm
 essctl.res : src\win\essctl.rc src\win\resource.h src\win\essctl.ico
  *wrc -q -r -bt=windows -i="$(%watcom)/h;$(%watcom)/h/win;src\win" src\win\essctl.rc -fo=essctl.res
 
-essctl.exe : w_essctl.obj w_dlgmain.obj w_page.obj w_pagefld.obj w_pageraw.obj w_pageinfo.obj w_pageesfm.obj w_winio.obj w_esfmlive.obj w_esfmtest.obj w_esshw.obj w_esscat.obj w_essio.obj w_profile.obj w_simhw.obj w_vxdapi.obj w_esfmbank.obj w_vxdcall.obj essctl.res nestamp.exe .AUTODEPEND
- @%write essctl.lk1 FIL w_essctl.obj,w_dlgmain.obj,w_page.obj,w_pagefld.obj,w_pageraw.obj,w_pageinfo.obj,w_pageesfm.obj,w_winio.obj
+essctl.exe : w_essctl.obj w_dlgmain.obj w_page.obj w_pagefld.obj w_pageraw.obj w_pageinfo.obj w_pageesfm.obj w_winio.obj w_drvcfg.obj w_esfmlive.obj w_esfmtest.obj w_esshw.obj w_esscat.obj w_essio.obj w_profile.obj w_simhw.obj w_vxdapi.obj w_esfmbank.obj w_vxdcall.obj essctl.res nestamp.exe .AUTODEPEND
+ @%write essctl.lk1 FIL w_essctl.obj,w_dlgmain.obj,w_page.obj,w_pagefld.obj,w_pageraw.obj,w_pageinfo.obj,w_pageesfm.obj,w_winio.obj,w_drvcfg.obj
  @%append essctl.lk1 FIL w_esfmlive.obj,w_esfmtest.obj,w_esshw.obj,w_esscat.obj,w_essio.obj,w_profile.obj,w_simhw.obj,w_vxdapi.obj,w_esfmbank.obj,w_vxdcall.obj
  @%append essctl.lk1 LIBR commdlg.lib,toolhelp.lib,mmsystem.lib
  @%append essctl.lk1 SEGMENT CLASS 'CODE' MOVEABLE DISCARDABLE
