@@ -1,7 +1,7 @@
 # (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 #
 # Licensed under GPL Version 3.0
-"""Run essctl.exe as a 16-bit Windows program under Wine.
+"""Run essctl.exe and ess3d.exe as 16-bit Windows programs under Wine.
 
 Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
 
@@ -16,6 +16,11 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
 - ESFM bank file: the fixed build loads the bank named in SYSTEM.INI
   [ESFM.DRV] Bank= when a program opens the device, and "essctl /load" of
   a profile with a bank names it there
+- ess3d: commands against the simulated chip, bad input and no card, read
+  from its /log= file, since Wine's winevdm always exits with 0 and drops
+  the program's exit code
+- ess3d's display: a second ess3d hands its setting to the display of the
+  first and exits, and the first goes after the second one's time
 
 Win16 wants 8.3 path names, so the work directory is reached through a
 short symbolic link in /tmp.
@@ -58,6 +63,7 @@ class WineTest(unittest.TestCase):
         subprocess.run([os.path.join(ROOT, "tools", "ow2build.sh"), OW2],
                        check=True, capture_output=True)
         shutil.copy(os.path.join(ROOT, "out", "ow2", "essctl.exe"), work)
+        shutil.copy(os.path.join(ROOT, "out", "ow2", "ess3d.exe"), work)
         shutil.copy(os.path.join(ROOT, "driver", "ESFM.DRV"), work)
         env = dict(os.environ, WATCOM=OW2, INCLUDE=os.path.join(OW2, "h"),
                    PATH=os.path.join(OW2, "binl64") + ":" + os.environ["PATH"])
@@ -215,6 +221,65 @@ class WineTest(unittest.TestCase):
         self.assertIn("Fixed driver: 0 messages queued", text)
         self.assertIn("Bank file: none, the driver's own bank plays", text)
         self.assertEqual(text.count("  free"), 18)
+
+    def ess3d(self, *args, log="E3.LOG"):
+        """Run ess3d.exe, returns the lines it added to its log."""
+        path = self.path(log)
+        old = len(read(path).splitlines()) if os.path.exists(path) else 0
+        self.wine("ess3d.exe", *args)
+        lines = read(path).decode().splitlines() if os.path.exists(path) \
+            else []
+        # without the time stamps
+        return [line.split(" ", 2)[2] for line in lines[old:]]
+
+    def test_ess3d_commands(self):
+        def run(*args):
+            return self.ess3d("/sim", "/q", "/log=E3.LOG", *args)
+
+        self.assertEqual(run("on", "level", "40"), ["3-D on, level 40 of 63"])
+        # in order, each run starts from the simulated chip's reset values
+        self.assertEqual(run("ON", "level", "40", "level", "+30", "down", "8",
+                             "toggle"), ["3-D off, level 55 of 63"])
+        self.assertEqual(run("toggle", "level", "50%", "up"),
+                         ["3-D on, level 36 of 63"])
+        self.assertEqual(run("on", "hold", "down", "2"),
+                         ["3-D on, held in reset, level 0 of 63"])
+        self.assertEqual(run("hold", "on", "reset", "show"),
+                         ["3-D on, level 0 of 63"])
+        self.assertEqual(run("on", "bogus"), ["unknown command: bogus"])
+        self.assertEqual(run("level", "64"),
+                         ["level 64: the level is 0 to 63, or 0% to 100%"])
+        # Wine has no ES1869, and /q without /log= writes ESS3D.LOG
+        self.assertEqual(self.ess3d("/q", "toggle", log="ESS3D.LOG"),
+                         ["No ES1869 answered at 220h: use /base=, or /sim "
+                          "to try ess3d without the card"])
+
+    def test_ess3d_display(self):
+        def start(*args):
+            return subprocess.Popen(["wine", "ess3d.exe", "/sim",
+                                     "/log=E3D.LOG"] + list(args),
+                                    env=self.env, cwd=self.link,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+
+        first = start("/t=30000", "on")
+        # it writes the log, then shows the display
+        deadline = time.time() + 60
+        while not os.path.exists(self.path("E3D.LOG")):
+            self.assertLess(time.time(), deadline)
+            time.sleep(0.1)
+        time.sleep(1)
+        t = time.time()
+        start("/t=5000", "level", "10").wait(timeout=60)
+        second = time.time() - t
+        first.wait(timeout=60)
+        first_after = time.time() - t
+        # the second one showed no display of its own, and the first one's
+        # went 5 s after the second one's setting instead of after 30 s
+        self.assertLess(second, 5)
+        self.assertGreater(first_after, 4.5)
+        self.assertLess(first_after, 15)
+        self.assertEqual(len(read(self.path("E3D.LOG")).splitlines()), 2)
 
 
 if __name__ == "__main__":

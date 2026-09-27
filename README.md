@@ -31,6 +31,56 @@ essctl [/load file] [/save file] [/dump file] [/ui] [/q]
 /novxd        direct I/O even with the register interface
 ```
 
+## [`ess3d.exe`](build)
+* Switches the ES1869's 3-D effect (Spatializer) from the command line, shows the new setting for a moment and exits. Made for keys: a shortcut's *Shortcut key*, or keyboard software that runs a command.
+* Reaches the card like essctl: through the register interface of the rebuilt `ES1869.VXD`, directly with the stock driver, or `/sim`.
+* The new setting shows in a small box at the bottom of the screen for 1.5 seconds, on top of everything. It never takes the focus from the game or program in front.
+  * Press the key again while the box is up and the box shows the new setting, no second box.
+  * A click closes it.
+* Commands run in order, so `ess3d on level 40` switches 3-D on, then sets the level.
+
+```
+ess3d [options] command [command...]
+
+on                3-D on (also releases it from reset)
+off               3-D off (bypassed)
+toggle            off if it's on, on if it's off or held in reset
+level N           level 0 to 63, or N% of 63
+level +N, -N      up or down N steps, stopping at 0 and 63
+up [N], down [N]  up or down N steps, 4 if N is left out
+reset             reset the effect, keeping on/off and the level
+hold              hold the effect in reset (on or reset releases it)
+show              change nothing, show the setting
+
+/q                no box and no message boxes (problems go to ESS3D.LOG,
+                  or to the /log= file)
+/t=1500           how long the box stays, in ms
+/log=file         append each result to a file, problems too
+/sim, /base=220, /cfg=800, /novxd   as for essctl
+
+Examples:
+ess3d toggle
+ess3d up 8
+ess3d on level 50%
+```
+
+* A bad command, or no ES1869, shows a message box (unless `/q`).
+* With the stock driver, ess3d can't reach the card while a DOS program has the sound device. It says so, and nothing changes. The rebuilt `ES1869.VXD` has no such limit.
+* Exit codes: 0 done, 1 the chip returned other values than were written, 2 failed, 3 bad command line.
+
+### Putting ess3d on a key
+* **A shortcut's Shortcut key**, in Windows 98:
+  1. Copy `build\ess3d.exe` to `C:\ESSREG`.
+  2. Right-click the desktop > *New* > *Shortcut*. Command line: `C:\ESSREG\ESS3D.EXE toggle`. Name it `3-D toggle`.
+  3. Right-click the shortcut > *Properties*, click in *Shortcut key* and press a key. Windows makes it Ctrl+Alt+ that key.
+  4. One shortcut per command, for example `ess3d up` and `ess3d down` on two more keys.
+  * *Note: shortcut keys only work for shortcuts on the desktop or in the Start menu.*
+* **Keyboard software** with keys that run a program: give it the same command line.
+* The 3-D controls of the Windows mixer (ESS's driver has *Spatializer Enable* and *3D Effect*, see [docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#23-mixer-state)) write the same registers. The last write wins.
+  * The mixer doesn't see ess3d's changes: its controls keep their own values.
+  * ESS's driver writes its own 3-D setting back each time it's enabled: when Windows starts and when it resumes from standby.
+* *Note: full-screen DirectX games draw over the box, so it may not show there. The setting still changes.*
+
 ## [`ES1869.VXD`](build) with a register interface
 * The Windows 95 driver of the ES1869, rebuilt from source in [`src/vxd`](src/vxd), with a register interface for programs added ([docs/VXD_API.md](docs/VXD_API.md)).
 * Otherwise it works exactly like the ESS driver. `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte for byte.
@@ -208,14 +258,14 @@ More checks are in [docs/TESTING.md](docs/TESTING.md) (G, G2 and G3).
 
 ### Building
 * Clone this repo and copy it your build environment.
-* Run [`build.bat`](build.bat) to build the executables
+* Run [`build.bat`](build.bat) to build the executables: `essreg.exe`, `1869opl3.com`, `esfmpat.exe`, `essctl.exe` and `ess3d.exe`.
 * Run `python3 tools/build_vxd.py` to build `build/ES1869.VXD`, and `python3 tools/build_esfm.py` to build `build/ESFM.DRV`.
 * On Linux, `tools/ow2build.sh <open-watcom-v2 directory>` builds the programs with Open Watcom v2 into `out/ow2/`.
   * The programs in [`build`](build), other than `1869opl3.com`, were built this way. `build.bat` builds the same programs with Watcom C 11.0.
 
 ### Testing
 * This code has been tested using a real ES1869 soundcard on I/O port 0x220. It probably won't work with any other ESS sound chips.
-* For essctl and the rebuilt drivers, [docs/TESTING.md](docs/TESTING.md) has a checklist for real hardware.
+* For essctl, ess3d and the rebuilt drivers, [docs/TESTING.md](docs/TESTING.md) has a checklist for real hardware.
 * `python3 tests/run_tests.py` runs the automated tests against a simulated ES1869.
 
 ## License

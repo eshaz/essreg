@@ -3,10 +3,11 @@
 # Licensed under GPL Version 3.0
 """Build every program with Open Watcom v2 (tools/ow2build.sh).
 
-Then check the 16-bit Windows program essctl.exe: expected Windows version
-4.0 (3-D look on Windows 95), a single data segment (so "essctl /load" can
-run while the window is open), discardable code, the imports and the
-resources.
+Then check the 16-bit Windows programs essctl.exe and ess3d.exe: expected
+Windows version 4.0 (3-D look on Windows 95), a single data segment, one
+for each instance (so "essctl /load" can run while the window is open, and
+a second ess3d while the first one's display is up), discardable code, the
+imports and the resources.
 
 Needs Open Watcom v2 in $OW2.
 """
@@ -35,17 +36,16 @@ class OW2BuildTest(unittest.TestCase):
             raise AssertionError("ow2build.sh failed:\n" + res.stdout[-3000:] +
                                  res.stderr[-3000:])
         cls.out = os.path.join(ROOT, "out", "ow2")
-        with open(os.path.join(cls.out, "essctl.exe"), "rb") as f:
-            cls.ne = NEFile(f.read())
+        cls.ne = cls.load("essctl.exe")
+        cls.ne3d = cls.load("ess3d.exe")
 
-    def test_all_programs(self):
-        for name in ("essreg.exe", "esfmpat.exe", "1869opl3.com",
-                     "essctl.exe", "nestamp.exe"):
-            self.assertTrue(os.path.exists(os.path.join(self.out, name)), name)
+    @classmethod
+    def load(cls, name):
+        with open(os.path.join(cls.out, name), "rb") as f:
+            return NEFile(f.read())
 
-    def test_windows_program(self):
-        ne = self.ne
-        self.assertEqual(ne.module_name, "ESSCTL")
+    def check_windows_program(self, ne, module, imports, exports):
+        self.assertEqual(ne.module_name, module)
         self.assertEqual(ne.target_os, 2)
         self.assertEqual(ne.expected_version, (4, 0))
         self.assertEqual(ne.flags & 3, 2)  # MULTIPLEDATA: one per instance
@@ -56,21 +56,45 @@ class OW2BuildTest(unittest.TestCase):
         for s in ne.segments:
             if not s.flags & SEG_DATA:
                 self.assertTrue(s.flags & SEG_DISCARDABLE, s)
-        for mod in ("KERNEL", "USER", "GDI", "COMMDLG", "TOOLHELP",
-                    "MMSYSTEM"):
+        for mod in imports:
             self.assertIn(mod, ne.modules)
         exported = {name for name, _ in ne.resident[1:]}
-        self.assertEqual(exported, {"MAIN_DLG_PROC", "BIT_DLG_PROC"})
+        self.assertEqual(exported, exports)
+
+    @staticmethod
+    def resource_kinds(ne):
+        kinds = {}
+        for r in ne.resources:
+            kinds.setdefault(r.type, set()).add(r.id)
+        return kinds
+
+    def test_all_programs(self):
+        for name in ("essreg.exe", "esfmpat.exe", "1869opl3.com",
+                     "essctl.exe", "ess3d.exe", "nestamp.exe"):
+            self.assertTrue(os.path.exists(os.path.join(self.out, name)), name)
+
+    def test_windows_program(self):
+        self.check_windows_program(
+            self.ne, "ESSCTL",
+            ("KERNEL", "USER", "GDI", "COMMDLG", "TOOLHELP", "MMSYSTEM"),
+            {"MAIN_DLG_PROC", "BIT_DLG_PROC"})
 
     def test_resources(self):
-        kinds = {}
-        for r in self.ne.resources:
-            kinds.setdefault(r.type, set()).add(r.id)
+        kinds = self.resource_kinds(self.ne)
         self.assertIn("ESSCTL", kinds[14])             # icon group
         self.assertIn("ESSCTL", kinds[4])              # menu
         self.assertEqual(kinds[5], {"ESSCTL", "BITEDIT"})  # dialogs
         self.assertIn("ESSCTL", kinds[9])              # accelerators
         self.assertIn(1, kinds[16])                    # version
+
+    def test_ess3d(self):
+        # the display's window procedure is the only export
+        self.check_windows_program(self.ne3d, "ESS3D",
+                                   ("KERNEL", "USER", "GDI"), {"OSD_PROC"})
+        kinds = self.resource_kinds(self.ne3d)
+        self.assertEqual(set(kinds), {3, 14, 16})      # icons, version
+        self.assertIn("ESS3D", kinds[14])
+        self.assertIn(1, kinds[16])
 
 
 if __name__ == "__main__":

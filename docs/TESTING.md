@@ -20,12 +20,13 @@ python3 tests/run_tests.py
   * the VxD API wrappers (`t_vxdapi`)
   * the register catalog (`t_esscat`)
   * profiles (`t_profile`)
+  * ess3d's command line and 3-D register changes (`t_ess3d`)
   * patch banks (`t_esfm`)
   * a port trace proving that the refactored essreg talks to the chip exactly like the original did (`t_trace`)
 
 **With Open Watcom v2** (`OW2=/path/to/open-watcom`), the tests also:
 * run essctl's 16-bit VxD call thunk in a CPU emulator
-* build every program and check `essctl.exe`'s NE header: Windows 4.0, one data segment, discardable code, imports, resources (`test_ow2build`)
+* build every program and check the NE headers of `essctl.exe` and `ess3d.exe`: Windows 4.0, one data segment, discardable code, imports, exports, resources (`test_ow2build`)
 
 To compile everything with Open Watcom on Linux:
 
@@ -33,11 +34,14 @@ To compile everything with Open Watcom on Linux:
 tools/ow2build.sh /path/to/open-watcom     # binaries in out/ow2/
 ```
 
-**Under Wine.** `tests/test_wine.py` runs `essctl.exe` as a 16-bit Windows program (`ESSREG_WINE=1`, needs 32-bit Wine and Xvfb):
+**Under Wine.** `tests/test_wine.py` runs `essctl.exe` and `ess3d.exe` as 16-bit Windows programs (`ESSREG_WINE=1`, needs 32-bit Wine and Xvfb):
 * profile save/load against the simulated chip
 * the ESFM live load against the real `ESFM.DRV`
 * the ESFM voice table of `essctl /dump`, with ESS's driver and the fixed one
 * the fixed `ESFM.DRV` loading the bank file named in `SYSTEM.INI` when the device is opened, and `essctl /load` naming it there
+* ess3d's commands against the simulated chip, a bad command and no card, read from its `/log=` file
+  * *Note: Wine drops the exit code of a 16-bit Windows program (its process always exits with 0), so the log is what the test checks.*
+* ess3d's box: a second ess3d hands its setting to the box of the first one and exits
 
 **Screenshots.** `tools/wineshot.sh` runs essctl under Wine on a virtual screen, to click through it and see the pages:
 
@@ -45,6 +49,14 @@ tools/ow2build.sh /path/to/open-watcom     # binaries in out/ow2/
 tools/wineshot.sh start out/ow2 essctl.exe /sim
 tools/wineshot.sh click 60 216          # ESFM patch bank
 tools/wineshot.sh shot esfm.png
+tools/wineshot.sh stop
+```
+
+It shows ess3d's box too, kept up with a long `/t=`:
+
+```
+tools/wineshot.sh start out/ow2 ess3d.exe /sim /t=20000 on level 40
+tools/wineshot.sh shot ess3d.png
 tools/wineshot.sh stop
 ```
 
@@ -153,11 +165,28 @@ With `build\ESFM.DRV` installed. See [ESFM_GM.md](ESFM_GM.md).
 2. The same file with ESS's `ESFM.DRV`: no vibrato, the G4 stays in the middle, no quarter tones, C4 three times, the chord doesn't get quieter, and the last C4 stays sharp to the end.
 3. Play GM MIDI files and games. They sound as before, with vibrato where the music uses the modulation wheel or channel pressure.
 
-### H. Expert mode (last)
+### H. ess3d
+
+With the stock driver, and again with the extended driver (E) if it's installed. Copy `build\ess3d.exe` to `C:\ESSREG`.
+
+1. Play music, and open essctl on *3-D, mic, MONO, I2S*. From Start > *Run*:
+   * `C:\ESSREG\ess3d.exe on level 40`: a box at the bottom of the screen says "3-D on, level 40 of 63" for 1.5 s, and the music changes. F5 in essctl shows *3-D effect* on and *3-D level* 40.
+   * `ess3d off`, `ess3d toggle`, `ess3d up`, `ess3d down 8`, `ess3d level 50%`: the box shows each new setting, and essctl agrees after F5.
+   * `ess3d reset`: the same setting, and the music keeps its 3-D sound.
+   * `ess3d hold`: the box says "held in reset". Is the music silent, or does it play without 3-D? Note which. `ess3d on` brings the effect back.
+2. Make a desktop shortcut to `C:\ESSREG\ESS3D.EXE toggle` with a Shortcut key, as in the [README](../README.md#putting-ess3d-on-a-key). With Notepad in front, type a few letters and press the key:
+   * the box shows, Notepad's title bar stays active and typing still goes to Notepad
+   * press the key again while the box is up: the same box shows the new setting. No second box, no taskbar button, and Notepad keeps the focus.
+3. The same in a game, in a window and full screen: the game keeps the focus and its sound. The box may not show over a full-screen game.
+4. With the stock driver, play a DOS game with sound in a window and press the key: a message says the audio device is in use by another program, and the game's sound goes on. With the extended driver, the key works while the game plays.
+5. `ess3d bogus` shows the usage in a message box. `ess3d /q bogus` shows nothing, and `ESS3D.LOG` next to ess3d.exe says "unknown command: bogus".
+6. Change 3-D in the Windows mixer, then `ess3d show`: it shows the mixer's setting. Restart Windows and `ess3d show`: the driver's own setting is back.
+
+### I. Expert mode (last)
 
 Only with nothing playing:
 1. Options > *Expert mode*.
 2. *Status & interrupts* > *DSP software reset*. The next WAV playback still works, because ES1869.DRV reprograms the DSP.
 3. In the raw register editor, write the value a register already has. Nothing should change.
 
-Report the essctl version, the access path in the title bar, and `ESSCTL.LOG` with any problem.
+Report the essctl version, the access path in the title bar, and `ESSCTL.LOG` (or `ESS3D.LOG`) with any problem.
