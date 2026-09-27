@@ -19,6 +19,9 @@ The fixed build must pass every case the stock build fails.
 SustainTest: a sustain pedal a song leaves down holds notes forever on FM.
 The fixed build lets it up at a program change and at a GM, GS or XG reset.
 
+GMTest: what General MIDI asks for that ESS's code doesn't do, in the fixed
+build (src/esfm/esfmgm.asm).
+
 BankFileTest: the fixed build plays the bank file named in SYSTEM.INI
 [ESFM.DRV] Bank=, read when a program opens the device if its date or time
 changed (src/esfm/esfmfile.asm).
@@ -35,6 +38,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import build_esfm  # noqa: E402
+import gmcheck  # noqa: E402
 from retools.ne import NEFile  # noqa: E402
 
 try:
@@ -199,6 +203,18 @@ class StuckNoteTest(unittest.TestCase):
                                         injects=[inj]), 1)
         self.assertEqual(emu.chip.splits, [])
         self.assertUnlocked(emu)
+
+    def test_running_status_note_offs_in_long_data(self):
+        for which, hung in (("stock", [0x40]), ("fixed", [])):
+            with self.subTest(which):
+                emu = ESFMEmu(builds()[which])
+                emu.open()
+                emu.data(0x7F3C90)
+                emu.data(0x7F4090)
+                # ESS's parser turns the second note off into note 7Ch
+                emu.longdata(bytes([0x80, 0x3C, 0x00, 0x40, 0x00]))
+                self.assertEqual(sorted({n for f, c, n in emu.voices()
+                                         if f & 1}), hung)
 
     def sweep(self, which, step):
         """Send a note off from an interrupt at every step-th instruction
@@ -415,6 +431,336 @@ class SustainTest(unittest.TestCase):
     def test_status_block_version(self):
         # 3 was an earlier build's pedal times
         self.assertEqual(self.emu("fixed").fix_state()["version"], 2)
+
+
+# General MIDI (esfmgm.asm): device fields, esfmdev.inc
+DEV_PROGRAM, DEV_RPN_DATA, DEV_CHAN_FLAGS, DEV_BEND = 0x20, 0x30, 0x40, 0x50
+DEV_CHAN_PAN, DEV_CHAN_VOLUME, DEV_CHAN_EXPR = 0x2D2, 0x2E2, 0x2F2
+DEV_GM_MOD, DEV_GM_PRESS, DEV_GM_RPN = 0x311, 0x321, 0x341
+DEV_GM_CENTS, DEV_GM_FINE, DEV_GM_COARSE, DEV_GM_MASTER = (0x361, 0x371,
+                                                           0x391, 0x3A1)
+
+
+def cc(channel, number, value):
+    return 0xB0 | channel | number << 8 | value << 16
+
+
+def rpn(channel, number, msb, lsb=None):
+    """Controllers selecting RPN number, then its data entry."""
+    out = [cc(channel, 101, number >> 7), cc(channel, 100, number & 0x7F),
+           cc(channel, 6, msb)]
+    if lsb is not None:
+        out.append(cc(channel, 38, lsb))
+    return out
+
+
+def master_volume(value):
+    return bytes([0xF0, 0x7F, 0x7F, 0x04, 0x01, value & 0x7F, value >> 7,
+                  0xF7])
+
+
+def pitches(emu, voices):
+    """F-number and block of every operator of the voices."""
+    return [(r[4] | (r[5] & 3) << 8, (r[5] >> 2) & 7)
+            for v in voices for r in emu.op_regs(v)]
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs the unicorn module")
+class GMTest(unittest.TestCase):
+    """What General MIDI asks for beyond ESS's code: modulation, channel
+    pressure, RPN 1 and 2, bend range cents, controller 121 as in RP-015,
+    GM resets to the defaults and master volume."""
+
+    def emu(self, which="fixed", msgs=()):
+        e = ESFMEmu(builds()[which])
+        e.open()
+        for m in msgs:
+            e.data(m)
+        return e
+
+    def play(self, emu, channel=0, note=60):
+        emu.data(0x7F0090 | channel | note << 8)
+        voices = emu.note_voices(channel, note)
+        self.assertTrue(voices)
+        return voices
+
+    def regs(self, emu, voices, reg):
+        return [r[reg] for v in voices for r in emu.op_regs(v)]
+
+    def assertPitch(self, msgs, ref_msgs, channel=0, note=60, ref_note=60,
+                    ref_channel=None):
+        """The note after msgs sounds at the pitch of ref_note after
+        ref_msgs, and not at the pitch it has without msgs."""
+        emu = self.emu(msgs=msgs)
+        got = pitches(emu, self.play(emu, channel, note))
+        ref = self.emu(msgs=ref_msgs)
+        ref_ch = channel if ref_channel is None else ref_channel
+        want = pitches(ref, self.play(ref, ref_ch, ref_note))
+        self.assertEqual(got, want)
+        plain = self.emu()
+        self.assertNotEqual(got, pitches(plain, self.play(plain, channel,
+                                                          note)))
+        return emu
+
+    # -- modulation and channel pressure: the chip's vibrato --------------
+
+    def test_modulation_vibrato(self):
+        emu = self.emu()
+        voices = self.play(emu)
+        reg0, reg6 = self.regs(emu, voices, 0), self.regs(emu, voices, 6)
+        emu.data(cc(0, 1, 40))                  # shallow
+        self.assertEqual(self.regs(emu, voices, 0), [r | 0x40 for r in reg0])
+        self.assertEqual(self.regs(emu, voices, 6), reg6)
+        emu.data(cc(0, 1, 100))                 # deep
+        self.assertEqual(self.regs(emu, voices, 0), [r | 0x40 for r in reg0])
+        self.assertEqual(self.regs(emu, voices, 6), [r | 0x40 for r in reg6])
+        # a new note gets it too, and modulation 0 takes it away
+        voices2 = self.play(emu, note=64)
+        self.assertTrue(all(r & 0x40 for r in self.regs(emu, voices2, 0)))
+        emu.data(cc(0, 1, 0))
+        self.assertEqual(self.regs(emu, voices, 0), reg0)
+        self.assertEqual(self.regs(emu, voices, 6), reg6)
+        # another channel's notes don't change
+        emu.data(cc(1, 1, 127))
+        self.assertEqual(self.regs(emu, voices, 0), reg0)
+        # ESS's driver ignores controller 1
+        stock = self.emu("stock")
+        voices = self.play(stock)
+        before = [stock.op_regs(v) for v in voices]
+        stock.data(cc(0, 1, 127))
+        self.assertEqual([stock.op_regs(v) for v in voices], before)
+
+    def test_channel_pressure(self):
+        emu = self.emu()
+        voices = self.play(emu)
+        reg0, reg6 = self.regs(emu, voices, 0), self.regs(emu, voices, 6)
+        emu.data(0x0030D0)                      # pressure 48
+        self.assertEqual(self.regs(emu, voices, 0), [r | 0x40 for r in reg0])
+        self.assertEqual(self.regs(emu, voices, 6), reg6)
+        emu.data(cc(0, 1, 10))
+        emu.data(0x0070D0)                      # the larger of the two
+        self.assertEqual(self.regs(emu, voices, 6), [r | 0x40 for r in reg6])
+        emu.data(0x0000D0)
+        self.assertEqual(self.regs(emu, voices, 6), reg6)
+        emu.data(cc(0, 1, 0))
+        self.assertEqual(self.regs(emu, voices, 0), reg0)
+        # in a long message, with running status
+        self.assertEqual(emu.longdata(bytes([0xD0, 0x10, 0x20]))[0], 0)
+        self.assertEqual(emu.dev8(DEV_GM_PRESS), 0x20)
+        self.assertEqual(self.regs(emu, voices, 0), [r | 0x40 for r in reg0])
+
+    def test_running_status_in_long_data(self):
+        for which, second in (("stock", 0x7C), ("fixed", 0x40)):
+            with self.subTest(which):
+                emu = self.emu(which)
+                emu.longdata(bytes([0x90, 0x3C, 0x7F, 0x40, 0x7F]))
+                # ESS's parser ORed 40h into the last note, 3Ch
+                self.assertEqual(sorted({n for f, c, n in emu.voices()
+                                         if f & 1}), [0x3C, second])
+
+    # -- tuning -----------------------------------------------------------
+
+    def test_fine_tuning(self):
+        # 2800h, +25 cents, is a bend of 2400h with the range of 2
+        # semitones
+        tune = rpn(0, 1, 0x50)
+        emu = self.assertPitch(tune, [0x4800E0])
+        self.assertEqual(emu.dev16(DEV_GM_FINE), 0x2800)
+        # with the LSB, and on a note that already sounds
+        emu = self.emu()
+        voices = self.play(emu)
+        for m in rpn(0, 1, 0x3F, 0x40):         # 1FC0h: -0.8 cents
+            emu.data(m)
+        ref = self.emu(msgs=[0x3F60E0])         # bend 1FE0h
+        self.assertEqual(pitches(emu, voices), pitches(ref, self.play(ref)))
+
+    def test_coarse_tuning(self):
+        self.assertPitch(rpn(0, 2, 0x40 + 12), [], ref_note=72)
+        self.assertPitch(rpn(3, 2, 0x40 - 5), [], channel=3, ref_note=55)
+        # not on channel 10, the drums
+        emu = self.emu(msgs=rpn(9, 2, 0x40 + 12))
+        plain = self.emu()
+        self.assertEqual(pitches(emu, self.play(emu, 9, 38)),
+                         pitches(plain, self.play(plain, 9, 38)))
+        # ESS's driver: no RPN 2
+        stock = self.emu("stock", rpn(0, 2, 0x40 + 12))
+        plain = self.emu("stock")
+        self.assertEqual(pitches(stock, self.play(stock)),
+                         pitches(plain, self.play(plain)))
+
+    def test_bend_range_cents(self):
+        # 1 semitone 50 cents at the top equals 3 semitones halfway up
+        self.assertPitch(rpn(0, 0, 1, 50) + [0x7F7FE0],
+                         rpn(0, 0, 3) + [0x6000E0])
+        # the MSB sets the cents to 0
+        emu = self.emu(msgs=rpn(0, 0, 1, 50) + [cc(0, 6, 2)])
+        self.assertEqual((emu.dev8(DEV_RPN_DATA), emu.dev8(DEV_GM_CENTS)),
+                         (2, 0))
+
+    def test_range_change_moves_a_bent_note(self):
+        emu = self.emu(msgs=[0x6000E0])         # half way up, 1 semitone
+        voices = self.play(emu)
+        for m in rpn(0, 0, 12):
+            emu.data(m)
+        ref = self.emu(msgs=rpn(0, 0, 12) + [0x6000E0])
+        self.assertEqual(pitches(emu, voices), pitches(ref, self.play(ref)))
+
+    def test_huge_bend_range(self):
+        emu = self.emu(msgs=rpn(0, 0, 127, 127))
+        self.play(emu)
+        for bend in (0x0000E0, 0x7F7FE0, 0x4000E0, 0x0040E0):
+            emu.data(bend)
+        self.assertEqual(emu.fix_state()["lock"], 0)
+
+    def test_null_and_nrpn_select_nothing(self):
+        for select in ([cc(0, 101, 0x7F), cc(0, 100, 0x7F)],
+                       [cc(0, 99, 0), cc(0, 98, 0)]):
+            emu = self.emu(msgs=rpn(0, 0, 5) + select + [cc(0, 6, 9),
+                                                         cc(0, 38, 9)])
+            self.assertEqual((emu.dev8(DEV_RPN_DATA),
+                              emu.dev8(DEV_GM_CENTS)), (5, 0))
+
+    # -- controller 121 and the resets -------------------------------------
+
+    def test_reset_all_controllers_rp015(self):
+        setup = [cc(0, 7, 50), cc(0, 10, 0), cc(0, 11, 30), cc(0, 1, 100),
+                 0x7F40B0] + rpn(0, 0, 12) + rpn(0, 1, 0x50) + [0x7000E0]
+        emu = self.emu(msgs=setup)
+        voices = self.play(emu)
+        emu.data(cc(0, 121, 0))
+        # kept: volume, pan, the bend range and the tuning
+        self.assertEqual((emu.dev8(DEV_CHAN_VOLUME), emu.dev8(DEV_CHAN_PAN),
+                          emu.dev8(DEV_RPN_DATA), emu.dev16(DEV_GM_FINE)),
+                         (50, 0x10, 12, 0x2800))
+        # reset: expression, modulation, the pedal, the bend and the RPN
+        self.assertEqual((emu.dev8(DEV_CHAN_EXPR), emu.dev8(DEV_GM_MOD),
+                          emu.dev8(DEV_CHAN_FLAGS) & 1, emu.dev16(DEV_BEND),
+                          emu.dev16(DEV_GM_RPN)),
+                         (127, 0, 0, 0x2000, 0x7F7F))
+        # the note that sounds isn't bent or shaking anymore
+        ref = self.emu(msgs=[cc(0, 7, 50), cc(0, 10, 0)] +
+                       rpn(0, 1, 0x50))
+        rv = self.play(ref)
+        self.assertEqual(pitches(emu, voices), pitches(ref, rv))
+        self.assertEqual(self.regs(emu, voices, 0), self.regs(ref, rv, 0))
+        self.assertEqual(self.regs(emu, voices, 1), self.regs(ref, rv, 1))
+        # a data entry now changes nothing
+        emu.data(cc(0, 6, 2))
+        self.assertEqual(emu.dev8(DEV_RPN_DATA), 12)
+        # ESS's code reset the volume, the pan and the range too
+        stock = self.emu("stock", setup + [cc(0, 121, 0)])
+        self.assertEqual((stock.dev8(DEV_CHAN_VOLUME),
+                          stock.dev8(DEV_CHAN_PAN), stock.dev8(DEV_RPN_DATA)),
+                         (100, 0x30, 2))
+
+    def test_gm_reset_sets_the_defaults(self):
+        setup = [0x0005C2, cc(2, 7, 50), cc(2, 10, 127), cc(2, 1, 100),
+                 0x0040D2] + rpn(2, 0, 12, 30) + rpn(2, 1, 0x50) + \
+            rpn(2, 2, 0x50)
+        for name, sysex in (("GM", GM_ON), ("GM2", GM2_ON), ("GS", GS_RESET),
+                            ("XG", XG_ON)):
+            with self.subTest(name):
+                emu = self.emu(msgs=setup)
+                emu.longdata(master_volume(0x1000))
+                self.play(emu, 2)
+                emu.longdata(sysex)
+                self.assertEqual(
+                    [emu.dev8(off + 2) for off in (
+                        DEV_PROGRAM, DEV_CHAN_VOLUME, DEV_CHAN_PAN,
+                        DEV_CHAN_EXPR, DEV_RPN_DATA, DEV_GM_CENTS,
+                        DEV_GM_COARSE, DEV_GM_MOD, DEV_GM_PRESS)],
+                    [0, 100, 0x30, 127, 2, 0, 0x40, 0, 0])
+                self.assertEqual((emu.dev16(DEV_GM_FINE + 4),
+                                  emu.dev16(DEV_GM_RPN + 4),
+                                  emu.dev8(DEV_GM_MASTER)),
+                                 (0x2000, 0x7F7F, 0))
+                self.assertEqual(emu.keyed_voices(), [])
+                self.assertEqual(emu.fix_state()["lock"], 0)
+
+    def test_midi_reset_sets_the_defaults(self):
+        emu = self.emu(msgs=rpn(0, 1, 0x50) + [cc(0, 1, 100)])
+        emu.longdata(master_volume(0))
+        emu.reset()
+        self.assertEqual((emu.dev16(DEV_GM_FINE), emu.dev8(DEV_GM_MOD),
+                          emu.dev8(DEV_GM_MASTER), emu.dev16(DEV_GM_RPN)),
+                         (0x2000, 0, 0, 0x7F7F))
+
+    # -- master volume and pan ---------------------------------------------
+
+    def test_master_volume(self):
+        emu = self.emu()
+        voices = self.play(emu)
+        tl = [r & 0x3F for r in self.regs(emu, voices, 1)]
+        r, flags = emu.longdata(master_volume(0x2000))     # 64: 11.25 dB
+        self.assertEqual((r, flags & 1), (0, 1))
+        self.assertEqual(emu.dev8(DEV_GM_MASTER), 15)
+        down = [r & 0x3F for r in self.regs(emu, voices, 1)]
+        self.assertTrue(any(d > t for d, t in zip(down, tl)))
+        self.assertTrue(all(d == t or d == min(63, t + 15)
+                            for d, t in zip(down, tl)))
+        # a new note plays as quietly
+        v2 = self.play(emu, 1)
+        ref = self.emu()
+        self.assertEqual([r & 0x3F for r in self.regs(emu, v2, 1)],
+                         [min(63, t + 15) if t != d else t
+                          for t, d in zip(self.regs_tl(ref, 1), down)])
+        emu.longdata(master_volume(0x3FFF))
+        self.assertEqual([r & 0x3F for r in self.regs(emu, voices, 1)], tl)
+        # ESS's driver skips it
+        stock = self.emu("stock")
+        voices = self.play(stock)
+        tl = self.regs(stock, voices, 1)
+        stock.longdata(master_volume(0))
+        self.assertEqual(self.regs(stock, voices, 1), tl)
+
+    # -- build/GMCHECK.MID ---------------------------------------------------
+
+    def test_gmcheck_is_current(self):
+        with open(gmcheck.OUT, "rb") as f:
+            self.assertEqual(f.read(), gmcheck.smf(gmcheck.events()),
+                             "run python3 tools/gmcheck.py")
+
+    def test_gmcheck_steps_in_testing_md(self):
+        with open(os.path.join(ROOT, "docs", "TESTING.md")) as f:
+            doc = f.read().replace("\n   ", "\n")
+        self.assertIn(gmcheck.steps_table(), doc)
+
+    def test_gmcheck_plays(self):
+        emu = self.emu()
+        for t, msg in gmcheck.events():
+            if msg[0] == 0xF0:
+                self.assertEqual(emu.longdata(msg)[0], 0)
+            else:
+                emu.data(int.from_bytes(msg, "little"))
+            if t == 32.5:
+                # after controller 121: centered, still, still on the left
+                self.assertEqual((emu.dev16(DEV_BEND), emu.dev8(DEV_GM_MOD),
+                                  emu.dev8(DEV_CHAN_PAN)), (0x2000, 0, 0x10))
+        self.assertEqual(emu.keyed_voices(), [])
+        self.assertEqual(emu.fix_state()["lock"], 0)
+        self.assertEqual(emu.dev8(DEV_CHAN_PAN), 0x30)
+
+    def regs_tl(self, emu, channel):
+        return [r & 0x3F for r in self.regs(emu, self.play(emu, channel), 1)]
+
+    def test_pan_moves_sounding_notes(self):
+        emu = self.emu()
+        voices = self.play(emu)
+        reg6 = self.regs(emu, voices, 6)
+        outs = [r & 0x30 for r in reg6]
+        self.assertIn(0x30, outs)               # the patch sounds on both
+        for value, side in ((0, 0x10), (127, 0x20)):
+            emu.data(cc(0, 10, value))
+            self.assertEqual([r & 0x30 for r in self.regs(emu, voices, 6)],
+                             [side if o else 0 for o in outs])
+        emu.data(cc(0, 10, 64))                 # the patch's own outputs
+        self.assertEqual(self.regs(emu, voices, 6), reg6)
+        # ESS's driver pans the next note only
+        stock = self.emu("stock")
+        voices = self.play(stock)
+        reg6 = self.regs(stock, voices, 6)
+        stock.data(cc(0, 10, 0))
+        self.assertEqual(self.regs(stock, voices, 6), reg6)
 
 
 # the bank file (esfmfile.asm)

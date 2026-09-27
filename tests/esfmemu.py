@@ -866,6 +866,24 @@ class ESFMEmu:
     def keyed_voices(self):
         return self.chip.keyed()
 
+    def note_voices(self, channel, note):
+        """Voices (0-17) the driver has keyed on for channel and note."""
+        return [v for v, (f, c, n) in enumerate(self.voices())
+                if f & 1 and c == channel and n == note]
+
+    def op_regs(self, voice):
+        """The chip's 8 registers of each of voice's 4 operators."""
+        base = voice * 32
+        return [bytes(self.chip.regs[base + op * 8:base + op * 8 + 8])
+                for op in range(4)]
+
+    def dev8(self, off):
+        """A byte of the device structure."""
+        return self.r8(4, self.dev + off)
+
+    def dev16(self, off):
+        return self.r16(4, self.dev + off)
+
     def driver_active(self):
         return [v for v, (f, _c, _n) in enumerate(self.voices()) if f & 1]
 

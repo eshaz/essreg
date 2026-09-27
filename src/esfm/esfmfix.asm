@@ -20,8 +20,11 @@
 ; 4. chip_reset holds the driver as well (it also runs for DRV_POWER and
 ;    DRVM_DISABLE).
 ; 5. MODM_OPEN loads the bank file first if it changed (esfmfile.asm).
-; 6. The sustain pedal is let up by a program change and by a GM, GS or
-;    XG reset (esfmped.asm).
+; 6. The sustain pedal is let up by a program change (esfmped.asm) and by
+;    a GM, GS or XG reset (esfmgm.asm).
+; 7. What General MIDI asks for beyond ESS's code: modulation, channel
+;    pressure, tuning, master volume, controller 121 as RP-015
+;    (esfmgm.asm), and running status in long messages (seg1.asm).
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
@@ -132,7 +135,7 @@ call_orig:
         push    word [ARG_DW2+2]
         push    word [ARG_DW2]
         push    cs
-        call    fix_process             ; esfmped.asm
+        call    fix_process             ; esfmgm.asm
         ret
 
 ; queue this call's message (interrupts are off)
@@ -278,7 +281,7 @@ fix_unlock:
 .call:
         call    restore_if
         push    cs
-        call    fix_process             ; esfmped.asm
+        call    fix_process             ; esfmgm.asm
         jmp     .again
 .dropped:
         call    restore_if

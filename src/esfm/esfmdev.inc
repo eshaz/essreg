@@ -55,3 +55,17 @@ Q_DW2           equ 10          ; dword: dwParam2
 
 ; ESFM_FIX: the bank file (esfmfile.asm)
 FIX_PATH        equ 128         ; bytes for Bank= from SYSTEM.INI
+
+; ESFM_FIX: General MIDI state (esfmgm.asm), after ESS's fields.  The fixed
+; driver allocates DEV_FIX_SIZE bytes for each device
+DEV_GM_MOD      equ 0x311   ; 16 bytes: controller 1 (modulation)
+DEV_GM_PRESS    equ 0x321   ; 16 bytes: channel pressure
+DEV_GM_VIB      equ 0x331   ; 16 bytes: the vibrato the voices have, VIB_*
+DEV_GM_RPN      equ 0x341   ; 16 words: RPN selected, MSB * 256 + LSB
+DEV_GM_CENTS    equ 0x361   ; 16 bytes: pitch bend range cents (RPN 0 LSB)
+DEV_GM_FINE     equ 0x371   ; 16 words: fine tuning (RPN 1), 2000h = 0 cents
+DEV_GM_COARSE   equ 0x391   ; 16 bytes: coarse tuning (RPN 2), 40h = none
+DEV_GM_MASTER   equ 0x3A1   ; byte: master volume attenuation, 0.75 dB steps
+DEV_GM_OPREGS   equ 0x3A2   ; 2 bytes for each operator (voice * 4 + op):
+                            ; the patch's registers 0 and 6
+DEV_FIX_SIZE    equ DEV_GM_OPREGS + NUM_VOICES * 4 * 2

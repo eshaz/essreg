@@ -119,6 +119,9 @@ L1_00CB:
         inc si                                          ; 00F3
         cmp si,byte +0x10                               ; 00F4
         jc short L1_00CB                                ; 00F7
+%if ESFM_FIX
+        call fix_gm_init                                ; esfmgm.asm
+%endif
         lea si,[di+0x71]                                ; 00F9
         mov cx,0x12                                     ; 00FC
 
@@ -859,6 +862,9 @@ program_operator:
         sub sp,byte +0x14                               ; 080B
         push di                                         ; 080E
         push si                                         ; 080F
+%if ESFM_FIX
+        call fix_coarse                                 ; esfmgm.asm
+%endif
         mov bx,[bp+0x14]                                ; 0810
         add bx,[bp+0x6]                                 ; 0813
         sub_ ah,ah                                      ; 0816
@@ -932,6 +938,9 @@ L1_0892:
         mov bx,[bp+0x8]                                 ; 08B0
         les si,[bank_ptr]                               ; 08B3
         mov al,[es:bx+si]                               ; 08B7
+%if ESFM_FIX
+        call fix_op_reg0                                ; esfmgm.asm
+%endif
         push ax                                         ; 08BA
         push cs                                         ; 08BB
         call fm_write                                   ; 08BC
@@ -1104,7 +1113,13 @@ L1_09E8:
         mov al,[bx+0x30]                                ; 0A2E
         push ax                                         ; 0A31
         mov_ si,dx                                      ; 0A32
+%if ESFM_FIX
+        push word [bp+0x14]
+        push word [bp+0x6]
+        call fix_calc_pitch                             ; esfmgm.asm
+%else
         call calc_pitch                                 ; 0A34
+%endif
         sub_ dx,dx                                      ; 0A37
         push dx                                         ; 0A39
         push ax                                         ; 0A3A
@@ -1182,6 +1197,9 @@ L1_0ADA:
         mov al,[es:bx+0x6]                              ; 0AE7
 
 L1_0AEB:
+%if ESFM_FIX
+        call fix_op_reg6                                ; esfmgm.asm
+%endif
         push ax                                         ; 0AEB
         push cs                                         ; 0AEC
         call fm_write                                   ; 0AED
@@ -1685,7 +1703,13 @@ L1_0EF1:
         mov al,[bx+di+0x30]                             ; 0F09
         sub_ ah,ah                                      ; 0F0C
         push ax                                         ; 0F0E
+%if ESFM_FIX
+        push word [bp+0x6]
+        push di
+        call fix_calc_pitch                             ; esfmgm.asm
+%else
         call calc_pitch                                 ; 0F0F
+%endif
         mov [bp-0x6],ax                                 ; 0F12
         mov word [bp-0x4],0x0                           ; 0F15
         push word [bp-0x4]                              ; 0F1A
@@ -1845,6 +1869,9 @@ L1_1041:
         add_ si,ax                                      ; 1041
 
 L1_1043:
+%if ESFM_FIX
+        call fix_master                                 ; esfmgm.asm
+%endif
         mov al,[bp+0x8]                                 ; 1043
         and al,0x3f                                     ; 1046
         mov_ cx,si                                      ; 1048
@@ -1990,6 +2017,17 @@ L1_114F:
         jmp near L1_13D2                                ; 1154
 
 L1_1157:
+%if ESFM_FIX
+        cmp ax,byte -0x10                               ; Dn: channel pressure
+        jne ..@fix_no_pressure
+        mov al,[bp-0x2]
+        push ax
+        mov al,[bp-0x3]
+        push ax
+        push word [bp+0x8]
+        call fix_pressure                               ; esfmgm.asm
+..@fix_no_pressure:
+%endif
         jmp near L1_13FE                                ; 1157
 
 L1_115A:
@@ -2009,6 +2047,12 @@ L1_1163:
         jmp near L1_13FE                                ; 1175
 
 L1_1178:
+%if ESFM_FIX
+        call fix_control                                ; esfmgm.asm
+        jnc ..@fix_ess_control
+        jmp near L1_13FE
+..@fix_ess_control:
+%endif
         mov al,[bp-0x2]                                 ; 1178
         sub_ ah,ah                                      ; 117B
         sub ax,strict word 0x6                          ; 117D
@@ -2720,7 +2764,14 @@ L1_1686:
         mov al,[running_status]                         ; 16C0
         sub_ ah,ah                                      ; 16C3
         sub_ dx,dx                                      ; 16C5
+%if ESFM_FIX
+        ; running status: a new message with the status alone.  ESS's
+        ; code kept the data bytes of the last one and ORed the new ones in
+        mov [bp-0x14],ax
+        mov [bp-0x12],dx
+%else
         or [bp-0x14],ax                                 ; 16C7
+%endif
         mov al,[bp-0x2]                                 ; 16CA
         dec al                                          ; 16CD
         mov [bp-0x15],al                                ; 16CF
@@ -3740,6 +3791,7 @@ R1_1ECB: dw 0xFFFF, 0x0000                              ; 1ECB KERNEL.LocalSize
 %include "esfmfix.asm"
 %include "esfmfile.asm"
 %include "esfmped.asm"
+%include "esfmgm.asm"
 %endif
 
 seg1_data_end:

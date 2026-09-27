@@ -590,7 +590,11 @@ dev_add:
 L3_0464:
         mov ax,0x40                                     ; 0464
         push ax                                         ; 0467
+%if ESFM_FIX
+        mov ax,DEV_FIX_SIZE                             ; esfmdev.inc
+%else
         mov ax,0x311                                    ; 0468
+%endif
         push ax                                         ; 046B
         callp R3_046D, R3_01E5, 0x0000                  ; 046C KERNEL.LocalAlloc
         mov_ si,ax                                      ; 0471

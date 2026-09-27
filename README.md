@@ -43,6 +43,8 @@ essctl [/load file] [/save file] [/dump file] [/ui] [/q]
 * ESS's driver drops MIDI messages that come in while it's busy, so notes hang when the music gets busy. This one queues them instead.
 * It also silences every voice when a program closes the device with the sustain pedal down.
 * A sustain pedal that a song leaves down doesn't hold notes forever: a program change, or a GM, GS or XG reset, lets it up.
+* General MIDI: modulation and channel pressure (vibrato), fine and coarse tuning, the bend range in cents, master volume, GM, GS and XG resets, and controller 121 as GM wants it. See [docs/ESFM_GM.md](docs/ESFM_GM.md).
+* Running status in `midiOutLongMsg` buffers no longer mixes up notes.
 * Its built-in patch bank is [`bnk_com_better_square_wave.bin`](esfm_patch_banks).
 * It can play a patch bank straight from a file named in `SYSTEM.INI`. The file is read when a program opens the MIDI device, if its date or time changed. See [docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv).
 * See [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md) for the details.
@@ -119,7 +121,7 @@ Usage: esfmpat "c:\path\to\esfm.drv" "c:\path\to\patch.bin"
 
 ## Installing and testing on Windows 98
 * `build\ESFM.DRV` is made from ESS's ES1869 AudioDrive driver 4.04.00.1319 in [`driver`](driver), which ESS made for Windows 95 and 98.
-* These steps install it and essctl on a Windows 98 machine, and test the hanging-note fix and the bank file.
+* These steps install it and essctl on a Windows 98 machine, and test the hanging-note fix, the bank file and General MIDI.
 * *Note: the rebuilt `ES1869.VXD` isn't needed for this. See [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#installing-the-extended-driver) to install it too.*
 
 ### Before you start
@@ -128,6 +130,7 @@ Usage: esfmpat "c:\path\to\esfm.drv" "c:\path\to\patch.bin"
 * Copy these files to `C:\ESSREG` on the Windows 98 machine, from a floppy, CD or network share:
   * `build\ESFM.DRV`
   * `build\essctl.exe`
+  * `build\GMCHECK.MID`
   * `esfm_patch_banks\bnk_com.bin` and `esfm_patch_banks\bnk_NT4.bin`
 * *Note: keep folder names to 8 characters, since MS-DOS mode only sees short names.*
 
@@ -172,8 +175,9 @@ Keep essctl open on the *ESFM patch bank* page.
 7. *Stress test* (button on the page): no voices left sounding.
 8. Play the MIDI files and games that used to hang notes. If a note hangs, the page shows its voice, channel and state (*held by pedal*, for example). `essctl /dump` writes it to a file.
 9. ESFM > *Restore original bank*: the `Bank=` line is gone from `SYSTEM.INI`, and the driver's own bank plays.
+10. Play `C:\ESSREG\GMCHECK.MID`. It tries the General MIDI features one at a time: vibrato, pan, tuning, a wide bend and master volume. What to hear, and when, is in [docs/TESTING.md](docs/TESTING.md#g3-general-midi).
 
-More checks are in [docs/TESTING.md](docs/TESTING.md) (G and G2).
+More checks are in [docs/TESTING.md](docs/TESTING.md) (G, G2 and G3).
 
 ### Going back
 1. Start > *Shut Down* > *Restart in MS-DOS mode*.

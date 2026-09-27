@@ -133,6 +133,26 @@ With `build\ESFM.DRV` installed. See [ESFM_BANK.md](ESFM_BANK.md#bank-file-build
 6. Delete `C:\BANKS\TEST.BIN` and play: the page says "cannot read", and the last bank keeps playing. Copy a bank back with a new date: it loads the next time a program opens the device.
 7. ESFM > *Restore original bank*: the `Bank=` line is gone from `SYSTEM.INI` and the driver's own bank plays. ESFM > *Load patch bank* writes it again.
 
+### G3. General MIDI
+
+With `build\ESFM.DRV` installed. See [ESFM_GM.md](ESFM_GM.md).
+
+1. Play `build\GMCHECK.MID` in Media Player. It plays a square lead, one feature at a time:
+
+   | Time | What to hear |
+   |---|---|
+   | 0.5-4.5 s | Modulation: C4, then a slight vibrato at 1.5 s, a deeper one at 2.5 s, none again at 3.5 s |
+   | 5-8.5 s | Channel pressure: E4, vibrato from 6 s to 7 s |
+   | 9-13 s | Pan: G4 in the middle, left at 10 s, right at 11 s, middle at 12 s |
+   | 13.5-17.5 s | Fine tuning: C4, a quarter tone sharp at 14.5 s, a quarter tone flat at 15.5 s, in tune at 16.5 s |
+   | 18-20.8 s | Coarse tuning: C4, C5, C4 |
+   | 21.5-25.5 s | Bend range 12: C4 glides up an octave from 22 s to 23 s, then back down at 24 s |
+   | 26-30 s | Master volume: a C chord, quiet at 27 s, louder at 28 s, full at 29 s |
+   | 30.5-34 s | Reset all controllers: C4 on the left, sharp, with vibrato. At 32.5 s the vibrato stops and it comes back in tune, still on the left |
+
+2. The same file with ESS's `ESFM.DRV`: no vibrato, the G4 stays in the middle, no quarter tones, C4 three times, the chord doesn't get quieter, and the last C4 stays sharp to the end.
+3. Play GM MIDI files and games. They sound as before, with vibrato where the music uses the modulation wheel or channel pressure.
+
 ### H. Expert mode (last)
 
 Only with nothing playing:

@@ -63,9 +63,15 @@ A dropped note off leaves the voice keyed on until it's stolen for another note 
 * **FM doesn't fade.** On a sample synth, a piano note held by a forgotten pedal decays. An ESFM patch with a sustaining envelope sounds until the pedal goes up.
   * So a pedal left down from an earlier part holds every note of the channel after it, forever, and those notes use up voices.
 
+### 5. Running status in long messages
+
+* In a long message (`midiOutLongMsg`), ESS's parser keeps the bytes of the last message when running status starts the next one, and ORs the new data bytes into them (seg1:16C7).
+* So `80 3C 00 40 00` turns off note 3Ch, then note 7Ch instead of 40h, and note 40h hangs.
+* Short messages (`midiOutShortMsg`) with running status are fine.
+
 ### Checked and fine
 
-* **Driver logic:** voice allocation, voice stealing, retriggering a note that's already playing, controller 64 itself, the controllers (including 120, 121 and 123-127), RPN pitch bend range, running status, the long-message parser apart from SysEx (see 4), and MODM_RESET, which silences everything.
+* **Driver logic:** voice allocation, voice stealing, retriggering a note that's already playing, controller 64 itself, the controllers (including 120, 121 and 123-127), RPN pitch bend range, running status in short messages, the long-message parser apart from SysEx (see 4) and running status (see 5), and MODM_RESET, which silences everything.
 * **The chip:** [ESFMu](https://github.com/Kagamiin/ESFMu), the hardware-accurate ESFM emulator, releases a key off that comes during an envelope delay right away. The chip doesn't hold notes on its own.
 * **`ES1869.VXD`:** once Windows owns FM, the VxD doesn't trap the FM ports at all.
 * **Not in the repository:** the Microsoft parts (`MMSYSTEM.DLL`, `MIDIMAP.DRV`, `MCISEQ.DRV`) are described here from their documented behaviour.
@@ -89,6 +95,7 @@ A dropped note off leaves the voice keyed on until it's stolen for another note 
 | Note off fired at every 11th instruction of a note on (937 tries) | 914 hanging notes | 0 |
 | Pedal down, a chord let go, then a program change | notes held, pedal down | released, pedal up |
 | Pedals down on two channels, then a GM, GM2, GS or XG reset | notes held | released |
+| Two notes, then `80 3C 00 40 00` in a long message | note 40h hangs | released |
 
 ## The fix: `build/ESFM.DRV`
 
@@ -103,7 +110,9 @@ A dropped note off leaves the voice keyed on until it's stolen for another note 
   * **Counters.** A small block of counters at the end of the data segment, starting with `ESFMFIX`, for essctl.
 * **Sustain pedal.** [`src/esfm/esfmped.asm`](../src/esfm/esfmped.asm):
   * A program change lets go of the channel's pedal first, as controller 64 with 0 would. The MIDI spec keeps it down, but a pedal still down when a channel changes instrument is left over from the part before, and on FM it holds notes forever.
-  * A GM, GM2, GS or XG reset in a long message resets the controllers of every channel (121, the pedal up) and turns their notes off (123), as GM synths do.
+  * A GM, GM2, GS or XG reset in a long message sets every channel back to the GM defaults, the pedal up and the notes off, as GM synths do ([ESFM_GM.md](ESFM_GM.md#gm-gs-and-xg-resets)).
+* **Running status in long messages.** Each message starts afresh ([`src/esfm/seg1.asm`](../src/esfm/seg1.asm), at seg1:16C7), so no note gets mixed up with the one before.
+* **General MIDI.** [`src/esfm/esfmgm.asm`](../src/esfm/esfmgm.asm) adds what GM asks for and ESS's code doesn't do: modulation, channel pressure, tuning, the bend range in cents, master volume and controller 121 as RP-015. See [ESFM_GM.md](ESFM_GM.md).
 * **Bank file.** [`src/esfm/esfmfile.asm`](../src/esfm/esfmfile.asm) lets the driver play a patch bank straight from a file named in `SYSTEM.INI`. It reads the file when a program opens the device, if the file's date or time changed. See [ESFM_BANK.md](ESFM_BANK.md#bank-file-buildesfmdrv).
 
 Everything else is ESS's code, unchanged:
