@@ -93,6 +93,7 @@ static void show_row(int i);
 static void layout(void) {
   int i;
 
+  page_freeze(1);
   for (i = 0; i < nrows; i++) {
     struct row *r = &rows[i];
     const struct ess_field *f = &ess_fields[r->field];
@@ -127,6 +128,7 @@ static void layout(void) {
       page_move(r->val, X_VAL, y + 2, W_VAL, 9, show);
     page_move(r->tag, X_TAG, y + 2, W_TAG, 9, show);
   }
+  page_freeze(0);
   page_scrollbar(top, nrows, nvis);
 }
 

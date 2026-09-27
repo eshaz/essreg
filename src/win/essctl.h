@@ -86,6 +86,9 @@ int page_kind(void);
 HWND page_control(const char *cls, const char *text, DWORD style, int x,
                   int y, int w, int h, int id);
 void page_move(HWND ctl, int x, int y, int w, int h, int show);
+// 1: moving controls doesn't paint; 0: paint the page area once
+// moved one by one, hundreds of controls leave parts of the page unpainted
+void page_freeze(int on);
 void page_scrollbar(int first, int count, int visible);
 void dlu_to_px(int *x, int *y);
 

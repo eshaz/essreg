@@ -81,6 +81,33 @@ void page_move(HWND ctl, int x, int y, int w, int h, int show) {
   ShowWindow(ctl, SW_SHOWNA);
 }
 
+void page_freeze(int on) {
+  static int frozen;
+  RECT rc, client;
+
+  if (on) {
+    // WM_SETREDRAW TRUE shows the window, so only on a visible one
+    frozen = IsWindowVisible(g_main);
+    if (frozen)
+      SendMessage(g_main, WM_SETREDRAW, FALSE, 0);
+    return;
+  }
+  if (!frozen)
+    return;
+  frozen = 0;
+  SendMessage(g_main, WM_SETREDRAW, TRUE, 0);
+  // the page area and its scroll bar, to the right edge
+  rc.left = area_x;
+  rc.top = area_y;
+  rc.right = area_x + area_w;
+  rc.bottom = area_y + area_h;
+  MapDialogRect(g_main, &rc);
+  GetClientRect(g_main, &client);
+  rc.right = client.right;
+  RedrawWindow(g_main, &rc, 0,
+               RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+}
+
 // page area scroll bar, showing rows first..first+visible of count
 void page_scrollbar(int first, int count, int visible) {
   HWND sb = GetDlgItem(g_main, IDC_PGSCROLL);
