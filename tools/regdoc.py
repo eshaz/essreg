@@ -51,8 +51,14 @@ RFLAGS = {"RF_READ_SIDEFX": "reading changes state",
           "RF_WRITEONLY": "write-only",
           "RF_NEEDS_IDLE": "DSP channel",
           "RF_ALIAS": "Sound Blaster compatible view"}
+# the optional logical devices of esscat.h, numbered from card register 25h
+LDN_NAMES = {
+    "LDN_MPU": "MPU-401 device (optional, LDN 3)",
+    "LDN_CDROM": "CD-ROM device (optional, LDN 3 or 4)",
+    "LDN_MODEM": "Modem device (optional, LDN 3, 4 or 5)",
+    "LDN_GP": "General-purpose device (optional, LDN 3 to 6)"}
 FFLAGS = {"FF_PERSIST": "profile", "FF_DRVOWNED": "driver sets it",
-          "FF_VOLATILE": "cleared by DSP reset"}
+          "FF_VOLATILE": "reset by DSP reset"}
 
 
 def split_args(text):
@@ -103,7 +109,7 @@ def parse(path=TBL):
         kind, args = m.group(1), split_args(m.group(2))
         if kind == "REG":
             rid, bank, ldn, addr, rflags, name, page = args
-            reg = {"id": rid, "bank": bank, "ldn": int(ldn, 0),
+            reg = {"id": rid, "bank": bank, "ldn": LDN_NAMES.get(ldn, ldn),
                    "addr": int(addr, 0), "flags": rflags,
                    "name": unquote(name), "page": int(page), "notes": notes,
                    "fields": []}
@@ -168,7 +174,7 @@ def render(regs, fields, enums):
     w("**Flags:** *profile* = saved by File > Save profile and "
       "`essctl /save`; *driver sets it* = ES1869.DRV or ES1869.VXD "
       "rewrites it (a profile loaded at startup puts it back); "
-      "*cleared by DSP reset* = lost when the DSP is reset, which "
+      "*reset by DSP reset* = set back when the DSP is reset, which "
       "the driver does whenever the device changes hands.")
     w("")
     for bank, (title, desc) in BANKS.items():
@@ -183,7 +189,8 @@ def render(regs, fields, enums):
         for r in group:
             if bank == "BK_PNPLDN" and r["ldn"] != ldn:
                 ldn = r["ldn"]
-                w("### Logical device %d" % ldn)
+                w("### " + (ldn if not ldn.isdigit()
+                            else "Logical device %s" % ldn))
                 w("")
             rf = flag_names(r["flags"], RFLAGS)
             head = "%s%02Xh %s" % (BANK_PREFIX[bank], r["addr"], r["name"])

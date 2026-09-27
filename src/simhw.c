@@ -14,10 +14,13 @@
 struct simhw_state simhw;
 
 // mixer reset values that aren't zero (DS p.57-66)
+// the Sound Blaster compatible registers are plain bytes here
 static const u8 mixer_defaults[][2] = {
-    {0x14, 0x88}, {0x32, 0x88}, {0x36, 0x88}, {0x38, 0x00}, {0x3C, 0x00},
-    {0x60, 0x3F}, {0x62, 0x3F}, {0x7C, 0x88}, {0x04, 0x88}, {0x22, 0x88},
-    {0x26, 0x88}};
+    {0x14, 0x88}, {0x32, 0x88}, {0x36, 0x88}, {0x3C, 0x04}, {0x60, 0x36},
+    {0x62, 0x36}, {0x7D, 0x08}, {0x04, 0x88}, {0x22, 0x88}, {0x26, 0x88}};
+
+// the record volumes, which a mixer reset leaves alone (DS p.63-64)
+static const u8 record_volumes[] = {0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6E, 0x6F};
 
 static void log_access(u8 dir, u16 port, u8 value) {
   if (simhw.nlog < SIMHW_LOG_MAX) {
@@ -32,24 +35,46 @@ static void dsp_reset(void) {
   u8 ba = simhw.ctrl[0xBA - 0xA0];
   u8 bb = simhw.ctrl[0xBB - 0xA0];
 
+  // the data sheet gives no values for the 8 kHz rate and filter it sets
   memset(simhw.ctrl, 0, sizeof(simhw.ctrl));
-  simhw.ctrl[0xBA - 0xA0] = ba; // ADC offsets survive a software reset
+  simhw.ctrl[0xA5 - 0xA0] = 0xF8; // DMA counter reload of 2048 bytes
+  simhw.ctrl[0xBA - 0xA0] = ba;   // ADC offsets survive a software reset
   simhw.ctrl[0xBB - 0xA0] = bb;
+  simhw.mixer[0x7A] = 0x00; // Audio 2 control 2 (DS p.65)
   simhw.ext_mode = 0;
   simhw.npending = 0;
   simhw.nrdata = 1;
   simhw.rdata[0] = 0xAA; // reset acknowledge
 }
 
-void simhw_reset(u16 audio_base, u16 config_base) {
+// writing mixer register 00h (DS p.53-54, p.62-64)
+static void mixer_reset(void) {
+  u8 keep[ESS_ARRAY_SIZE(record_volumes)];
+  u8 m60 = simhw.mixer[0x60], m62 = simhw.mixer[0x62];
+  int emulation = !(simhw.mixer[0x64] & 0x01); // SB Pro master volume
   unsigned i;
 
+  for (i = 0; i < ESS_ARRAY_SIZE(record_volumes); i++)
+    keep[i] = simhw.mixer[record_volumes[i]];
+  memset(simhw.mixer, 0, sizeof(simhw.mixer));
+  for (i = 0; i < ESS_ARRAY_SIZE(mixer_defaults); i++)
+    simhw.mixer[mixer_defaults[i][0]] = mixer_defaults[i][1];
+  for (i = 0; i < ESS_ARRAY_SIZE(record_volumes); i++)
+    simhw.mixer[record_volumes[i]] = keep[i];
+  // 60h and 62h go back to 36h only with the emulation on
+  if (!emulation) {
+    simhw.mixer[0x60] = m60;
+    simhw.mixer[0x62] = m62;
+  }
+}
+
+void simhw_reset(u16 audio_base, u16 config_base) {
   memset(&simhw, 0, sizeof(simhw));
   simhw.audio_base = audio_base;
   simhw.config_base = config_base;
-  for (i = 0; i < ESS_ARRAY_SIZE(mixer_defaults); i++)
-    simhw.mixer[mixer_defaults[i][0]] = mixer_defaults[i][1];
-  simhw.port7 = 0x08; // analog stays on
+  mixer_reset();
+  simhw.port7 = 0x0A;        // GPO1 high (DS p.41), analog stays on
+  simhw.cfg_ports[7] = 0xFF; // interrupt mask (DS p.39)
   // LDN 1 (audio) resources: 220h, FM 388h, MPU 330h, IRQ 5, DMA 1 and 0
   simhw.pnp_ldn[1][0x30] = 0x01;
   simhw.pnp_ldn[1][0x60] = (u8)(audio_base >> 8);
@@ -61,8 +86,15 @@ void simhw_reset(u16 audio_base, u16 config_base) {
   simhw.pnp_ldn[1][0x70] = 0x05;
   simhw.pnp_ldn[1][0x74] = 0x01;
   simhw.pnp_ldn[1][0x75] = 0x00;
+  simhw.pnp_ldn[1][0x71] = 0x02; // "returns 2" (DS p.33-34)
+  simhw.pnp_ldn[1][0x73] = 0x02;
   simhw.pnp_ldn[0][0x60] = (u8)(config_base >> 8);
   simhw.pnp_ldn[0][0x61] = (u8)config_base;
+  simhw.pnp_ldn[0][0x74] = 0x04; // "returns 4" (DS p.32)
+  simhw.pnp_ldn[0][0x75] = 0x04;
+  // configuration ROM header 0: DRQ latch, on the motherboard, none of
+  // the optional logical devices (DS p.30-31)
+  simhw.pnp_card[0x25] = 0x80;
   simhw.pnp_card[0x06] = 0x00;
 }
 
@@ -131,6 +163,8 @@ static u8 sim_in(u16 port) {
     return simhw.cfg_ports[c];
   }
   switch (off) {
+  case 0x00:
+    return 0x00; // FM status: no timer overflow
   case 0x04:
     return simhw.mixer_index;
   case 0x05:
@@ -143,7 +177,9 @@ static u8 sim_in(u16 port) {
     }
     return simhw.mixer[simhw.mixer_index];
   case 0x06:
-    return simhw.port6;
+    // activity flags low (the model is always busy), digital section
+    // powered up, and the reset bits as written (DS p.40)
+    return (u8)(0x08 | (simhw.port6 & 0x03));
   case 0x07:
     return simhw.port7;
   case 0x0A:
@@ -177,7 +213,7 @@ static void sim_out(u16 port, u8 value) {
     break;
   case 0x05:
     if (simhw.mixer_index == 0x00)
-      simhw_reset(simhw.audio_base, simhw.config_base);
+      mixer_reset();
     else
       simhw.mixer[simhw.mixer_index] = value;
     break;

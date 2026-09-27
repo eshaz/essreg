@@ -51,7 +51,6 @@ static void ops(void) {
   simhw.ctrl[0xA1 - 0xA0] = 0xF0;
   simhw.ctrl[0xA2 - 0xA0] = 0xF8;
   simhw.ctrl[0xBA - 0xA0] = 0x03;
-  get_audio_1_sample_rate();
   get_audio_1_filter_rate();
   get_audio_2_filter_rate();
   get_adc_offset_left();

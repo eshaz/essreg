@@ -11,11 +11,15 @@
 
 #include "esscat.h"
 
-#define ESSIO_ETIER 20 // the field can't be written at this tier
+#define ESSIO_ETIER 20   // the field can't be written at this tier
+#define ESSIO_EABSENT 21 // an optional logical device the card doesn't have
 
-// register value (0-255), or a negative ESSHW_E* or -ESSIO_ETIER
+// register value (0-255), or a negative ESSHW_E* or ESSIO_E* code
 int ess_read(int reg);
 int ess_write(int reg, u8 value);
+
+// text of an ESSIO_E* or ESSHW_E* code
+const char *ess_strerror(int err);
 
 // field value in *value, and the whole register in *raw if not NULL
 int ess_field_read(int field, u8 *value, u8 *raw);

@@ -296,6 +296,9 @@ int dump_file(const char *path) {
     fclose(f);
     return 1;
   }
+  // how to decode the Audio 1 rate: mixer 71h bit 5
+  if ((v = ess_read(R_MX71)) >= 0)
+    cat_a1_like_70 = (v >> 5) & 1;
   for (i = 0; i < R_COUNT; i++) {
     const struct ess_reg *r = &ess_regs[i];
     fprintf(f, "\n%-11s %02Xh  %s", ess_bank_names[r->bank], r->addr,
@@ -306,7 +309,7 @@ int dump_file(const char *path) {
     }
     v = ess_read(i);
     if (v < 0) {
-      fprintf(f, "  %s\n", esshw_strerror(v));
+      fprintf(f, "  %s\n", ess_strerror(v));
       continue;
     }
     fprintf(f, "  = %02Xh\n", v);

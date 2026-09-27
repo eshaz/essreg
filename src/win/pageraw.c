@@ -175,7 +175,7 @@ void raw_refresh(int how) {
   fill_list();
   // with no device the rows say so, otherwise the status line says why
   if (err < 0 && err != -ESSHW_ENODEV)
-    set_status("%s", esshw_strerror(err));
+    set_status("%s", ess_strerror(err));
 }
 
 static void edit_selected(void) {
@@ -252,7 +252,7 @@ static void be_write(HWND dlg) {
     raw = ess_read(be.reg);
   winio_end();
   if (err < 0) {
-    msg_error(dlg, "Could not write %s: %s", r->name, esshw_strerror(err));
+    msg_error(dlg, "Could not write %s: %s", r->name, ess_strerror(err));
     return;
   }
   tray_notify(be.reg);

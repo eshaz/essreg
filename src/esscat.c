@@ -103,8 +103,27 @@ const char *cat_enum_text(u8 enum_id, u8 value) {
   return 0;
 }
 
+int cat_a1_like_70;
+
+int cat_opt_ldn(int ldn, u8 hdr) {
+  // the 25h bits of the optional devices, in the order they're numbered
+  // after LDN 2 (DS p.30-32)
+  static const u8 bits[4] = {0x01, 0x02, 0x04, 0x18};
+  int i, n = 3;
+
+  if (ldn < LDN_OPT || ldn > LDN_GP)
+    return ldn;
+  for (i = 0; i < ldn - LDN_OPT; i++)
+    if (hdr & bits[i])
+      n++;
+  return (hdr & bits[ldn - LDN_OPT]) ? n : -1;
+}
+
 u32 cat_rate_a1(u8 raw) {
-  // DS p.67: 397.7 kHz / (128 - x) or 795.5 kHz / (256 - x)
+  // DS p.67: 397.7 kHz / (128 - x) or 795.5 kHz / (256 - x), or as 70h
+  // when mixer 71h bit 5 is set (DS p.64)
+  if (cat_a1_like_70)
+    return cat_rate_70(raw);
   if (raw & 0x80)
     return 795500UL / (u32)(256 - raw);
   return 397700UL / (u32)(128 - raw);

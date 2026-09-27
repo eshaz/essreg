@@ -23,8 +23,8 @@ static void print_opts() {
   printf("| a2f                | Audio 2 Filter Clock         Get\n");
   printf("| pa=[1,0]           | Analog Stays On              Enable / Disable\n");
   printf("| pd                 | Digital Power Down           Get\n");
-  printf("| m=[1,0]            | Mono-In                      Enable / Disable\n");
-  printf("| ml=[0,25; 0%%,100%%] | Mono-In Level                Get / Set \n");
+  printf("| m=[1,0]            | Mono-In direct to output     Enable / Disable\n");
+  printf("| ml=[0,15; 0%%,100%%] | Mono-In Mixer Volume         Get / Set \n");
   printf("| micp=[1,0]         | Mic Preamp                   Enable / Disable\n");
   printf("| fmd=[1,0]          | FM,IIS,ES689 digital record  Enable / Disable\n");
   printf("| fms=[1,0]          | FM,IIS,ES689 digital sync    Enable / Disable\n");

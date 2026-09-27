@@ -36,6 +36,14 @@ enum ess_bank {
   BK_COUNT
 };
 
+// optional logical devices, whose number depends on which of them card
+// register 25h says the card has: they follow LDN 2 in this order
+#define LDN_OPT 0x10
+#define LDN_MPU (LDN_OPT + 0)   // MPU-401, 25h bit 0
+#define LDN_CDROM (LDN_OPT + 1) // CD-ROM, 25h bit 1
+#define LDN_MODEM (LDN_OPT + 2) // modem, 25h bit 2
+#define LDN_GP (LDN_OPT + 3)    // general-purpose, 25h bits 4:3
+
 // how a field is shown and edited
 enum ess_kind {
   K_BOOL,   // one bit
@@ -65,7 +73,7 @@ enum ess_tier {
 // field flags
 #define FF_PERSIST 0x01  // stored in profiles
 #define FF_DRVOWNED 0x02 // the Windows driver rewrites it
-#define FF_VOLATILE 0x04 // cleared by a DSP software reset
+#define FF_VOLATILE 0x04 // a DSP software reset reinitializes it
 
 // user interface pages
 enum ess_page {
@@ -199,5 +207,14 @@ u32 cat_rate_a1(u8 raw);
 u32 cat_rate_70(u8 raw);
 u32 cat_filter(u8 raw);
 int cat_adc_offset(u8 raw);
+
+// mixer 71h bit 5: A1h works like 70h (DS p.64); cat_rate_a1 and
+// FMT_RATE_A1 follow it, so programs set it after reading 71h
+extern int cat_a1_like_70;
+
+// the logical device number of an optional device (LDN_MPU to LDN_GP) on a
+// card whose register 25h is hdr, -1 if the card doesn't have it; other
+// numbers come back as they are
+int cat_opt_ldn(int ldn, u8 hdr);
 
 #endif /* ESSCAT_H */

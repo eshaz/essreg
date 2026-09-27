@@ -274,9 +274,17 @@ unsigned long get_audio_1_sample_rate() {
     printf("Audio 1 Sample Rate: %s\n", esshw_strerror(reg));
     return 0;
   }
-  rate = reg & 0x80 ? 795500UL / (256 - reg)  //  rate > 22kHz
-                    : 397700UL / (128 - reg); // rate <= 22kHz
+  if (read_mixer_reg(0x71) & 0x20) {
+    // mixer 71h bit 5: A1h works like 70h (DS p.64)
+    rate = (reg & 0x80 ? 768000UL : 793800UL) / (128 - (reg & 0x7f));
+  } else {
+    rate = reg & 0x80 ? 795500UL / (256 - reg)  //  rate > 22kHz
+                      : 397700UL / (128 - reg); // rate <= 22kHz
+  }
   printf("Audio 1 Sample Rate: %lu Hz\n", rate);
+  // mixer 7Fh bit 4: Audio 1 records the music DAC at its rate (DS p.65)
+  if (read_mixer_reg(0x7f) & 0x10)
+    printf("  (music DAC digital record is on: the music DAC rate applies)\n");
   return rate;
 }
 

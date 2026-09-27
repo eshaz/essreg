@@ -284,6 +284,8 @@ static const char *short_error(int err) {
     return "no config port";
   case ESSHW_ENODEV:
     return "no device";
+  case ESSIO_EABSENT:
+    return "not present";
   }
   return "error";
 }
@@ -308,6 +310,11 @@ static void show_row(int i) {
   }
   if (r->raw < 0) {
     SetWindowText(r->val, short_error(r->raw));
+    // nothing to set on a device the card doesn't have
+    if (r->raw == -ESSIO_EABSENT && r->ctl)
+      EnableWindow(r->ctl, FALSE);
+    if (r->raw == -ESSIO_EABSENT && r->edit)
+      EnableWindow(r->edit, FALSE);
     return;
   }
   v = cat_get(f, (u8)r->raw);
@@ -353,6 +360,9 @@ void fields_refresh(int how) {
     return;
   memset(done, 0, sizeof(done));
   err = winio_begin();
+  // how to decode the Audio 1 rate: mixer 71h bit 5
+  if (err == 0 && dsp && (reg = ess_read(R_MX71)) >= 0)
+    cat_a1_like_70 = (reg >> 5) & 1;
   for (i = 0; i < nrows; i++) {
     reg = ess_fields[rows[i].field].reg;
     if (done[reg])
@@ -386,7 +396,7 @@ static void help_for(int i) {
   if (f->flags & FF_DRVOWNED)
     strcat(text, " Windows' driver sets this itself.");
   if (f->flags & FF_VOLATILE)
-    strcat(text, " A DSP reset clears it.");
+    strcat(text, " A DSP reset sets it back.");
   if (f->tier == T_EXPERT && !g_expert)
     strcat(text, " Needs Expert mode.");
   set_help(text);
@@ -417,8 +427,7 @@ static void write_row(int i, u8 value) {
   winio_end();
 
   if (err < 0) {
-    set_status("%s: %s", f->label,
-               err == -ESSIO_ETIER ? "needs Expert mode" : esshw_strerror(err));
+    set_status("%s: %s", f->label, ess_strerror(err));
     show_row(i); // back to what the chip had
     return;
   }

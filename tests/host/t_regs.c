@@ -1,7 +1,8 @@
 /*
  * t_regs checks the essreg register functions that the original essreg
- * didn't have, so t_trace can't compare them: the 3-D limit bit (mixer 50h
- * bit 0).
+ * didn't have, or that now work differently, so t_trace can't compare them:
+ * the 3-D limit bit (mixer 50h bit 0) and the Audio 1 rate with mixer 71h
+ * bit 5 set.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -48,6 +49,16 @@ int main(void) {
   set_3d_level(20);
   CHECK(simhw.mixer[0x50] == 0x0D);
   CHECK((simhw.mixer[0x52] & 0x3F) == 20);
+
+  // A1h: the original formula, or like 70h with mixer 71h bit 5 (DS p.64)
+  simhw.ext_mode = 1;
+  simhw.ctrl[0xA1 - 0xA0] = 0xF0;
+  simhw.mixer[0x71] = 0x00;
+  CHECK(get_audio_1_sample_rate() == 49718);
+  simhw.mixer[0x71] = 0x20;
+  CHECK(get_audio_1_sample_rate() == 48000);
+  simhw.ctrl[0xA1 - 0xA0] = 0x6E;
+  CHECK(get_audio_1_sample_rate() == 44100);
 
   fprintf(stderr, "t_regs: %d checks, %d failures\n", checks, failures);
   return failures != 0;

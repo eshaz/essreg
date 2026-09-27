@@ -9,8 +9,33 @@
 #include "essio.h"
 #include "esshw.h"
 
+// the number of a register's logical device: an optional device's
+// depends on card register 25h
+static int ldn_of(const struct ess_reg *r) {
+  int hdr, ldn;
+
+  if (r->ldn < LDN_OPT)
+    return r->ldn;
+  hdr = esshw_pnp_read(0xFF, 0x25);
+  if (hdr < 0)
+    return hdr;
+  ldn = cat_opt_ldn(r->ldn, (u8)hdr);
+  return ldn < 0 ? -ESSIO_EABSENT : ldn;
+}
+
+const char *ess_strerror(int err) {
+  switch (err < 0 ? -err : err) {
+  case ESSIO_ETIER:
+    return "needs Expert mode";
+  case ESSIO_EABSENT:
+    return "not on this card";
+  }
+  return esshw_strerror(err);
+}
+
 int ess_read(int reg) {
   const struct ess_reg *r = &ess_regs[reg];
+  int ldn;
 
   switch (r->bank) {
   case BK_MIXER:
@@ -24,13 +49,15 @@ int ess_read(int reg) {
   case BK_PNPCARD:
     return esshw_pnp_read(0xFF, (u8)r->addr);
   case BK_PNPLDN:
-    return esshw_pnp_read(r->ldn, (u8)r->addr);
+    ldn = ldn_of(r);
+    return ldn < 0 ? ldn : esshw_pnp_read((u8)ldn, (u8)r->addr);
   }
   return -ESSHW_EPARAM;
 }
 
 int ess_write(int reg, u8 value) {
   const struct ess_reg *r = &ess_regs[reg];
+  int ldn;
 
   switch (r->bank) {
   case BK_MIXER:
@@ -44,7 +71,8 @@ int ess_write(int reg, u8 value) {
   case BK_PNPCARD:
     return esshw_pnp_write(0xFF, (u8)r->addr, value);
   case BK_PNPLDN:
-    return esshw_pnp_write(r->ldn, (u8)r->addr, value);
+    ldn = ldn_of(r);
+    return ldn < 0 ? ldn : esshw_pnp_write((u8)ldn, (u8)r->addr, value);
   }
   return -ESSHW_EPARAM;
 }
@@ -69,6 +97,27 @@ static void pulse_delay(void) {
     esshw_port_read(0x0C);
 }
 
+// after a DSP software reset the DSP puts AAh in its read buffer: read it,
+// so the next command doesn't take it as its data (DS p.43)
+static int reset_ack(void) {
+  int i, v;
+
+  // at least 1 ms: each read of Audio_Base+Eh takes about 1 us on ISA
+  for (i = 0; i < 2000; i++) {
+    v = esshw_port_read(0x0E);
+    if (v < 0)
+      return v;
+    if (!(v & 0x80))
+      continue;
+    v = esshw_port_read(0x0A);
+    if (v < 0)
+      return v;
+    if (v == 0xAA)
+      return 0;
+  }
+  return -ESSHW_ETIMEOUT;
+}
+
 int ess_field_write(int field, u8 value, int expert) {
   const struct ess_field *f = &ess_fields[field];
   const struct ess_reg *r = &ess_regs[f->reg];
@@ -91,7 +140,10 @@ int ess_field_write(int field, u8 value, int expert) {
     if (err < 0)
       return err;
     pulse_delay();
-    return ess_write(f->reg, cat_set(f, (u8)raw, 0));
+    err = ess_write(f->reg, cat_set(f, (u8)raw, 0));
+    if (err == 0 && field == F_AP_SWRST)
+      err = reset_ack();
+    return err;
   case K_ACTION:
     return ess_write(f->reg, cat_set(f, (u8)raw, cat_max(f)));
   }

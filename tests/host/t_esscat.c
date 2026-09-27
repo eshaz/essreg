@@ -132,6 +132,12 @@ static void test_formulas(void) {
   CHECK_EQ(cat_rate_70(0xE0), 24000); // 768000 / 32
   CHECK_EQ(cat_rate_a1(0x6E), 22094); // 397700 / 18
   CHECK_EQ(cat_rate_a1(0xEE), 44194); // 795500 / 18
+  // with mixer 71h bit 5 set, A1h works like 70h (DS p.64)
+  cat_a1_like_70 = 1;
+  CHECK_EQ(cat_rate_a1(0xF0), 48000);
+  CHECK_EQ(cat_rate_a1(0x6E), 44100);
+  cat_a1_like_70 = 0;
+  CHECK_EQ(cat_rate_a1(0xF0), 49718); // 795500 / 16, the old formula
   CHECK_EQ(cat_filter(0xFF), 7160000);
   CHECK_EQ(cat_adc_offset(0x00), 0);
   CHECK_EQ(cat_adc_offset(0x0F), 960);
@@ -255,6 +261,31 @@ static void test_essio(void) {
   CHECK_EQ(ess_field_write(cat_find_key("adc.off_l"), 0x12, 0), 0);
   CHECK_EQ(simhw.ctrl[0xBA - 0xA0], 0x32);
   CHECK_EQ(simhw.irq_clears, 0);
+
+  // a DSP reset reads the AAh the DSP answers with, so the next controller
+  // read gets its own data; BAh survives the reset (DS p.43, p.70)
+  CHECK_EQ(ess_field_write(cat_find_key("ctl.sw_reset"), 1, 1), 0);
+  CHECK_EQ(simhw.nrdata, 0);
+  CHECK_EQ(ess_read(R_CT_BA), 0x32);
+
+  // optional logical devices follow LDN 2 in 25h order (DS p.30-32)
+  CHECK_EQ(cat_opt_ldn(1, 0x80), 1);
+  CHECK_EQ(cat_opt_ldn(LDN_MPU, 0x80), -1);
+  CHECK_EQ(cat_opt_ldn(LDN_GP, 0x80), -1);
+  CHECK_EQ(cat_opt_ldn(LDN_MPU, 0x1F), 3);
+  CHECK_EQ(cat_opt_ldn(LDN_CDROM, 0x1F), 4);
+  CHECK_EQ(cat_opt_ldn(LDN_MODEM, 0x1F), 5);
+  CHECK_EQ(cat_opt_ldn(LDN_GP, 0x1F), 6);
+  CHECK_EQ(cat_opt_ldn(LDN_CDROM, 0x02), 3);
+  CHECK_EQ(cat_opt_ldn(LDN_MODEM, 0x0C), 3);
+  CHECK_EQ(cat_opt_ldn(LDN_GP, 0x0C), 4);
+  // a CD-ROM without a separate MPU-401 is LDN 3
+  simhw.pnp_card[0x25] = 0x02;
+  simhw.pnp_ldn[3][0x60] = 0x01;
+  CHECK_EQ(ess_read(R_PCD_60), 0x01);
+  CHECK_EQ(ess_read(R_PMPU_30), -ESSIO_EABSENT);
+  CHECK_EQ(ess_write(R_PMOD_30, 1), -ESSIO_EABSENT);
+  CHECK(strcmp(ess_strerror(-ESSIO_EABSENT), "not on this card") == 0);
 }
 
 int main(void) {
