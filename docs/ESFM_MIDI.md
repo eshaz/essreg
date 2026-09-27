@@ -104,7 +104,6 @@ A dropped note off leaves the voice keyed on until it's stolen for another note 
 * **Sustain pedal.** [`src/esfm/esfmped.asm`](../src/esfm/esfmped.asm):
   * A program change lets go of the channel's pedal first, as controller 64 with 0 would. The MIDI spec keeps it down, but a pedal still down when a channel changes instrument is left over from the part before, and on FM it holds notes forever.
   * A GM, GM2, GS or XG reset in a long message resets the controllers of every channel (121, the pedal up) and turns their notes off (123), as GM synths do.
-  * When each channel's pedal went down and up, what let it up, and when its program changed are kept for essctl.
 * **Bank file.** [`src/esfm/esfmfile.asm`](../src/esfm/esfmfile.asm) lets the driver play a patch bank straight from a file named in `SYSTEM.INI`. It reads the file when a program opens the device, if the file's date or time changed. See [ESFM_BANK.md](ESFM_BANK.md#bank-file-buildesfmdrv).
 
 Everything else is ESS's code, unchanged:
@@ -128,11 +127,6 @@ To go back, copy `ESFM.ORG` over `ESFM.DRV` the same way.
 * **Chip column.** While a program has the MIDI device open, the Chip column reads the key-on bit back from the synthesizer.
 * **Stuck notes.** A voice that's `on` in the chip while the driver has it as free is marked **STUCK**. A voice that keeps *playing* after the music has stopped is a hanging note too.
 * **With the fixed driver:** the page also counts the messages that came in while it was busy. ESS's driver would have dropped every one of them.
-* **Sustain pedal.** For each channel whose pedal is down, the fixed driver's page says for how many note ons, and when the channel's program last changed. It also lists pedals that a program change or a reset let up:
-  ```
-  Channel 6: pedal down for 734 note ons, program changed 900 note ons ago
-  Channel 2: pedal let up by a program change 40 note ons ago
-  ```
 * **In a file:** `essctl /dump file` writes the same table.
 
 **Stress test** (button on the same page):

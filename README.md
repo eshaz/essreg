@@ -170,7 +170,7 @@ Keep essctl open on the *ESFM patch bank* page.
 5. Restart Windows and play: the bank file is read at the first play.
 6. Delete `C:\BANKS\TEST.BIN` and play: the page says "cannot read", and the last bank keeps playing.
 7. *Stress test* (button on the page): no voices left sounding.
-8. Play the MIDI files and games that used to hang notes. If a note hangs, the page says which channel's pedal is down, for how long, and when its program last changed. `essctl /dump` writes it to a file.
+8. Play the MIDI files and games that used to hang notes. If a note hangs, the page shows its voice, channel and state (*held by pedal*, for example). `essctl /dump` writes it to a file.
 9. ESFM > *Restore original bank*: the `Bank=` line is gone from `SYSTEM.INI`, and the driver's own bank plays.
 
 More checks are in [docs/TESTING.md](docs/TESTING.md) (G and G2).

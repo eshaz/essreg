@@ -105,7 +105,7 @@ See [ESFM_MIDI.md](ESFM_MIDI.md).
 3. Install `build\ESFM.DRV` from DOS (see [ESFM_MIDI.md](ESFM_MIDI.md#installing)) and restart.
 4. The page says "Fixed driver". Run the stress test again: no voice left sounding. The "queued while busy" count is what ESS's driver would have dropped.
 5. Play the same music again: no hanging notes. MIDI, the patch bank and *Load bank* work like before.
-6. Play music that uses the sustain pedal. When a song changes a channel's program with the pedal down, the page lists "pedal let up by a program change". After the music stops, no channel should keep its pedal down.
+6. Play music that uses the sustain pedal. After the music stops, no voice stays *held by pedal*.
 
 ### G2. ESFM bank file
 

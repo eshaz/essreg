@@ -43,7 +43,6 @@
 #define DEV_ACTIVE 0x014
 #define DEV_OPEN 0x016
 #define DEV_CLOCK 0x01C
-#define DEV_CHAN_FLAGS 0x040
 #define DEV_VOICES 0x070
 #define DEV_FLAGS 0x30E
 #define DEV_SIZE 0x311
@@ -374,28 +373,13 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
     d->file_time = *(u16 __far *)(fix + 42);
     _fmemcpy(d->file, fix + 44, sizeof(d->file) - 1);
   }
-  // version 3: the sustain pedal of each channel (src/esfm/esfmped.asm)
-  if (fix && d->version >= 3 &&
-      (u32)(FP_OFF(fix) - FP_OFF(lv.dg)) + 284 <= dgsize) {
-    _disable();
-    _fmemcpy(d->ped_down, fix + 172, sizeof(d->ped_down));
-    _fmemcpy(d->ped_up, fix + 204, sizeof(d->ped_up));
-    _fmemcpy(d->ped_prog, fix + 236, sizeof(d->ped_prog));
-    _fmemcpy(d->ped_why, fix + 268, sizeof(d->ped_why));
-    _enable();
-    d->pedal_times = 1;
-  }
   close_live(&lv);
 
   d->device = 1;
   d->fm_port = *(u16 *)(dev + DEV_FM_PORT);
   d->open = *(u16 *)(dev + DEV_OPEN) != 0;
   d->suspended = (dev[DEV_FLAGS] & 4) != 0;
-  for (i = 0; i < 16; i++)
-    if (dev[DEV_CHAN_FLAGS + i] & 1)
-      d->pedal |= 1 << i;
   clock = rd32(dev + DEV_CLOCK);
-  d->clock = (u16)clock;
   for (i = 0; i < ESFM_VOICES; i++) {
     const u8 *v = dev + DEV_VOICES + i * VOICE_SIZE;
     d->v[i].flags = v[0];
@@ -454,36 +438,6 @@ static void file_text(const struct esfm_diag *d, const char *nl, char *buf,
                 "changed: %u checks, %u load%s%s",
           d->file_checks, d->file_loads, d->file_loads == 1 ? "" : "s", nl);
   strncat(buf, line, size - strlen(buf) - 1);
-}
-
-// each channel with the pedal down, and pedals the fixed driver let up
-static void pedal_text(const struct esfm_diag *d, const char *nl, char *buf,
-                       unsigned size) {
-  static char line[120];
-  int i, n;
-
-  for (i = 0; i < 16; i++) {
-    if (d->pedal & (1 << i)) {
-      n = sprintf(line, "Channel %d: pedal down", i + 1);
-      if (d->ped_down[i] != 0xFFFF)
-        n += sprintf(line + n, " for %u note ons",
-                     (u16)(d->clock - d->ped_down[i]));
-      if (d->ped_prog[i] != 0xFFFF)
-        sprintf(line + n, ", program changed %u note ons ago%s",
-                (u16)(d->clock - d->ped_prog[i]), nl);
-      else
-        sprintf(line + n, ", no program change since the reset%s", nl);
-    } else if (d->ped_why[i] == ESFM_PED_PROGRAM ||
-               d->ped_why[i] == ESFM_PED_SYSEX) {
-      sprintf(line, "Channel %d: pedal let up by %s %u note ons ago%s", i + 1,
-              d->ped_why[i] == ESFM_PED_PROGRAM ? "a program change"
-                                                : "a GM, GS or XG reset",
-              (u16)(d->clock - d->ped_up[i]), nl);
-    } else {
-      continue;
-    }
-    strncat(buf, line, size - strlen(buf) - 1);
-  }
 }
 
 static const char *note_name(u8 note, char *buf) {
@@ -551,14 +505,4 @@ void esfm_diag_text(const struct esfm_diag *d, int rc, const char *nl,
     sprintf(line + n, "%s", nl);
     strncat(buf, line, size - strlen(buf) - 1);
   }
-  if (d->pedal) {
-    strcpy(line, "Sustain pedal down on channel");
-    for (i = 0; i < 16; i++)
-      if (d->pedal & (1 << i))
-        sprintf(line + strlen(line), " %d", i + 1);
-    strcat(line, nl);
-    strncat(buf, line, size - strlen(buf) - 1);
-  }
-  if (d->pedal_times)
-    pedal_text(d, nl, buf, size);
 }

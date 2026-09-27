@@ -13,49 +13,13 @@
 ; 2. a GM, GS or XG reset in a long message resets the controllers of
 ;    every channel, pedal included, as GM synths do (fix_process).  ESS's
 ;    parser skips every SysEx byte
-; 3. when each channel's pedal went down and up, what let it up, and when
-;    its program changed are kept for essctl, as DEV_CLOCK (note ons)
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
 ; Licensed under GPL Version 3.0
 
-; fix_ped_why: what let the pedal up last
-PED_CC64        equ 1           ; controller 64 below 64
-PED_PROGRAM     equ 2           ; a program change
-PED_SYSEX       equ 3           ; a GM, GS or XG reset
-PED_CC121       equ 4           ; controller 121, reset all controllers
-
 MIDIHDR_DATA    equ 0x00
 MIDIHDR_LENGTH  equ 0x04
-
-; controller 64: sustain(dev, channel, value), with the time kept
-; far, the caller pops the arguments, like sustain
-fix_sustain:
-        push    bp
-        mov     bp,sp
-        mov     bx,[bp+0x6]             ; dev
-        mov     ax,[bx+DEV_CLOCK]
-        mov     bx,[bp+0x8]             ; channel
-        and     bx,0x0F
-        cmp     word [bp+0xA],64
-        jl      .up
-        add     bx,bx
-        mov     [bx+fix_ped_down],ax
-        jmp     .call
-.up:
-        mov     byte [bx+fix_ped_why],PED_CC64
-        add     bx,bx
-        mov     [bx+fix_ped_up],ax
-.call:
-        push    word [bp+0xA]
-        push    word [bp+0x8]
-        push    word [bp+0x6]
-        push    cs
-        call    sustain
-        add     sp,6
-        pop     bp
-        retf
 
 ; a program change (short_msg, after the program is stored): let go of the
 ; channel's sustain pedal, as controller 64 with 0 would
@@ -68,17 +32,9 @@ fix_program:
         mov     si,[bp+0x4]             ; dev
         mov     di,[bp+0x6]             ; channel
         and     di,0x0F
-        mov     ax,[si+DEV_CLOCK]
-        mov     bx,di
-        add     bx,bx
-        mov     [bx+fix_ped_prog],ax
-        mov     cx,bx
         mov     bx,di
         test    byte [bx+si+DEV_CHAN_FLAGS],1
         jz      .out
-        mov     byte [bx+fix_ped_why],PED_PROGRAM
-        mov     bx,cx
-        mov     [bx+fix_ped_up],ax
         push    word 0                  ; pedal up
         push    di
         push    si
@@ -90,47 +46,6 @@ fix_program:
         pop     si
         pop     bp
         ret     4
-
-; controller 121 (short_msg, before ESS's code resets the channel): keep the
-; time if it lets the pedal up
-; fix_ctl_reset(dev, channel), near, pops its arguments
-fix_ctl_reset:
-        push    bp
-        mov     bp,sp
-        push    si
-        mov     si,[bp+0x4]             ; dev
-        mov     bx,[bp+0x6]             ; channel
-        and     bx,0x0F
-        test    byte [bx+si+DEV_CHAN_FLAGS],1
-        jz      .out
-        mov     al,[fix_ped_reason]
-        mov     [bx+fix_ped_why],al
-        mov     ax,[si+DEV_CLOCK]
-        add     bx,bx
-        mov     [bx+fix_ped_up],ax
-.out:
-        pop     si
-        pop     bp
-        ret     4
-
-; chip_reset clears every channel's flags and the note-on count: forget the
-; pedal times too
-fix_ped_clear:
-        push    di
-        push    es
-        push    ds
-        pop     es
-        mov     di,fix_ped_down
-        mov     cx,16 * 3               ; fix_ped_down, _up, _prog
-        mov     ax,0xFFFF
-        cld
-        rep     stosw
-        mov     cx,16                   ; fix_ped_why
-        xor     al,al
-        rep     stosb
-        pop     es
-        pop     di
-        ret
 
 ; modMessage_orig, with a look at long messages first: a GM, GS or XG reset
 ; resets the controllers of every channel before ESS's code plays the rest
@@ -235,7 +150,6 @@ fix_find_reset:
 fix_gm_reset:
         push    si
         push    di
-        mov     byte [fix_ped_reason],PED_SYSEX
         mov     si,[device_list]
 .dev:
         or      si,si
@@ -263,7 +177,6 @@ fix_gm_reset:
         mov     si,[si+DEV_NEXT]
         jmp     .dev
 .done:
-        mov     byte [fix_ped_reason],PED_CC121
         pop     di
         pop     si
         ret
