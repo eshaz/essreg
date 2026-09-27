@@ -81,24 +81,25 @@ BEGIN
     LTEXT           "", IDC_BE_NAME, 6, 6, 224, 18, SS_NOPREFIX
     LTEXT           "Value (hex):", -1, 6, 29, 42, 9
     EDITTEXT        IDC_BE_HEX, 50, 27, 18, 12, ES_UPPERCASE
-    LTEXT           "Bits:", -1, 78, 29, 18, 9
+    SCROLLBAR       IDC_BE_SLIDER, 72, 28, 158, 10, WS_TABSTOP
+    LTEXT           "Bits:", -1, 6, 45, 18, 9
     CONTROL         "7", IDC_BE_BIT7, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
-                    98, 28, 16, 10
+                    26, 44, 16, 10
     CONTROL         "6", IDC_BE_BIT6, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
-                    115, 28, 16, 10
+                    43, 44, 16, 10
     CONTROL         "5", IDC_BE_BIT5, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
-                    132, 28, 16, 10
+                    60, 44, 16, 10
     CONTROL         "4", IDC_BE_BIT4, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
-                    149, 28, 16, 10
+                    77, 44, 16, 10
     CONTROL         "3", IDC_BE_BIT3, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
-                    166, 28, 16, 10
+                    94, 44, 16, 10
     CONTROL         "2", IDC_BE_BIT2, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
-                    183, 28, 16, 10
+                    111, 44, 16, 10
     CONTROL         "1", IDC_BE_BIT1, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
-                    200, 28, 16, 10
+                    128, 44, 16, 10
     CONTROL         "0", IDC_BE_BIT0, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
-                    217, 28, 16, 10
-    LISTBOX         IDC_BE_FIELDS, 6, 44, 224, 86,
+                    145, 44, 16, 10
+    LISTBOX         IDC_BE_FIELDS, 6, 58, 224, 72,
                     LBS_NOINTEGRALHEIGHT | LBS_USETABSTOPS | WS_VSCROLL |
                     WS_BORDER | WS_TABSTOP
     DEFPUSHBUTTON   "&Write", IDOK, 124, 136, 50, 14

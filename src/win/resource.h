@@ -42,9 +42,11 @@
 #define IDC_BE_BIT6 316
 #define IDC_BE_BIT7 317
 #define IDC_BE_FIELDS 320
+#define IDC_BE_SLIDER 321
 
 /* controls created at run time in the page area */
-#define IDC_ROW 1000 /* IDC_ROW + 4 * row + column */
+#define IDC_ROW 1000 /* IDC_ROW + ROW_IDS * row + column */
+#define ROW_IDS 5    /* label, control, value, tier, text field */
 #define IDC_PG_EDIT 900
 #define IDC_PG_BANK 901
 #define IDC_PG_LIST 902

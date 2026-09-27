@@ -80,6 +80,8 @@ tools/wineshot.sh stop
 ### B. Changing settings
 
 1. *3-D, mic, MONO, I2S*: switch *3-D effect* on and move *3-D level*. Music playing in Windows changes audibly.
+   * Click the slider's arrows: the level goes up or down by one, and the text field follows.
+   * Type 20 in the text field and press Enter: the slider moves to 20. Type 99: a beep, and the text field goes back to 20.
 2. Toggle *Mic +26 dB preamp* and speak into the microphone with the Windows mixer's mic monitor on.
 3. *ADC offset & power*:
    * click *Read controller registers*, set *ADC offset L* to +3 and read again

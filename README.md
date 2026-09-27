@@ -8,6 +8,7 @@ This repository contains utilities and drivers designed for the ESS AudioDrive E
 * Shows every register of the chip, 137 registers and 279 settings, on these pages: *Output mixer*, *Master volume*, *Record*, *3-D, mic, MONO, I2S*, *Serial / telegaming*, *Audio 2 channel*, *Audio 1 controller*, *ADC offset & power*, *Status & interrupts*, *Plug and Play*, *SB compatible mixer*, *Raw registers* and *ESFM patch bank*.
   * Each setting shows the decoded value (sample rates in Hz, ADC offsets in samples, named choices). The help line shows the register, bits and data sheet page.
   * Every change is written and read back, so the page shows what the chip returned.
+  * Levels, signed values and raw values have a text field with a slider on its right. The slider moves in steps of one over the setting's range. The text field takes decimal, or hex for raw values, and writes on Enter or when you leave it.
   * Registers the data sheet leaves out, but ESS's drivers use, are there too, marked *(undocumented)*: the 3-D limit (mixer 50h bit 0), the 3-D registers 54h, 56h, 58h and 5Ah, and controller A8h bits 7:5 and 2. See [docs/REGISTERS.md](docs/REGISTERS.md).
 * Settings that can stop playback, hang the DSP or move the card to other resources are read-only until Options > *Expert mode* is turned on for the session.
 * Talks to the card in one of three ways:

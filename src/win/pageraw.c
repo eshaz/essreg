@@ -5,7 +5,8 @@
  * Notes:
  *
  * Writing a whole register bypasses the per-field tiers, so
- * the bit editor only writes in Expert mode.
+ * the bit editor only writes in Expert mode. Its slider, text
+ * field and bits all show the same value, in steps of one.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -217,6 +218,7 @@ static void be_show(HWND dlg, int from_edit) {
   }
   for (i = 0; i < 8; i++)
     CheckDlgButton(dlg, IDC_BE_BIT0 + i, (be.value >> i) & 1);
+  SetScrollPos(GetDlgItem(dlg, IDC_BE_SLIDER), SB_CTL, be.value, TRUE);
   SendDlgItemMessage(dlg, IDC_BE_FIELDS, LB_RESETCONTENT, 0, 0);
   for (i = 0; i < F_COUNT; i++) {
     const struct ess_field *f = &ess_fields[i];
@@ -282,8 +284,39 @@ BOOL CALLBACK __export bit_dlg_proc(HWND dlg, UINT msg, WPARAM wp,
     SendDlgItemMessage(dlg, IDC_BE_FIELDS, LB_SETTABSTOPS, 2,
                        (LPARAM)(int FAR *)tabs);
     SendDlgItemMessage(dlg, IDC_BE_HEX, EM_LIMITTEXT, 2, 0);
+    SetScrollRange(GetDlgItem(dlg, IDC_BE_SLIDER), SB_CTL, 0, 255, FALSE);
     EnableWindow(GetDlgItem(dlg, IDOK), g_expert);
     be_show(dlg, 0);
+    return TRUE;
+  case WM_HSCROLL:
+    // the slider, in steps of one
+    i = be.value;
+    switch (wp) {
+    case SB_LINEUP:
+    case SB_PAGEUP:
+      i--;
+      break;
+    case SB_LINEDOWN:
+    case SB_PAGEDOWN:
+      i++;
+      break;
+    case SB_TOP:
+      i = 0;
+      break;
+    case SB_BOTTOM:
+      i = 255;
+      break;
+    case SB_THUMBTRACK:
+    case SB_THUMBPOSITION:
+      i = LOWORD(lp);
+      break;
+    default:
+      return TRUE;
+    }
+    if (i >= 0 && i <= 255 && i != be.value) {
+      be.value = (u8)i;
+      be_show(dlg, 0);
+    }
     return TRUE;
   case WM_COMMAND:
     if (wp >= IDC_BE_BIT0 && wp < IDC_BE_BIT0 + 8 &&

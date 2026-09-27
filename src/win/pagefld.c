@@ -4,16 +4,19 @@
  * tier. The control depends on the kind of field:
  *
  *   one bit             check box
- *   level / signed      scroll bar
+ *   level, signed, raw  text field and a slider on its right, in steps
+ *                       of one over the field's range
  *   named values        drop-down list
  *   action / pulse      push button
- *   raw value           "Edit..." (bit editor)
  *   status              value only
  *
  * Notes:
  *
  * Every change is a read-modify-write of the register and then
  * a read back, so the row shows what the chip returned.
+ * The text field takes decimal for levels and signed values
+ * and hex for raw values. It's written on Enter or when it
+ * loses the focus.
  * Controller registers go through the DSP command channel and
  * are only read on request.
  *
@@ -23,6 +26,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "essctl.h"
@@ -39,6 +43,7 @@
 #define W_CTL 80
 #define X_VAL 208
 #define W_VAL 76
+#define W_EDIT 24 // a slider's text field, the slider on its right
 #define X_TAG 286
 #define W_TAG 28
 
@@ -47,7 +52,8 @@
 struct row {
   int field;
   HWND lab, ctl, val, tag;
-  int raw; // register value, NOT_READ or a negative error
+  HWND edit;  // the slider's text field
+  int raw;    // register value, NOT_READ or a negative error
   int lo, hi; // scroll bar range
 };
 
@@ -59,8 +65,13 @@ static HWND read_btn;
 
 static int row_of(HWND ctl) {
   int id = GetDlgCtrlID(ctl);
-  int r = (id - IDC_ROW) / 4;
+  int r = (id - IDC_ROW) / ROW_IDS;
   return id >= IDC_ROW && r < nrows ? r : -1;
+}
+
+// a slider and a text field
+static int is_ranged(const struct ess_field *f) {
+  return f->kind == K_UINT || f->kind == K_SMAG || f->kind == K_HEX;
 }
 
 static int can_write(const struct ess_field *f) {
@@ -95,17 +106,25 @@ static void layout(void) {
       break;
     case K_ACTION:
     case K_PULSE:
-    case K_HEX:
       page_move(r->ctl, X_CTL, y, 44, 12, show);
       break;
     case K_BOOL:
       page_move(r->ctl, X_CTL, y + 1, 12, 10, show);
       break;
     default:
-      if (r->ctl)
+      if (r->edit) {
+        // the text field, then the slider on its right
+        page_move(r->edit, X_CTL, y, W_EDIT, 12, show);
+        page_move(r->ctl, X_CTL + W_EDIT + 3, y + 1, W_CTL, 10, show);
+      } else if (r->ctl) {
         page_move(r->ctl, X_CTL, y + 2, W_CTL, 9, show);
+      }
     }
-    page_move(r->val, X_VAL, y + 2, W_VAL, 9, show);
+    if (r->edit)
+      page_move(r->val, X_CTL + W_EDIT + W_CTL + 6, y + 2,
+                X_TAG - (X_CTL + W_EDIT + W_CTL + 6), 9, show);
+    else
+      page_move(r->val, X_VAL, y + 2, W_VAL, 9, show);
     page_move(r->tag, X_TAG, y + 2, W_TAG, 9, show);
   }
   page_scrollbar(top, nrows, nvis);
@@ -126,10 +145,44 @@ static int is_bool(const struct ess_field *f) {
   return f->kind == K_BOOL || (f->kind == K_UINT && f->width == 1);
 }
 
+// the slider position of a field value
+static int slider_pos(const struct ess_field *f, u8 v) {
+  return f->kind == K_SMAG ? cat_smag(f, v) : v;
+}
+
+// the field value of a slider position
+static u8 slider_value(const struct ess_field *f, int pos) {
+  return f->kind == K_SMAG ? cat_smag_code(f, pos) : (u8)pos;
+}
+
+// the text field shows the slider position, hex for raw values
+static void show_edit(struct row *r, int pos, int force) {
+  char text[8];
+
+  if (!r->edit || (!force && GetFocus() == r->edit))
+    return; // don't change what's being typed
+  sprintf(text, ess_fields[r->field].kind == K_HEX ? "%02X" : "%d", pos);
+  SetWindowText(r->edit, text);
+}
+
+// next to the text field: the decoded value, or the range
+static void range_text(const struct row *r, u8 raw, char *text, unsigned size) {
+  const struct ess_field *f = &ess_fields[r->field];
+
+  if (f->fmt != FMT_NONE)
+    cat_format(f, raw, text, size);
+  else if (f->kind == K_HEX)
+    sprintf(text, "%02Xh-%02Xh", r->lo, r->hi);
+  else if (f->kind == K_SMAG)
+    sprintf(text, "%d to +%d", r->lo, r->hi);
+  else
+    sprintf(text, "of %d", r->hi);
+}
+
 static void create_row(int i, int field) {
   const struct ess_field *f = &ess_fields[field];
   struct row *r = &rows[i];
-  int id = IDC_ROW + 4 * i;
+  int id = IDC_ROW + ROW_IDS * i;
   DWORD tab = WS_TABSTOP;
 
   memset(r, 0, sizeof(*r));
@@ -146,7 +199,14 @@ static void create_row(int i, int field) {
     switch (f->kind) {
     case K_UINT:
     case K_SMAG:
-      r->ctl = page_control("SCROLLBAR", "", tab | SBS_HORZ, 0, 0, W_CTL, 9,
+    case K_HEX:
+      // the text field first, so Tab goes from it to its slider
+      r->edit = page_control("EDIT", "",
+                             tab | WS_BORDER | ES_AUTOHSCROLL |
+                                 (f->kind == K_HEX ? ES_UPPERCASE : 0),
+                             0, 0, W_EDIT, 12, id + 4);
+      SendMessage(r->edit, EM_LIMITTEXT, 5, 0);
+      r->ctl = page_control("SCROLLBAR", "", tab | SBS_HORZ, 0, 0, W_CTL, 10,
                             id + 1);
       if (f->kind == K_SMAG) {
         r->lo = -(1 << (f->width - 1));
@@ -168,14 +228,12 @@ static void create_row(int i, int field) {
       r->ctl = page_control("BUTTON", f->kind == K_PULSE ? "Pulse" : "Do it",
                             tab | BS_PUSHBUTTON, 0, 0, 44, 12, id + 1);
       break;
-    case K_HEX:
-      r->ctl = page_control("BUTTON", "Edit...", tab | BS_PUSHBUTTON, 0, 0,
-                            44, 12, id + 1);
-      break;
     }
   }
   if (r->ctl && !can_write(f))
     EnableWindow(r->ctl, FALSE);
+  if (r->edit && !can_write(f))
+    EnableWindow(r->edit, FALSE);
   r->val = page_control("STATIC", "", SS_LEFTNOWORDWRAP | SS_NOPREFIX, 0, 0,
                         W_VAL, 9, id + 2);
   r->tag = page_control("STATIC", tag_text(f), SS_LEFTNOWORDWRAP, 0, 0,
@@ -253,16 +311,18 @@ static void show_row(int i) {
     return;
   }
   v = cat_get(f, (u8)r->raw);
-  cat_format(f, (u8)r->raw, text, sizeof(text));
+  if (r->edit)
+    range_text(r, (u8)r->raw, text, sizeof(text));
+  else
+    cat_format(f, (u8)r->raw, text, sizeof(text));
   SetWindowText(r->val, text);
   if (!r->ctl || i == drag_row)
     return;
   if (is_bool(f)) {
     SendMessage(r->ctl, BM_SETCHECK, v ? 1 : 0, 0);
-  } else if (f->kind == K_UINT) {
-    SetScrollPos(r->ctl, SB_CTL, v, TRUE);
-  } else if (f->kind == K_SMAG) {
-    SetScrollPos(r->ctl, SB_CTL, cat_smag(f, v), TRUE);
+  } else if (is_ranged(f)) {
+    SetScrollPos(r->ctl, SB_CTL, slider_pos(f, v), TRUE);
+    show_edit(r, slider_pos(f, v), 0);
   } else if (f->kind == K_ENUM) {
     n = (int)SendMessage(r->ctl, CB_GETCOUNT, 0, 0);
     for (j = 0; j < n; j++)
@@ -374,16 +434,61 @@ static void write_row(int i, u8 value) {
   }
 }
 
+// write what was typed in row i's text field, if it's a new value
+static void apply_edit(int i) {
+  struct row *r = &rows[i];
+  const struct ess_field *f = &ess_fields[r->field];
+  char text[16], *end;
+  long v;
+
+  GetWindowText(r->edit, text, sizeof(text));
+  v = strtol(text, &end, f->kind == K_HEX ? 16 : 10);
+  if (f->kind == K_HEX && (*end == 'h' || *end == 'H'))
+    end++;
+  if (!text[0] || *end || v < r->lo || v > r->hi) {
+    MessageBeep(0);
+    if (f->kind == K_HEX)
+      set_status("%s: %s is not 00h to %02Xh", f->label, text, r->hi);
+    else
+      set_status("%s: %s is not %d to %d", f->label, text, r->lo, r->hi);
+    if (r->raw >= 0)
+      show_edit(r, slider_pos(f, cat_get(f, (u8)r->raw)), 1);
+    return;
+  }
+  if (r->raw >= 0 && v == slider_pos(f, cat_get(f, (u8)r->raw)))
+    return;
+  SetScrollPos(r->ctl, SB_CTL, (int)v, TRUE);
+  write_row(i, slider_value(f, (int)v));
+  if (r->raw >= 0)
+    show_edit(r, slider_pos(f, cat_get(f, (u8)r->raw)), 1);
+}
+
 void fields_command(int id, int code, HWND ctl) {
   int i, sel;
   const struct ess_field *f;
+  HWND focus;
 
   if (id == IDC_PG_READ) {
     fields_refresh(2);
     return;
   }
+  if (id == IDOK) {
+    // Enter in a text field
+    focus = GetFocus();
+    i = row_of(focus);
+    if (i >= 0 && rows[i].edit == focus)
+      apply_edit(i);
+    return;
+  }
   i = row_of(ctl);
-  if (i < 0 || (id - IDC_ROW) % 4 != 1)
+  if (i >= 0 && (id - IDC_ROW) % ROW_IDS == 4) {
+    if (code == EN_KILLFOCUS && can_write(&ess_fields[rows[i].field]))
+      apply_edit(i);
+    else if (code == EN_SETFOCUS)
+      help_for(i);
+    return;
+  }
+  if (i < 0 || (id - IDC_ROW) % ROW_IDS != 1)
     return;
   f = &ess_fields[rows[i].field];
   if (is_bool(f) && code == BN_CLICKED) {
@@ -395,11 +500,6 @@ void fields_command(int id, int code, HWND ctl) {
   } else if ((f->kind == K_ACTION || f->kind == K_PULSE) &&
              code == BN_CLICKED) {
     write_row(i, cat_max(f));
-  } else if (f->kind == K_HEX && code == BN_CLICKED) {
-    if (rows[i].raw >= 0 || (ess_regs[f->reg].flags & RF_WRITEONLY)) {
-      bit_editor(g_main, f->reg, rows[i].raw >= 0 ? rows[i].raw : 0);
-      fields_refresh(0);
-    }
   } else if (code == CBN_SETFOCUS) {
     help_for(i);
   }
@@ -409,7 +509,7 @@ void fields_hscroll(int code, int pos, HWND ctl) {
   int i = row_of(ctl);
   struct row *r;
   const struct ess_field *f;
-  int cur, step;
+  int cur;
   char text[48];
 
   if (i < 0)
@@ -417,19 +517,15 @@ void fields_hscroll(int code, int pos, HWND ctl) {
   r = &rows[i];
   f = &ess_fields[r->field];
   cur = GetScrollPos(ctl, SB_CTL);
-  step = (r->hi - r->lo) / 8 ? (r->hi - r->lo) / 8 : 1;
+  // steps of one: arrows, keys and clicks beside the thumb
   switch (code) {
   case SB_LINEUP:
+  case SB_PAGEUP:
     cur--;
     break;
   case SB_LINEDOWN:
-    cur++;
-    break;
-  case SB_PAGEUP:
-    cur -= step;
-    break;
   case SB_PAGEDOWN:
-    cur += step;
+    cur++;
     break;
   case SB_TOP:
     cur = r->lo;
@@ -444,7 +540,7 @@ void fields_hscroll(int code, int pos, HWND ctl) {
   case SB_ENDSCROLL:
     if (drag_row == i) {
       drag_row = -1;
-      write_row(i, f->kind == K_SMAG ? cat_smag_code(f, cur) : (u8)cur);
+      write_row(i, slider_value(f, cur));
     }
     return;
   default:
@@ -455,19 +551,18 @@ void fields_hscroll(int code, int pos, HWND ctl) {
   if (cur > r->hi)
     cur = r->hi;
   SetScrollPos(ctl, SB_CTL, cur, TRUE);
+  show_edit(r, cur, 1);
   if (!can_write(f))
     return;
   if (code == SB_THUMBTRACK && !winio_can_poll()) {
     // direct I/O with ES1869.VXD, only write when the thumb is released
     drag_row = i;
-    cat_format(f, cat_set(f, 0, f->kind == K_SMAG ? cat_smag_code(f, cur)
-                                                  : (u8)cur),
-               text, sizeof(text));
+    range_text(r, cat_set(f, 0, slider_value(f, cur)), text, sizeof(text));
     SetWindowText(r->val, text);
     return;
   }
   drag_row = -1;
-  write_row(i, f->kind == K_SMAG ? cat_smag_code(f, cur) : (u8)cur);
+  write_row(i, slider_value(f, cur));
 }
 
 void fields_vscroll(int code, int pos) {
