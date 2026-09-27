@@ -48,3 +48,6 @@
 __pycache__/
 *.pyc
 /tests/bin/
+
+# Claude Code worktrees of parallel agents
+/.claude/worktrees/
