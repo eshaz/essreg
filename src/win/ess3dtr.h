@@ -1,9 +1,12 @@
 /*
  * ess3d's tray icon: an icon in the taskbar's notification area that shows
- * whether 3-D is on, and a small panel with every 3-D setting when it's
+
+ * * whether 3-D is on, and a small panel with every 3-D setting when it's
+ *
  * clicked (see ess3dtr.c).
  *
- * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan Halsall
+ * <ethan.s.halsall@gmail.com>
  *
  * Licensed under GPL Version 3.0
  */
@@ -27,9 +30,14 @@ HWND tray_window(void);
 // tell a running tray icon that the setting changed
 void tray_changed(void);
 
+// the tray's hidden window, made right after tray_window() found none,
+// before anything can yield, so two "ess3d tray" can't both start
+// 0 if there's no memory for it
+HWND tray_claim(HINSTANCE inst);
+
 // show the tray icon until its panel's Close button or "ess3d exit"
 // returns ess3d's exit code
-int tray_run(HINSTANCE inst, const struct ess3d_cmd *c);
+int tray_run(const struct ess3d_cmd *c);
 
 // append a line with the time to the log file name (ess3dw.c)
 void ess3d_log(const char *name, const char *text);

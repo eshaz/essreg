@@ -83,7 +83,8 @@ ess3d limit toggle
 ess3d reg 54 A0
 ```
 
-* A bad command, or no ES1869, shows a message box (unless `/q`).
+* A bad command shows a message box with the usage (unless `/q`).
+* Other problems, like no ES1869, show in the box at the bottom of the screen for 3 s and go to the log. No message box waits behind a full-screen game, and pressing the key again doesn't pile them up.
 * With the stock driver, ess3d can't reach the card while a DOS program has the sound device. It says so, and nothing changes. The rebuilt `ES1869.VXD` has no such limit.
 * Exit codes: 0 done, 1 the chip returned other values than were written, 2 failed, 3 bad command line.
 * *Note: the data sheet doesn't have the registers 54h-5Ah or the limit and mono bits. ESS's drivers set them when Windows starts, but what they do isn't known yet. [docs/SPATIALIZER.md](docs/SPATIALIZER.md) has what's known and how to find out.*

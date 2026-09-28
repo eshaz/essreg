@@ -20,7 +20,8 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   a profile with a bank names it there
 - ess3d: commands against the simulated chip, bad input and no card, read
   from its /log= file, since Wine's winevdm always exits with 0 and drops
-  the program's exit code
+  the program's exit code; without /q, no card shows in the display, which
+  closes by itself
 - ess3d's display: a second ess3d hands its setting to the display of the
   first and exits, and the first goes after the second one's time
 - ess3d's tray icon: a second "ess3d tray" opens the panel of the first,
@@ -303,6 +304,13 @@ class WineTest(unittest.TestCase):
         self.assertEqual(self.ess3d("/q", "toggle", log="ESS3D.LOG"),
                          ["No ES1869 answered at 220h: use /base=, or /sim "
                           "to try ess3d without the card"])
+        # without /q the problem shows in the display, which goes away by
+        # itself: a message box would wait for a click
+        t = time.time()
+        self.assertEqual(self.ess3d("/log=E3.LOG", "toggle"),
+                         ["No ES1869 answered at 220h: use /base=, or /sim "
+                          "to try ess3d without the card"])
+        self.assertLess(time.time() - t, 30)
 
     def test_ess3d_display(self):
         def start(*args):

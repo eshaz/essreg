@@ -27,6 +27,11 @@
  * ES1869.VXD, the icon also checks the setting every few seconds, so it
  * follows the Windows mixer.
  *
+ * Explorer may not be ready when the tray starts from the StartUp folder,
+ * and on Windows 98 it restarts after a crash: an icon the shell refused
+ * is added again every 2 s until it's there, and again when the new
+ * taskbar says "TaskbarCreated".
+ *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
  * Licensed under GPL Version 3.0
@@ -52,6 +57,8 @@
 #define POLL_MS 3000
 #define PANEL_TIMER 2 // while the panel is up: is it still in front
 #define PANEL_MS 250
+#define ADD_TIMER 3 // the shell refused the icon: try again
+#define ADD_MS 2000
 
 // Shell_NotifyIcon
 #define NIM_ADD 0
@@ -120,6 +127,7 @@ static struct ess3d_state cur; // the setting as the chip returned it
 static int cur_err;            // reading or writing it failed
 static UINT taskbar_created;   // Explorer restarted: add the icon again
 static int nsliders;
+static int shown;       // the shell has the icon
 static int drag = -1;   // slider held without writing (direct I/O)
 static UINT panel_fg;   // the window in front while the panel is up
 static DWORD hidden_at; // GetTickCount() when the panel last hid
@@ -213,12 +221,20 @@ static void state_text(char *buf, unsigned size) {
     ess3d_text(&cur, buf, size);
 }
 
-// the icon and its tooltip follow the setting
-static void icon_update(DWORD msg) {
+// the icon and its tooltip follow the setting; one the shell doesn't
+// have is added, and one it refuses is tried again on a timer
+static void icon_update(void) {
   nid.icon =
       (DWORD)(UINT)(!cur_err && cur.enable && cur.run ? icon_on : icon_off);
   state_text(nid.tip, sizeof(nid.tip));
-  notify(msg);
+  if (shown && notify(NIM_MODIFY))
+    return;
+  // gone without "TaskbarCreated", or never added
+  shown = notify(NIM_ADD) != 0;
+  if (shown)
+    KillTimer(tray, ADD_TIMER);
+  else if (!SetTimer(tray, ADD_TIMER, ADD_MS, 0))
+    tray_log("no timer left to add the icon again");
 }
 
 // --- the panel --------------------------------------------------------------
@@ -284,16 +300,16 @@ static void panel_fill(void) {
 }
 
 static void changed(int err) {
-  char text[64];
+  char text[96];
 
   cur_err = err < 0 ? err : 0;
   if (err < 0)
     read_setting();
-  icon_update(NIM_MODIFY);
+  icon_update();
   panel_fill();
   state_text(text, sizeof(text));
   if (err == ESS3D_MISMATCH)
-    strcat(text, " (not what was written)");
+    strncat(text, " (not what was written)", sizeof(text) - 1 - strlen(text));
   tray_log(text);
 }
 
@@ -489,7 +505,7 @@ static void panel_show(void) {
   if (!panel)
     return;
   read_setting();
-  icon_update(NIM_MODIFY);
+  icon_update();
   panel_fill();
   GetWindowRect(panel, &rc);
   w = rc.right - rc.left;
@@ -510,7 +526,8 @@ static void panel_show(void) {
   SetWindowPos(panel, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW);
   to_front(panel);
   panel_fg = 0;
-  SetTimer(tray, PANEL_TIMER, PANEL_MS, 0);
+  if (!SetTimer(tray, PANEL_TIMER, PANEL_MS, 0))
+    tray_log("no timer left: the panel closes with Esc or a click on it");
   SetFocus(item(IDC_P_ON));
   tray_log("panel");
 }
@@ -567,7 +584,10 @@ LRESULT CALLBACK __export tray_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
   struct ess3d_state old;
 
   if (msg == taskbar_created && msg) {
-    notify(NIM_ADD);
+    // a new taskbar, after Explorer restarted
+    shown = 0;
+    icon_update();
+    tray_log("icon added again");
     return 0;
   }
   switch (msg) {
@@ -586,7 +606,7 @@ LRESULT CALLBACK __export tray_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     return 0;
   case TRAY_CHANGED:
     read_setting();
-    icon_update(NIM_MODIFY);
+    icon_update();
     panel_fill();
     return 0;
   case WM_TIMER:
@@ -594,11 +614,17 @@ LRESULT CALLBACK __export tray_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
       panel_check();
       return 0;
     }
+    if (wp == ADD_TIMER) {
+      icon_update();
+      if (shown)
+        tray_log("icon added");
+      return 0;
+    }
     // with the register interface, reading has no side effects
     old = cur;
     read_setting();
     if (memcmp(&old, &cur, sizeof(cur))) {
-      icon_update(NIM_MODIFY);
+      icon_update();
       panel_fill();
     }
     return 0;
@@ -608,7 +634,9 @@ LRESULT CALLBACK __export tray_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
   case WM_DESTROY:
     KillTimer(w, POLL_TIMER);
     KillTimer(w, PANEL_TIMER);
-    notify(NIM_DELETE);
+    KillTimer(w, ADD_TIMER);
+    if (shown)
+      notify(NIM_DELETE);
     if (panel)
       DestroyWindow(panel);
     panel = 0; // the message loop runs until WM_QUIT
@@ -619,20 +647,10 @@ LRESULT CALLBACK __export tray_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
   return DefWindowProc(w, msg, wp, lp);
 }
 
-int tray_run(HINSTANCE hinst, const struct ess3d_cmd *c) {
+HWND tray_claim(HINSTANCE hinst) {
   WNDCLASS wc;
-  DLGPROC proc;
-  MSG msg;
 
   inst = hinst;
-  cmd = c;
-  if (w32_load() < 0) {
-    if (!c->quiet)
-      MessageBox(0, "The tray icon needs Windows 95 or later.", TRAY_TITLE,
-                 MB_OK | MB_ICONEXCLAMATION);
-    tray_log("no tray on this Windows");
-    return 2;
-  }
   memset(&wc, 0, sizeof(wc));
   wc.lpfnWndProc = tray_proc;
   wc.hInstance = inst;
@@ -640,15 +658,34 @@ int tray_run(HINSTANCE hinst, const struct ess3d_cmd *c) {
   RegisterClass(&wc);
   tray = CreateWindow(TRAY_CLASS, TRAY_TITLE, WS_OVERLAPPED, 0, 0, 0, 0, 0, 0,
                       inst, 0);
-  if (!tray) {
-    w32_free();
+  return tray;
+}
+
+int tray_run(const struct ess3d_cmd *c) {
+  DLGPROC proc;
+  MSG msg;
+
+  cmd = c;
+  if (w32_load() < 0) {
+    if (!c->quiet)
+      MessageBox(0, "The tray icon needs Windows 95 or later.", TRAY_TITLE,
+                 MB_OK | MB_ICONEXCLAMATION);
+    tray_log("no tray on this Windows");
+    DestroyWindow(tray);
     return 2;
   }
   taskbar_created = RegisterWindowMessage("TaskbarCreated");
   icon_on = LoadIcon(inst, "ICON_ON");
   icon_off = LoadIcon(inst, "ICON_OFF");
   proc = (DLGPROC)MakeProcInstance((FARPROC)panel_proc, inst);
-  CreateDialog(inst, "PANEL", 0, proc);
+  // owned by the tray's window, so the panel gets no taskbar button
+  if (!CreateDialog(inst, "PANEL", tray, proc)) {
+    tray_log("not enough memory for the panel");
+    DestroyWindow(tray);
+    FreeProcInstance((FARPROC)proc);
+    w32_free();
+    return 2;
+  }
 
   memset(&nid, 0, sizeof(nid));
   nid.size = sizeof(nid);
@@ -657,10 +694,10 @@ int tray_run(HINSTANCE hinst, const struct ess3d_cmd *c) {
   nid.flags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
   nid.message = WM_TRAYICON;
   read_setting();
-  icon_update(NIM_ADD);
-  tray_log("started");
-  if (winio_can_poll())
-    SetTimer(tray, POLL_TIMER, POLL_MS, 0);
+  icon_update();
+  tray_log(shown ? "started" : "started, the icon comes when the taskbar does");
+  if (winio_can_poll() && !SetTimer(tray, POLL_TIMER, POLL_MS, 0))
+    tray_log("no timer left: the icon won't follow the Windows mixer");
 
   while (GetMessage(&msg, 0, 0, 0)) {
     // the panel's keys: Tab, Enter and Esc

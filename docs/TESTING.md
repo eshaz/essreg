@@ -203,7 +203,7 @@ With the stock driver, and again with the extended driver (E) if it's installed.
    * the box shows, Notepad's title bar stays active and typing still goes to Notepad
    * press the key again while the box is up: the same box shows the new setting. No second box, no taskbar button, and Notepad keeps the focus.
 3. The same in a game, in a window and full screen: the game keeps the focus and its sound. The box may not show over a full-screen game.
-4. With the stock driver, play a DOS game with sound in a window and press the key: a message says the audio device is in use by another program, and the game's sound goes on. With the extended driver, the key works while the game plays.
+4. With the stock driver, play a DOS game with sound in a window and press the key: the box at the bottom says the audio device is in use by another program, goes away by itself after 3 s, and the game's sound goes on. Press the key five times: still one box, and Ctrl+Alt+Del lists no ess3d after it's gone. With the extended driver, the key works while the game plays.
 5. `ess3d bogus` shows the usage in a message box. `ess3d /q bogus` shows nothing, and `ESS3D.LOG` next to ess3d.exe says "unknown command: bogus".
 6. Change 3-D in the Windows mixer, then `ess3d show`: it shows the mixer's setting. Restart Windows and `ess3d show`: the driver's own setting is back.
 7. **The tray icon.** `C:\ESSREG\ESS3D.EXE tray` from Start > *Run*:
@@ -217,6 +217,7 @@ With the stock driver, and again with the extended driver (E) if it's installed.
    * A second `ess3d tray` opens the panel. *Close tray icon* removes the icon. `ess3d tray`, then `ess3d exit`: it goes too.
    * Put a shortcut to `C:\ESSREG\ESS3D.EXE tray` in the StartUp folder and restart Windows: the icon is there after the start.
    * If Explorer restarts (after a crash, or ended with Ctrl+Alt+Del), the icon comes back with the taskbar.
+   * Start `ess3d tray` twice at once (two shortcuts, or the StartUp folder and a key right after a restart): one icon.
 8. **The undocumented settings** ([SPATIALIZER.md](SPATIALIZER.md#finding-out-on-the-card)). No document says what they do, so note everything:
    * Before Windows starts, from a cold boot to DOS: `essreg r=boot.txt`. Note 50h, 52h and 54h-5Ah: the chip's own reset values.
    * In essctl's Expert mode, write FFh to each of 54h, 56h, 58h and 5Ah on the *Raw registers* page and read it back, then 00h. Note which bits stay.
