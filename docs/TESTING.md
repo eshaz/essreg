@@ -124,6 +124,8 @@ tools/wineshot.sh stop
 ### D. essreg (DOS)
 
 1. In real DOS (not Windows), run `essreg a` and `essreg 3=40 m=1`: same results as the original essreg.
+   * `essreg 3=99` says "use 0 to 63", and changes nothing.
+   * In a Windows DOS box while a WAV file plays: essreg says the ES1869 doesn't answer.
 2. `essreg x=1 a1s` uses the protected protocol (C6h, polling Audio_Base+Ch). Check that the reported Audio 1 sample rate matches the default mode.
 
 ### E. The extended driver
@@ -140,7 +142,8 @@ tools/wineshot.sh stop
 2. ESFM > *Restore original bank*: the sound goes back.
 3. Save a profile with a bank loaded. Its `[ESFM] Bank=` line reloads the bank on `essctl /load`.
 4. `esfmpat C:\WINDOWS\SYSTEM\ESFM.DRV bank.bin` with a bank larger than 8288 bytes:
-   * it reports "Bank moved"
+   * in a DOS box, it refuses: Windows has the driver loaded
+   * from MS-DOS mode, it reports "Bank moved", and no `ESFM.$$$` is left
    * after a restart, MIDI plays with the new bank
    * `ESFM.BAK` is the original
 

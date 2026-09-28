@@ -53,13 +53,14 @@ static void print_result(unsigned int reg_addr, int value) {
     print_reg(reg_addr, (unsigned char)value);
 }
 
-void dump_regs(const char *path) {
+int dump_regs(const char *path) {
   unsigned int i;
+  int bad;
 
   out = fopen(path, "w");
   if (!out) {
     printf("Could not create %s\n", path);
-    return;
+    return 1;
   }
 
   fprintf(out, "Config Regs: \n");
@@ -78,8 +79,15 @@ void dump_regs(const char *path) {
   for (i = 0; i < ESS_ARRAY_SIZE(mixer_regs); i++)
     print_result(mixer_regs[i], read_mixer_reg(mixer_regs[i]));
 
-  fclose(out);
+  // a full disk shows here, not as a short file that says it was saved
+  bad = ferror(out);
+  if (fclose(out))
+    bad = 1;
   out = 0;
-
+  if (bad) {
+    printf("Could not write %s: is the disk full?\n", path);
+    return 1;
+  }
   printf("Saved registers to %s\n", path);
+  return 0;
 }

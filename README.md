@@ -182,7 +182,9 @@ file       the WAV file, FMREC001.WAV and up if left out
 ## [`essreg.exe`](build)
 * Utility to control otherwise unsupported registers for the ES1869 audio chip.
 * This program can be executed in native DOS or Windows DOS box environment.
+  * In a DOS box the chip only answers while no Windows program has the sound device. essreg checks its ID first and says so, instead of showing FFh as settings.
 * Sound card with ES1869 chip is assumed to be on I/O port 220h.
+* A value out of range is refused with its range. The exit code is 1 when something didn't work (a bad value, a dump that couldn't be written), for batch files.
 * Check out `fmd=1`, which makes the chip record the FM digitally at its own rate, 49,716 Hz! In Windows, `esfmrec` (above) records it to a file.
   * [Examples!](digital_recording)
 
@@ -218,8 +220,9 @@ Example: `essreg r=before.txt 3=0 m=1 pa=1 t=0 r=after.txt`
 ## [`1869opl3.com`](build)
 * Utility to fix ES1869 OPL3 playback for some games in the Windows DOS box.
 * This program reads the FM volume mixer register on the sound card and then runs the application.
-* Sound card with ES1869 chip is assumed to be on I/O port 220h.
+* The sound card's I/O port comes from the `BLASTER` variable (`A220`), 220h without it.
 * The IIS mixer control must not be muted in the Windows volume mixer. However, the volume can be set to 0.
+* The exit code is the command's, or 1 if it couldn't run.
 
 ```
 Example:
@@ -231,6 +234,8 @@ c:\>1869opl3.com "c:\path\to\game.exe"
 * Utility to write custom patch banks to the Windows ESFM VxD driver.
 * Patch banks that are larger than the existing bank work now, up to 32752 bytes. They're appended to the driver file and the driver is told the new size.
 * The original driver is kept as `ESFM.BAK`.
+* Nothing is changed in place: the backup and the patched driver are written to `ESFM.$$$` first, checked, then renamed. A disk error, Ctrl+C or a power cut leaves the old files as they were, and a backup that isn't a whole driver is made again.
+* Run it from MS-DOS mode (Start > *Shut Down* > *Restart in MS-DOS mode*). In a Windows DOS box it won't patch the `ESFM.DRV` Windows has loaded: Windows reads parts of the driver from the file again later, and would mix old and new.
 * Accepts raw banks and RIFF "Ptch" bank files, and checks the bank and the driver before changing anything. See [docs/ESFM_BANK.md](docs/ESFM_BANK.md) for the bank format.
 * See the [ESFM patch banks](esfm_patch_banks) for the Windows 98, Windows NT4, and other custom patches.
 * See the [recordings](digital_recording) for ESFM patch comparisons.

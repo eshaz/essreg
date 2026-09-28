@@ -363,6 +363,11 @@ static int set_adc_offset(unsigned char reg, int offset) {
   int old = read_controller_reg(reg);
   unsigned char value = calc_offset_reg(offset);
 
+  // without the old value its top bits would be lost
+  if (old < 0) {
+    printf("ADC offset not set: %s\n", esshw_strerror(old));
+    return old;
+  }
   if (old > 0)
     value |= (unsigned char)(old & 0xe0); // keep BAh bit 5
   write_controller_reg(reg, value);

@@ -1,8 +1,8 @@
 #!/bin/sh
 # Builds the DOS and 16-bit Windows programs with Open Watcom v2 on Linux,
 # into out/ow2/.  It also checks that the sources compile with a Watcom
-# toolchain.  The programs in build/, other than 1869opl3.com, were built
-# this way, and build.bat builds the same programs with Watcom C 11.0.
+# toolchain.  The programs in build/ were built this way, and build.bat
+# builds the same programs with Watcom C 11.0.
 #
 # Usage:
 #   `tools/ow2build.sh OPEN_WATCOM_DIR [wmake targets...]`

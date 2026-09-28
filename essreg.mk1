@@ -16,4 +16,4 @@ esshw.obj : src\esshw.c .AUTODEPEND
 essreg.exe : regs.obj debug.obj main.obj esshw.obj .AUTODEPEND
  @%write essreg.lk1 FIL main.obj,debug.obj,regs.obj,esshw.obj
  @%append essreg.lk1
- *wlink name essreg sys dos op m libf cstart_t op maxe=10 op q op DOSSEG op STACK=512 op el sort @essreg.lk1
+ *wlink name essreg sys dos op m libf cstart_t op maxe=10 op q op DOSSEG op STACK=4096 op el sort @essreg.lk1

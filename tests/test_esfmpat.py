@@ -151,6 +151,25 @@ class EsfmpatTest(unittest.TestCase):
         self.assertEqual(read(self.drv), bytes(other))
         self.assertFalse(os.path.exists(os.path.join(self.dir, "ESFM.BAK")))
 
+    def test_truncated_backup_is_replaced(self):
+        # a backup cut short (a full disk, a crash) isn't kept
+        with open(os.path.join(self.dir, "ESFM.BAK"), "wb") as f:
+            f.write(self.orig[:1000])
+        res = self.run_esfmpat(BANK)
+        self.assertEqual(res.returncode, 0, res.stdout)
+        self.assertIn("isn't a whole ESFM.DRV", res.stdout)
+        self.assertEqual(read(os.path.join(self.dir, "ESFM.BAK")),
+                         self.orig)
+
+    def test_no_temporary_files_left(self):
+        self.run_esfmpat(self.write("big.bin", bigger_bank()))
+        bad = bytearray(read(BANK))
+        struct.pack_into("<H", bad, 10, 0x10)
+        self.run_esfmpat(self.write("bad.bin", bytes(bad)))
+        self.assertEqual(sorted(n for n in os.listdir(self.dir)
+                                if n.startswith("ESFM.")),
+                         ["ESFM.BAK", "ESFM.DRV"])
+
     def test_fixed_driver(self):
         # build/ESFM.DRV (src/esfm with the stuck-note fixes) keeps the bank
         # loader, so esfmpat patches it like the ESS driver

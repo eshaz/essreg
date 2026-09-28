@@ -13,9 +13,7 @@
 
 static u16 rd16(const u8 *p) { return (u16)(p[0] | (p[1] << 8)); }
 
-static u32 rd32(const u8 *p) {
-  return rd16(p) | ((u32)rd16(p + 2) << 16);
-}
+static u32 rd32(const u8 *p) { return rd16(p) | ((u32)rd16(p + 2) << 16); }
 
 static void wr16(u8 *p, u16 v) {
   p[0] = (u8)v;
@@ -121,13 +119,17 @@ static const struct {
 } loader_sig[] = {
     // push bp; mov bp,sp; sub sp,134h; push di; push si;
     // mov ax,2042h; push ax; mov ax,
-    {0x0662, 14, {0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x34, 0x01, 0x57, 0x56, 0xB8,
-                  0x42, 0x20, 0x50, 0xB8}},
+    {0x0662,
+     14,
+     {0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x34, 0x01, 0x57, 0x56, 0xB8, 0x42, 0x20,
+      0x50, 0xB8}},
     // <size>; cwd; push dx; push ax; call far GlobalAlloc
     {0x0672, 4, {0x99, 0x52, 0x50, 0x9A}},
     // mov word [12h],0; mov [14h],ax; or ax,[12h]
-    {0x067A, 13, {0xC7, 0x06, 0x12, 0x00, 0x00, 0x00, 0xA3, 0x14, 0x00, 0x0B,
-                  0x06, 0x12, 0x00}},
+    {0x067A,
+     13,
+     {0xC7, 0x06, 0x12, 0x00, 0x00, 0x00, 0xA3, 0x14, 0x00, 0x0B, 0x06, 0x12,
+      0x00}},
     // mov ax,1234; cwd; push dx; push ax; mov ax,256 (FindResource)
     {0x06B4, 9, {0xB8, 0xD2, 0x04, 0x99, 0x52, 0x50, 0xB8, 0x00, 0x01}},
     // mov cx,<size/2>; rep movsw
@@ -224,8 +226,8 @@ int esfm_drv_inspect(FILE *f, struct esfm_drv *d) {
   if (!read_at(f, d->seg3 + ESFM_K_RIFF2, buf, 2))
     goto io;
   k[3] = rd16(buf);
-  if (k[1] * 2u != k[0] || k[2] != k[0] || k[3] != k[0] ||
-      k[0] > BANK_MAX || k[0] > d->bank_len) {
+  if (k[1] * 2u != k[0] || k[2] != k[0] || k[3] != k[0] || k[0] > BANK_MAX ||
+      k[0] > d->bank_len) {
     strcpy(d->why, "the bank size constants of the loader disagree");
     return -1;
   }
@@ -240,8 +242,21 @@ io:
   return -1;
 }
 
-int esfm_drv_patch(FILE *f, struct esfm_drv *d, const u8 *bank, u16 size) {
+// n zeros at the file position, 16 at a time
+static int put_zeros(FILE *f, u32 n) {
   static const u8 zeros[16];
+  unsigned chunk;
+
+  while (n) {
+    chunk = n > sizeof(zeros) ? sizeof(zeros) : (unsigned)n;
+    if (fwrite(zeros, 1, chunk, f) != chunk)
+      return 0;
+    n -= chunk;
+  }
+  return 1;
+}
+
+int esfm_drv_patch(FILE *f, struct esfm_drv *d, const u8 *bank, u16 size) {
   u16 even = (u16)((size + 1) & ~1u);
   u32 unit = 1UL << d->res_shift;
   u32 at, len;
@@ -263,23 +278,15 @@ int esfm_drv_patch(FILE *f, struct esfm_drv *d, const u8 *bank, u16 size) {
       strcpy(d->why, "file too large for the resource table");
       return -1;
     }
-    if (at > d->file_size &&
-        !write_at(f, d->file_size, zeros, (unsigned)(at - d->file_size)))
+    // the gap to the alignment, up to a whole unit
+    if (fseek(f, (long)d->file_size, SEEK_SET) != 0 ||
+        !put_zeros(f, at - d->file_size))
       goto io;
   }
   if (!write_at(f, at, bank, size))
     goto io;
-  if (fseek(f, (long)(at + size), SEEK_SET) != 0)
+  if (fseek(f, (long)(at + size), SEEK_SET) != 0 || !put_zeros(f, len - size))
     goto io;
-  {
-    u32 n = len - size;
-    while (n) {
-      unsigned chunk = n > sizeof(zeros) ? sizeof(zeros) : (unsigned)n;
-      if (fwrite(zeros, 1, chunk, f) != chunk)
-        goto io;
-      n -= chunk;
-    }
-  }
   if (at != d->bank_off || len != d->bank_len) {
     wr16(buf, (u16)(at >> d->res_shift));
     wr16(buf + 2, (u16)(len >> d->res_shift));
