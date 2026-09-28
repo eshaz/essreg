@@ -82,6 +82,10 @@ ESSREG_FM_PORTS         equ 0x030F      ; FM address and data
 
 ESSREG_FM_VOLUME        equ 0xFF        ; 36h for a DOS FM owner, as 1869opl3
 
+; Audio 2 mode (mixer 71h)
+ESSREG_A2_4X            equ 0x10        ; 4x oversampling (and no filter)
+ESSREG_A2_SCF_BYPASS    equ 0x08        ; the switched-capacitor filter bypassed
+
 ; virtual FM chip, one per VM and device, allocated zeroed on first use
 VFM_Flags               equ 0x000       ; byte: VFM_*
 VFM_Latch               equ 0x004       ; dword: address latch
@@ -737,6 +741,17 @@ ESSREG_API_Owners:
         mov     [ebp+Client_EDX],ax
         clc
 .done:  ret
+
+; --- the Audio 2 DAC ---------------------------------------------------------
+
+; in place of ESS's write of mixer 71h, AL = its value (bits 4 and 1: 4x
+; oversampling, asynchronous), AH = 71h, EDX = Audio_Base: the DAC plays
+; the samples as they are, not oversampled and the filter bypassed, as
+; build/ES1869.DRV has it (docs/AUDIO_PIPELINE.md)
+ESSREG_A2_Mode:
+        and     al,~ESSREG_A2_4X & 0xFF
+        or      al,ESSREG_A2_SCF_BYPASS
+        jmp     L1_09A8
 
 ; --- Windows' ESS functions, wrapped -------------------------------------------
 

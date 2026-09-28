@@ -93,6 +93,7 @@ The extended driver (`src/vxd/essext.asm`) changes this:
 * **DOS FM is heard.** A DOS FM owner gets the music DAC and, if 36h was 00h, FM volume FFh. When it lets go, both go back, unless something changed them meanwhile.
   * `ESFM.DRV` releases FM before it tells ES1869.DRV that MIDI closed. When a DOS box takes FM in that moment, the first DSP release by Windows afterwards (0003) gives the DOS box the music DAC and the volume again.
 * **Windows' mixer comes back.** When a DOS VM takes the DSP, 30 mixer registers are saved (`ESSREG_Snap_Regs`); when it lets go, all of them go back after ESS's 11. A change made meanwhile through the register interface (essctl, ess3d) counts as Windows'.
+  * 71h comes back with the driver's Audio 2 mode, no 4x oversampling and the filter bypassed: ESS's code sets it before the save (o5:198C).
 * **Windows' next use resets FM.** When Windows acquires through the API, to play a sound, change a level (0002), open MIDI (0102) or the MPU-401 (0302), FM a DOS program left is reset: notes still sounding stop, and the next DOS program starts from a clean chip.
 * A program's end drops the notes and timers of its VM's virtual chip, and closing the VM frees it.
 
@@ -152,6 +153,7 @@ The essreg extension changes the original only in these places, each the same le
 * the size of the ADI (E9h becomes 110h, o4:0235) and of the per-VM node (2Eh becomes 34h: o4:00AB, o5:100D, o7:0042)
 * in the control dispatcher, VM_Not_Executeable and Sys_Dynamic_Device_Exit; the node removal of a device that goes (o4:09C1)
 * the DOSMGR hook's jump to the next hook (o1:0511), which now goes through `ESSREG_App_End`
+* the two writes of mixer 71h, the Audio 2 mode, when a VM takes the DSP (o5:198C) and at the VxD's own Audio 2 start (o5:3603): through `ESSREG_A2_Mode`, no 4x oversampling and the filter bypassed ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter))
 
 Everything else is appended, so ESS's code stays at its addresses: Windows' sound, DirectSound and the interrupt handlers run the same bytes as in ESS's driver. `EssCodeTest` in `tests/test_vxdext.py` compares the two builds after their fixups, and a new hook goes in its list. `PcmPathTest` runs ES1869.DRV's calls around a wave device and DirectSound's acquire and release in both, and compares the port accesses.
 

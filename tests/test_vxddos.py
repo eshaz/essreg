@@ -358,6 +358,10 @@ class DosMixerTest(VxDBuilds, unittest.TestCase):
                0x64: 0x0F, 0x68: 0x99, 0x69: 0x99, 0x6A: 0x99, 0x6B: 0x99,
                0x6C: 0x99, 0x6D: 0x00, 0x6E: 0x99, 0x6F: 0x00, 0x71: 0x32,
                0x7C: 0x00, 0x7D: 0x06, 0x7F: 0x01, 0x60: 0x2A, 0x62: 0x2A}
+    # what comes back: all of it, 71h with the Audio 2 mode the driver sets
+    # when the DOS VM takes the DSP, before the save (no 4x oversampling,
+    # the filter bypassed)
+    BACK = {**WINDOWS, 0x71: 0x2A}
 
     def dos_mixer(self, m, vm=VM_DOS):
         """a DOS game sets up the mixer its way"""
@@ -374,7 +378,7 @@ class DosMixerTest(VxDBuilds, unittest.TestCase):
         m.program_end(VM_DOS)
         self.assertEqual(m.adi32(ADI_DSP_OWNER), 0)
         got = {reg: m.hw.mixer[reg] for reg in self.WINDOWS}
-        self.assertEqual(got, self.WINDOWS)
+        self.assertEqual(got, self.BACK)
         # ESS's driver puts back 11 of them: the 3-D effect, the record
         # source and levels and the wave volume stay as the game left them
         m = self.machine(False)
@@ -393,7 +397,7 @@ class DosMixerTest(VxDBuilds, unittest.TestCase):
         self.dos_mixer(m)
         m.program_end(VM_DOS)
         got = {reg: m.hw.mixer[reg] for reg in self.WINDOWS}
-        self.assertEqual(got, self.WINDOWS)
+        self.assertEqual(got, self.BACK)
 
     def test_a_setting_made_meanwhile_is_kept(self):
         m = self.machine()

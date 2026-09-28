@@ -244,7 +244,7 @@ At every playback start, 5:3BAC (6:2D5A) reads 60h and 62h back. If they changed
 
 | Register | Address | Value |
 |---|---|---|
-| 71h | 1:115E, 6:2DEE | bits 4 and 1 set (4x oversampling, asynchronous); other bits kept |
+| 71h | 1:115E, 6:2DEE | bits 4 and 1 set (4x oversampling, asynchronous); other bits kept. `build/ES1869.DRV` sets bits 3 and 1 at 1:115E and clears bit 4 at 6:2DEE: no oversampling, the filter bypassed ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter)) |
 | 70h, 72h, 74h, 76h, 78h | 1:1174-1:1192 | 00h at wave-out open, close and resume (list "prtvx" at 7:00A8), then 70h = 72h = FFh |
 | 70h, 72h | 6:2599, 6:25D0 | sample rate and filter |
 | 7Ch | 6:2D6D | wave volume, at start |

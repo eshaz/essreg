@@ -30,8 +30,10 @@ def anchors(path):
             code = not code
         m = None if code else re.match(r"^#+\s+(.*)", line)
         if m:
-            # lowercase, spaces to -, no punctuation other than - and _
-            h = re.sub(r"[`*]", "", m.group(1).strip().lower())
+            # a link's text only, lowercase, spaces to -, no punctuation
+            # other than - and _
+            h = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", m.group(1).strip())
+            h = re.sub(r"[`*]", "", h.lower())
             out.add(re.sub(r"[^\w\- ]", "", h).replace(" ", "-"))
     return out
 

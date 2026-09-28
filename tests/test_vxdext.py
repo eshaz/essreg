@@ -344,6 +344,8 @@ HOOKS = [
     (5, 0x127A, 0x127D),    # Acquire_Resources, DSP: ESSREG_DSP_Save
     (5, 0x1362, 0x1362),    # the API's groups: 0-4
     (5, 0x136D, 0x1370),    # and their table
+    (5, 0x198D, 0x1990),    # a VM takes the DSP, 71h: ESSREG_A2_Mode
+    (5, 0x3604, 0x3607),    # the VxD's Audio 2 start, 71h: ESSREG_A2_Mode
     (7, 0x0043, 0x0043),    # the per-VM node's size
 ] + [(6, off, off + 3) for off in (     # the FM ports' trap handler
     0x02D6, 0x02DC, 0x02E2, 0x02E8, 0x0306, 0x030C,
@@ -447,11 +449,28 @@ class PcmPathTest(VxDBuilds, unittest.TestCase):
                 sorted(e.trap_off)))
         return out
 
+    @staticmethod
+    def a2_mode(step):
+        """the step as the extended driver makes it: mixer 71h without 4x
+        oversampling and with the filter bypassed (ESSREG_A2_Mode)"""
+        name, result, log, svc, owners, traps = step
+        out, index = [], None
+        for op, port, value in log:
+            if op == "out" and port == 0x224:
+                index = value
+            elif op == "out" and port == 0x225 and index == 0x71:
+                value = (value & ~0x10) | 0x08
+            out.append((op, port, value))
+        return name, result, out, svc, owners, traps
+
     def test_windows_sound_as_with_ess_driver(self):
         import vxdemu
         stock, ext = self.run_steps(False), self.run_steps(True)
         for s, x in zip(stock, ext):
-            self.assertEqual(x, s, s[0])
+            self.assertEqual(x, self.a2_mode(s), s[0])
+        # the one difference: 71h, here at the first acquisition
+        self.assertIn(("out", 0x225, 0x12), stock[0][2])
+        self.assertIn(("out", 0x225, 0x0A), ext[0][2])
         # the steps did what they're for: Windows took the DSP and gave it
         # back each time, DirectSound too, and the position moved
         sys_vm = vxdemu.VM_SYS
@@ -464,6 +483,42 @@ class PcmPathTest(VxDBuilds, unittest.TestCase):
                          [(0, False)] * 4 + [1, 0, (0, False)])
         self.assertNotEqual(stock[1][1], stock[2][1])
         self.assertTrue(stock[5][2])            # the DSP reset of a release
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class Audio2ModeTest(VxDBuilds, unittest.TestCase):
+    """The VxD's own Audio 2 start (L5_3594) and a VM taking the DSP set
+    mixer 71h: ESS's driver 4x oversampling, the extended one no
+    oversampling and the switched-capacitor filter bypassed."""
+
+    def start(self, ext, old):
+        import vxdemu
+        m = self.machine(ext)
+        m.hw.mixer[0x71] = old
+        # demand transfers, as without "Single Mode DMA" (ADI 13h bit 0)
+        m.emu.uc.mem_write(vxdemu.ADI + 0x13, b"\x01\x00")
+        # cdecl: the Audio_Base the ADI is found by, the transfer count
+        m.emu.write32(vxdemu.STACK - 0x100 + 4, 0x220)
+        m.emu.write32(vxdemu.STACK - 0x100 + 8, 0x1000)
+        m.emu.run(m.syms["L5_3594"], {"EBX": vxdemu.VM_SYS})
+        return m.hw.mixer[0x71], m.hw.mixer[0x78]
+
+    def test_audio2_start(self):
+        for old in (0x00, 0x01, 0x10, 0x12, 0x20, 0x32):
+            with self.subTest(old=hex(old)):
+                self.assertEqual(self.start(False, old),
+                                 (old | 0x12, 0x93))
+                # bit 5 (48 kHz rates) and bit 0 stay, bit 1 as ESS's
+                self.assertEqual(self.start(True, old),
+                                 ((old | 0x0A) & ~0x10, 0x93))
+
+    def test_acquire(self):
+        import vxdemu
+        for ext, want in ((False, 0x32), (True, 0x2A)):
+            m = self.machine(ext)
+            m.hw.mixer[0x71] = 0x30             # 4x left on, bit 5 set
+            m.api(vxdemu.VM_SYS, 0x0002, EAX=0x220, EBX=1)
+            self.assertEqual(m.hw.mixer[0x71], want, ext)
 
 
 if __name__ == "__main__":

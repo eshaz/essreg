@@ -2564,7 +2564,11 @@ L5_197F:
         call L1_099C                                    ; 1983
         or al,0x12                                      ; 1988
         mov ah,0x71                                     ; 198A
+%if ESSREG_EXT
+        call ESSREG_A2_Mode                     ; essreg: no 4x, no filter
+%else
         call L1_09A8                                    ; 198C
+%endif
         xor_ al,al                                      ; 1991
         mov ecx,D6_0269                                 ; 1993
 L5_1998:
@@ -5511,7 +5515,11 @@ L5_35ED:
         jc short L5_361F                                ; 35FD
         or al,0x12                                      ; 35FF
         mov ah,0x71                                     ; 3601
+%if ESSREG_EXT
+        call ESSREG_A2_Mode                     ; essreg: no 4x, no filter
+%else
         call L1_09A8                                    ; 3603
+%endif
         jc short L5_361F                                ; 3608
         mov al,0x13                                     ; 360A
         test word [edi+0x13],0x1                        ; 360C

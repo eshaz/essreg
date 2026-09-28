@@ -168,6 +168,7 @@ file       the WAV file, FMREC001.WAV and up if left out
   * After a DOS game, all of Windows' mixer settings come back: the 3-D effect, the record source and levels, the wave volume and the rest. ESS's driver puts back 11 levels.
   * The next time Windows plays a sound or a level changes, FM left by a DOS game is reset, so no note keeps sounding. After a DOS game, moving a slider in the tray's volume control resets the card.
   * *Note: the Sound Blaster part and the MPU-401 still belong to one program at a time, as with ESS's driver. While Windows plays a sound, a DOS game starting then finds no Sound Blaster; it finds it once the sound ends.*
+* DirectSound and the rest of the driver's own Audio 2 playback play without 4x oversampling and with the filter bypassed, as [`ES1869.DRV`](#es1869drv-with-the-audio-2-dac-unfiltered) below does for Windows sounds.
 * Otherwise it works like the ESS driver. `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte for byte.
 * Install: keep a copy of `C:\WINDOWS\SYSTEM\ES1869.VXD`, copy `build\ES1869.VXD` over it and restart Windows.
   * See [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#installing-the-extended-driver) for the steps, and how to go back if something goes wrong.
@@ -187,6 +188,21 @@ file       the WAV file, FMREC001.WAV and up if left out
 * Everything else is ESS's code. `python3 tools/build_esfm.py --stock --verify` rebuilds the original byte for byte, and `esfmpat` and essctl's banks work the same.
 * Install it from DOS, since Windows has the driver open: keep a copy of `C:\WINDOWS\SYSTEM\ESFM.DRV`, copy `build\ESFM.DRV` over it and restart Windows.
   * Step by step: [Installing and testing on Windows 98](#installing-and-testing-on-windows-98).
+
+## [`ES1869.DRV`](build) with the Audio 2 DAC unfiltered
+* ESS's wave, mixer and aux driver 4.04.00.1319, with one change: the Audio 2 DAC, which plays every Windows sound, plays the samples as they are. No 4x oversampling, and the filter bypassed.
+  * ESS's driver turns the 4x oversampling on at every playback. Its interpolation most likely dulls the treble. Why, and what each setting does: [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter).
+  * *Note: sounds at 11 or 22 kHz, like many Windows sounds, keep more of the DAC's images, which can sound harsher.*
+  * *Note: DirectSound plays through `ES1869.VXD`. The [extended one](#es1869vxd-with-a-register-interface-and-better-dos-boxes) plays it the same way. ESS's turns the 4x oversampling on.*
+* It isn't rebuilt from source. `python3 tools/build_es1869drv.py` changes the operand of the two instructions that write the Audio 2 mode (mixer 71h), after checking ESS's bytes. The rest is ESS's file, byte for byte.
+* It replaces ESS's 4.04.00.1319 only. Check the version as for [`ESFM.DRV`](#before-you-start).
+* Install it from MS-DOS mode, since Windows has the driver open (Start > *Shut Down* > *Restart in MS-DOS mode*), with the file copied to `C:\ESSREG`:
+  ```
+  copy C:\WINDOWS\SYSTEM\ES1869.DRV C:\WINDOWS\SYSTEM\ES1869.ORG
+  copy C:\ESSREG\ES1869.DRV C:\WINDOWS\SYSTEM\ES1869.DRV
+  ```
+  Type `exit` to go back to Windows. To go back to ESS's driver, copy `ES1869.ORG` over `ES1869.DRV` the same way.
+* To try each setting live, essctl's *Audio 2 channel* page has *Audio 2 4x oversampling* and *Audio 2 filter bypass*. The driver puts its own setting back when a sound starts.
 
 ## [`essreg.exe`](build)
 * Utility to control otherwise unsupported registers for the ES1869 audio chip.
@@ -338,7 +354,7 @@ More checks are in [docs/TESTING.md](docs/TESTING.md) (G, G2 and G3).
 * [docs/SPATIALIZER.md](docs/SPATIALIZER.md): the 3-D effect, where it comes from (ESS's ES938), and its undocumented registers.
 * [docs/ESFM_BANK.md](docs/ESFM_BANK.md): FM patch banks and `ESFM.DRV`.
 * [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md): why ESFM notes hang, the MIDI driver stack, and the fixed `ESFM.DRV`.
-* [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md): where skipped samples come from, and what to try on the card.
+* [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md): where skipped samples come from, the Audio 2 DAC's oversampling and filter, and what to try on the card.
 * [docs/RE_NOTES.md](docs/RE_NOTES.md): how the drivers were reverse-engineered.
 * [docs/TESTING.md](docs/TESTING.md): automated tests and a checklist for real hardware.
 * [docs/datasheet](docs/datasheet): the ES1869, ES938 and ES1868 data sheets.
@@ -354,7 +370,7 @@ More checks are in [docs/TESTING.md](docs/TESTING.md) (G, G2 and G3).
 ### Building
 * Clone this repo and copy it your build environment.
 * Run [`build.bat`](build.bat) to build the executables: `essreg.exe`, `1869opl3.com`, `esfmpat.exe`, `essctl.exe`, `ess3d.exe` and `esfmrec.exe`.
-* Run `python3 tools/build_vxd.py` to build `build/ES1869.VXD`, and `python3 tools/build_esfm.py` to build `build/ESFM.DRV`.
+* Run `python3 tools/build_vxd.py` to build `build/ES1869.VXD`, `python3 tools/build_esfm.py` to build `build/ESFM.DRV`, and `python3 tools/build_es1869drv.py` to build `build/ES1869.DRV`.
 * On Linux, `tools/ow2build.sh <open-watcom-v2 directory>` builds the programs with Open Watcom v2 into `out/ow2/`.
   * The programs in [`build`](build), other than `1869opl3.com`, were built this way. `build.bat` builds the same programs with Watcom C 11.0.
 

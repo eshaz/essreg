@@ -13,7 +13,8 @@ python3 tests/run_tests.py
   * `ESFM.DRV` in a CPU emulator with an FM chip model and simulated interrupts: the hanging notes of ESS's driver, and the fixed driver (`test_esfmdrv`, [ESFM_MIDI.md](ESFM_MIDI.md))
   * the fixed driver's bank file in the same emulator, with `SYSTEM.INI`, files with dates and the global heap simulated
   * the register API of the rebuilt VxD, run in a CPU emulator against a simulated ES1869, and its refusals and checks (`test_vxdext`)
-  * that the extended VxD keeps ESS's code where it was, byte for byte apart from the hooks, and that Windows' own sound (ES1869.DRV's calls around a wave device, a mixer change, DirectSound taking the DSP) makes the same port accesses as with ESS's driver (`test_vxdext`)
+  * that the extended VxD keeps ESS's code where it was, byte for byte apart from the hooks, and that Windows' own sound (ES1869.DRV's calls around a wave device, a mixer change, DirectSound taking the DSP) makes the same port accesses as with ESS's driver, apart from the Audio 2 mode (`test_vxdext`)
+  * `ES1869.DRV`'s writes of the Audio 2 mode, run in the CPU emulator inside ESS's code, for ESS's driver and `build/ES1869.DRV`, and that the build changes only their operands (`test_es1869drv`)
   * DOS boxes and the rebuilt VxD in the same emulator, with an FM chip model after ESFMu, VMs and per-VM port trapping (`test_vxddos`): FM detection whoever has FM, the virtual FM chip and its hand-over, the music DAC, Windows' mixer around a DOS game, and the reset when Windows uses the card again. The stock driver runs the same steps where it differs.
   * `esfmpat` on copies of `ESFM.DRV`
   * that the generated documentation is current
@@ -81,7 +82,7 @@ tools/wineshot.sh stop
 ## On the hardware
 
 * None of the above touches a real card.
-* Before you start, keep copies of `C:\WINDOWS\SYSTEM\ES1869.VXD` and `ESFM.DRV`.
+* Before you start, keep copies of `C:\WINDOWS\SYSTEM\ES1869.VXD`, `ES1869.DRV` and `ESFM.DRV`.
 * Run the steps in this order and stop at the first surprise. Each step says what to expect.
 
 ### A. Reading, with the stock driver
@@ -154,6 +155,19 @@ Use an FM-only DOS game or player (AdLib music, no Sound Blaster), and one that 
 6. **A game that runs other programs** (a menu that starts the game, a cutscene player): its music keeps its instruments after the other program ends.
 7. **Recording a DOS game.** With esfmrec recording, play the FM game: the recording has its music (esfmrec keeps 7Fh bit 4 on; the driver changes only bit 0 and 36h).
 8. Note anything that differs, and the game.
+
+### E3. The Audio 2 DAC
+
+See [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter).
+
+1. With ESS's `ES1869.DRV`, play music at 44.1 kHz in Winamp with the waveOut output, and open essctl on *Audio 2 channel*. F5: *Audio 2 4x oversampling* is on.
+   * Switch it off and *Audio 2 filter bypass* on while the music plays, and back. Note what changes.
+   * Stop and play again: the oversampling is on again.
+2. Install `build\ES1869.DRV` as in the [README](../README.md#es1869drv-with-the-audio-2-dac-unfiltered) and restart. Play the same music: F5 shows the oversampling off and the filter bypassed, and it sounds like the setting of step 1.
+3. Winamp's DirectSound output: the same with the extended `ES1869.VXD` (E). With ESS's, the oversampling is on.
+4. Play Windows sounds at 11 and 22 kHz, like those in `C:\WINDOWS\MEDIA`, with each setting. Note any harshness with the new one.
+5. Record the Wave output with each setting, as in [Measuring the DAC on the card](AUDIO_PIPELINE.md#measuring-the-dac-on-the-card), and keep both files.
+6. Sound Recorder records, a MIDI file plays, and a DOS game in a window has its sound, as before.
 
 ### F. ESFM patch banks
 
