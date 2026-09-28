@@ -8,7 +8,8 @@ Tools and rebuilt drivers for the ESS ES1869 sound chip on DOS and Windows 9x. [
 * `src/win/`: `essctl.exe`, the 16-bit Windows control panel, and `ess3dw.c`, the Windows side of `ess3d.exe` (the 3-D effect from the command line, for keys). `ess3dtr.c` is ess3d's tray icon and panel. Its icons come from `tools/ess3dico.py`. `esfmrec.c` records the FM digitally to a WAV file.
 * `src/vxd/`: `ES1869.VXD` as NASM source, from `tools/vxd2asm.py`. `essext.asm` adds the register API and the DOS box improvements (the virtual FM chip, Windows' mixer around a DOS program); `essext.inc` has its layout.
 * `src/esfm/`: `ESFM.DRV` as NASM source, from `tools/ne2asm.py`. `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm` and `esfmgm.asm` are the fixes and General MIDI, assembled with `ESFM_FIX=1`.
-* `driver/`: ESS's original drivers, the reference for the byte-identical rebuilds. `ES1869.DRV` has no source: `tools/build_es1869drv.py` changes two instructions of ESS's file.
+* `src/es1869/`: `ES1869.DRV` (wave, mixer and aux) as NASM source, from `tools/ne2asm.py` with `names.txt`. Changes are assembled with `ES1869_FIX=1`.
+* `driver/`: ESS's original drivers, the reference for the byte-identical rebuilds.
 * `build/`: the committed binaries.
 * `tools/`: builders, RE tools, `guard.py`, `wineshot.sh`. `tests/`: Python tests, `tests/host/`: C tests.
 * `docs/`: [TESTING.md](docs/TESTING.md), [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md), [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md), [VXD_INTERNALS.md](docs/VXD_INTERNALS.md), [SPATIALIZER.md](docs/SPATIALIZER.md), [DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md), [AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md), [RE_NOTES.md](docs/RE_NOTES.md), [STYLE.md](docs/STYLE.md). `REGISTERS.md` is generated. `docs/datasheet/` has the ES1869, ES938 and ES1868 data sheets.
@@ -29,6 +30,7 @@ python3 tools/build_esfm.py --stock --verify      # ESS's driver, byte for byte
 python3 tools/build_vxd.py                        # build/ES1869.VXD
 python3 tools/build_vxd.py --stock --verify
 python3 tools/build_es1869drv.py                  # build/ES1869.DRV
+python3 tools/build_es1869drv.py --stock --verify
 tools/ow2build.sh $OW2                            # DOS and Win16 programs, into out/ow2/
 python3 tools/regdoc.py                           # docs/REGISTERS.md from src/esscat.tbl
 python3 tools/gmcheck.py                          # build/GMCHECK.MID
@@ -42,8 +44,8 @@ tools/wineshot.sh run ess3d.exe /sim tray         # a second program on its desk
 
 ## Rules
 
-* **Byte-identical stock builds.** `build_esfm.py --stock --verify` and `build_vxd.py --stock --verify` must stay identical to `driver/`. Driver changes go under `%if ESFM_FIX` (ESFM.DRV) or in the extension (`ESSREG_EXT`, the VxD).
-* **ES1869.DRV changes** are instructions of the same length in `PATCHES` (`tools/build_es1869drv.py`), each checked against ESS's bytes and clear of relocations. `tests/test_es1869drv.py` checks that and runs them inside ESS's code.
+* **Byte-identical stock builds.** `build_esfm.py`, `build_vxd.py` and `build_es1869drv.py` with `--stock --verify` must stay identical to `driver/`. Driver changes go under `%if ESFM_FIX` (ESFM.DRV), `%if ES1869_FIX` (ES1869.DRV) or in the extension (`ESSREG_EXT`, the VxD).
+* **ES1869.DRV changes:** ESS's code keeps its addresses, as in the VxD: a changed instruction has the same length, and new code goes after ESS's. ESS copies its interrupt handler to a fixed block and patches it by offset, so moved code would break it. A changed instruction goes in `HOOKS` of `tests/test_es1869drv.py`, which compares ESS's segments byte for byte and relocation for relocation.
 * **VxD extension hooks:** ESS's code changes only under `%if ESSREG_EXT`, with instructions of the same length, never an added one: ESS's code keeps its addresses. `EssCodeTest` (`tests/test_vxdext.py`) checks it, and a new hook goes in its `HOOKS` list. The extension's per-device state goes after ESS's E9h bytes of the ADI, and a VM's after ESS's 2Eh bytes of its node (`essext.inc`). `tests/test_vxddos.py` runs the DOS box paths in the emulator.
 * **Committed binaries.** After changing their sources, rebuild `build/ESFM.DRV`, `build/ES1869.VXD` or `build/ES1869.DRV`, and copy the changed programs from `out/ow2/` to `build/`. `test_build_is_current` checks `ESFM.DRV` and `ES1869.DRV`.
 * **ESFM_FIX code:**

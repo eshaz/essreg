@@ -194,7 +194,7 @@ file       the WAV file, FMREC001.WAV and up if left out
   * ESS's driver turns the 4x oversampling on at every playback. Its interpolation most likely dulls the treble. Why, and what each setting does: [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter).
   * *Note: this is how a non-oversampling (NOS) DAC plays. At low sample rates, like the 11 and 22 kHz of many Windows sounds, its images are audible: treble above the sound's own.*
   * *Note: DirectSound plays through `ES1869.VXD`. The [extended one](#es1869vxd-with-a-register-interface-and-better-dos-boxes) plays it the same way. ESS's turns the 4x oversampling on.*
-* It isn't rebuilt from source. `python3 tools/build_es1869drv.py` changes the two instructions that make the Audio 2 mode (mixer 71h), 2 bytes each, after checking ESS's bytes. The rest is ESS's file, byte for byte.
+* Rebuilt from source in [`src/es1869`](src/es1869). `python3 tools/build_es1869drv.py --stock --verify` rebuilds the original byte for byte. The change is two instructions of 2 bytes each, and the rest of ESS's code stays at its addresses.
 * It replaces ESS's 4.04.00.1319 only. Check the version as for [`ESFM.DRV`](#before-you-start).
 * Install it from MS-DOS mode, since Windows has the driver open (Start > *Shut Down* > *Restart in MS-DOS mode*), with the file copied to `C:\ESSREG`:
   ```

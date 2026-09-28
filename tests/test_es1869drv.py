@@ -1,8 +1,9 @@
 # (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 #
 # Licensed under GPL Version 3.0
-"""Test build/ES1869.DRV, ESS's driver with the Audio 2 DAC not
-oversampled and its filter bypassed (tools/build_es1869drv.py).
+"""Test build/ES1869.DRV, ESS's driver rebuilt from src/es1869
+(tools/build_es1869drv.py): the Audio 2 DAC not oversampled and its filter
+bypassed, and ESS's code at its addresses.
 
 The two changed instructions run in a CPU emulator inside ESS's own code,
 for ESS's driver and the changed one: the wave-out open (1:1148) and the
@@ -191,6 +192,35 @@ class Audio2ModeTest(unittest.TestCase):
                 self.assertEqual(fixed.mixer[0x71], want)
 
 
+# ESS's bytes a change may replace: (segment, first, last), each an
+# instruction of the same length under ES1869_FIX
+HOOKS = [
+    (1, 0x115A, 0x115B),    # audio2_init: or al,0Ah (ESS: or al,12h)
+    (6, 0x2DEB, 0x2DEC),    # playback start: and al,0EFh (ESS: or al,12h)
+]
+
+
+def sites(ne, index):
+    """{offset: (type, flags, target)} of every relocation site of a
+    segment, the chains followed"""
+    data = ne.segment_data(index)
+    out = {}
+    for rtype, rflags, off, target in ne.segments[index - 1].relocs:
+        pos = off
+        while True:
+            out[pos] = (rtype, rflags, target)
+            if rflags & 4:
+                break
+            pos = struct.unpack_from("<H", data, pos)[0]
+            if pos == 0xFFFF:
+                break
+    return out
+
+
+def site_bytes(rtype):
+    return 4 if rtype == 3 else 1 if rtype == 0 else 2
+
+
 class BuildTest(unittest.TestCase):
     def test_build_is_current(self):
         with open(os.path.join(ROOT, "build", "ES1869.DRV"), "rb") as f:
@@ -202,42 +232,41 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(build_es1869drv.build(False),
                          build_es1869drv.original())
 
-    def test_only_the_two_instructions(self):
-        stock = build_es1869drv.build(False)
-        fixed = build_es1869drv.build(True)
-        self.assertEqual(len(stock), len(fixed))
-        changed = [i for i in range(len(stock)) if stock[i] != fixed[i]]
-        want = []
-        for at, (_s, _o, old, new, _w) in zip(
-                build_es1869drv.file_offsets(stock),
-                build_es1869drv.PATCHES):
-            want += [at + k for k in range(len(old)) if old[k] != new[k]]
-        self.assertEqual(changed, want)
+    def test_ess_code_keeps_its_addresses(self):
+        """every segment of ESS's is the same, byte for byte and relocation
+        for relocation, apart from HOOKS; new code only follows ESS's"""
+        stock = NEFile(build_es1869drv.build(False))
+        fixed = NEFile(build_es1869drv.build(True))
+        self.assertGreaterEqual(len(fixed.segments), len(stock.segments))
+        for s in stock.segments:
+            i = s.index
+            old, new = stock.segment_data(i), fixed.segment_data(i)
+            self.assertGreaterEqual(len(new), len(old), "seg%d" % i)
+            os_, ns = sites(stock, i), sites(fixed, i)
+            skip = set()
+            for off, (rtype, _f, _t) in os_.items():
+                skip.update(range(off, off + site_bytes(rtype)))
+                self.assertEqual(ns.get(off), os_[off],
+                                 "seg%d relocation at %04X" % (i, off))
+            for seg, a, b in HOOKS:
+                if seg == i:
+                    skip.update(range(a, b + 1))
+            diff = [o for o in range(len(old))
+                    if o not in skip and old[o] != new[o]]
+            self.assertEqual(diff, [], "seg%d differs at %s" % (
+                i, " ".join("%04X" % o for o in diff[:8])))
 
-    def test_no_relocation_in_the_way(self):
-        ne = NEFile(build_es1869drv.original())
-        for seg, off, old, _n, _w in build_es1869drv.PATCHES:
-            s = ne.segments[seg - 1]
-            data = ne.segment_data(seg)
-            sites = set()
-            for rtype, rflags, roff, _target in s.relocs:
-                size = 4 if rtype == 3 else 2   # far pointer, or a word
-                pos = roff
-                while True:
-                    sites.update(range(pos, pos + size))
-                    if rflags & 4:
-                        break
-                    pos = struct.unpack_from("<H", data, pos)[0]
-                    if pos == 0xFFFF:
-                        break
-            self.assertFalse(sites & set(range(off, off + len(old))),
-                             "%d:%04X" % (seg, off))
-
-    def test_other_driver_refused(self):
-        data = bytearray(build_es1869drv.original())
-        data[-1] ^= 1
-        with self.assertRaises(SystemExit):
-            build_es1869drv.build(True, bytes(data))
+    def test_hooks_changed_and_clear_of_relocations(self):
+        stock = NEFile(build_es1869drv.build(False))
+        fixed = NEFile(build_es1869drv.build(True))
+        for seg, a, b in HOOKS:
+            with self.subTest(seg=seg, at="%04X" % a):
+                old = stock.segment_data(seg)[a:b + 1]
+                self.assertNotEqual(old, fixed.segment_data(seg)[a:b + 1])
+                taken = set()
+                for off, (rtype, _f, _t) in sites(stock, seg).items():
+                    taken.update(range(off, off + site_bytes(rtype)))
+                self.assertFalse(taken & set(range(a, b + 1)))
 
 
 if __name__ == "__main__":

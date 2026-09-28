@@ -1,0 +1,121 @@
+# Names and hints for ES1869.DRV 4.04.00.1319, read by tools/ne2asm.py
+#
+#   seg:off kind name [size] ; comment
+#
+# kinds: code (an entry point), data (bytes, with a size), var (a DGROUP
+# variable, absolute operands [off] use the name), imm (the immediate of
+# the instruction at seg:off is the offset of label <name>), label (a name,
+# and on a jump table the size is the number of entries)
+#
+# ESS's wave, mixer and aux driver: wave-out plays on Audio 2, wave-in
+# records on Audio 1. docs/DRIVER_CONFIG.md and docs/VXD_API.md list what
+# its routines read, write and call. The Windows 95 DDK's MSSNDSYS sample
+# (MMEDIA\SAMPLES\MSSNDSYS\DRV) has the same design: the VxD hands out the
+# hardware and the DMA buffers, this driver runs the devices.
+
+# --- segment 1: fixed code: hardware access, callable at interrupt time -----
+1:0000 data - 16
+1:10EC code dma_pos_record ; position of the running recording, from the VxD (0004, BX=0)
+1:1118 code dma_pos_play ; position of the running playback, from the VxD (0004, BX=1)
+1:1148 code audio2_init ; Audio 2 at wave-out open, close and resume: 71h bits 4 and 1, the 7:00A8 list (70h-78h) to 0, then 70h = 72h = FFh
+1:11A0 code dsp_reset ; Audio_Base+6 = 03h then 00h, then command C6h (extended mode), when the DSP is taken for recording
+1:11F6 code dsp_read ; read a byte from the DSP (Audio_Base+Ah)
+1:1228 code dsp_write ; write a command or data byte to the DSP (Audio_Base+Ch)
+1:1294 code mixer_read ; mixer_read(dev, reg): index to Audio_Base+4, data from +5
+1:12B2 code mixer_write ; mixer_write(dev, reg, value)
+1:16DC code audio2_stop ; stop playback: 78h bit 4 off, the DMA channel masked, 78h = 0, 7Ah bit 7 cleared, 7Ch = 0
+1:1754 code isr_play ; playback interrupt service: refill the Audio 2 DMA buffer from the wave-out queue (+101h). Audio 2 users 1 and 2, Audio 1 users 3 and 4
+1:1916 code record_copy ; copy captured bytes from the DMA buffer to the wave-in queue
+1:19B4 code isr_record ; recording interrupt service: what's new in the Audio 1 DMA buffer to the wave-in queue. Audio 1 users 1 and 2
+1:1A8E code
+1:1A94 code vxd_dma_pos ; VxD API 0004: DMA position of the running transfer
+1:1AB1 code vxd_pio_buffer ; VxD API 0007: PIO emulation buffer
+1:1CC3 code dc_mean ; DCdrift: mean of the first recorded block
+1:1D0B code dc_remove ; DCdrift: subtract it from the following samples
+1:1D6C code agc_convert ; 16-bit recording converted with an adaptive gain stage
+1:1E90 data - 2
+1:1E92 code
+1:2025 code
+1:214C code
+1:0C90 code
+1:1754 code
+1:1916 code
+1:19B4 code
+1:1B3C code
+1:1BD5 code
+1:1C44 code
+1:1C7E code
+1:1F65 code
+1:1FD7 code
+1:25CC code
+1:25E6 code
+1:2654 code
+
+# --- segment 3: init, enable, the interrupt handler templates ----------------
+3:0091 code get_vxd_entry ; the VxD's entry point (INT 2Fh AX=1684h BX=3B07h) to DS:0010
+3:00C4 code vxd_version ; VxD API 0000
+3:00D1 code
+3:00D9 code vxd_get_adi ; VxD API 0001: copy the ADI (C9h bytes): Audio_Base, MPU-401, IRQs, DMA channels
+3:01B9 code isr_template ; the interrupt handler, the DDK sample's ISR_Stub: copied to a fixed block by isr_install, the device pointer patched at +0Ah (mov si,1234h). An Audio 2 interrupt goes to the second stub (+FEh:0000), an Audio 1 one through isr_srv_table by the Audio 1 user (+5Dh), then the MPU-401 and the EOI (+5Bh)
+3:0261 code isr_install ; the sample's Create_ISR: 0A8h fixed bytes (+51h), a code alias (+53h), isr_template copied and +0Ah patched
+3:02C3 code isr_template_b ; the Audio 2 stub: dispatch by the Audio 2 user (+100h) through isr_srv_table+8, then 7Ah bit 7 cleared, the mixer index kept
+3:03AB data - 1549
+3:09EA code cm_get_devnode_key ; CONFIGMG CM_Get_DevNode_Key through the VxD
+3:0A1C code
+3:0B58 code vxd_check ; "The ES1869.VXD driver is not present..." / "...out of date" boxes
+3:0CFA code
+3:0D54 code save_mixer_state ; the mixer state to the registry as REG_BINARY, at the last disable and at suspend
+3:18EC code restore_mixer_state ; at every enable and resume, through set-control-details (5:17CA)
+3:3DEC code read_config ; the configuration values and GPO0/GPO1 Show, at the first DRVM_ENABLE
+3:44A8 code
+3:4578 code
+3:469A code
+3:4758 code vxd_register_pipe ; VxD API 0200 ("ESSFMMXD", "ESMPUISR")
+3:4794 code vxd_unregister_pipe ; VxD API 0201
+3:4818 code hw_init ; mixer reset and defaults (6:1F92), Telegaming Vol to 14h, then restore_mixer_state; at enable and resume
+3:4C3C code dsp_busy_callback ; the VxD's 000A callback: with a pointer, both channels in use (Audio 1 user 2, Audio 2 user 1, +127h); without, both free
+3:4C8A code power_suspend ; DRV_POWER, suspend: every enabled device
+3:4CA8 code power_resume ; DRV_POWER, resume: hw_init, then the wave devices' suspend and resume
+3:4EE6 code mpu_isr_callback ; "ESMPUISR" pipe callback
+
+# --- segment 4: DriverProc and the VxD API wrappers ---------------------------
+4:0000 code vxd_acquire ; VxD API 0002 (BX=1)
+4:0023 code vxd_release ; VxD API 0003 (BX=1)
+4:0054 code wod_acquire ; wave-out: busy if +127h, an Audio 2 user (+100h) or +70h bit 0; else acquire the DSP and Audio 2 user = 1
+4:009F code wod_release
+4:00E0 code wid_acquire ; wave-in: busy if +127h, an Audio 1 user (+5Dh) or +6Fh bit 0; else acquire the DSP and Audio 1 user = 2
+4:011A code wid_release
+4:014A code vxd_0005
+4:0187 code vxd_hwvol_callback ; VxD API 0006: hardware volume callback
+4:01A7 code vxd_dsp_callback ; VxD API 000A: register dsp_busy_callback
+4:01C8 code
+4:0294 code
+
+# --- segment 5: the mixer driver ----------------------------------------------
+5:15C6 label JT_mixer_class 6 ; ((control type & F000h) - 1000h) >> 11: the control class
+5:17CA code mxd_set_control_details
+5:1D6E code fm_mixer_callback ; "ESSFMMXD" pipe callback
+5:20DE code hwvol_callback ; the hardware volume buttons
+5:235E code mixer_set_control ; write one control's registers (05h, 1Ah, 32h-3Eh, 68h-6Eh, 7Ch)
+5:2BA1 data control_handlers 197 ; per-control handler table (near pointers into this segment)
+5:2C66 code
+5:3176 code
+5:32FC code
+5:341A code
+5:38EE code
+5:38F4 code
+5:3A74 code
+5:3AE6 code
+5:3BAC code sync_hw_volume ; reads 60h and 62h back at every playback start
+
+# --- segment 6: the wave devices ---------------------------------------------
+6:149C code wod_open ; WODM_OPEN: format check (PCM, 8/16 bit, 1/2 channels, 4000-49000 Hz), busy check, audio2_init
+6:1764 code wod_close ; WODM_CLOSE
+6:184C code wod_suspend ; stop playback, mark suspended (+70h bit 2)
+6:187E code wod_resume ; audio2_init again, then restart
+6:1F92 code mixer_reset_defaults ; mixer register 00h (reset), then the driver's defaults (14h from Telegaming Vol)
+
+# --- segment 7: DGROUP ----------------------------------------------------------
+7:0010 label vxd_entry ; the VxD's entry point (3:0091)
+7:00A8 label prtvx_regs ; 70h, 72h, 74h, 76h, 78h: zeroed by audio2_init
+7:00AE label isr_srv_table ; far pointers by user - 1: Audio 1 users 1-4 at +0 (isr_record, isr_record, isr_play, isr_play), Audio 2 users 1-2 at +8

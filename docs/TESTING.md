@@ -14,7 +14,7 @@ python3 tests/run_tests.py
   * the fixed driver's bank file in the same emulator, with `SYSTEM.INI`, files with dates and the global heap simulated
   * the register API of the rebuilt VxD, run in a CPU emulator against a simulated ES1869, and its refusals and checks (`test_vxdext`)
   * that the extended VxD keeps ESS's code where it was, byte for byte apart from the hooks, and that Windows' own sound (ES1869.DRV's calls around a wave device, a mixer change, DirectSound taking the DSP) makes the same port accesses as with ESS's driver, apart from the Audio 2 mode (`test_vxdext`)
-  * `ES1869.DRV`'s writes of the Audio 2 mode, run in the CPU emulator inside ESS's code, for ESS's driver and `build/ES1869.DRV`, and that the build changes only those two instructions (`test_es1869drv`)
+  * `ES1869.DRV` rebuilt from `src/es1869`: ESS's driver byte for byte, and in the changed build ESS's code at its addresses, apart from the listed instructions. Its writes of the Audio 2 mode run in the CPU emulator inside ESS's code, for both builds (`test_es1869drv`)
   * DOS boxes and the rebuilt VxD in the same emulator, with an FM chip model after ESFMu, VMs and per-VM port trapping (`test_vxddos`): FM detection whoever has FM, the virtual FM chip and its hand-over, the music DAC, Windows' mixer around a DOS game, and the reset when Windows uses the card again. The stock driver runs the same steps where it differs.
   * `esfmpat` on copies of `ESFM.DRV`
   * that the generated documentation is current

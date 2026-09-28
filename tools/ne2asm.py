@@ -60,17 +60,28 @@ IMPORT_NAMES = {
                17: "GlobalFree", 18: "GlobalLock", 19: "GlobalUnlock",
                20: "GlobalSize", 23: "LockSegment", 24: "UnlockSegment",
                48: "GetModuleUsage", 49: "GetModuleFileName",
-               60: "FindResource", 61: "LoadResource", 62: "LockResource",
-               63: "FreeResource", 88: "lstrcpy", 91: "InitTask",
-               102: "DOS3Call", 111: "GlobalWire", 112: "GlobalUnWire",
-               131: "GetDOSEnvironment", 137: "FatalAppExit",
+               50: "GetProcAddress", 60: "FindResource",
+               61: "LoadResource", 62: "LockResource", 63: "FreeResource",
+               88: "lstrcpy", 89: "lstrcat", 91: "InitTask",
+               95: "LoadLibrary", 96: "FreeLibrary", 102: "DOS3Call",
+               111: "GlobalWire", 112: "GlobalUnWire", 114: "__AHINCR",
+               127: "GetPrivateProfileInt",
+               128: "GetPrivateProfileString", 131: "GetDOSEnvironment",
+               137: "FatalAppExit", 175: "AllocSelector",
+               176: "FreeSelector", 177: "PrestoChangoSelector",
                178: "__WINFLAGS", 191: "GlobalPageLock",
-               192: "GlobalPageUnlock", 353: "lstrcpyn"},
-    "USER": {176: "LoadString", 255: "DefDriverProc", 420: "wsprintf",
-             471: "lstrcmpi"},
+               192: "GlobalPageUnlock", 217: "RegOpenKey",
+               218: "RegCreateKey", 220: "RegCloseKey",
+               225: "RegQueryValueEx", 226: "RegSetValueEx",
+               353: "lstrcpyn"},
+    "USER": {1: "MessageBox", 32: "GetWindowRect", 88: "EndDialog",
+             101: "SendDlgItemMessage", 176: "LoadString",
+             179: "GetSystemMetrics", 232: "SetWindowPos",
+             239: "DialogBoxParam", 255: "DefDriverProc", 420: "wsprintf",
+             421: "wvsprintf", 431: "AnsiUpper", 471: "lstrcmpi"},
     "MMSYSTEM": {31: "DriverCallback", 216: "midiOutMessage",
-                 1210: "mmioOpen", 1211: "mmioClose", 1212: "mmioRead",
-                 1223: "mmioDescend"},
+                 607: "timeGetTime", 1210: "mmioOpen", 1211: "mmioClose",
+                 1212: "mmioRead", 1223: "mmioDescend"},
 }
 
 
@@ -191,8 +202,14 @@ class Disassembler:
                 res.append([int(m.group(1), 16), m.group(2),
                             m.group(3).strip()])
         end = start + len(chunk)
-        return [(a, len(h) // 2, t) for a, h, t in res
-                if a + len(h) // 2 <= end]
+        res = [(a, len(h) // 2, t) for a, h, t in res
+               if a + len(h) // 2 <= end]
+        # an instruction cut off by the end of the chunk comes out as db
+        # bytes, and its last bytes as other instructions: leave the last 15
+        # bytes (the longest instruction) to the next chunk
+        if len(chunk) == length:
+            res = [r for r in res if r[0] < end - 15]
+        return res
 
     def _classify(self, seg, off, size, text, recent):
         mn = text.split()[0] if text else ""
@@ -734,10 +751,11 @@ NE16_INC = """\
 """
 
 
-def render_main(ne, name, segfiles):
+def render_main(ne, name, segfiles, fix="ESFM_FIX",
+                build="python3 tools/build_esfm.py [--stock]"):
     out = ["; %s -- reassemblable source (tools/ne2asm.py)" % name, ";",
-           "; Build: python3 tools/build_esfm.py [--stock]", "",
-           "%ifndef ESFM_FIX", "%define ESFM_FIX 1", "%endif", "",
+           "; Build: " + build, "",
+           "%%ifndef %s" % fix, "%%define %s 1" % fix, "%endif", "",
            "        bits 16", '%include "ne16.inc"', ""]
     prev = None
     for s, fname in zip(ne.segments, segfiles):
@@ -960,7 +978,8 @@ def check_encodings(tmp, dis, em, forced, variants, verbose):
                   len(bad) - len(ok_load) - len(ok_word)))
 
 
-def generate(path, names_path, outdir, verbose=True, res_map=None):
+def generate(path, names_path, outdir, verbose=True, res_map=None,
+             fix="ESFM_FIX", build="python3 tools/build_esfm.py [--stock]"):
     with open(path, "rb") as f:
         raw = f.read()
     ne = NEFile(raw)
@@ -1005,7 +1024,8 @@ def generate(path, names_path, outdir, verbose=True, res_map=None):
                 f.write(render_link(ne, layout["symbols"]))
             main = name + ".asm"
             with open(os.path.join(tmp, main), "w") as f:
-                f.write(render_main(ne, os.path.basename(path), segfiles))
+                f.write(render_main(ne, os.path.basename(path), segfiles,
+                                    fix, build))
             with open(os.path.join(tmp, stub_name), "wb") as f:
                 f.write(raw[:ne.ne])
             for r in ne.resources:
@@ -1020,7 +1040,7 @@ def generate(path, names_path, outdir, verbose=True, res_map=None):
                             raise RuntimeError(
                                 "%s differs from resource %s:%s"
                                 % (name, r.type, r.id))
-            res = assemble(tmp, main, {"ESFM_FIX": 0},
+            res = assemble(tmp, main, {fix: 0},
                            os.path.join(tmp, "out.bin"))
             if res.returncode != 0:
                 bad = set()
@@ -1105,6 +1125,12 @@ def main():
     ap.add_argument("module")
     ap.add_argument("-n", "--names")
     ap.add_argument("-o", "--outdir", required=True)
+    ap.add_argument("--fix", default="ESFM_FIX",
+                    help="the define that turns the fixes on (0 for the "
+                    "original)")
+    ap.add_argument("--build", default="python3 tools/build_esfm.py "
+                    "[--stock]", help="the build command named in the top "
+                    "file")
     ap.add_argument("--resource", action="append", default=[],
                     metavar="TYPE:ID=FILE",
                     help="use FILE (relative to the output directory) for a "
@@ -1115,7 +1141,8 @@ def main():
         key, fn = spec.split("=", 1)
         t, i = key.split(":")
         res_map[(int(t), int(i))] = fn
-    generate(args.module, args.names, args.outdir, res_map=res_map or None)
+    generate(args.module, args.names, args.outdir, res_map=res_map or None,
+             fix=args.fix, build=args.build)
 
 
 if __name__ == "__main__":

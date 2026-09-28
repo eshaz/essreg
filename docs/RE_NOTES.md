@@ -10,11 +10,11 @@ How the ES1869 driver set was taken apart, and where the results are.
 |---|---|---|---|
 | `driver/ES1869.VXD` | LE | virtual device driver (device AUDDRV, 3B07h) | full source in `src/vxd/`, [VXD_API.md](VXD_API.md), [VXD_INTERNALS.md](VXD_INTERNALS.md) |
 | `driver/ESFM.DRV` | NE | FM MIDI driver | full source in `src/esfm/`; bank loader and patch format: [ESFM_BANK.md](ESFM_BANK.md); hanging notes: [ESFM_MIDI.md](ESFM_MIDI.md) |
-| `driver/ES1869.DRV` | NE | wave, mixer and aux driver | settings and registers it uses: [DRIVER_CONFIG.md](DRIVER_CONFIG.md) |
+| `driver/ES1869.DRV` | NE | wave, mixer and aux driver | full source in `src/es1869/`; settings and registers it uses: [DRIVER_CONFIG.md](DRIVER_CONFIG.md) |
 | `driver/ESSDC.EXE` | MZ | ESS DOS configuration program | its DSP protocol for controller registers (C6h, then poll Audio_Base+Ch) |
 | ES1869 data sheet | PDF | `docs/datasheet/` | the register catalog `src/esscat.tbl` and [REGISTERS.md](REGISTERS.md) |
 
-*Note: the ES1868 driver sets for DOS, Windows 3.1, 95, 98, NT and OS/2 (from philscomputerlab.com) were only used for comparison and aren't in the repository.*
+*Note: the ES1868 driver sets for DOS, Windows 3.1, 95, 98, NT and OS/2 (from philscomputerlab.com) were only used for comparison and aren't in the repository. Neither are Microsoft's Windows 95 and 98 DDKs, used for the 16-bit multimedia headers and the MSSNDSYS sample (below).*
 
 ## Tools
 
@@ -28,9 +28,9 @@ How the ES1869 driver set was taken apart, and where the results are.
 | `tools/lelink.py` | Links NASM's ELF output back into an LE file (layout from `src/vxd/layout.json`). |
 | `tools/build_vxd.py` | Builds `build/ES1869.VXD`; `--stock --verify` checks the byte-identical rebuild. |
 | `tools/regdoc.py` | Generates [REGISTERS.md](REGISTERS.md) from the catalog. |
-| `tools/ne2asm.py` | Turns a 16-bit NE module (`ESFM.DRV`) into NASM source: one section per segment, followed by its relocation table. |
-| `tools/nelink.py` | Links that source back into an NE file (layout from `src/esfm/layout.json`). |
-| `tools/build_esfm.py` | Builds `build/ESFM.DRV`; `--stock --verify` checks the byte-identical rebuild. |
+| `tools/ne2asm.py` | Turns a 16-bit NE module (`ESFM.DRV`, `ES1869.DRV`) into NASM source: one section per segment, followed by its relocation table. |
+| `tools/nelink.py` | Links that source back into an NE file (layout from `layout.json` next to the source). |
+| `tools/build_esfm.py`, `tools/build_es1869drv.py` | Build `build/ESFM.DRV` and `build/ES1869.DRV`; `--stock --verify` checks the byte-identical rebuild. |
 | `tests/esfmemu.py` | Runs `ESFM.DRV` in a 16-bit CPU emulator (Unicorn) with an FM chip model and simulated interrupts ([ESFM_MIDI.md](ESFM_MIDI.md)). |
 
 ## From VxD to source
@@ -96,3 +96,16 @@ A fixup whose target isn't the start of a label is written as `label+offset wrt 
 * **Assembling.** `nasm -f bin` assembles every segment into its own section (`vstart=0`, so labels are segment offsets), followed by the segment's relocation table exactly as it sits in the file. A last section tells `nelink.py` the lengths and the exported offsets.
 * **Encodings.** Instructions that NASM would encode differently are written with the "load" macros (`mov_ bx,ax`) or `strict word`. Only 2 needed raw bytes.
 * **The layout.** `nelink.py` writes the header, the segment, resource, name and entry tables and the gang-load area. It places the segments and resources at their original offsets, and moves the ones after a segment that grew.
+
+**ES1869.DRV.** The same tool, with `src/es1869/names.txt`:
+* **Chunk ends.** `ne2asm.py` decodes 512 bytes at a time. An instruction cut off by the end of a chunk came out as `db` bytes followed by bogus instructions, and ended the decoding there. The last 15 bytes of a chunk now go to the next one.
+* **Code reached only through pointers.** Recursive descent missed about 12 KB: callbacks handed to the VxD, the pipe callbacks, the power routines. Every undecoded gap that starts with a function prologue (`55 8B EC`, with `45` or `8C D8 90` before it) became an entry in the names file, and a few more by hand. What's left is strings, tables and padding.
+* **A jump table** in the mixer (5:15C6) is indexed by `(type & F000h) - 1000h >> 11`, a byte offset, so its 6 entries are given in the names file.
+* **Position-dependent code.** The interrupt handler (3:01B9) is copied to a fixed block when it's installed, and patched there by offset: the data selector and the device pointer (`mov ax,0FFFFh`, `mov si,1234h`) and the return offset `push 5Bh`. So ESS's code must keep its addresses, as in the VxD: a change is an instruction of the same length, or new code after ESS's. `tests/test_es1869drv.py` checks it.
+* **Imports** are named from the IMPDEF records of the DDK's `LIBW.LIB` and `MMSYSTEM.LIB`.
+
+**Compared with Microsoft's sample.** The Windows 95 DDK's MSSNDSYS sample (`MMEDIA\SAMPLES\MSSNDSYS`, a Windows Sound System driver in C with its VxD) has the same design as ESS's pair:
+* The VxD owns the hardware. It hands the DSP to a VM or to the 16-bit driver (acquire and release), allocates the DMA buffers and virtualizes the Sound Blaster for DOS boxes.
+* The 16-bit driver runs the wave, mixer and aux devices, with a per-device structure linked in a list.
+* The interrupt handler ends with the device's EOI word: the slave EOI in the low byte, the master's in the high byte (ESS's +5Bh, the sample's `wEOICommands`).
+* ESS's device structure is laid out differently, though (Audio_Base in its first word, the MPU-401 port next), and the sample has no copied and patched interrupt handler.
