@@ -69,6 +69,9 @@ enum ess_tier {
 #define RF_WRITEONLY 0x02   // no meaningful read-back
 #define RF_NEEDS_IDLE 0x04  // goes through the DSP command channel
 #define RF_ALIAS 0x08       // Sound Blaster compatible view of another reg
+#define RF_FM_PORT                                                             \
+  0x10 // an FM port: a read through the stock
+       // ES1869.VXD makes the reader FM's owner
 
 // field flags
 #define FF_PERSIST 0x01  // stored in profiles
@@ -104,7 +107,7 @@ enum ess_fmt {
 
 // register, field and enum ids
 #define REG(id, bank, ldn, addr, rflags, name, dspage) id,
-#define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,    \
+#define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,     \
             label, help)
 #define ENUM(id)
 #define ENUMV(en, value, text)
@@ -116,7 +119,7 @@ enum ess_reg_id {
 #undef FLD
 
 #define REG(id, bank, ldn, addr, rflags, name, dspage)
-#define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,    \
+#define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,     \
             label, help)                                                       \
   id,
 enum ess_field_id {
@@ -126,7 +129,7 @@ enum ess_field_id {
 #undef FLD
 #undef ENUM
 
-#define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,    \
+#define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,     \
             label, help)
 #define ENUM(id) id,
 enum ess_enum_id {

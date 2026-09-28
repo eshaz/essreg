@@ -485,7 +485,8 @@ FLD(F_PWR_SELFTIMED, R_CT_BD, 0, 8, K_UINT, T_EXPERT, 0, E_NONE, PG_POWER, FMT_N
 /* the mixer index and data (+4h, +5h), the read buffer (+Ah) and the FIFO port (+Fh) are access ports, which esshw uses rather than shows (DS p.38-41) */
 
 /* Audio_Base+0h-3h are the FM address and data ports: reading +0h returns the FM status, and a write would pick an FM register (DS p.38, p.41) */
-REG(R_AP_0, BK_APORT, 0, 0x00, 0, "FM status", 41)
+/* Audio_Base+0 is an FM port: ES1869.VXD traps it, and a read from Windows while FM is free makes Windows FM's owner, resets the FM and locks DOS programs out of FM until a MIDI program opens and closes it (docs/VXD_INTERNALS.md), so the stock driver's direct path doesn't read it */
+REG(R_AP_0, BK_APORT, 0, 0x00, RF_FM_PORT, "FM status", 41)
 FLD(F_AP_FMIRQ, R_AP_0, 7, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.fm_irq", "FM timer IRQ", "1 = an FM timer overflowed; only a status flag, kept for OPL3 compatibility (DS p.41)")
 FLD(F_AP_FMFT1, R_AP_0, 6, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.fm_timer1", "FM timer 1 overflow", "Overflow flag of FM timer 1 (DS p.41)")
 FLD(F_AP_FMFT2, R_AP_0, 5, 1, K_RO, T_RO, 0, E_NONE, PG_STATUS, FMT_NONE, "stat.fm_timer2", "FM timer 2 overflow", "Overflow flag of FM timer 2 (DS p.41)")

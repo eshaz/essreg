@@ -29,6 +29,8 @@ const char *ess_strerror(int err) {
     return "needs Expert mode";
   case ESSIO_EABSENT:
     return "not on this card";
+  case ESSIO_ETRAPPED:
+    return "not read: ES1869.VXD would give the FM to Windows";
   }
   return esshw_strerror(err);
 }
@@ -36,6 +38,10 @@ const char *ess_strerror(int err) {
 int ess_read(int reg) {
   const struct ess_reg *r = &ess_regs[reg];
   int ldn;
+
+  // a DOS program would find no FM until a MIDI program closes
+  if ((r->flags & RF_FM_PORT) && (esshw.flags & ESSHW_F_FM_TRAPPED))
+    return -ESSIO_ETRAPPED;
 
   switch (r->bank) {
   case BK_MIXER:
@@ -58,6 +64,9 @@ int ess_read(int reg) {
 int ess_write(int reg, u8 value) {
   const struct ess_reg *r = &ess_regs[reg];
   int ldn;
+
+  if ((r->flags & RF_FM_PORT) && (esshw.flags & ESSHW_F_FM_TRAPPED))
+    return -ESSIO_ETRAPPED;
 
   switch (r->bank) {
   case BK_MIXER:
@@ -90,11 +99,13 @@ int ess_field_read(int field, u8 *value, u8 *raw) {
 }
 
 // wait a few microseconds between pulse edges (the DSP reset needs 3 us)
-// each status read of Audio_Base+Ch takes about 1 us on ISA
+// by reading Audio_Base+6h, about 1 us each on ISA, as the reset recipe
+// does (DS p.43): any other port wakes the chip from a partial power-down
+// (DS p.76), which would undo a power-down pulse
 static void pulse_delay(void) {
   int i;
   for (i = 0; i < 8; i++)
-    esshw_port_read(0x0C);
+    esshw_port_read(0x06);
 }
 
 // after a DSP software reset the DSP puts AAh in its read buffer: read it,

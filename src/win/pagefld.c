@@ -289,6 +289,8 @@ static const char *short_error(int err) {
     return "no device";
   case ESSIO_EABSENT:
     return "not present";
+  case ESSIO_ETRAPPED:
+    return "not read (FM)";
   }
   return "error";
 }

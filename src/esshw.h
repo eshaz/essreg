@@ -34,6 +34,7 @@ enum esshw_backend { ESSHW_DIRECT, ESSHW_VXDEXT, ESSHW_SIM };
 #define ESSHW_F_POLL_C 0x04      // poll Audio_Base+Ch bit 6 for read data
 #define ESSHW_F_EXT_C6 0x08      // send C6h before controller access
 #define ESSHW_F_PRECHECK 0x10    // refuse DSP access unless it's idle
+#define ESSHW_F_FM_TRAPPED 0x20  // ES1869.VXD traps the FM ports: leave them
 #define ESSHW_LEGACY 0x00
 #define ESSHW_SAFE 0x1F
 
@@ -44,7 +45,8 @@ enum esshw_backend { ESSHW_DIRECT, ESSHW_VXDEXT, ESSHW_SIM };
 #define ESSHW_EBUSY 4
 #define ESSHW_ETIMEOUT 5
 #define ESSHW_ENOCFG 6
-#define ESSHW_EFAIL 7 // the driver rejected the call
+#define ESSHW_EFAIL 7   // the driver rejected the call
+#define ESSHW_EDESYNC 8 // the DSP took half a command and never the rest
 
 // VxD essreg API function numbers (DX)
 #define ESSX_INFO 0x0400
@@ -88,11 +90,11 @@ int esshw_mixer_read(u8 reg);
 int esshw_mixer_write(u8 reg, u8 value);
 int esshw_ctrl_read(u8 reg);
 int esshw_ctrl_write(u8 reg, u8 value);
-int esshw_port_read(u8 offset);             // Audio_Base + offset
+int esshw_port_read(u8 offset); // Audio_Base + offset
 int esshw_port_write(u8 offset, u8 value);
-int esshw_cfg_read(u8 offset);              // Config_Base + offset
+int esshw_cfg_read(u8 offset); // Config_Base + offset
 int esshw_cfg_write(u8 offset, u8 value);
-int esshw_pnp_read(u8 ldn, u8 reg);         // ldn FFh for card level
+int esshw_pnp_read(u8 ldn, u8 reg); // ldn FFh for card level
 int esshw_pnp_write(u8 ldn, u8 reg, u8 value);
 
 // read the mixer 40h identification sequence: 18h 69h cfg-hi cfg-lo

@@ -185,7 +185,9 @@ static u8 sim_in(u16 port) {
   case 0x0A:
     return rdata_pop();
   case 0x0C:
-    return (u8)((simhw.busy_stuck ? 0x80 : 0) | (simhw.nrdata ? 0x40 : 0));
+    return (u8)((simhw.busy_stuck || (simhw.busy_mid && simhw.npending) ? 0x80
+                                                                        : 0) |
+                (simhw.nrdata ? 0x40 : 0));
   case 0x0E:
     simhw.irq_clears++;
     return (u8)(simhw.nrdata ? 0x80 : 0);

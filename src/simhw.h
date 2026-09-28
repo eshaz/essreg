@@ -32,13 +32,13 @@ struct simhw_state {
   u8 mixer[256];
   u8 mixer_index;
   u8 id_seq;
-  u8 ctrl[32];       // A0h-BFh
-  u8 ext_mode;       // C6h received since the last reset
-  u8 pending[2];     // DSP command waiting for its operand
+  u8 ctrl[32];   // A0h-BFh
+  u8 ext_mode;   // C6h received since the last reset
+  u8 pending[2]; // DSP command waiting for its operand
   u8 npending;
-  u8 rdata[4];       // read buffer
+  u8 rdata[4]; // read buffer
   u8 nrdata;
-  u8 port6, port7;   // reset/status, power management
+  u8 port6, port7; // reset/status, power management
   u8 in_reset;
   u8 cfg_index;
   u8 ldn;
@@ -46,10 +46,11 @@ struct simhw_state {
   u8 pnp_ldn[8][0x100];
   u8 cfg_ports[8];
   // fault injection
-  u8 busy_stuck;     // Audio_Base+Ch bit 7 stays set
-  u8 mute_dsp;       // the DSP never returns data
+  u8 busy_stuck; // Audio_Base+Ch bit 7 stays set
+  u8 busy_mid;   // it sets once the DSP has a command's first byte
+  u8 mute_dsp;   // the DSP never returns data
   // statistics
-  u16 irq_clears;    // reads of Audio_Base+Eh
+  u16 irq_clears; // reads of Audio_Base+Eh
   u16 nlog;
   struct simhw_log log[SIMHW_LOG_MAX];
 };

@@ -50,7 +50,8 @@ KINDS = {"K_BOOL": "bit", "K_UINT": "level", "K_ENUM": "choice",
 RFLAGS = {"RF_READ_SIDEFX": "reading changes state",
           "RF_WRITEONLY": "write-only",
           "RF_NEEDS_IDLE": "DSP channel",
-          "RF_ALIAS": "Sound Blaster compatible view"}
+          "RF_ALIAS": "Sound Blaster compatible view",
+          "RF_FM_PORT": "FM port"}
 # the optional logical devices of esscat.h, numbered from card register 25h
 LDN_NAMES = {
     "LDN_MPU": "MPU-401 device (optional, LDN 3)",

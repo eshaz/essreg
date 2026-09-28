@@ -766,9 +766,11 @@ Ports Audio_Base+0h to +Fh.
 
 ### Audio_Base+00h FM status
 
-DS p.41
+DS p.41; FM port
 
 > Audio_Base+0h-3h are the FM address and data ports: reading +0h returns the FM status, and a write would pick an FM register (DS p.38, p.41)
+
+> Audio_Base+0 is an FM port: ES1869.VXD traps it, and a read from Windows while FM is free makes Windows FM's owner, resets the FM and locks DOS programs out of FM until a MIDI program opens and closes it (docs/VXD_INTERNALS.md), so the stock driver's direct path doesn't read it
 
 | Bits | Setting | Key | Kind | Tier | Flags | Description |
 |---|---|---|---|---|---|---|

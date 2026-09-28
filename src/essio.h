@@ -11,8 +11,9 @@
 
 #include "esscat.h"
 
-#define ESSIO_ETIER 20   // the field can't be written at this tier
-#define ESSIO_EABSENT 21 // an optional logical device the card doesn't have
+#define ESSIO_ETIER 20    // the field can't be written at this tier
+#define ESSIO_EABSENT 21  // an optional logical device the card doesn't have
+#define ESSIO_ETRAPPED 22 // an FM port the stock ES1869.VXD would take FM for
 
 // register value (0-255), or a negative ESSHW_E* or ESSIO_E* code
 int ess_read(int reg);

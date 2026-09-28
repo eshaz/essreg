@@ -14,15 +14,23 @@
 #endif
 
 esshw_ctx esshw = {
-    0x220,          // audio_base
-    0x250,          // config_base, the original essreg's default
-    0xFFF,          // dsp_timeout
-    0xF,            // dsp_retries
-    ESSHW_LEGACY,   // flags
-    ESSHW_DIRECT,   // backend
-    0,              // dsp_desync
-    0, 0, 0         // ext_call, sim_in, sim_out
+    0x220,        // audio_base
+    0x250,        // config_base, the original essreg's default
+    0xFFF,        // dsp_timeout
+    0xF,          // dsp_retries
+    ESSHW_LEGACY, // flags
+    ESSHW_DIRECT, // backend
+    0,            // dsp_desync
+    0,
+    0,
+    0 // ext_call, sim_in, sim_out
 };
+
+// the safe protocol's waits: short ones with interrupts off, then, once
+// the DSP has the first byte of a command and takes whatever byte comes
+// next as the rest, long ones with interrupts on between them
+#define CRIT_POLLS 0x200L   // about 0.5 ms of ISA reads
+#define LATE_POLLS 0xA0000L // about 0.7 s, as long as ES1869.VXD waits
 
 // only mask interrupts with ESSHW_F_CRIT (the safe protocol)
 // _enable() instead of restoring the saved flags, since at CPL 3 POPF can't
@@ -132,14 +140,20 @@ int esshw_mixer_id(u8 id[4]) {
 
 int esshw_detect_config(void) {
   u8 id[4];
+  u16 base;
   int err = esshw_mixer_id(id);
 
   if (err < 0)
     return err;
-  if (id[0] != 0x18)
+  if (id[0] != 0x18 || id[1] != 0x69)
     return -ESSHW_ENODEV;
-  esshw.config_base = (u16)((id[2] << 8) | id[3]);
-  return esshw.config_base ? 0 : -ESSHW_ENOCFG;
+  // Config_Base is 100h to FF8h, 8 aligned (DS p.28): anything else isn't
+  // the chip's, and Config_Base+7 must not wrap to the DMA controller
+  base = (u16)((id[2] << 8) | id[3]);
+  if (base < 0x100 || base > 0xFF8 || (base & 7))
+    return -ESSHW_ENOCFG;
+  esshw.config_base = base;
+  return 0;
 }
 
 // DSP channel
@@ -174,11 +188,54 @@ static int dsp_wait_data(void) {
   }
 }
 
-static int dsp_write(u8 value) {
-  if (dsp_wait_ready() < 0)
-    return -1;
-  esshw_outb(esshw.audio_base + 0x0C, value);
-  return 0;
+// safe protocol: Audio_Base+Ch bit 7 (busy) clear within polls
+static int ready_within(long polls) {
+  u16 port = esshw.audio_base + 0x0C;
+  long n;
+
+  for (n = 0; n <= polls; n++)
+    if (!(esshw_inb(port) & 0x80))
+      return 0;
+  return -1;
+}
+
+// safe protocol: read data within polls, Audio_Base+Ch bit 6 or +Eh bit 7
+static int data_within(long polls) {
+  int poll_c = (esshw.flags & ESSHW_F_POLL_C) != 0;
+  u16 port = esshw.audio_base + (poll_c ? 0x0C : 0x0E);
+  u8 mask = poll_c ? 0x40 : 0x80;
+  long n;
+
+  for (n = 0; n <= polls; n++)
+    if (esshw_inb(port) & mask)
+      return 0;
+  return -1;
+}
+
+// the rest of a command the DSP started has to go in: wait as long as
+// it takes, with interrupts on between the short waits
+static int wait_long(int (*within)(long)) {
+  long n;
+
+  for (n = 0; n < LATE_POLLS; n += 2 * CRIT_POLLS) {
+    if (within(CRIT_POLLS) == 0)
+      return 0;
+    CRIT_LEAVE();
+    within(CRIT_POLLS);
+    CRIT_ENTER();
+  }
+  return -1;
+}
+
+// safe protocol: the DSP ready, a byte left from an answer nobody read
+// dropped first; 0 or -1
+static int precheck(void) {
+  u16 base = esshw.audio_base;
+  int i;
+
+  for (i = 0; i < 8 && (esshw_inb(base + 0x0C) & 0x40); i++)
+    esshw_inb(base + 0x0A);
+  return esshw_dsp_idle() ? 0 : -1;
 }
 
 int esshw_dsp_idle(void) {
@@ -241,21 +298,31 @@ int esshw_ctrl_read(u8 reg) {
   if (!(esshw.flags & (ESSHW_F_EXT_C6 | ESSHW_F_PRECHECK | ESSHW_F_POLL_C)))
     return ctrl_read_legacy(reg);
 
-  if ((esshw.flags & ESSHW_F_PRECHECK) && !esshw_dsp_idle())
+  if ((esshw.flags & ESSHW_F_PRECHECK) && precheck() < 0)
     return -ESSHW_EBUSY;
   CRIT_ENTER();
+  // C6h and C0h go in whole or not at all: EBUSY, try again
   result = -ESSHW_EBUSY;
-  if ((esshw.flags & ESSHW_F_EXT_C6) && dsp_write(0xC6) < 0)
+  if (esshw.flags & ESSHW_F_EXT_C6) {
+    if (ready_within(CRIT_POLLS) < 0)
+      goto done;
+    esshw_outb(esshw.audio_base + 0x0C, 0xC6);
+  }
+  if (ready_within(CRIT_POLLS) < 0)
     goto done;
-  if (dsp_write(0xC0) < 0 || dsp_write(reg) < 0) {
+  esshw_outb(esshw.audio_base + 0x0C, 0xC0);
+  // the next byte the DSP gets is the register, whoever sends it, so it
+  // has to be ours
+  result = -ESSHW_EDESYNC;
+  if (wait_long(ready_within) < 0) {
     esshw.dsp_desync = 1;
     goto done;
   }
-  if (dsp_wait_data() < 0) {
-    esshw.dsp_desync = 1;
-    result = -ESSHW_ETIMEOUT;
+  esshw_outb(esshw.audio_base + 0x0C, reg);
+  // an answer that comes too late is dropped by the next precheck
+  result = -ESSHW_ETIMEOUT;
+  if (wait_long(data_within) < 0)
     goto done;
-  }
   result = esshw_inb(esshw.audio_base + 0x0A);
 done:
   CRIT_LEAVE();
@@ -274,16 +341,26 @@ int esshw_ctrl_write(u8 reg, u8 value) {
   if (!(esshw.flags & (ESSHW_F_EXT_C6 | ESSHW_F_PRECHECK | ESSHW_F_POLL_C)))
     return ctrl_write_legacy(reg, value);
 
-  if ((esshw.flags & ESSHW_F_PRECHECK) && !esshw_dsp_idle())
+  if ((esshw.flags & ESSHW_F_PRECHECK) && precheck() < 0)
     return -ESSHW_EBUSY;
   CRIT_ENTER();
+  // C6h and the register go in whole or not at all: EBUSY, try again
   result = -ESSHW_EBUSY;
-  if ((esshw.flags & ESSHW_F_EXT_C6) && dsp_write(0xC6) < 0)
+  if (esshw.flags & ESSHW_F_EXT_C6) {
+    if (ready_within(CRIT_POLLS) < 0)
+      goto done;
+    esshw_outb(esshw.audio_base + 0x0C, 0xC6);
+  }
+  if (ready_within(CRIT_POLLS) < 0)
     goto done;
-  if (dsp_write(reg) < 0 || dsp_write(value) < 0) {
+  esshw_outb(esshw.audio_base + 0x0C, reg);
+  // the next byte the DSP gets is the value, whoever sends it
+  result = -ESSHW_EDESYNC;
+  if (wait_long(ready_within) < 0) {
     esshw.dsp_desync = 1;
     goto done;
   }
+  esshw_outb(esshw.audio_base + 0x0C, value);
   result = 0;
 done:
   CRIT_LEAVE();
@@ -397,6 +474,8 @@ const char *esshw_strerror(int err) {
     return "configuration port not found";
   case ESSHW_EFAIL:
     return "the driver rejected the request";
+  case ESSHW_EDESYNC:
+    return "the DSP stopped in the middle of a command: restart Windows";
   }
   return "error";
 }

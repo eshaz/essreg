@@ -107,7 +107,25 @@ static void test_controller_errors(void) {
   setup(ESSHW_SAFE);
   simhw.mute_dsp = 1;
   CHECK_EQ(esshw_ctrl_read(0xA1), -ESSHW_ETIMEOUT);
+  // the command went in whole: a late answer goes at the next precheck
+  CHECK_EQ(esshw.dsp_desync, 0);
+
+  // the DSP takes C0h or the register, then stays busy: the rest of the
+  // command never goes in, and nothing retries it
+  setup(ESSHW_SAFE);
+  simhw.busy_mid = 1;
+  CHECK_EQ(esshw_ctrl_read(0xA1), -ESSHW_EDESYNC);
   CHECK_EQ(esshw.dsp_desync, 1);
+  setup(ESSHW_SAFE);
+  simhw.busy_mid = 1;
+  CHECK_EQ(esshw_ctrl_write(0xB1, 0x12), -ESSHW_EDESYNC);
+  CHECK_EQ(esshw.dsp_desync, 1);
+
+  // a byte left from an answer nobody read is dropped before a read
+  setup(ESSHW_SAFE);
+  simhw.ctrl[0xA1 - 0xA0] = 0x55;
+  simhw.rdata[simhw.nrdata++] = 0x99;
+  CHECK_EQ(esshw_ctrl_read(0xA1), 0x55);
 
   setup(ESSHW_SAFE);
   CHECK_EQ(esshw_ctrl_read(0x40), -ESSHW_EPARAM);

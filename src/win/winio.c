@@ -56,6 +56,8 @@ int winio_init(const struct winio_opts *opts) {
       return 0;
     }
     winio_path = WIO_DIRECT_VXD;
+    // its FM ports are trapped: a read would take FM from DOS programs
+    esshw.flags |= ESSHW_F_FM_TRAPPED;
     if (vxd_config_port(&port) == 0)
       esshw.config_base = port;
   }

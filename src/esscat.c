@@ -14,7 +14,7 @@
 
 #define REG(id, bank, ldn, addr, rflags, name, dspage)                         \
   {bank, ldn, addr, rflags, dspage, name},
-#define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,    \
+#define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,     \
             label, help)
 #define ENUM(id)
 #define ENUMV(en, value, text)
@@ -25,7 +25,7 @@ const struct ess_reg ess_regs[R_COUNT] = {
 #undef FLD
 
 #define REG(id, bank, ldn, addr, rflags, name, dspage)
-#define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,    \
+#define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,     \
             label, help)                                                       \
   {reg, shift, width, kind, tier, fflags, en, page, fmt, key, label, help},
 const struct ess_field ess_fields[F_COUNT] = {
@@ -34,7 +34,7 @@ const struct ess_field ess_fields[F_COUNT] = {
 #undef FLD
 #undef ENUMV
 
-#define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,    \
+#define FLD(id, reg, shift, width, kind, tier, fflags, en, page, fmt, key,     \
             label, help)
 #define ENUMV(en, value, text) {en, value, text},
 const struct ess_enumv ess_enumvs[] = {
@@ -45,31 +45,24 @@ const struct ess_enumv ess_enumvs[] = {
 #undef ENUM
 #undef ENUMV
 
-const unsigned ess_enumv_count =
-    sizeof(ess_enumvs) / sizeof(ess_enumvs[0]) - 1;
+const unsigned ess_enumv_count = sizeof(ess_enumvs) / sizeof(ess_enumvs[0]) - 1;
 
 const char *const ess_page_names[PG_COUNT] = {
-    "Output mixer",       "Master volume",
-    "Record",             "3-D, mic, MONO, I2S",
-    "Serial / telegaming", "Audio 2 channel",
-    "Audio 1 controller", "ADC offset & power",
-    "Status & interrupts", "Plug and Play",
-    "SB compatible mixer"};
+    "Output mixer",        "Master volume",       "Record",
+    "3-D, mic, MONO, I2S", "Serial / telegaming", "Audio 2 channel",
+    "Audio 1 controller",  "ADC offset & power",  "Status & interrupts",
+    "Plug and Play",       "SB compatible mixer"};
 
 const char *const ess_tier_names[4] = {"read-only", "safe", "caution",
                                        "expert"};
 
-const char *const ess_bank_names[BK_COUNT] = {"mixer", "controller",
+const char *const ess_bank_names[BK_COUNT] = {"mixer",      "controller",
                                               "audio port", "config port",
-                                              "PnP card", "PnP device"};
+                                              "PnP card",   "PnP device"};
 
-u8 cat_max(const struct ess_field *f) {
-  return (u8)((1u << f->width) - 1);
-}
+u8 cat_max(const struct ess_field *f) { return (u8)((1u << f->width) - 1); }
 
-u8 cat_mask(const struct ess_field *f) {
-  return (u8)(cat_max(f) << f->shift);
-}
+u8 cat_mask(const struct ess_field *f) { return (u8)(cat_max(f) << f->shift); }
 
 u8 cat_get(const struct ess_field *f, u8 raw) {
   return (u8)((raw >> f->shift) & cat_max(f));
@@ -148,8 +141,7 @@ int cat_adc_offset(u8 raw) {
   return 64 * (raw & 0x0F);
 }
 
-void cat_format(const struct ess_field *f, u8 raw, char *buf,
-                unsigned size) {
+void cat_format(const struct ess_field *f, u8 raw, char *buf, unsigned size) {
   char tmp[64];
   u8 v = cat_get(f, raw);
   const char *text;
@@ -239,8 +231,8 @@ int cat_parse(const struct ess_field *f, const char *text, u8 *value) {
   if (!len)
     return -1;
   if (text[len - 1] == 'h' || text[len - 1] == 'H') {
-    n = strtol(text, &end, 16); // "0Ch"
-    if (end != text + len - 1)
+    n = strtol(text, &end, 16); // "0Ch", not a bare "h"
+    if (end == text || end != text + len - 1)
       return -1;
   } else {
     n = strtol(text, &end, 0); // "12", "0x0c", "-3"

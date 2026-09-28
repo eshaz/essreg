@@ -30,8 +30,7 @@ static void test_tables(void) {
     CHECK(r->name && r->name[0]);
     CHECK(r->addr < 0x100);
     if (r->bank == BK_CTRL)
-      CHECK(r->addr >= 0xA0 && r->addr <= 0xBF &&
-            (r->flags & RF_NEEDS_IDLE));
+      CHECK(r->addr >= 0xA0 && r->addr <= 0xBF && (r->flags & RF_NEEDS_IDLE));
     if (r->bank == BK_APORT)
       CHECK(r->addr <= 0x0F);
     if (r->bank == BK_CPORT)
@@ -76,8 +75,8 @@ static void test_tables(void) {
     if (f->kind == K_RO)
       CHECK_EQ(f->tier, T_RO);
     if (f->flags & FF_PERSIST)
-      CHECK((f->tier == T_SAFE || f->tier == T_CAUTION) &&
-            f->kind != K_RO && f->kind != K_ACTION && f->kind != K_PULSE);
+      CHECK((f->tier == T_SAFE || f->tier == T_CAUTION) && f->kind != K_RO &&
+            f->kind != K_ACTION && f->kind != K_PULSE);
     // actions that reset or reconfigure something need Expert mode, unless
     // they only calibrate
     if (f->kind == K_PULSE)
@@ -230,14 +229,17 @@ static void test_essio(void) {
 
   // refused below the tier: no port access at all
   simhw.nlog = 0;
-  CHECK_EQ(ess_field_write(cat_find_key("ctl.fifo_reset"), 1, 0),
-           -ESSIO_ETIER);
+  CHECK_EQ(ess_field_write(cat_find_key("ctl.fifo_reset"), 1, 0), -ESSIO_ETIER);
   CHECK_EQ(simhw.nlog, 0);
 
-  // Audio_Base+6 pulses: never read first, written 02h then 00h
+  // Audio_Base+6 pulses: never read first, written 02h then 00h, the
+  // delay between them reads +6h (the only port that doesn't wake a
+  // partial power-down with +7h, DS p.76)
   simhw.nlog = 0;
   CHECK_EQ(ess_field_write(cat_find_key("ctl.fifo_reset"), 1, 1), 0);
-  CHECK_EQ(count_port(0x226, 'i'), 0);
+  CHECK(simhw.nlog > 0 && simhw.log[0].port == 0x226 &&
+        simhw.log[0].dir == 'o');
+  CHECK_EQ(count_port(0x22C, 'i'), 0);
   {
     u8 seq[4];
     int n = 0;
@@ -248,6 +250,16 @@ static void test_essio(void) {
     CHECK_EQ(seq[0], 0x02);
     CHECK_EQ(seq[1], 0x00);
   }
+
+  // the stock ES1869.VXD's FM ports: not touched, a read would take FM
+  // from DOS programs
+  simhw.nlog = 0;
+  esshw.flags |= ESSHW_F_FM_TRAPPED;
+  CHECK_EQ(ess_read(R_AP_0), -ESSIO_ETRAPPED);
+  CHECK_EQ(ess_write(R_AP_0, 0), -ESSIO_ETRAPPED);
+  CHECK_EQ(simhw.nlog, 0);
+  esshw.flags &= (u8)~ESSHW_F_FM_TRAPPED;
+  CHECK(ess_read(R_AP_0) >= 0);
 
   // power management pulse keeps GPO and Analog_Stays_On
   simhw.port7 = 0x0B;
