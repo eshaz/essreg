@@ -23,6 +23,11 @@
  * Put `essctl /load C:\ESS\MY.INI` in the StartUp group to
  * restore the settings every time Windows starts.
  *
+ * A profile is written to NAME.$$$ and then renamed over the old one, so
+ * a crash can't leave half a profile. The chip is read first: a busy or
+ * missing chip leaves the old file as it was, and a setting the chip
+ * didn't answer for keeps its old value.
+ *
  * Exit codes of the batch actions: 0 done, 1 done with
  * problems, 2 failed, 3 bad command line.
  *
@@ -31,6 +36,7 @@
  * Licensed under GPL Version 3.0
  */
 
+#include <io.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,6 +58,7 @@ HINSTANCE g_inst;
 HWND g_main;
 HFONT g_font;
 int g_expert;
+int g_closing;
 
 static int quiet;
 static char log_path[144];
@@ -70,6 +77,9 @@ static void log_line(const char *text) {
     return;
   strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
   fprintf(f, "%s %s\n", stamp, text);
+  // committed, so the line is there after a crash
+  fflush(f);
+  _commit(fileno(f));
   fclose(f);
 }
 
@@ -78,12 +88,20 @@ void msg_error(HWND owner, const char *fmt, ...) {
   va_list ap;
 
   va_start(ap, fmt);
-  vsprintf(text, fmt, ap);
+  _vbprintf(text, sizeof(text), fmt, ap);
   va_end(ap);
   if (quiet)
     log_line(text);
   else
     MessageBox(owner, text, "ES1869 Control", MB_OK | MB_ICONEXCLAMATION);
+}
+
+// the box that shows even when memory is low
+void msg_no_memory(const char *text) {
+  if (quiet)
+    log_line(text);
+  else
+    MessageBox(0, text, "ES1869 Control", MB_OK | MB_ICONHAND | MB_SYSTEMMODAL);
 }
 
 int confirm(HWND owner, const char *text) {
@@ -101,7 +119,43 @@ void app_dir_file(const char *name, char *path, unsigned size) {
     slash[1] = 0;
   else
     path[0] = 0;
-  strcat(path, name);
+  strncat(path, name, size - 1 - strlen(path));
+}
+
+int wait_ms(DWORD ms) {
+  UINT timer = SetTimer(0, 0, (UINT)ms, 0);
+  DWORD start = GetTickCount();
+  MSG msg;
+  int quit = 0;
+
+  while (GetTickCount() - start < ms) {
+    // GetMessage sleeps until the timer's message comes; without a
+    // timer, poll and let the other programs run
+    if (timer) {
+      if (!GetMessage(&msg, 0, 0, 0)) {
+        quit = 1;
+        break;
+      }
+    } else if (!PeekMessage(&msg, 0, 0, 0, PM_REMOVE)) {
+      Yield();
+      continue;
+    } else if (msg.message == WM_QUIT) {
+      quit = 1;
+      break;
+    }
+    if (msg.message == WM_TIMER && !msg.hwnd && msg.wParam == timer)
+      break;
+    if (!g_main || !IsDialogMessage(g_main, &msg)) {
+      TranslateMessage(&msg);
+      DispatchMessage(&msg);
+    }
+  }
+  if (timer)
+    KillTimer(0, timer);
+  // the main loop ends with it
+  if (quit)
+    PostQuitMessage(msg.wParam);
+  return quit;
 }
 
 // --- profiles in INI files --------------------------------------------------
@@ -114,15 +168,12 @@ static int ini_get(void *ctx, const char *section, const char *key, char *buf,
 
 static int ini_put(void *ctx, const char *section, const char *key,
                    const char *value) {
-  return WritePrivateProfileString(section, key, value, (const char *)ctx)
-             ? 0
-             : -1;
+  return WritePrivateProfileString(section, key, value, (const char *)ctx) ? 0
+                                                                           : -1;
 }
 
-static int ini_keys(void *ctx, const char *section, char *buf,
-                    unsigned size) {
-  return GetPrivateProfileString(section, 0, "", buf, size,
-                                 (const char *)ctx);
+static int ini_keys(void *ctx, const char *section, char *buf, unsigned size) {
+  return GetPrivateProfileString(section, 0, "", buf, size, (const char *)ctx);
 }
 
 // the profile functions look up a bare file name in the Windows directory,
@@ -155,54 +206,157 @@ static void report_text(const struct prof_report *r, int load, char *buf,
     sprintf(tmp + strlen(tmp), ", %d failed", r->failed);
   if (r->mismatched)
     sprintf(tmp + strlen(tmp), ", %d did not stick", r->mismatched);
+  if (r->kept)
+    sprintf(tmp + strlen(tmp), ", %d kept from the old profile", r->kept);
   if (r->problem[0])
     sprintf(tmp + strlen(tmp), " (%s)", r->problem);
   strncpy(buf, tmp, size - 1);
   buf[size - 1] = 0;
 }
 
-int profile_save_file(const char *path, char *report, unsigned size) {
-  struct prof_io io;
-  struct prof_report rep;
-  char full[144];
+// path with the extension ext instead of its own
+static void sibling(const char *path, const char *ext, char *out,
+                    unsigned size) {
+  char *dot, *slash;
+
+  strncpy(out, path, size - 5);
+  out[size - 5] = 0;
+  dot = strrchr(out, '.');
+  slash = strrchr(out, '\\');
+  if (dot && (!slash || dot > slash))
+    *dot = 0;
+  strcat(out, ".");
+  strcat(out, ext);
+}
+
+// a profile written with plain file I/O, one section after the other
+struct ini_out {
+  FILE *f;
+  char section[16];
   int err;
+};
+
+static int out_put(void *ctx, const char *section, const char *key,
+                   const char *value) {
+  struct ini_out *w = (struct ini_out *)ctx;
+
+  if (stricmp(w->section, section)) {
+    if (fprintf(w->f, "%s[%s]\n", w->section[0] ? "\n" : "", section) < 0)
+      w->err = 1;
+    strncpy(w->section, section, sizeof(w->section) - 1);
+  }
+  if (fprintf(w->f, "%s=%s\n", key, value) < 0)
+    w->err = 1;
+  return w->err ? -1 : 0;
+}
+
+// 1 if line starts section name
+static int opens(const char *line, const char *name) {
+  size_t n = strlen(name);
+
+  return line[0] == '[' && !strnicmp(line + 1, name, n) && line[n + 1] == ']';
+}
+
+// the old profile's sections that essctl doesn't write itself, [ESFM] too
+// unless this session changed the bank
+static void copy_others(struct ini_out *w, const char *old) {
+  char line[256];
+  int copy = 0;
+  FILE *f = fopen(old, "r");
+
+  if (!f)
+    return;
+  while (fgets(line, sizeof(line), f)) {
+    if (line[0] == '[') {
+      copy = !opens(line, PROF_HEADER) && !opens(line, PROF_FIELDS) &&
+             !(esfm_bank_touched && opens(line, "ESFM"));
+      if (copy && fputs("\n", w->f) < 0)
+        w->err = 1;
+    }
+    if (copy && line[strspn(line, " \t\r\n")] && fputs(line, w->f) < 0)
+      w->err = 1;
+  }
+  // better the old file than a new one without its other sections
+  if (ferror(f))
+    w->err = 1;
+  fclose(f);
+}
+
+// tmp becomes path; 0, or -1 with the old file still there
+static int replace_file(const char *path, const char *tmp, const char *bak) {
+  OFSTRUCT of;
+  int had = OpenFile(path, &of, OF_EXIST) != HFILE_ERROR;
+
+  remove(bak);
+  if (had && rename(path, bak))
+    return -1;
+  if (rename(tmp, path)) {
+    if (had)
+      rename(bak, path);
+    return -1;
+  }
+  if (had)
+    remove(bak);
+  return 0;
+}
+
+int profile_save_file(const char *path, char *report, unsigned size) {
+  struct prof_io out, old;
+  struct prof_report rep;
+  struct ini_out w;
+  char full[144], tmp[144], bak[144];
+  OFSTRUCT of;
+  int err, bad;
 
   full_path(path, full, sizeof(full));
-  io.get = ini_get;
-  io.put = ini_put;
-  io.keys = ini_keys;
-  io.ctx = full;
-  WritePrivateProfileString(PROF_FIELDS, 0, 0, full); // drop old keys
+  // the chip first: when it's busy or missing, the old file stays as it is
   if ((err = winio_begin()) < 0) {
     strncpy(report, esshw_strerror(err), size - 1);
     report[size - 1] = 0;
     return 2;
   }
-  prof_save(&io, &rep);
+  prof_read(&rep);
   winio_end();
-  // save the ESFM bank loaded in this session, if any
-  WritePrivateProfileString("ESFM", 0, 0, full);
-  if (esfm_last_bank[0])
-    WritePrivateProfileString("ESFM", "Bank", esfm_last_bank, full);
-  WritePrivateProfileString(0, 0, 0, full); // flush the profile cache
-  report_text(&rep, 0, report, size);
-  if (!rep.saved)
+  if (!rep.read) {
+    _bprintf(report, size, "nothing saved, %s", rep.problem);
     return 2;
+  }
+  // a new file, renamed over the old one once it's all written
+  sibling(full, "$$$", tmp, sizeof(tmp));
+  sibling(full, "$$B", bak, sizeof(bak));
+  memset(&w, 0, sizeof(w));
+  w.f = fopen(tmp, "w");
+  if (!w.f) {
+    _bprintf(report, size, "can't create %.120s", tmp);
+    return 2;
+  }
+  out.put = out_put;
+  out.get = ini_get;
+  out.keys = ini_keys;
+  out.ctx = &w;
+  old = out;
+  old.put = ini_put;
+  old.ctx = full;
+  // a setting the chip didn't answer for keeps the old file's value
+  prof_write(&out, OpenFile(full, &of, OF_EXIST) != HFILE_ERROR ? &old : 0,
+             &rep);
+  copy_others(&w, full);
+  if (esfm_bank_touched && esfm_last_bank[0])
+    out_put(&w, "ESFM", "Bank", esfm_last_bank);
+  bad = w.err || ferror(w.f);
+  if (fclose(w.f))
+    bad = 1;
+  if (bad || replace_file(full, tmp, bak)) {
+    remove(tmp);
+    _bprintf(report, size,
+             "can't write %.120s (is the disk full?), the old one is kept",
+             full);
+    return 2;
+  }
+  // Windows may still have the old file in its profile cache
+  WritePrivateProfileString(0, 0, 0, full);
+  report_text(&rep, 0, report, size);
   return rep.failed ? 1 : 0;
-}
-
-// wait without blocking Windows (never inside a winio bracket)
-static void pause_ms(DWORD ms) {
-  DWORD start = GetTickCount();
-  MSG msg;
-
-  while (GetTickCount() - start < ms)
-    if (PeekMessage(&msg, 0, 0, 0, PM_REMOVE)) {
-      TranslateMessage(&msg);
-      DispatchMessage(&msg);
-    } else {
-      Yield();
-    }
 }
 
 // load the profile's [ESFM] Bank=file into the running ESFM.DRV and add
@@ -239,10 +393,11 @@ void tray_notify(int reg) {
 
 int profile_load_file(const char *path, char *report, unsigned size) {
   struct prof_io io;
-  struct prof_report rep;
+  struct prof_report parsed, rep;
   char full[144];
   OFSTRUCT of;
-  int err, attempt, esfm_failed;
+  HCURSOR cursor;
+  int err, attempt, esfm_failed, quit = 0;
 
   full_path(path, full, sizeof(full));
   if (OpenFile(full, &of, OF_EXIST) == HFILE_ERROR) {
@@ -253,24 +408,33 @@ int profile_load_file(const char *path, char *report, unsigned size) {
   io.put = ini_put;
   io.keys = ini_keys;
   io.ctx = full;
+  // the file first, outside the hardware bracket
+  prof_parse(&io, &parsed);
   // DSP registers are refused while Windows plays a sound (at startup, the
   // startup sound), so try again a little later
   for (attempt = 0;; attempt++) {
+    rep = parsed;
     if ((err = winio_begin()) < 0) {
-      memset(&rep, 0, sizeof(rep));
       rep.failed = 1;
-      strcpy(rep.problem, esshw_strerror(err));
+      strncpy(rep.problem, esshw_strerror(err), sizeof(rep.problem) - 1);
     } else {
-      prof_load(&io, &rep);
+      prof_apply(&rep);
       winio_end();
     }
-    if (!rep.failed || attempt == 4)
+    if (!rep.failed || attempt == 4 || quit)
       break;
-    pause_ms(1000);
+    // no other command from the window meanwhile
+    if (g_main)
+      EnableWindow(g_main, FALSE);
+    cursor = SetCursor(LoadCursor(0, IDC_WAIT));
+    quit = wait_ms(1000);
+    SetCursor(cursor);
+    if (g_main && IsWindow(g_main))
+      EnableWindow(g_main, TRUE);
   }
   report_text(&rep, 1, report, size);
   tray_notify(-1);
-  esfm_failed = load_esfm(full, report, size);
+  esfm_failed = quit ? 0 : load_esfm(full, report, size);
   if (!rep.applied && (rep.failed || rep.invalid || rep.unknown))
     return 2;
   return (rep.failed || rep.mismatched || rep.invalid || rep.unknown ||
@@ -283,55 +447,61 @@ int profile_load_file(const char *path, char *report, unsigned size) {
 
 int dump_file(const char *path) {
   static char info[3072];
+  static int raw[R_COUNT];
   char full[144];
   FILE *f;
-  int i, j, v, err;
+  int i, j, v, err, bad;
   char text[48];
 
   full_path(path, full, sizeof(full));
+  info_text(info, sizeof(info));
+  // the registers into memory, then the file: no file work while the DSP
+  // is held
+  if ((err = winio_begin()) == 0) {
+    // how to decode the Audio 1 rate: mixer 71h bit 5
+    if ((v = ess_read(R_MX71)) >= 0)
+      cat_a1_like_70 = (v >> 5) & 1;
+    for (i = 0; i < R_COUNT; i++)
+      raw[i] =
+          ess_regs[i].flags & (RF_READ_SIDEFX | RF_WRITEONLY) ? 0 : ess_read(i);
+    winio_end();
+  }
   f = fopen(full, "w");
   if (!f)
     return 2;
-  info_text(info, sizeof(info));
   fprintf(f, "ES1869 Control %s register dump\n\n%s\n", ESSCTL_VERSION, info);
-  if ((err = winio_begin()) < 0) {
+  if (err < 0)
     fprintf(f, "registers: %s\n", esshw_strerror(err));
-    fclose(f);
-    return 1;
-  }
-  // how to decode the Audio 1 rate: mixer 71h bit 5
-  if ((v = ess_read(R_MX71)) >= 0)
-    cat_a1_like_70 = (v >> 5) & 1;
-  for (i = 0; i < R_COUNT; i++) {
+  for (i = 0; err == 0 && i < R_COUNT; i++) {
     const struct ess_reg *r = &ess_regs[i];
-    fprintf(f, "\n%-11s %02Xh  %s", ess_bank_names[r->bank], r->addr,
-            r->name);
+    fprintf(f, "\n%-11s %02Xh  %s", ess_bank_names[r->bank], r->addr, r->name);
     if (r->flags & (RF_READ_SIDEFX | RF_WRITEONLY)) {
       fprintf(f, "  (not read)\n");
       continue;
     }
-    v = ess_read(i);
-    if (v < 0) {
-      fprintf(f, "  %s\n", ess_strerror(v));
+    if (raw[i] < 0) {
+      fprintf(f, "  %s\n", ess_strerror(raw[i]));
       continue;
     }
-    fprintf(f, "  = %02Xh\n", v);
+    fprintf(f, "  = %02Xh\n", raw[i]);
     for (j = 0; j < F_COUNT; j++) {
       if (ess_fields[j].reg != i)
         continue;
-      cat_format(&ess_fields[j], (u8)v, text, sizeof(text));
+      cat_format(&ess_fields[j], (u8)raw[i], text, sizeof(text));
       fprintf(f, "    %-34s %s\n", ess_fields[j].label, text);
     }
   }
-  winio_end();
   if (GetModuleHandle("ESFM")) {
     struct esfm_diag d;
     int rc = esfm_diag_read(&d, 1);
     esfm_diag_text(&d, rc, "\n", info, sizeof(info));
     fprintf(f, "\nESFM.DRV\n\n%s", info);
   }
-  fclose(f);
-  return 0;
+  // a full disk shows here, not as a short file that looks written
+  bad = ferror(f);
+  if (fclose(f))
+    bad = 1;
+  return bad ? 2 : err < 0 ? 1 : 0;
 }
 
 // --- the music DAC ----------------------------------------------------------
@@ -484,7 +654,10 @@ static int run_batch(const struct cmdline *c) {
   }
   if (c->dump[0]) {
     r = dump_file(c->dump);
-    sprintf(line, "/dump %.120s: %s", c->dump, r ? "failed" : "written");
+    sprintf(line, "/dump %.120s: %s", c->dump,
+            r == 2   ? "failed"
+            : r == 1 ? "written, without the registers"
+                     : "written");
     batch_result(line, r);
     rc = r > rc ? r : rc;
   }
@@ -543,15 +716,21 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     return 0;
   }
 
-  if (!register_classes())
+  if (!register_classes()) {
+    msg_no_memory("Not enough memory for essctl's window");
     return 2;
+  }
   proc = (DLGPROC)MakeProcInstance((FARPROC)main_dlg_proc, inst);
   g_main = CreateDialog(inst, "ESSCTL", 0, proc);
-  if (!g_main)
+  if (!g_main) {
+    msg_no_memory("Not enough memory for essctl's window");
+    FreeProcInstance((FARPROC)proc);
     return 2;
+  }
   if (err == -ESSHW_ENODEV)
     set_status("No ES1869 answered at %03Xh: use /base=, or /sim to try "
-               "essctl without the card", esshw.audio_base);
+               "essctl without the card",
+               esshw.audio_base);
   else if (err < 0)
     set_status("%s", esshw_strerror(err));
   ShowWindow(g_main, show);

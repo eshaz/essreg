@@ -1,7 +1,8 @@
 /*
  * Saves and restores ES1869 settings, see profile.h.
  *
- * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan
+ * Halsall <ethan.s.halsall@gmail.com>
  *
  * Licensed under GPL Version 3.0
  */
@@ -16,8 +17,10 @@
 
 #define DSP_RETRIES 50
 
-static u8 want_value[F_COUNT];
+static u8 want_value[F_COUNT]; // prof_parse
 static u8 want[F_COUNT];
+static u8 read_value[F_COUNT]; // prof_read
+static u8 read_ok[F_COUNT];
 static char keybuf[4096];
 
 static int persistable(const struct ess_field *f) {
@@ -53,30 +56,66 @@ void prof_value_text(int field, u8 value, char *buf, unsigned size) {
   buf[size - 1] = 0;
 }
 
-int prof_save(const struct prof_io *io, struct prof_report *rep) {
-  char text[40];
-  int i;
+int prof_read(struct prof_report *rep) {
+  int i, tries, err;
   u8 v;
 
   memset(rep, 0, sizeof(*rep));
-  io->put(io->ctx, PROF_HEADER, "Format", "1");
-  io->put(io->ctx, PROF_HEADER, "Chip", "ES1869");
   for (i = 0; i < F_COUNT; i++) {
+    read_ok[i] = 0;
     if (!persistable(&ess_fields[i]))
       continue;
-    if (ess_field_read(i, &v, 0) < 0) {
+    // a DSP register is busy while a sound plays: try it again
+    for (tries = 0;; tries++) {
+      err = ess_field_read(i, &v, 0);
+      if (err != -ESSHW_EBUSY || tries >= DSP_RETRIES)
+        break;
+    }
+    if (err < 0) {
       rep->failed++;
       note(rep, "could not read ", ess_fields[i].key);
       continue;
     }
-    prof_value_text(i, v, text, sizeof(text));
+    read_value[i] = v;
+    read_ok[i] = 1;
+    rep->read++;
+  }
+  return rep->failed ? -1 : 0;
+}
+
+int prof_write(const struct prof_io *io, const struct prof_io *old,
+               struct prof_report *rep) {
+  char text[40];
+  int i, err = 0;
+
+  if (io->put(io->ctx, PROF_HEADER, "Format", "1") < 0 ||
+      io->put(io->ctx, PROF_HEADER, "Chip", "ES1869") < 0)
+    err = -1;
+  for (i = 0; i < F_COUNT; i++) {
+    if (!persistable(&ess_fields[i]))
+      continue;
+    if (read_ok[i])
+      prof_value_text(i, read_value[i], text, sizeof(text));
+    else if (!old || old->get(old->ctx, PROF_FIELDS, ess_fields[i].key, text,
+                              sizeof(text)) <= 0)
+      continue;
     if (io->put(io->ctx, PROF_FIELDS, ess_fields[i].key, text) < 0) {
-      rep->failed++;
+      err = -1;
       note(rep, "could not store ", ess_fields[i].key);
       continue;
     }
-    rep->saved++;
+    if (read_ok[i])
+      rep->saved++;
+    else
+      rep->kept++;
   }
+  return err;
+}
+
+int prof_save(const struct prof_io *io, struct prof_report *rep) {
+  prof_read(rep);
+  if (prof_write(io, 0, rep) < 0)
+    rep->failed++;
   return rep->failed ? -1 : 0;
 }
 
@@ -122,15 +161,20 @@ static void apply_register(int reg, struct prof_report *rep) {
   }
 }
 
-int prof_load(const struct prof_io *io, struct prof_report *rep) {
+int prof_parse(const struct prof_io *io, struct prof_report *rep) {
   char value[40];
   const char *key;
-  int i, len, pass;
+  int len;
   u8 v;
 
   memset(rep, 0, sizeof(*rep));
   memset(want, 0, sizeof(want));
   len = io->keys(io->ctx, PROF_FIELDS, keybuf, sizeof(keybuf));
+  // a full buffer may have cut keys off
+  if (len >= (int)sizeof(keybuf) - 2) {
+    rep->invalid++;
+    note(rep, "too many settings in ", PROF_FIELDS);
+  }
   for (key = keybuf; len > 0 && *key; key += strlen(key) + 1) {
     int f = cat_find_key(key);
     if (f < 0) {
@@ -152,6 +196,12 @@ int prof_load(const struct prof_io *io, struct prof_report *rep) {
     want[f] = 1;
     want_value[f] = v;
   }
+  return rep->unknown || rep->refused || rep->invalid ? -1 : 0;
+}
+
+int prof_apply(struct prof_report *rep) {
+  int i, pass;
+
   // go through the registers in catalog order, plain ones before DSP ones
   for (pass = 0; pass < 2; pass++)
     for (i = 0; i < R_COUNT; i++) {
@@ -165,4 +215,9 @@ int prof_load(const struct prof_io *io, struct prof_report *rep) {
         apply_register(i, rep);
     }
   return (rep->failed || rep->mismatched) ? -1 : 0;
+}
+
+int prof_load(const struct prof_io *io, struct prof_report *rep) {
+  prof_parse(io, rep);
+  return prof_apply(rep);
 }

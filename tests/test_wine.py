@@ -7,7 +7,9 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
 
   ESSREG_WINE=1 OW2=/path/to/open-watcom python3 -m unittest tests.test_wine
 
-- profiles: /save and /load in batch mode against the simulated chip
+- profiles: /save and /load in batch mode against the simulated chip; a
+  save keeps the file's other sections, and a full disk (a file size
+  limit) leaves the old file as it was
 - /i2s=off and /i2s=on: ESSWaveTableChip in the ES1869's software key,
   and mixer 7Fh bit 0 cleared
 - ESFM: tests/host/drvhold.c loads and enables the real driver/ESFM.DRV,
@@ -139,6 +141,33 @@ class WineTest(unittest.TestCase):
         self.assertIn("rec.source=Line", back)
         log = read(self.path("ESSCTL.LOG")).decode()
         self.assertIn("56 settings applied", log)
+
+    def test_profile_save_is_safe(self):
+        # a section of the user's own stays, and no temporary file is left
+        with open(self.path("KEEP.INI"), "w", newline="\r\n") as f:
+            f.write("[Mine]\nnote=kept\n\n[Fields]\nfx.3d.level=40\n")
+        self.wine("essctl.exe", "/sim", "/save", "KEEP.INI", "/q")
+        text = read(self.path("KEEP.INI")).decode()
+        self.assertTrue(text.startswith("[ESSCTL]\r\nFormat=1\r\n"))
+        self.assertIn("[Mine]\r\nnote=kept\r\n", text)
+        self.assertIn("fx.3d.level=0\r\n", text)
+        self.assertNotIn("fx.3d.level=40", text)
+        self.assertFalse(os.path.exists(self.path("KEEP.$$$")))
+        self.assertFalse(os.path.exists(self.path("KEEP.$$B")))
+
+        # a disk that's full before the new file is written: the old one
+        # stays as it was
+        def limit():
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (200,) * 2)
+
+        old = read(self.path("KEEP.INI"))
+        subprocess.run(["wine", "essctl.exe", "/sim", "/save", "KEEP.INI",
+                        "/q"], env=self.env, cwd=self.link, timeout=120,
+                       preexec_fn=limit, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+        self.assertEqual(read(self.path("KEEP.INI")), old)
+        self.assertFalse(os.path.exists(self.path("KEEP.$$$")))
 
     def test_i2s_off(self):
         key = r"HKLM\System\CurrentControlSet\Services\Class\Media\0003"

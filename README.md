@@ -18,6 +18,7 @@ This repository contains utilities and drivers designed for the ESS AudioDrive E
   * `/sim`: a simulated ES1869, to try essctl without the card.
 * **Profiles**: File > *Save profile* stores the 56 ordinary settings in an INI file, and File > *Load profile* restores them.
   * The ESS driver resets the mixer whenever Windows starts and only puts back its own settings ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)). Put `essctl /load C:\ESS\MY.INI` in the StartUp group to restore yours at every start of Windows.
+  * A save reads the chip first, then writes `MY.$$$` and renames it over `MY.INI`. A crash, a full disk or a DOS game that has the sound device leaves the old profile as it was. A setting the chip didn't answer for keeps its old value, and sections of your own in the file stay.
 * **The music DAC**: ESS's driver gives the music DAC to the I2S input (mixer 7Fh bit 0) whenever no program has the MIDI synthesizer open. FM from a DOS box or another program then doesn't play, on cards whose MODE pin enables I2S, or plays at the IIS line's volume.
   * Options > *FM keeps the music DAC*, or `essctl /i2s=off`, stops that: FM has the DAC at all times. `/i2s=on` goes back to ESS's default.
   * It sets `ESSWaveTableChip` in the driver's registry settings, which ESS's driver reads when Windows starts ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)). essctl also clears 7Fh bit 0 right away.
@@ -25,6 +26,8 @@ This repository contains utilities and drivers designed for the ESS AudioDrive E
   * *Note: only a card with a device on its I2S input (Zoom Video, MPEG audio) needs ESS's default.*
 * **ESFM**: ESFM > *Load patch bank* replaces the FM synthesizer's sounds while Windows runs.
   * Check out the *ESFM patch bank* page! It shows the synthesizer's 18 voices live and marks hanging notes. *Stress test* plays dense music to check for them ([docs/ESFM_MIDI.md](docs/ESFM_MIDI.md)).
+  * A bank larger than the one in memory waits until no program has the MIDI device open: ESS's driver keeps its bank locked in memory for interrupt time then. The fixed `ESFM.DRV` takes it at the next open.
+* Esc in a text field drops what was typed; elsewhere it closes essctl.
 
 ```
 essctl [/load file] [/save file] [/dump file] [/ui] [/q]

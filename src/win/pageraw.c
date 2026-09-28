@@ -8,6 +8,9 @@
  * the bit editor only writes in Expert mode. Its slider, text
  * field and bits all show the same value, in steps of one.
  *
+ * A refresh only replaces the lines whose value changed, so the
+ * list doesn't repaint every second.
+ *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
  * Licensed under GPL Version 3.0
@@ -22,7 +25,7 @@
 #include "resource.h"
 #include "winio.h"
 
-#define MAX_VIEWS 12
+#define MAX_VIEWS 16
 #define MAX_LINES 128
 
 struct view {
@@ -33,7 +36,8 @@ static struct view views[MAX_VIEWS];
 static int nviews, cur_view;
 static int line_reg[MAX_LINES]; // catalog register of each list line
 static int line_raw[MAX_LINES];
-static int nlines;
+static int shown_raw[MAX_LINES]; // what the list shows
+static int nlines, nshown;
 static HWND list, bank_cb;
 
 static void view_name(const struct view *v, char *buf) {
@@ -81,25 +85,43 @@ static void format_line(int i, char *text) {
   }
 }
 
+// the lines whose value changed, or all of them for a new view
 static void fill_list(void) {
-  const struct view *v = &views[cur_view];
   char text[96];
-  int i, sel, topi;
+  int i, sel, topi, changed = 0;
 
+  if (nshown == nlines) {
+    for (i = 0; i < nlines; i++)
+      changed += shown_raw[i] != line_raw[i];
+    if (!changed)
+      return;
+  }
   sel = (int)SendMessage(list, LB_GETCURSEL, 0, 0);
   topi = (int)SendMessage(list, LB_GETTOPINDEX, 0, 0);
   SendMessage(list, WM_SETREDRAW, FALSE, 0);
-  SendMessage(list, LB_RESETCONTENT, 0, 0);
-  for (i = 0; i < nlines; i++) {
-    format_line(i, text);
-    SendMessage(list, LB_ADDSTRING, 0, (LPARAM)(LPSTR)text);
+  if (nshown != nlines) {
+    SendMessage(list, LB_RESETCONTENT, 0, 0);
+    for (i = 0; i < nlines; i++) {
+      format_line(i, text);
+      SendMessage(list, LB_ADDSTRING, 0, (LPARAM)(LPSTR)text);
+    }
+  } else {
+    for (i = 0; i < nlines; i++) {
+      if (shown_raw[i] == line_raw[i])
+        continue;
+      format_line(i, text);
+      SendMessage(list, LB_DELETESTRING, i, 0);
+      SendMessage(list, LB_INSERTSTRING, i, (LPARAM)(LPSTR)text);
+    }
   }
+  for (i = 0; i < nlines; i++)
+    shown_raw[i] = line_raw[i];
+  nshown = nlines;
   if (sel >= 0 && sel < nlines)
     SendMessage(list, LB_SETCURSEL, sel, 0);
   SendMessage(list, LB_SETTOPINDEX, topi, 0);
   SendMessage(list, WM_SETREDRAW, TRUE, 0);
-  InvalidateRect(list, 0, TRUE);
-  (void)v;
+  InvalidateRect(list, 0, changed == 0);
 }
 
 static void select_view(int n) {
@@ -114,6 +136,7 @@ static void select_view(int n) {
       line_raw[nlines++] = -1;
     }
   SendMessage(list, LB_RESETCONTENT, 0, 0);
+  nshown = -1; // the next fill writes every line
 }
 
 void raw_create(void) {
@@ -131,16 +154,15 @@ void raw_create(void) {
       views[nviews++].ldn = ess_regs[i].ldn;
     }
   }
-  bank_cb = page_control("COMBOBOX", "",
-                         WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
-                             CBS_DROPDOWNLIST,
-                         0, 0, 150, 120, IDC_PG_BANK);
+  bank_cb = page_control(
+      "COMBOBOX", "", WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+      0, 0, 150, 120, IDC_PG_BANK);
   for (i = 0; i < nviews; i++) {
     view_name(&views[i], name);
     SendMessage(bank_cb, CB_ADDSTRING, 0, (LPARAM)(LPSTR)name);
   }
-  page_control("BUTTON", "&Read", WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-               156, 0, 50, 13, IDC_PG_READ);
+  page_control("BUTTON", "&Read", WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 156,
+               0, 50, 13, IDC_PG_READ);
   page_control("BUTTON", "&Edit...", WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
                210, 0, 50, 13, IDC_PG_EDITREG);
   list = page_control("LISTBOX", "",
@@ -267,10 +289,9 @@ static void be_write(HWND dlg) {
   }
 }
 
-BOOL CALLBACK __export bit_dlg_proc(HWND dlg, UINT msg, WPARAM wp,
-                                    LPARAM lp) {
+BOOL CALLBACK __export bit_dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
   const struct ess_reg *r = &ess_regs[be.reg];
-  char text[128];
+  char text[160];
   int tabs[2];
   int i;
 
@@ -278,7 +299,8 @@ BOOL CALLBACK __export bit_dlg_proc(HWND dlg, UINT msg, WPARAM wp,
   switch (msg) {
   case WM_INITDIALOG:
     sprintf(text, "%s %02Xh: %.80s%s", ess_bank_names[r->bank], r->addr,
-            r->name, g_expert ? "" : "\n(read only: writing needs Expert mode)");
+            r->name,
+            g_expert ? "" : "\n(read only: writing needs Expert mode)");
     SetDlgItemText(dlg, IDC_BE_NAME, text);
     tabs[0] = 20;
     tabs[1] = 64;
@@ -320,8 +342,7 @@ BOOL CALLBACK __export bit_dlg_proc(HWND dlg, UINT msg, WPARAM wp,
     }
     return TRUE;
   case WM_COMMAND:
-    if (wp >= IDC_BE_BIT0 && wp < IDC_BE_BIT0 + 8 &&
-        HIWORD(lp) == BN_CLICKED) {
+    if (wp >= IDC_BE_BIT0 && wp < IDC_BE_BIT0 + 8 && HIWORD(lp) == BN_CLICKED) {
       be.value = 0;
       for (i = 0; i < 8; i++)
         if (IsDlgButtonChecked(dlg, IDC_BE_BIT0 + i))

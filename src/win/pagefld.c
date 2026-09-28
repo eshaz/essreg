@@ -19,6 +19,8 @@
  * loses the focus.
  * Controller registers go through the DSP command channel and
  * are only read on request.
+ * The timer only updates rows whose register changed: each
+ * update repaints controls, and a page has hundreds.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -36,7 +38,7 @@
 #include "winio.h"
 
 #define MAX_ROWS 96
-#define RH 13      // row pitch in dialog units
+#define RH 13 // row pitch in dialog units
 #define X_LABEL 0
 #define W_LABEL 120
 #define X_CTL 124
@@ -190,13 +192,13 @@ static void create_row(int i, int field) {
   memset(r, 0, sizeof(*r));
   r->field = field;
   r->raw = NOT_READ;
-  r->lab = page_control("STATIC", f->label, SS_LEFTNOWORDWRAP | SS_NOPREFIX,
-                        0, 0, W_LABEL, 9, id);
+  r->lab = page_control("STATIC", f->label, SS_LEFTNOWORDWRAP | SS_NOPREFIX, 0,
+                        0, W_LABEL, 9, id);
   if (f->tier == T_RO || f->kind == K_RO) {
     // status, only the value column
   } else if (is_bool(f)) {
-    r->ctl = page_control("BUTTON", "", tab | BS_AUTOCHECKBOX, 0, 0, 12, 10,
-                          id + 1);
+    r->ctl =
+        page_control("BUTTON", "", tab | BS_AUTOCHECKBOX, 0, 0, 12, 10, id + 1);
   } else {
     switch (f->kind) {
     case K_UINT:
@@ -220,9 +222,8 @@ static void create_row(int i, int field) {
       SetScrollRange(r->ctl, SB_CTL, r->lo, r->hi, FALSE);
       break;
     case K_ENUM:
-      r->ctl = page_control("COMBOBOX", "",
-                            tab | WS_VSCROLL | CBS_DROPDOWNLIST, 0, 0, W_CTL,
-                            100, id + 1);
+      r->ctl = page_control("COMBOBOX", "", tab | WS_VSCROLL | CBS_DROPDOWNLIST,
+                            0, 0, W_CTL, 100, id + 1);
       fill_enum(r->ctl, f->enum_id);
       break;
     case K_ACTION:
@@ -238,8 +239,8 @@ static void create_row(int i, int field) {
     EnableWindow(r->edit, FALSE);
   r->val = page_control("STATIC", "", SS_LEFTNOWORDWRAP | SS_NOPREFIX, 0, 0,
                         W_VAL, 9, id + 2);
-  r->tag = page_control("STATIC", tag_text(f), SS_LEFTNOWORDWRAP, 0, 0,
-                        W_TAG, 9, id + 3);
+  r->tag = page_control("STATIC", tag_text(f), SS_LEFTNOWORDWRAP, 0, 0, W_TAG,
+                        9, id + 3);
 }
 
 void fields_create(int pg) {
@@ -256,13 +257,13 @@ void fields_create(int pg) {
   y0 = 0;
   if (dsp) {
     read_btn = page_control("BUTTON", "Read controller registers",
-                            WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0,
-                            110, 13, IDC_PG_READ);
+                            WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0, 110,
+                            13, IDC_PG_READ);
     page_control("STATIC",
                  "These go through the DSP command channel and are read "
                  "only on request.",
-                 WS_VISIBLE | SS_LEFT | SS_NOPREFIX, 114, 0, area_w - 124,
-                 16, IDC_PG_TEXT);
+                 WS_VISIBLE | SS_LEFT | SS_NOPREFIX, 114, 0, area_w - 124, 16,
+                 IDC_PG_TEXT);
     y0 = 18;
   }
   for (i = 0; i < F_COUNT && nrows < MAX_ROWS; i++)
@@ -341,12 +342,13 @@ static void show_row(int i) {
   }
 }
 
-// show raw in every row of register reg
-static void set_reg(int reg, int raw) {
+// show raw in every row of register reg, unless it's what they show
+// and force is 0
+static void set_reg(int reg, int raw, int force) {
   int i;
 
   for (i = 0; i < nrows; i++)
-    if (ess_fields[rows[i].field].reg == reg) {
+    if (ess_fields[rows[i].field].reg == reg && (force || rows[i].raw != raw)) {
       rows[i].raw = raw;
       show_row(i);
     }
@@ -375,7 +377,7 @@ void fields_refresh(int how) {
       continue;
     if ((flags & RF_NEEDS_IDLE) && !dsp)
       continue;
-    set_reg(reg, err < 0 ? err : ess_read(reg));
+    set_reg(reg, err < 0 ? err : ess_read(reg), how != REFRESH_TIMER);
   }
   winio_end();
   // with no device the rows say so, otherwise the status line says why
@@ -433,7 +435,7 @@ static void write_row(int i, u8 value) {
     show_row(i); // back to what the chip had
     return;
   }
-  set_reg(f->reg, raw);
+  set_reg(f->reg, raw, 1);
   tray_notify(f->reg);
   if (raw >= 0 && f->kind != K_ACTION && f->kind != K_PULSE &&
       cat_get(f, (u8)raw) != value)
@@ -494,7 +496,9 @@ void fields_command(int id, int code, HWND ctl) {
   }
   i = row_of(ctl);
   if (i >= 0 && (id - IDC_ROW) % ROW_IDS == 4) {
-    if (code == EN_KILLFOCUS && can_write(&ess_fields[rows[i].field]))
+    // closing takes the focus away too, and doesn't write
+    if (code == EN_KILLFOCUS && !g_closing &&
+        can_write(&ess_fields[rows[i].field]))
       apply_edit(i);
     else if (code == EN_SETFOCUS)
       help_for(i);
@@ -610,6 +614,21 @@ void fields_vscroll(int code, int pos) {
     top = 0;
   if (top != old)
     layout();
+}
+
+int fields_cancel_edit(void) {
+  int i = row_of(GetFocus());
+  struct row *r;
+
+  if (i < 0 || rows[i].edit != GetFocus())
+    return 0;
+  r = &rows[i];
+  if (r->raw >= 0)
+    show_edit(r,
+              slider_pos(&ess_fields[r->field],
+                         cat_get(&ess_fields[r->field], (u8)r->raw)),
+              1);
+  return 1;
 }
 
 void fields_click(int y) {

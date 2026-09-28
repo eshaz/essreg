@@ -15,6 +15,10 @@
  * arrives while it is still busy with another one, and a
  * dropped note off leaves a voice on.
  *
+ * Every 50 ms essctl lets the other programs run. It stops the
+ * test when essctl is closed, and Windows closes the stream
+ * before the buffer goes.
+ *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
  * Licensed under GPL Version 3.0
@@ -28,6 +32,7 @@
 
 #include "esfmlive.h"
 #include "esfmtest.h"
+#include "essctl.h"
 
 // MIDI streams came with Windows 95, not in the Windows 3.1 headers
 typedef struct {
@@ -57,7 +62,7 @@ typedef UINT(FAR PASCAL *STREAMOUT)(UINT, MIDIHDR95 FAR *, UINT);
 typedef UINT(FAR PASCAL *STREAMPROP)(UINT, BYTE FAR *, DWORD);
 typedef UINT(FAR PASCAL *STREAMCTL)(UINT);
 
-#define TICKS 700       // 48 per quarter note at 120 bpm, 7.3 s
+#define TICKS 700 // 48 per quarter note at 120 bpm, 7.3 s
 #define CHANNELS 12
 #define MAX_OFFS 96
 #define BUF_BYTES 60000U
@@ -170,12 +175,20 @@ static int find_esfm(UINT *id) {
   return -1;
 }
 
-static void wait_ms(DWORD ms) {
-  DWORD start = GetTickCount();
+// the other programs run; 1 when essctl is closing (WM_QUIT, put back
+// for the main loop)
+static int pump(void) {
   MSG msg;
 
-  while (GetTickCount() - start < ms)
-    PeekMessage(&msg, 0, 0, 0, PM_NOREMOVE);
+  while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE)) {
+    if (msg.message == WM_QUIT) {
+      PostQuitMessage(msg.wParam);
+      return 1;
+    }
+    TranslateMessage(&msg);
+    DispatchMessage(&msg);
+  }
+  return 0;
 }
 
 static void append(char *out, unsigned size, const char *text) {
@@ -206,9 +219,9 @@ int esfm_stress_test(char *report, unsigned size) {
   struct esfm_diag before, after;
   HGLOBAL mem;
   UINT id, hms = 0, r;
-  DWORD start, sent = 0, refused = 0, took;
+  DWORD start, sent = 0, refused = 0, took, pumped;
   char text[200], nb[8];
-  int i, stuck = 0, rc = -1;
+  int i, stuck = 0, rc = -1, quit = 0;
   HCURSOR old;
 
   report[0] = 0;
@@ -245,7 +258,8 @@ int esfm_stress_test(char *report, unsigned size) {
   if (r) {
     sprintf(text, "Cannot open the ESFM device (error %u)%s.", r,
             r == MMSYSERR_ALLOCATED ? ": it is in use, stop other MIDI "
-                                      "playback first" : "");
+                                      "playback first"
+                                    : "");
     append(report, size, text);
     goto out_mem;
   }
@@ -267,7 +281,7 @@ int esfm_stress_test(char *report, unsigned size) {
   }
 
   old = SetCursor(LoadCursor(0, IDC_WAIT));
-  start = GetTickCount();
+  start = pumped = GetTickCount();
   // send controller changes from the program while the stream plays,
   // volume and expression rewrite the levels of every sounding voice
   while (!(hdr.dwFlags & MHDR_DONE) && GetTickCount() - start < 20000) {
@@ -278,15 +292,27 @@ int esfm_stress_test(char *report, unsigned size) {
     sent++;
     if (r)
       refused++;
+    if (GetTickCount() - pumped >= 50) {
+      pumped = GetTickCount();
+      if ((quit = pump()) != 0)
+        break;
+    }
   }
   took = GetTickCount() - start;
-  wait_ms(400); // wait for the releases
+  // wait for the releases
+  if (!quit)
+    quit = wait_ms(400);
   SetCursor(old);
+  if (quit) {
+    append(report, size, "Stopped: essctl is closing.");
+    goto out_stop;
+  }
   esfm_diag_read(&after, 1);
 
-  sprintf(text, "Played %u MIDI events in %lu.%lu s from MMSYSTEM's stream "
-                "player (interrupt time), while essctl sent %lu controller "
-                "messages (%lu refused).\r\n\r\n",
+  sprintf(text,
+          "Played %u MIDI events in %lu.%lu s from MMSYSTEM's stream "
+          "player (interrupt time), while essctl sent %lu controller "
+          "messages (%lu refused).\r\n\r\n",
           events, took / 1000, took % 1000 / 100, sent, refused);
   append(report, size, text);
   if (!(hdr.dwFlags & MHDR_DONE))
@@ -309,21 +335,29 @@ int esfm_stress_test(char *report, unsigned size) {
     append(report, size, "No voice was left sounding.\r\n\r\n");
   }
   if (after.device && after.fixed) {
-    sprintf(text, "Fixed ESFM.DRV: %lu messages arrived while it was busy "
-                  "and were queued (the ESS driver drops these), %lu "
-                  "refused with a full queue.",
+    sprintf(text,
+            "Fixed ESFM.DRV: %lu messages arrived while it was busy "
+            "and were queued (the ESS driver drops these), %lu "
+            "refused with a full queue.",
             after.queued - before.queued, after.overflow - before.overflow);
     append(report, size, text);
   } else if (after.device) {
-    append(report, size, "This is ESS's ESFM.DRV: messages that arrive while "
-                         "it is busy are dropped.  Install build\\ESFM.DRV "
-                         "and run the test again.");
+    append(report, size,
+           "This is ESS's ESFM.DRV: messages that arrive while "
+           "it is busy are dropped.  Install build\\ESFM.DRV "
+           "and run the test again.");
   }
   rc = stuck ? 1 : 0;
 
+out_stop:
   s_stop(hms);
   midiOutReset((HMIDIOUT)hms);
 out_close:
+  // a buffer the stream still holds can't be unprepared or freed
+  if (hdr.dwFlags & MHDR_INQUEUE) {
+    s_stop(hms);
+    midiOutReset((HMIDIOUT)hms);
+  }
   if (hdr.dwFlags & MHDR_PREPARED)
     midiOutUnprepareHeader((HMIDIOUT)hms, (LPMIDIHDR)&hdr, sizeof(hdr));
   s_close(hms);

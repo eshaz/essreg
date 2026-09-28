@@ -1,21 +1,42 @@
 /*
  * Replaces the FM patch bank of the running ESFM.DRV (see
- * esfmlive.h and docs/ESFM_BANK.md).
+ * esfmlive.h and
+ * docs/ESFM_BANK.md).
  *
  * Notes:
  *
- * The driver's data segment holds a far pointer to its bank
- * at 0012h (offset, always 0) and 0014h (the GlobalAlloc
+ * The driver's data segment holds a far
+ * pointer to its bank
+ * at 0012h (offset, always 0) and 0014h (the
+ * GlobalAlloc
  * handle, used directly as a selector).
  *
- * Before touching anything, check that the driver file is the
- * build with the known loader (esfm_drv_inspect) and that its
+ * Before touching
+ * anything, check that the driver file is the
+ * build with the known loader
+ * (esfm_drv_inspect) and that its
  * data segment has the known layout.
  *
- * A larger bank grows the driver's own block with
- * GlobalReAlloc, so the driver still owns and frees it.
+ * A
+ * larger bank grows the driver's own block with
+ * GlobalReAlloc, so the driver
+ * still owns and frees it. Not
+ * while a program has the MIDI device open: the
+ * driver has
+ * the block page-locked then (bank_locks, seg3.asm bank_lock),
  *
- * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * for its code at interrupt time, and pages added to it
+ * wouldn't be. The
+ * fixed driver takes it from SYSTEM.INI at
+ * the next open instead.
+ *
+ * The
+ * driver file is inspected once while the same module is
+ * loaded, not on
+ * every refresh of the ESFM page.
+ *
+ * (c) 2026 Ethan Halsall
+ * <ethan.s.halsall@gmail.com>
  *
  * Licensed under GPL Version 3.0
  */
@@ -32,10 +53,11 @@
 #include "esfmbank.h"
 #include "esfmlive.h"
 
+#define DG_BANK_LOCKS 0x10 // GlobalPageLock count of the bank
 #define DG_BANK_OFF 0x12
 #define DG_BANK_SEL 0x14
-#define DG_NAME1 0x47 // "Undefined", file name of the dormant RIFF loader
-#define DG_NAME2 0x51 // "Undefined", what it is compared with
+#define DG_NAME1 0x47   // "Undefined", file name of the dormant RIFF loader
+#define DG_NAME2 0x51   // "Undefined", what it is compared with
 #define DG_DEVICES 0x3C // first device structure
 
 // device structure (src/esfm/esfmdev.inc)
@@ -50,6 +72,14 @@
 #define FM_KEYON 0x240 // key-on registers, 0x250-0x253 for voices 16, 17
 
 char esfm_last_bank[144];
+int esfm_bank_touched;
+
+// the inspection of the loaded driver's file
+static struct {
+  HMODULE mod;
+  char path[144];
+  struct esfm_drv drv;
+} seen;
 
 struct live {
   HMODULE mod;
@@ -60,7 +90,7 @@ struct live {
 };
 
 static HGLOBAL bank_handle(const struct live *lv) {
-  return (HGLOBAL)*(u16 __far *)(lv->dg + DG_BANK_SEL);
+  return (HGLOBAL) * (u16 __far *)(lv->dg + DG_BANK_SEL);
 }
 
 // handle of segment seg of a loaded module, from ToolHelp or else from the
@@ -81,8 +111,8 @@ static HGLOBAL module_segment(HMODULE mod, unsigned seg) {
     return 0;
   if (ne[0] == 'N' && ne[1] == 'E' && seg >= 1 &&
       seg <= *(u16 __far *)(ne + 0x1C))
-    h = (HGLOBAL) * (u16 __far *)(ne + *(u16 __far *)(ne + 0x22) +
-                                   (seg - 1) * 10 + 8);
+    h = (HGLOBAL) *
+        (u16 __far *)(ne + *(u16 __far *)(ne + 0x22) + (seg - 1) * 10 + 8);
   GlobalUnlock((HGLOBAL)mod);
   return h;
 }
@@ -97,17 +127,24 @@ static int open_live(struct live *lv, char *why) {
     return -1;
   }
   GetModuleFileName(lv->mod, lv->path, sizeof(lv->path));
-  f = fopen(lv->path, "rb");
-  if (!f) {
-    strcpy(why, "cannot read the driver file");
-    return -1;
-  }
-  if (esfm_drv_inspect(f, &lv->drv) != 0) {
+  if (seen.mod == lv->mod && !strcmp(seen.path, lv->path)) {
+    lv->drv = seen.drv;
+  } else {
+    f = fopen(lv->path, "rb");
+    if (!f) {
+      strcpy(why, "cannot read the driver file");
+      return -1;
+    }
+    if (esfm_drv_inspect(f, &lv->drv) != 0) {
+      fclose(f);
+      strcpy(why, lv->drv.why);
+      return -1;
+    }
     fclose(f);
-    strcpy(why, lv->drv.why);
-    return -1;
+    seen.mod = lv->mod;
+    strcpy(seen.path, lv->path);
+    seen.drv = lv->drv;
   }
-  fclose(f);
 
   lv->dgroup = module_segment(lv->mod, lv->drv.autodata);
   if (!lv->dgroup) {
@@ -154,11 +191,21 @@ static u16 fix_version(const struct live *lv) {
   return fix ? *(u16 __far *)(fix + 8) : 0;
 }
 
+// 1 while a program has the MIDI device open and the bank is page-locked
+static int bank_locked(const struct live *lv) {
+  return *(u16 __far *)(lv->dg + DG_BANK_LOCKS) != 0;
+}
+
 // copy n bytes into the driver's bank, growing its block if needed
 static int put_bank(struct live *lv, const u8 __far *src, u16 n, char *why) {
   HGLOBAL h = bank_handle(lv), h2;
   u8 __far *dst;
 
+  if (GlobalSize(h) < n && bank_locked(lv)) {
+    strcpy(why, "it's larger than the bank in memory, and a MIDI program has "
+                "the device open: close it first");
+    return -1;
+  }
   if (GlobalSize(h) < n) {
     h2 = GlobalReAlloc(h, n, GMEM_MOVEABLE | GMEM_ZEROINIT);
     if (!h2) {
@@ -246,18 +293,37 @@ int esfm_live_load(const char *path, char *msg, unsigned size) {
   } else if (bank_check(file + off, blen, &info) != 0) {
     strcpy(why, info.why);
   } else if (open_live(&lv, why) == 0) {
-    if (put_bank(&lv, file + off, info.size, why) == 0) {
-      strncpy(esfm_last_bank, path, sizeof(esfm_last_bank) - 1);
-      esfm_last_bank[sizeof(esfm_last_bank) - 1] = 0;
+    if (fix_version(&lv) >= 2 && bank_locked(&lv) &&
+        GlobalSize(bank_handle(&lv)) < info.size) {
+      // the fixed driver loads it itself at the next open, and locks it
+      if (WritePrivateProfileString(ESFM_INI_SECTION, ESFM_INI_KEY, path,
+                                    ESFM_INI_FILE)) {
+        WritePrivateProfileString(0, 0, 0, ESFM_INI_FILE);
+        sprintf(text,
+                "ESFM bank set: %u patches, %u bytes. ESFM.DRV plays "
+                "it when a program next opens the MIDI device",
+                info.patches, info.size);
+        rc = 0;
+      } else {
+        strcpy(why, "cannot write SYSTEM.INI");
+      }
+    } else if (put_bank(&lv, file + off, info.size, why) == 0) {
       sprintf(text, "ESFM bank loaded: %u patches, %u bytes", info.patches,
               info.size);
       // the fixed driver keeps playing the file, also after a restart
       if (fix_version(&lv) >= 2 &&
           WritePrivateProfileString(ESFM_INI_SECTION, ESFM_INI_KEY, path,
-                                    ESFM_INI_FILE))
+                                    ESFM_INI_FILE)) {
+        WritePrivateProfileString(0, 0, 0, ESFM_INI_FILE);
         strcat(text, ", ESFM.DRV plays it from the file now");
-      message(msg, size, text);
+      }
       rc = 0;
+    }
+    if (rc == 0) {
+      strncpy(esfm_last_bank, path, sizeof(esfm_last_bank) - 1);
+      esfm_last_bank[sizeof(esfm_last_bank) - 1] = 0;
+      esfm_bank_touched = 1;
+      message(msg, size, text);
     }
     close_live(&lv);
   }
@@ -270,11 +336,13 @@ int esfm_live_load(const char *path, char *msg, unsigned size) {
 }
 
 int esfm_live_restore(char *msg, unsigned size) {
+  struct bank_info info;
   struct live lv;
   char why[96], text[160];
   HRSRC res;
   HGLOBAL mem;
   u8 __far *src;
+  u32 n = 0;
   int rc = -1;
 
   if (open_live(&lv, why) != 0) {
@@ -286,14 +354,25 @@ int esfm_live_restore(char *msg, unsigned size) {
                      MAKEINTRESOURCE(BANK_RES_TYPE));
   mem = res ? LoadResource(lv.mod, res) : 0;
   src = mem ? (u8 __far *)LockResource(mem) : 0;
+  // no more than the resource in memory holds: the file on disk may be
+  // another version than the one loaded
+  if (src)
+    n = SizeofResource(lv.mod, res);
+  if (n > lv.drv.bank_size)
+    n = lv.drv.bank_size;
   if (!src) {
     strcpy(why, "cannot load the driver's bank resource");
-  } else if (put_bank(&lv, src, lv.drv.bank_size, why) == 0) {
+  } else if (bank_check(src, n, &info) != 0) {
+    sprintf(why, "the driver's own bank: %.70s", info.why);
+  } else if (put_bank(&lv, src, info.size, why) == 0) {
     esfm_last_bank[0] = 0;
+    esfm_bank_touched = 1;
     // and the fixed driver stops playing a bank file
-    if (fix_version(&lv) >= 2)
+    if (fix_version(&lv) >= 2) {
       WritePrivateProfileString(ESFM_INI_SECTION, ESFM_INI_KEY, 0,
                                 ESFM_INI_FILE);
+      WritePrivateProfileString(0, 0, 0, ESFM_INI_FILE);
+    }
     message(msg, size, "ESFM bank restored from the driver");
     rc = 0;
   }
@@ -393,9 +472,11 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
     for (i = 0; i < 16; i++)
       d->v[i].chip = fm_read(d->fm_port, FM_KEYON + i) & 1;
     d->v[16].chip = (fm_read(d->fm_port, FM_KEYON + 16) |
-                     fm_read(d->fm_port, FM_KEYON + 17)) & 1;
+                     fm_read(d->fm_port, FM_KEYON + 17)) &
+                    1;
     d->v[17].chip = (fm_read(d->fm_port, FM_KEYON + 18) |
-                     fm_read(d->fm_port, FM_KEYON + 19)) & 1;
+                     fm_read(d->fm_port, FM_KEYON + 19)) &
+                    1;
     d->chip_read = 1;
   }
   return 0;
@@ -426,16 +507,17 @@ static void file_text(const struct esfm_diag *d, const char *nl, char *buf,
     sprintf(line, "Bank file: cannot read %.110s, %s%s", d->file, plays, nl);
     break;
   case ESFM_FILE_BAD:
-    sprintf(line, "Bank file: %.110s is not a patch bank, %s%s", d->file,
-            plays, nl);
+    sprintf(line, "Bank file: %.110s is not a patch bank, %s%s", d->file, plays,
+            nl);
     break;
   default:
     sprintf(line, "Bank file: not enough memory for %.110s, %s%s", d->file,
             plays, nl);
   }
   strncat(buf, line, size - strlen(buf) - 1);
-  sprintf(line, "Read when a program opens the device, if its date or time "
-                "changed: %u checks, %u load%s%s",
+  sprintf(line,
+          "Read when a program opens the device, if its date or time "
+          "changed: %u checks, %u load%s%s",
           d->file_checks, d->file_loads, d->file_loads == 1 ? "" : "s", nl);
   strncat(buf, line, size - strlen(buf) - 1);
 }
@@ -460,17 +542,21 @@ void esfm_diag_text(const struct esfm_diag *d, int rc, const char *nl,
     strncat(buf, line, size - strlen(buf) - 1);
     return;
   }
-  sprintf(line, "%s%s%s", d->open ? "A program has the MIDI device open"
-                                  : "The MIDI device is closed",
+  sprintf(line, "%s%s%s",
+          d->open ? "A program has the MIDI device open"
+                  : "The MIDI device is closed",
           d->suspended ? " (suspended)" : "", nl);
   strncat(buf, line, size - strlen(buf) - 1);
   if (d->fixed)
-    sprintf(line, "Fixed driver: %lu messages queued while busy, %lu "
-                  "refused%s",
+    sprintf(line,
+            "Fixed driver: %lu messages queued while busy, %lu "
+            "refused%s",
             (unsigned long)d->queued, (unsigned long)d->overflow, nl);
   else
-    sprintf(line, "ESS driver: drops messages that come while it is "
-                  "busy%s", nl);
+    sprintf(line,
+            "ESS driver: drops messages that come while it is "
+            "busy%s",
+            nl);
   strncat(buf, line, size - strlen(buf) - 1);
   if (d->fixed && d->version >= 2)
     file_text(d, nl, buf, size);

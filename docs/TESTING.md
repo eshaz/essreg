@@ -105,6 +105,7 @@ tools/wineshot.sh stop
    1. File > *Save profile* to `C:\ESS\MY.INI`.
    2. Change a few values, then File > *Load profile*: they come back.
    3. Put `essctl /load C:\ESS\MY.INI` in the StartUp group and restart Windows. The settings are back, and `ESSCTL.LOG` next to essctl.exe says "... settings applied".
+   4. With the stock driver, start a DOS game with sound in a window, then File > *Save profile* over `MY.INI`: essctl says the device is in use, and `MY.INI` is unchanged (its date too).
 
 5. **The music DAC.**
    1. Play a MIDI file in the Media Player and stop it. *3-D, mic, MONO, I2S* shows *I2S drives music DAC* on (ESS's driver gives the DAC back to I2S), and *Device information* says "I2S has it while no MIDI program is open".

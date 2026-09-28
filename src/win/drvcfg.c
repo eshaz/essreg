@@ -28,6 +28,7 @@ typedef LONG(FAR PASCAL *REGQUERYVALUEEX)(DWORD, LPCSTR, DWORD FAR *,
                                           DWORD FAR *, BYTE FAR *, DWORD FAR *);
 typedef LONG(FAR PASCAL *REGSETVALUEEX)(DWORD, LPCSTR, DWORD, DWORD,
                                         const BYTE FAR *, DWORD);
+typedef LONG(FAR PASCAL *REGFLUSHKEY)(DWORD);
 
 static struct {
   int tried;
@@ -36,10 +37,11 @@ static struct {
   REGCLOSEKEY close;
   REGQUERYVALUEEX query;
   REGSETVALUEEX set;
+  REGFLUSHKEY flush;
 } reg;
 
 // KERNEL's registry functions: RegEnumKey 216, RegOpenKey 217,
-// RegCloseKey 220, RegQueryValueEx 225, RegSetValueEx 226
+// RegCloseKey 220, RegQueryValueEx 225, RegSetValueEx 226, RegFlushKey 227
 static int reg_init(void) {
   HMODULE k;
 
@@ -51,6 +53,7 @@ static int reg_init(void) {
     reg.close = (REGCLOSEKEY)GetProcAddress(k, MAKEINTRESOURCE(220));
     reg.query = (REGQUERYVALUEEX)GetProcAddress(k, MAKEINTRESOURCE(225));
     reg.set = (REGSETVALUEEX)GetProcAddress(k, MAKEINTRESOURCE(226));
+    reg.flush = (REGFLUSHKEY)GetProcAddress(k, MAKEINTRESOURCE(227));
   }
   return reg.enum_key && reg.open && reg.close && reg.query && reg.set ? 0 : -1;
 }
@@ -100,6 +103,10 @@ int drvcfg_set(const char *name, DWORD value) {
   if (open_config(&key))
     return -1;
   err = reg.set(key, name, 0, REG_BIN, (const BYTE FAR *)&value, sizeof(value));
+  // to the disk now: Windows writes the registry late, and a crash
+  // before that loses the value
+  if (!err && reg.flush)
+    reg.flush(key);
   reg.close(key);
   return err ? -1 : 0;
 }

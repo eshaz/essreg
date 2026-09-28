@@ -571,6 +571,11 @@ BOOL CALLBACK __export panel_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
       if (id >= IDC_P_EDIT && id < IDC_P_EDIT + nsliders)
         edit_apply(id - IDC_P_EDIT);
     } else if (id == IDCANCEL) {
+      // Esc drops what was typed: hiding takes the focus, which writes it
+      focus = GetFocus();
+      id = GetDlgCtrlID(focus);
+      if (id >= IDC_P_EDIT && id < IDC_P_EDIT + nsliders)
+        edit_show(id - IDC_P_EDIT, 1);
       panel_hide();
     }
     return TRUE;

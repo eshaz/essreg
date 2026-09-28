@@ -1,8 +1,10 @@
 /*
  * The main dialog of essctl: category list, menus, status
- * lines and the refresh timer.
+ * lines and the
+ * refresh timer.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
  *
  * Licensed under GPL Version 3.0
  */
@@ -13,12 +15,12 @@
 
 #include "essctl.h"
 
-#include <commdlg.h>
 #include "drvcfg.h"
 #include "esshw.h"
 #include "resource.h"
 #include "vxdapi.h"
 #include "winio.h"
+#include <commdlg.h>
 
 #define TIMER_ID 1
 #define TIMER_MS 1000
@@ -32,24 +34,27 @@ static int nentries;
 static int auto_refresh = 1;
 static char status[160];
 
-void set_help(const char *text) {
-  SetDlgItemText(g_main, IDC_HELPTEXT, text);
-}
+void set_help(const char *text) { SetDlgItemText(g_main, IDC_HELPTEXT, text); }
 
 void set_status(const char *fmt, ...) {
   va_list ap;
 
   va_start(ap, fmt);
-  vsprintf(status, fmt, ap);
+  _vbprintf(status, sizeof(status), fmt, ap);
   va_end(ap);
   SetDlgItemText(g_main, IDC_STATUS, status);
 }
 
 void update_owner_status(void) {
+  static char shown[96];
   char text[96];
 
+  // a new text only: each one repaints the line
   winio_owner_text(text, sizeof(text));
-  SetDlgItemText(g_main, IDC_OWNERS, text);
+  if (strcmp(text, shown)) {
+    strcpy(shown, text);
+    SetDlgItemText(g_main, IDC_OWNERS, text);
+  }
 }
 
 static void add_entry(HWND list, const char *name, int kind, int arg) {
@@ -95,8 +100,8 @@ static int file_dialog(HWND owner, int save, const char *filter,
   ofn.lpstrFile = path;
   ofn.nMaxFile = size;
   ofn.lpstrDefExt = ext;
-  ofn.Flags = OFN_HIDEREADONLY |
-              (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+  ofn.Flags =
+      OFN_HIDEREADONLY | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
   return save ? GetSaveFileName(&ofn) : GetOpenFileName(&ofn);
 }
 
@@ -113,6 +118,9 @@ static void cmd_load(HWND dlg) {
   if (!file_dialog(dlg, 0, ini_filter, "ini", path, sizeof(path)))
     return;
   rc = profile_load_file(path, report, sizeof(report));
+  // essctl may have closed while the load waited for the DSP
+  if (!IsWindow(dlg))
+    return;
   page_refresh(REFRESH_USER);
   if (rc)
     msg_error(dlg, "%s:\n%s", path, report);
@@ -211,8 +219,15 @@ static void on_command(HWND dlg, int id, int code, HWND ctl) {
   case IDM_DUMP:
     cmd_dump(dlg);
     return;
-  case IDM_EXIT:
   case IDCANCEL: // Esc
+    // in a text field it drops what was typed
+    if (page_kind() == PK_FIELDS && fields_cancel_edit())
+      return;
+    g_closing = 1;
+    DestroyWindow(dlg);
+    return;
+  case IDM_EXIT:
+    g_closing = 1;
     DestroyWindow(dlg);
     return;
   case IDM_REFRESH:
@@ -246,8 +261,7 @@ static void on_command(HWND dlg, int id, int code, HWND ctl) {
   page_command(id, code, ctl);
 }
 
-BOOL CALLBACK __export main_dlg_proc(HWND dlg, UINT msg, WPARAM wp,
-                                     LPARAM lp) {
+BOOL CALLBACK __export main_dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
   char title[128], path[96];
 
   switch (msg) {
@@ -267,8 +281,14 @@ BOOL CALLBACK __export main_dlg_proc(HWND dlg, UINT msg, WPARAM wp,
       EnableMenuItem(GetMenu(dlg), IDM_AUTOREFRESH, MF_BYCOMMAND | MF_GRAYED);
     }
     fmdac_menu(dlg);
-    SetTimer(dlg, TIMER_ID, TIMER_MS, 0);
+    if (!SetTimer(dlg, TIMER_ID, TIMER_MS, 0)) {
+      auto_refresh = 0;
+      CheckMenuItem(GetMenu(dlg), IDM_AUTOREFRESH, MF_BYCOMMAND | MF_UNCHECKED);
+      EnableMenuItem(GetMenu(dlg), IDM_AUTOREFRESH, MF_BYCOMMAND | MF_GRAYED);
+    }
     select_page(dlg);
+    if (!auto_refresh && winio_can_poll())
+      set_status("No timer left in Windows: F5 refreshes");
     update_owner_status();
     return TRUE;
 
@@ -297,6 +317,7 @@ BOOL CALLBACK __export main_dlg_proc(HWND dlg, UINT msg, WPARAM wp,
     return TRUE;
 
   case WM_CLOSE:
+    g_closing = 1;
     DestroyWindow(dlg);
     return TRUE;
 

@@ -11,7 +11,7 @@
 #include "essctl.h"
 #include "resource.h"
 
-#define MAX_CTLS 420
+#define MAX_CTLS 512 // the Plug and Play page has the most, 333
 
 int area_w, area_h;
 static int area_x, area_y; // page area origin in dialog units
@@ -49,8 +49,8 @@ void page_init(void) {
   area_h = (int)((long)(rc.bottom - rc.top) * 100 / unit_y);
 }
 
-HWND page_control(const char *cls, const char *text, DWORD style, int x,
-                  int y, int w, int h, int id) {
+HWND page_control(const char *cls, const char *text, DWORD style, int x, int y,
+                  int w, int h, int id) {
   HWND ctl;
   int px = area_x + x, py = area_y + y;
 
@@ -60,9 +60,13 @@ HWND page_control(const char *cls, const char *text, DWORD style, int x,
                      (HMENU)id, g_inst, 0);
   if (!ctl)
     return 0;
+  // one that isn't in the list would never be destroyed
+  if (nctls == MAX_CTLS) {
+    DestroyWindow(ctl);
+    return 0;
+  }
   SendMessage(ctl, WM_SETFONT, (WPARAM)g_font, 0);
-  if (nctls < MAX_CTLS)
-    ctls[nctls++] = ctl;
+  ctls[nctls++] = ctl;
   return ctl;
 }
 

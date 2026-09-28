@@ -52,10 +52,16 @@ extern HINSTANCE g_inst;
 extern HWND g_main;   // main dialog
 extern HFONT g_font;  // dialog font for the controls created at run time
 extern int g_expert;  // Expert mode, only for this session
+extern int g_closing; // the window is closing: a text field's focus loss
+                      // doesn't write it
 
 // essctl.c
 void msg_error(HWND owner, const char *fmt, ...);
+void msg_no_memory(const char *text); // shows even when memory is low
 int confirm(HWND owner, const char *text);
+// wait ms while Windows goes on, never inside a winio bracket
+// 1 if essctl is closing (WM_QUIT, put back for the main loop)
+int wait_ms(DWORD ms);
 void app_dir_file(const char *name, char *path, unsigned size);
 int profile_save_file(const char *path, char *report, unsigned size);
 int profile_load_file(const char *path, char *report, unsigned size);
@@ -67,8 +73,7 @@ void tray_notify(int reg);
 int fmdac_set(int fm_only, char *report, unsigned size);
 
 // dlgmain.c
-BOOL CALLBACK __export main_dlg_proc(HWND dlg, UINT msg, WPARAM wp,
-                                     LPARAM lp);
+BOOL CALLBACK __export main_dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp);
 void set_help(const char *text);
 void set_status(const char *fmt, ...);
 void update_owner_status(void);
@@ -87,8 +92,8 @@ void page_vscroll(int code, int pos);
 void page_click(int x, int y);
 void page_focus(HWND ctl);
 int page_kind(void);
-HWND page_control(const char *cls, const char *text, DWORD style, int x,
-                  int y, int w, int h, int id);
+HWND page_control(const char *cls, const char *text, DWORD style, int x, int y,
+                  int w, int h, int id);
 void page_move(HWND ctl, int x, int y, int w, int h, int show);
 // 1: moving controls doesn't paint; 0: paint the page area once
 // moved one by one, hundreds of controls leave parts of the page unpainted
@@ -104,6 +109,8 @@ void fields_hscroll(int code, int pos, HWND ctl);
 void fields_vscroll(int code, int pos);
 void fields_click(int y);
 void fields_focus(HWND ctl);
+// Esc in a row's text field: back to the chip's value, 1 if it was one
+int fields_cancel_edit(void);
 
 // raw registers (pageraw.c)
 void raw_create(void);

@@ -1,7 +1,8 @@
 /*
  * The ESFM patch bank page and the ESFM menu commands.
  *
- * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ * (c) 2026 Ethan
+ * Halsall <ethan.s.halsall@gmail.com>
  *
  * Licensed under GPL Version 3.0
  */
@@ -11,10 +12,10 @@
 
 #include "essctl.h"
 
-#include <commdlg.h>
 #include "esfmlive.h"
 #include "esfmtest.h"
 #include "resource.h"
+#include <commdlg.h>
 
 static HWND text, voices;
 static char voice_text[3072];
@@ -25,10 +26,16 @@ static void show_voices(void) {
   struct esfm_diag d;
   int rc = esfm_diag_read(&d, 1);
 
+  int first;
+
   esfm_diag_text(&d, rc, "\r\n", buf, sizeof(buf));
   if (strcmp(buf, voice_text)) {
+    // a new text scrolls the box to the top: back to where it was
+    first = (int)SendMessage(voices, EM_GETFIRSTVISIBLELINE, 0, 0);
     strcpy(voice_text, buf);
     SetWindowText(voices, buf);
+    if (first > 0)
+      SendMessage(voices, EM_LINESCROLL, 0, MAKELPARAM(first, 0));
   }
 }
 
@@ -46,8 +53,8 @@ static void show_status(void) {
                 "ES1869's FM synthesizer; it loads when a program opens "
                 "the ESS FM MIDI device.");
   } else {
-    sprintf(buf, "Driver:\t%.100s\r\nBank in memory:\t%lu bytes\r\n",
-            st.path, (unsigned long)st.bank_size);
+    sprintf(buf, "Driver:\t%.100s\r\nBank in memory:\t%lu bytes\r\n", st.path,
+            (unsigned long)st.bank_size);
     if (file && d.file_used)
       sprintf(buf + strlen(buf), "Bank file:\t%.100s\r\n", d.file);
     else if (esfm_last_bank[0])
@@ -111,13 +118,21 @@ static void stress_test(HWND owner) {
 
   if (!confirm(owner, "The stress test plays about 7 seconds of dense music "
                       "on the ESFM synthesizer and then looks for notes "
-                      "left sounding.  Stop other MIDI playback first.\n\n"
+                      "left sounding.  Windows is slow while it runs.  Stop "
+                      "other MIDI playback first.\n\n"
                       "Run it now?"))
     return;
+  // no other command from the window while it runs
+  EnableWindow(owner, FALSE);
   rc = esfm_stress_test(report, sizeof(report));
+  // essctl may have been closed meanwhile
+  if (!IsWindow(owner))
+    return;
+  EnableWindow(owner, TRUE);
   MessageBox(owner, report, "ESFM stress test",
              MB_OK | (rc < 0 ? MB_ICONEXCLAMATION
-                             : rc ? MB_ICONSTOP : MB_ICONINFORMATION));
+                      : rc   ? MB_ICONSTOP
+                             : MB_ICONINFORMATION));
   show_voices();
 }
 
