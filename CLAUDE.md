@@ -50,9 +50,22 @@ tools/wineshot.sh run ess3d.exe /sim tray         # a second program on its desk
   * The fixed code runs at interrupt time. KERNEL and DOS calls only happen at open and enable.
   * State the fixed driver keeps for each device goes after ESS's fields (`DEV_GM_*`, `DEV_FIX_SIZE` in `esfmdev.inc`).
   * Watch the short jumps of ESS's code: code added between a `jmp short` and its target can put it out of range. Adding it right after the target's label keeps the distance.
+  * Every long message goes back to its program: refused with its flags as they were, or with MOM_DONE, also when a close drops it or ESS's code refuses it. A program waits for its buffers.
+  * DOS calls ask for their errors back (INT 21h 716Ch and 6C00h with BX bit 13): no critical error box at open.
 * **The status block** (`esfmfixd.asm`, found by `ESFMFIX`) is read by essctl at fixed offsets (`src/win/esfmlive.c`). A layout change bumps `fix_version`. The next one is 4.
 * **Spatializer registers:** a new one goes in `src/esscat.tbl` as an `fx.3d.*` field on `PG_EFFECTS`. essctl, `ess3d reg` and the tray panel pick it up from there (`ess3d_regs()` in `src/ess3d.c`), up to `ESS3D_MAX_REGS`. Its value at Windows start goes in `driver_regs` for `ess3d defaults`.
 * **Ranged settings** (levels, signed and raw values) are a text field with a slider on its right, in steps of one, in essctl, its bit editor and the tray panel.
 * **The VxD API from essctl:** only the *info* functions, and 0002 and 0003 as [VXD_API.md](docs/VXD_API.md#ownership-and-port-trapping) describes. Never 0006, 0007, 0009, 000B, 0200 or 0201: they register callbacks into the caller's code.
+* **Windows 98 robustness** (essctl, ess3d, esfmrec and the DOS programs):
+  * No message box where nobody may be looking (the tray, a hotkey, a recording, a timer): it waits behind a full-screen game. Log it, or use ess3d's box.
+  * Files: write `NAME.$$$`, check it, then rename it over the old one (profiles, `esfmpat`). `_commit` what has to survive a crash (logs, esfmrec's WAV header), and check `close` and the bytes written, for a full disk.
+  * A program that leaves the chip changed while it runs first writes what to put back (esfmrec's `ESFMREC.RST`), and deletes it once it's back.
+  * Waits and long jobs let Windows run: a timer or `Yield` between steps, never a busy loop holding the Win16Mutex. A nested message loop puts WM_QUIT back with `PostQuitMessage`.
+  * Check what can fail (`SetTimer`, `CreateDialog`, `GlobalAlloc`, `SetMessageQueue`) and log it.
+  * A 16-bit program's queue holds 8 messages and drops the rest. Ask for more (`SetMessageQueue`), and never count on one message per event: esfmrec takes every done block when one message comes.
+  * Text into a fixed buffer: `_bprintf`/`_vbprintf`, and `%.Ns` for a path.
+  * Inside a `winio_begin`/`winio_end` bracket: register accesses only, no file I/O, message box or yield. Read and parse files first (`prof_parse`, then `prof_apply`).
+  * Interrupts off only around a few port accesses (about 0.5 ms at most): ES1869.DRV's interrupt code has to run. Once the DSP has a command's first byte, the rest follows (`esshw.c`).
+  * DOS programs link with a 4 KB stack (`op STACK=4096`), and big buffers are static.
 * **Text:** [docs/STYLE.md](docs/STYLE.md). Docs in the README voice, terse lowercase comments, the file header on new files, no em dashes, no "we".
 * **Git:** keep the configured git user. Commit messages start with `feat:`, `fix:`, `docs:`, `refactor:` or `chore:`. Don't commit other drivers or listings than `driver/`'s.
