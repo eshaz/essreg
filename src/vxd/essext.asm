@@ -55,14 +55,37 @@
 ;     back when it lets go.  When Windows next plays a sound or changes the
 ;     mixer (0002, 0102, 0302), FM left by a DOS program is reset.
 ;
+; Settings (docs/DRIVER_CONFIG.md): each change can be turned off in
+; SYSTEM.INI, [ES1869.VXD] and the Audio 2 mode in [ES1869.DRV], read once
+; when the VxD starts (ESSREG_Read_Settings).  Off, the VxD does what ESS's
+; does there.
+;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0110
-ESSREG_FEATURES         equ 0x01FF      ; mixer, controller, ports, config,
+ESSREG_VERSION          equ 0x0111
+ESSREG_FEATURES         equ 0x03FF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
-                                        ; DOS FM, DOS mixer restore
+                                        ; DOS FM, DOS mixer restore, settings
+FEATURE_DOS_FM          equ 0x0080      ; cleared while VirtualFM=0
+FEATURE_DOS_MIXER       equ 0x0100      ; cleared while DosMixerRestore=0
+
+; settings (ESSREG_Opts), 1 = the change is on
+OPT_API                 equ 0x0001      ; RegisterAPI: group 4
+OPT_VFM                 equ 0x0002      ; VirtualFM: the virtual FM chip
+OPT_TAKES_FM            equ 0x0004      ; DosTakesFM: Windows' soft FM gives way
+OPT_KEEPS_FM            equ 0x0008      ; DosKeepsFM: no reset for a returning VM
+OPT_FM_AUDIBLE          equ 0x0010      ; DosFMAudible: music DAC and FM volume
+OPT_DOS_MIXER           equ 0x0020      ; DosMixerRestore: Windows' mixer back
+OPT_RESET_FM            equ 0x0040      ; ResetDosFM: FM reset when Windows is back
+OPT_A2_4X               equ 0x0100      ; Audio2Oversampling: ESS's 4x
+OPT_A2_FILTER           equ 0x0200      ; Audio2Filter: the filter in use
+OPT_READ                equ 0x8000      ; SYSTEM.INI was read
+OPT_DEFAULT             equ 0x007F
+
+SYSSTATE_VXDINITCOMPLETED equ 0x40000000 ; VMM_GetSystemInitState: the profile
+                                        ; services are gone from here on
 
 ESSREG_E_NODEV          equ 1           ; ECX is not an ES1869 devnode
 ESSREG_E_INUSE          equ 2           ; another VM owns the DSP or FM
@@ -115,7 +138,9 @@ TSC_NONE                equ 1           ; no time stamp counter
 TSC_WAIT                equ 2           ; calibrating against the system time
 TSC_READY               equ 3
 
-global ESSREG_Rdtsc, ESSREG_Snap_Regs
+global ESSREG_Rdtsc, ESSREG_Snap_Regs, ESSREG_Opts
+global OPT_API, OPT_VFM, OPT_TAKES_FM, OPT_KEEPS_FM, OPT_FM_AUDIBLE
+global OPT_DOS_MIXER, OPT_RESET_FM, OPT_A2_4X, OPT_A2_FILTER, OPT_READ
 global VFM_Flags, VFM_Latch, VFM_Status, VFM_Ctl, VFM_T1, VFM_T2
 global VFM_EmuMask, VFM_NatMask, VFM_Emu, VFM_Nat, VFM_SIZE
 global EX_Flags, EX_D1, EX_Snap, NODE_VFM
@@ -459,7 +484,16 @@ ESSREG_Map_Buffer:
 ; --- 0400: extension information ------------------------------------------
 ESSREG_API_Info:
         mov     word [ebp+Client_EAX],ESSREG_VERSION
-        mov     word [ebp+Client_EBX],ESSREG_FEATURES
+        mov     ax,ESSREG_FEATURES
+        test    byte [ESSREG_Opts],OPT_VFM
+        jnz     .mixer
+        and     ax,~FEATURE_DOS_FM & 0xFFFF
+.mixer: test    byte [ESSREG_Opts],OPT_DOS_MIXER
+        jnz     .out
+        and     ax,~FEATURE_DOS_MIXER & 0xFFFF
+.out:   mov     [ebp+Client_EBX],ax
+        mov     ax,[ESSREG_Opts]
+        mov     [ebp+Client_ECX],ax
         mov     word [ebp+Client_EDX],ESSREG_FUNC_COUNT
         clc
         ret
@@ -745,13 +779,25 @@ ESSREG_API_Owners:
 ; --- the Audio 2 DAC ---------------------------------------------------------
 
 ; in place of ESS's write of mixer 71h, AL = its value (bits 4 and 1: 4x
-; oversampling, asynchronous), AH = 71h, EDX = Audio_Base: the DAC plays
-; the samples as they are, not oversampled and the filter bypassed, as
-; build/ES1869.DRV has it (docs/AUDIO_PIPELINE.md)
+; oversampling, asynchronous), AH = 71h, EDX = Audio_Base: by default the
+; DAC plays the samples as they are, not oversampled and the filter
+; bypassed, as build/ES1869.DRV has it (docs/AUDIO_PIPELINE.md)
+; Audio2Oversampling=1 keeps ESS's 4x, Audio2Filter=1 the filter
 ESSREG_A2_Mode:
+        test    byte [ESSREG_Opts+1],OPT_A2_4X >> 8
+        jnz     .over
         and     al,~ESSREG_A2_4X & 0xFF
+        test    byte [ESSREG_Opts+1],OPT_A2_FILTER >> 8
+        jnz     .filter
+.bypass:
         or      al,ESSREG_A2_SCF_BYPASS
         jmp     L1_09A8
+.filter:
+        and     al,~ESSREG_A2_SCF_BYPASS & 0xFF
+        jmp     L1_09A8
+.over:  test    byte [ESSREG_Opts+1],OPT_A2_FILTER >> 8
+        jz      .bypass
+        jmp     L1_09A8                 ; ESS's value
 
 ; --- Windows' ESS functions, wrapped -------------------------------------------
 
@@ -906,7 +952,8 @@ ESSREG_FM_Hard:
 ; Windows plays a sound or changes the mixer (EBX = system VM): for every
 ; device, Windows' saved mixer goes back if a DOS program's release didn't
 ; manage to, and the FM chip is reset if a DOS program had it (notes it
-; left on stop, and the next DOS program starts from a clean chip)
+; left on stop, and the next DOS program starts from a clean chip), unless
+; ResetDosFM=0
 ESSREG_Reclaim:
         pushad
         mov     esi,[ADI_List]
@@ -924,7 +971,9 @@ ESSREG_Reclaim:
         cmp     dword [edi+ADI_DSPOwner],byte 0
         jne     .fm
         call    ESSREG_Snap_Restore
-.fm:    test    byte [edi+EX_Flags],EXF_DOS_FM
+.fm:    test    byte [ESSREG_Opts],OPT_RESET_FM
+        jz      .skip
+        test    byte [edi+EX_Flags],EXF_DOS_FM
         jz      .skip
         cmp     dword [edi+ADI_FMOwner],byte 0
         jne     .skip                   ; still in use
@@ -952,8 +1001,10 @@ ESSREG_Reclaim:
 
 ; in place of ESS's Save_DOS_Mixer when a VM (EBX) acquires the DSP:
 ; a DOS VM taking it from Windows first saves Windows' mixer (unless it's
-; already saved and not put back yet)
+; already saved and not put back yet); DosMixerRestore=0: ESS's alone
 ESSREG_DSP_Save:
+        test    byte [ESSREG_Opts],OPT_DOS_MIXER
+        jz      .stock
         VxDCall Test_Sys_VM_Handle
         je      .stock
         test    byte [edi+EX_Flags],EXF_SNAP
@@ -986,6 +1037,8 @@ ESSREG_DSP_Save:
 ; in place of ESS's Restore_DOS_Mixer when a VM (EBX) releases the DSP:
 ; after ESS's own restore, all of Windows' saved mixer goes back
 ESSREG_DSP_Restore:
+        test    byte [ESSREG_Opts],OPT_DOS_MIXER
+        jz      near Restore_DOS_Mixer
         call    Restore_DOS_Mixer
         VxDCall Test_Sys_VM_Handle
         je      .done
@@ -1056,7 +1109,10 @@ SNAP_7F                 equ 27          ; and of 7Fh; 30 registers fit in the
 ; EAX = data written; returns EAX = data read
 ; the caller's own chip goes to the hardware; a free chip is taken first;
 ; otherwise the access goes to the VM's virtual chip
+; VirtualFM=0: ESS's trap, FFh and a message while another VM has FM
 ESSREG_FM_Trap:
+        test    byte [ESSREG_Opts],OPT_VFM
+        jz      near FM_Port_Trap
         cmp     word [esi+ADI_FMBase],byte -1
         je      near FM_Port_Trap       ; no FM port: ESS's answer
         cmp     ecx,byte 4              ; Byte_Input 0, Byte_Output 4
@@ -1105,8 +1161,8 @@ ESSREG_FM_Trap:
         ret
 
 ; give the FM chip to the VM in EBX, EDI = ADI; CF set if it can't have it
-; Windows gets it softly (a DOS VM may take it); a DOS VM gets the music
-; DAC and an FM volume
+; Windows gets it softly (a DOS VM may take it, unless DosTakesFM=0); a
+; DOS VM gets the music DAC and an FM volume
 ESSREG_FM_Take:
         push    eax
         mov     eax,2
@@ -1118,6 +1174,8 @@ ESSREG_FM_Take:
 .kept:  call    ESSREG_VFM_Replay
         VxDCall Test_Sys_VM_Handle
         jne     .dos
+        test    byte [ESSREG_Opts],OPT_TAKES_FM
+        jz      .ok
         or      byte [edi+EX_Flags],EXF_FM_SOFT
         jmp     .ok
 .dos:   or      byte [edi+EX_Flags],EXF_DOS_FM
@@ -1129,8 +1187,11 @@ ESSREG_FM_Take:
 ; in place of the FM reset in ESS's Acquire_Resources, EBX = new owner,
 ; EDI = ADI, EDX = Audio_Base: a DOS VM taking back the chip it had last
 ; finds its state as it left it, since nobody used the chip in between
+; (DosKeepsFM=0: always reset, as ESS's)
 ESSREG_FM_Reset:
         and     byte [edi+EX_Flags],~EXF_FM_RESET
+        test    byte [ESSREG_Opts],OPT_KEEPS_FM
+        jz      .reset
         cmp     [edi+ADI_FMLastOwner],ebx
         jne     .reset
         VxDCall Test_Sys_VM_Handle
@@ -1142,8 +1203,12 @@ ESSREG_FM_Reset:
 
 ; a DOS FM owner needs the music DAC (7Fh bit 0 = 0) and an FM volume (36h)
 ; that ES1869.DRV only sets while Windows' MIDI has FM, EDI = ADI
+; (not with DosFMAudible=0)
 ESSREG_FM_Audible:
-        push    eax
+        test    byte [ESSREG_Opts],OPT_FM_AUDIBLE
+        jnz     .on
+        ret
+.on:    push    eax
         push    edx
         movzx   edx,word [edi+ADI_AudioBase]
         mov     ah,0x7F
@@ -1802,6 +1867,71 @@ ESSREG_Dynamic_Exit:
         popad
         jmp     AUDDRV_Dynamic_Exit
 
+; --- settings ------------------------------------------------------------------
+
+; in place of ESS's Sys_Dynamic_Device_Init: SYSTEM.INI first
+ESSREG_Dynamic_Init:
+        call    ESSREG_Read_Settings
+        jmp     AUDDRV_Dynamic_Init
+
+; ESSREG_Opts from SYSTEM.INI (ESSREG_Settings), once when the VxD starts.
+; VMM reads SYSTEM.INI only while Windows starts: a VxD loaded later (a
+; card found while Windows runs) keeps the defaults, and OPT_READ stays
+; clear for essctl to show. A key is read as GetPrivateProfileInt reads
+; it in the 16-bit drivers: its leading digits, 0 if none
+ESSREG_Read_Settings:
+        pushad
+        VxDCall VMM_GetSystemInitState
+        cmp     eax,SYSSTATE_VXDINITCOMPLETED
+        jae     .api
+        mov     ebx,ESSREG_Settings
+.next:  mov     edi,[ebx]               ; the key
+        or      edi,edi
+        jz      .read
+        mov     esi,[ebx+4]             ; its section
+        xor     edx,edx
+        VxDCall Get_Profile_String
+        jc      .skip                   ; not there: the default
+        call    ESSREG_Profile_Int
+        mov     ecx,[ebx+8]             ; its bit
+        or      eax,eax
+        jz      .off
+        or      [ESSREG_Opts],cx
+        jmp     .skip
+.off:   not     ecx
+        and     [ESSREG_Opts],cx
+.skip:  add     ebx,byte 12
+        jmp     .next
+.read:  or      word [ESSREG_Opts],OPT_READ
+.api:   test    byte [ESSREG_Opts],OPT_API
+        jnz     .done
+        mov     dword [ESSREG_Group4_Count],0   ; CF set, as ESS's driver
+.done:  popad
+        ret
+
+; EAX = the number at the start of the string at EDX, after blanks
+ESSREG_Profile_Int:
+        push    ecx
+        push    edx
+        xor     eax,eax
+.blank: cmp     byte [edx],' '
+        je      .skip
+        cmp     byte [edx],9
+        jne     .digit
+.skip:  inc     edx
+        jmp     .blank
+.digit: movzx   ecx,byte [edx]
+        sub     ecx,byte '0'
+        cmp     ecx,byte 9
+        ja      .done
+        imul    eax,eax,byte 10
+        add     eax,ecx
+        inc     edx
+        jmp     .digit
+.done:  pop     edx
+        pop     ecx
+        ret
+
 ; --- a microsecond clock for the virtual timers --------------------------------
 
 ; EAX = microseconds (wraps after 71 minutes)
@@ -1932,6 +2062,7 @@ ESSREG_TSC_BaseMs:      dd 0            ; system time when calibration began
 ESSREG_TSC_MHz:         dd 0            ; TSC counts per us
 ESSREG_TSC_Last:        dd 0            ; the clock's last value
 ESSREG_TSC_State:       db TSC_UNKNOWN
+ESSREG_Opts:            dw OPT_DEFAULT  ; OPT_*: the changes that are on
 
 section PDAT
 
@@ -1982,5 +2113,31 @@ ESSREG_Group_Table:
         dd 4, ESSREG_Group1_Funcs
         dd 2, API_Group2_Funcs
         dd 4, ESSREG_Group3_Funcs
+ESSREG_Group4_Count:                    ; 0 with RegisterAPI=0
         dd ESSREG_FUNC_COUNT, ESSREG_Group4_Funcs
 ESSREG_API_GROUPS equ ($ - ESSREG_Group_Table) / 8
+
+; SYSTEM.INI keys: the key, its section, its ESSREG_Opts bit
+ESSREG_Settings:
+        dd ESSREG_Key_API, ESSREG_Sec_VxD, OPT_API
+        dd ESSREG_Key_VFM, ESSREG_Sec_VxD, OPT_VFM
+        dd ESSREG_Key_Takes, ESSREG_Sec_VxD, OPT_TAKES_FM
+        dd ESSREG_Key_Keeps, ESSREG_Sec_VxD, OPT_KEEPS_FM
+        dd ESSREG_Key_Audible, ESSREG_Sec_VxD, OPT_FM_AUDIBLE
+        dd ESSREG_Key_Mixer, ESSREG_Sec_VxD, OPT_DOS_MIXER
+        dd ESSREG_Key_Reset, ESSREG_Sec_VxD, OPT_RESET_FM
+        ; the Audio 2 mode, the same for DirectSound as for ES1869.DRV
+        dd ESSREG_Key_4X, ESSREG_Sec_Drv, OPT_A2_4X
+        dd ESSREG_Key_Filter, ESSREG_Sec_Drv, OPT_A2_FILTER
+        dd 0
+ESSREG_Sec_VxD:         db "ES1869.VXD", 0
+ESSREG_Sec_Drv:         db "ES1869.DRV", 0
+ESSREG_Key_API:         db "RegisterAPI", 0
+ESSREG_Key_VFM:         db "VirtualFM", 0
+ESSREG_Key_Takes:       db "DosTakesFM", 0
+ESSREG_Key_Keeps:       db "DosKeepsFM", 0
+ESSREG_Key_Audible:     db "DosFMAudible", 0
+ESSREG_Key_Mixer:       db "DosMixerRestore", 0
+ESSREG_Key_Reset:       db "ResetDosFM", 0
+ESSREG_Key_4X:          db "Audio2Oversampling", 0
+ESSREG_Key_Filter:      db "Audio2Filter", 0

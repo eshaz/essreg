@@ -135,7 +135,7 @@ tools/wineshot.sh stop
 
 1. Install `build\ES1869.VXD` as in [VXD_INTERNALS.md](VXD_INTERNALS.md#installing-the-extended-driver) and restart.
 2. Windows sounds, MIDI, a DirectSound game and a DOS game in a window all work like before.
-3. essctl's title bar says "VxD register API 1.10", and the owners line (bottom right) shows the DSP/FM/MPU owners.
+3. essctl's title bar says "VxD register API 1.11", and the owners line (bottom right) shows the DSP/FM/MPU owners.
 4. With a DOS game playing, change *Audio 2 volume* or *Master volume* in essctl. The change applies right away and the game keeps its sound. That's the point of the register API!
 5. Put the original driver back if anything misbehaves, and note what.
 6. **Long playback.** Play a stream or a long MP3 for 10 minutes in Winamp, once with the DirectSound output and once with waveOut, with essctl, the tray and DOS boxes closed. Listen for skips.

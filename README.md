@@ -170,6 +170,7 @@ file       the WAV file, FMREC001.WAV and up if left out
   * *Note: the Sound Blaster part and the MPU-401 still belong to one program at a time, as with ESS's driver. While Windows plays a sound, a DOS game starting then finds no Sound Blaster; it finds it once the sound ends.*
 * DirectSound and the rest of the driver's own Audio 2 playback play without 4x oversampling and with the filter bypassed, as [`ES1869.DRV`](#es1869drv-with-the-audio-2-dac-unfiltered) below does for Windows sounds.
 * Otherwise it works like the ESS driver. `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte for byte.
+* Each change can be turned off in `SYSTEM.INI`, one key each under `[ES1869.VXD]`, read when Windows starts. See [docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings).
 * Install: keep a copy of `C:\WINDOWS\SYSTEM\ES1869.VXD`, copy `build\ES1869.VXD` over it and restart Windows.
   * See [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#installing-the-extended-driver) for the steps, and how to go back if something goes wrong.
 * *Note: the rebuilt driver no longer carries ESS's DirectX certification mark.*
@@ -191,10 +192,11 @@ file       the WAV file, FMREC001.WAV and up if left out
 
 ## [`ES1869.DRV`](build) with the Audio 2 DAC unfiltered
 * ESS's wave, mixer and aux driver 4.04.00.1319, with one change: the Audio 2 DAC, which plays Windows' wave output, plays the samples as they are. No 4x oversampling, and the filter bypassed, at every sample rate.
+  * `SYSTEM.INI` chooses it, read when Windows starts. `Audio2Oversampling=1` and `Audio2Filter=1` under `[ES1869.DRV]` give ESS's mode back, for DirectSound too. See [docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#62-es1869drv).
   * ESS's driver turns the 4x oversampling on at every playback. Its interpolation most likely dulls the treble. Why, and what each setting does: [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter).
   * *Note: this is how a non-oversampling (NOS) DAC plays. At low sample rates, like the 11 and 22 kHz of many Windows sounds, its images are audible: treble above the sound's own.*
   * *Note: DirectSound plays through `ES1869.VXD`. The [extended one](#es1869vxd-with-a-register-interface-and-better-dos-boxes) plays it the same way. ESS's turns the 4x oversampling on.*
-* Rebuilt from source in [`src/es1869`](src/es1869). `python3 tools/build_es1869drv.py --stock --verify` rebuilds the original byte for byte. The change is two instructions of 2 bytes each, and the rest of ESS's code stays at its addresses.
+* Rebuilt from source in [`src/es1869`](src/es1869). `python3 tools/build_es1869drv.py --stock --verify` rebuilds the original byte for byte. The change is five instructions of ESS's, each the same length, and code added after ESS's, which stays at its addresses.
 * It replaces ESS's 4.04.00.1319 only. Check the version as for [`ESFM.DRV`](#before-you-start).
 * Install it from MS-DOS mode, since Windows has the driver open (Start > *Shut Down* > *Restart in MS-DOS mode*), with the file copied to `C:\ESSREG`:
   ```

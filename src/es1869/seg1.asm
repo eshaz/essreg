@@ -1976,10 +1976,11 @@ audio2_init:
         push di                                         ; 1154
         push ax                                         ; 1155
         push cs                                         ; 1156
-        call mixer_read                                 ; 1157
 %if ES1869_FIX
-        or al,0x0A                      ; essreg: filter bypassed, asynchronous
+        call a2_mode_read               ; essreg: 4x and the filter from SYSTEM.INI
+        or al,A2_ASYNC                  ; essreg: bit 4 left as a2_mode_read set it
 %else
+        call mixer_read                                 ; 1157
         or al,0x12                                      ; 115A
 %endif
         push ax                                         ; 115C
@@ -5073,6 +5074,10 @@ L1_264C:
         pop bp                                          ; 2665
         dec bp                                          ; 2666
         retf                                            ; 2667
+
+%if ES1869_FIX
+%include "a2mode.asm"
+%endif
 
 seg1_data_end:
 

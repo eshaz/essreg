@@ -40,6 +40,8 @@ List_Deallocate                          equ 0x000100A2
 List_Get_First                           equ 0x000100A3
 List_Get_Next                            equ 0x000100A4
 _Allocate_Device_CB_Area                 equ 0x000100A7
+Get_Profile_String                       equ 0x000100B3
+VMM_GetSystemInitState                   equ 0x00010111
 VMM_Service_0116                         equ 0x00010116
 VMM_Service_011C                         equ 0x0001011C
 VMM_Service_0174                         equ 0x00010174

@@ -8285,7 +8285,11 @@ L3_4B0D:
         mov word [si+0x1c],0x1                          ; 4B4F
         push si                                         ; 4B54
         push cs                                         ; 4B55
+%if ES1869_FIX
+        call es_read_config             ; essreg: then SYSTEM.INI
+%else
         call read_config                                ; 4B56
+%endif
         push si                                         ; 4B59
         callf L5_00D6, R3_4B5D, R3_4B71                 ; 4B5A far seg5
         mov word [bp-0x8],0x8                           ; 4B5F
@@ -8948,6 +8952,10 @@ L3_505D:
         retf 0xa                                        ; 5060
         db 0x90                                         ; 5063
 
+%if ES1869_FIX
+%include "settings.asm"
+%endif
+
 seg3_data_end:
 
 ; relocation table
@@ -8983,5 +8991,8 @@ seg3_rel_start:
         reloc 3, 1, R3_463F, 0x0002, 0x0065             ; USER.SendDlgItemMessage
         reloc 3, 1, R3_460B, 0x0002, 0x00E8             ; USER.SetWindowPos
         reloc 3, 1, R3_456E, 0x0002, 0x00EF             ; USER.DialogBoxParam
+%if ES1869_FIX
+        settings_relocs
+%endif
 seg3_rel_end:
 seg3_end:

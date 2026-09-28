@@ -89,8 +89,8 @@ class ExtensionTest(VxDBuilds, unittest.TestCase):
         m, _hw = self.emu()
         out, cf = self.api(m, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0110)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x01FF)
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0111)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x03FF)
         self.assertEqual(out["EDX"] & 0xFFFF, 13)
         out, cf = self.api(m, 0x0000)            # stock functions still work
         self.assertEqual((cf, out["EAX"] & 0xFFFF), (False, 0x0404))
@@ -332,6 +332,7 @@ class ExtensionTest(VxDBuilds, unittest.TestCase):
 # each an instruction of the same length or a constant (CLAUDE.md)
 HOOKS = [
     (1, 0x03EE, 0x03F1),    # VM_Not_Executeable: ESSREG_VM_Not_Executeable
+    (1, 0x0400, 0x0403),    # Sys_Dynamic_Device_Init: ESSREG_Dynamic_Init
     (1, 0x0409, 0x040C),    # Sys_Dynamic_Device_Exit: ESSREG_Dynamic_Exit
     (1, 0x0511, 0x0516),    # the DOSMGR hook's last jump: ESSREG_App_End
     (4, 0x00AC, 0x00AC),    # the per-VM node's size

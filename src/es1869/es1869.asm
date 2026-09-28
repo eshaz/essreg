@@ -18,6 +18,12 @@
 
         bits 16
 %include "ne16.inc"
+%if ES1869_FIX
+%include "fix.inc"
+%endif
+%ifdef MAP_FILE
+[map symbols MAP_FILE]                  ; the tests find routines by name
+%endif
 
         section seg1 progbits start=0 vstart=0 align=1
 %include "seg1.asm"

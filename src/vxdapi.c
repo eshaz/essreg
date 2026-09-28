@@ -72,6 +72,8 @@ int vxd_open(void) {
     vxd.ext_version = (u16)r.eax;
     vxd.ext_features = (u16)r.ebx;
     vxd.ext_count = (u16)r.edx;
+    if (vxd.ext_features & VXD_F_SETTINGS)
+      vxd.ext_settings = (u16)r.ecx;
   }
   return 0;
 }

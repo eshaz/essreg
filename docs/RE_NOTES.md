@@ -107,5 +107,7 @@ A fixup whose target isn't the start of a label is written as `label+offset wrt 
 **Compared with Microsoft's sample.** The Windows 95 DDK's MSSNDSYS sample (`MMEDIA\SAMPLES\MSSNDSYS`, a Windows Sound System driver in C with its VxD) has the same design as ESS's pair:
 * The VxD owns the hardware. It hands the DSP to a VM or to the 16-bit driver (acquire and release), allocates the DMA buffers and virtualizes the Sound Blaster for DOS boxes.
 * The 16-bit driver runs the wave, mixer and aux devices, with a per-device structure linked in a list.
-* The interrupt handler ends with the device's EOI word: the slave EOI in the low byte, the master's in the high byte (ESS's +5Bh, the sample's `wEOICommands`).
-* ESS's device structure is laid out differently, though (Audio_Base in its first word, the MPU-401 port next), and the sample has no copied and patched interrupt handler.
+* The interrupt handler is the sample's `ISR_Stub`. `Create_ISR` copies it to a fixed block and patches the device pointer in (`mov si,1234h`), as ESS's 3:0261 does.
+* The interrupt user (the sample's `hwi_bIntUsed`, ESS's +5Dh) picks the service routine from `isr_Srv_Table`. ESS added the MPU-401 and a second stub for Audio 2, with its own user at +100h.
+* The handler ends with the device's EOI word: the slave EOI in the low byte, the master's in the high byte (ESS's +5Bh, the sample's `wEOICommands`).
+* ESS's device structure is laid out differently, though (Audio_Base in its first word, the MPU-401 port next).

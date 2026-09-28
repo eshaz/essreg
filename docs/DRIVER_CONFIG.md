@@ -3,6 +3,7 @@
 This page lists:
 * the registry values the ES1869's Windows 95 drivers (`ES1869.VXD` and `ES1869.DRV`) read, and what each one does to the chip
 * the registers `ES1869.DRV` writes while Windows runs
+* the SYSTEM.INI keys that turn the rebuilt drivers' changes off ([section 6](#6-the-rebuilt-drivers-systemini-settings))
 
 It was worked out from the files in `driver/`:
 * `ES1869.VXD` from its source in `src/vxd`
@@ -244,7 +245,7 @@ At every playback start, 5:3BAC (6:2D5A) reads 60h and 62h back. If they changed
 
 | Register | Address | Value |
 |---|---|---|
-| 71h | 1:115E, 6:2DEE | bits 4 and 1 set (4x oversampling, asynchronous); other bits kept. `build/ES1869.DRV` sets bits 3 and 1 at 1:115E and clears bit 4 at 6:2DEE: no oversampling, the filter bypassed ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter)) |
+| 71h | 1:115E, 6:2DEE | bits 4 and 1 set (4x oversampling, asynchronous); other bits kept. `build/ES1869.DRV` reads 71h through `a2_mode_read` at both (1:1157, 6:2DE6), which clears bit 4 and sets bit 3 by default: no oversampling, the filter bypassed ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter), section 6.2) |
 | 70h, 72h, 74h, 76h, 78h | 1:1174-1:1192 | 00h at wave-out open, close and resume (list "prtvx" at 7:00A8), then 70h = 72h = FFh |
 | 70h, 72h | 6:2599, 6:25D0 | sample rate and filter |
 | 7Ch | 6:2D6D | wave volume, at start |
@@ -291,3 +292,57 @@ At every playback start, 5:3BAC (6:2D5A) reads 60h and 62h back. If they changed
 * The values of sections 1 and 2.2 are only read, never written, except Single Mode DMA. The driver's own Settings dialog writes that one ("Use single mode DMA": Multimedia control panel, Advanced, the ES1869 audio device, Properties, Settings).
 * A setting made with essctl or essreg is undone by the mixer reset at the next start or resume, and by the writes in section 4.
   * An `essctl /load` in the StartUp group runs after the driver's start-up writes, but the playback, recording and mixer writes of section 4 still apply afterwards.
+
+## 6. The rebuilt drivers' SYSTEM.INI settings
+
+The drivers in `build/` change ESS's in the ways this repository describes. Each change has a key in `SYSTEM.INI` (`C:\WINDOWS\SYSTEM.INI`), and `0` gives back what ESS's driver does there.
+
+* A driver reads its section **once, when it starts**:
+  * `ES1869.VXD` when Windows loads it (`Sys_Dynamic_Device_Init`)
+  * `ES1869.DRV` at its first enable, right after ESS's registry values
+* A change takes effect when Windows starts again.
+* Without the section or a key, the default applies.
+* A value is read as `GetPrivateProfileInt` reads it: its leading digits, 0 without any. Write `1` or `0`: `yes` and `on` read as 0.
+
+For example, ESS's DOS box behavior and ESS's Audio 2 mode, with the register API kept:
+
+```
+[ES1869.VXD]
+VirtualFM=0
+DosTakesFM=0
+DosKeepsFM=0
+DosFMAudible=0
+DosMixerRestore=0
+ResetDosFM=0
+
+[ES1869.DRV]
+Audio2Oversampling=1
+Audio2Filter=1
+```
+
+*Note: the VxD can read SYSTEM.INI only while Windows starts: VMM's profile services are gone afterwards. A VxD loaded later, for a card found while Windows runs, keeps the defaults. essctl's Device information page says which: "VxD settings: from SYSTEM.INI" or "the defaults".*
+
+### 6.1 [ES1869.VXD]
+
+The DOS box changes are described in [VXD_INTERNALS.md](VXD_INTERNALS.md#dos-boxes).
+
+| Key | Default | 1 | 0, as ESS's driver |
+|---|---|---|---|
+| RegisterAPI | 1 | The register API, functions 0400-040C ([VXD_API.md](VXD_API.md)), which essctl, `ess3d` and `esfmrec` use | Group 4 fails with CF set. The programs go through the ports as with ESS's driver ([VXD_API.md](VXD_API.md#ownership-and-port-trapping)) |
+| VirtualFM | 1 | A DOS program that can't have the FM chip gets a virtual one, so its FM detection succeeds | Every FM read returns FFh while Windows' MIDI or another DOS box has FM, with ESS's "in use" message |
+| DosTakesFM | 1 | Windows keeps FM it got from a port access only until a DOS program wants it | Windows keeps it until a MIDI program opens and closes |
+| DosKeepsFM | 1 | A DOS program taking back the FM chip it had last finds it as it left it | The chip is reset under it |
+| DosFMAudible | 1 | A DOS FM owner gets the music DAC (7Fh bit 0) and, if 36h was 00h, FM volume FFh | An FM-only DOS program can be silent while no Windows MIDI program is open |
+| DosMixerRestore | 1 | Windows' mixer, 30 registers, comes back after a DOS program | ESS's 11 registers come back |
+| ResetDosFM | 1 | Windows' next sound, level change or MIDI open resets FM a DOS program left | Notes a DOS program left keep sounding |
+
+### 6.2 [ES1869.DRV]
+
+| Key | Default | 1 | 0 |
+|---|---|---|---|
+| Audio2Oversampling | 0 | ESS's 4x oversampling on the Audio 2 DAC (mixer 71h bit 4), which also bypasses the filter | The DAC plays the samples as they are |
+| Audio2Filter | 0 | Without 4x oversampling, the switched-capacitor filter smooths the DAC's steps (71h bit 3 clear) | The filter is bypassed (71h bit 3 set) |
+
+* `Audio2Oversampling=1` with `Audio2Filter=1` writes ESS's value, 71h bits 4 and 1 set and bit 3 as it was.
+* ES1869.DRV applies them to Windows' wave output, at the open (1:1157) and at every playback start (6:2DE6). ES1869.VXD reads the same two keys for DirectSound and for a DOS program taking the DSP.
+* Why the defaults sound better: [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter).

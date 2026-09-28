@@ -237,7 +237,7 @@ Common rules:
 
 | DX | In | Out |
 |---|---|---|
-| 0400 | - | AX = 0110h (version 1.10), BX = feature bits (01FFh), DX = number of functions (13) |
+| 0400 | - | AX = 0111h (version 1.11), BX = feature bits (03FFh), CX = the SYSTEM.INI settings, DX = number of functions (13) |
 | 0401 | BL = mixer register | AL = value |
 | 0402 | BL = mixer register, BH = value | - |
 | 0403 | BL = controller register A0h-BFh | AL = value |
@@ -279,8 +279,24 @@ Feature bits of 0400 (BX):
 | 4 | PnP |
 | 5 | mixer block |
 | 6 | owner information |
-| 7 | DOS FM: the virtual FM chip and the rest of [DOS boxes](VXD_INTERNALS.md#dos-boxes) |
-| 8 | DOS mixer: Windows' mixer saved and put back around a DOS program |
+| 7 | DOS FM: the virtual FM chip and the rest of [DOS boxes](VXD_INTERNALS.md#dos-boxes). Clear with `VirtualFM=0` |
+| 8 | DOS mixer: Windows' mixer saved and put back around a DOS program. Clear with `DosMixerRestore=0` |
+| 9 | CX holds the settings below (version 1.11) |
+
+The settings in CX, read from SYSTEM.INI when the VxD starts ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings)). A set bit is a change that's on:
+
+| Bit | Key | Default |
+|---|---|---|
+| 0 | `[ES1869.VXD] RegisterAPI` (always set here: with 0, 0400 fails) | 1 |
+| 1 | `VirtualFM` | 1 |
+| 2 | `DosTakesFM` | 1 |
+| 3 | `DosKeepsFM` | 1 |
+| 4 | `DosFMAudible` | 1 |
+| 5 | `DosMixerRestore` | 1 |
+| 6 | `ResetDosFM` | 1 |
+| 8 | `[ES1869.DRV] Audio2Oversampling` | 0 |
+| 9 | `[ES1869.DRV] Audio2Filter` | 0 |
+| 15 | SYSTEM.INI was read. Clear: the VxD was loaded after Windows started and runs with the defaults | |
 
 ### Detecting the extension
 

@@ -62,6 +62,25 @@ def build(fix=True, output=None, workdir=None, defines=None):
     return data
 
 
+def symbols(fix=True, workdir=None):
+    """{name: (segment, offset)} of the build's labels, from NASM's map"""
+    import tempfile
+    with tempfile.TemporaryDirectory(dir=workdir) as tmp:
+        path = os.path.join(tmp, "es1869.map")
+        build(fix, workdir=tmp, defines={"MAP_FILE": path})
+        with open(path) as f:
+            lines = f.read().splitlines()
+    out, seg = {}, None
+    for line in lines:
+        if line.startswith("---- Section seg"):
+            seg = int(line.split()[2][3:])
+        elif seg and line.strip() and line.split()[0].isalnum():
+            parts = line.split()
+            if len(parts) == 3 and parts[2] != "Name":
+                out[parts[2]] = (seg, int(parts[1], 16))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--stock", action="store_true",

@@ -5485,10 +5485,11 @@ L6_2DCB:
         push ax                                         ; 2DE1
         push word [bp+0x6]                              ; 2DE2
         push ax                                         ; 2DE5
-        callf mixer_read, R6_2DE9, R6_2794              ; 2DE6 far seg1
 %if ES1869_FIX
-        and al,0xEF                     ; essreg: no 4x oversampling
+        callf a2_mode_read, R6_2DE9, R6_2794    ; essreg: 4x and the filter
+        or al,A2_ASYNC                  ; essreg: from SYSTEM.INI
 %else
+        callf mixer_read, R6_2DE9, R6_2794              ; 2DE6 far seg1
         or al,0x12                                      ; 2DEB
 %endif
         push ax                                         ; 2DED

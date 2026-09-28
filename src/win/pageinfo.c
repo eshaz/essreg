@@ -8,6 +8,10 @@
  * 0001, 0004, 0005 read, 0008, 000A, 0101, 0301, and
  * 0400/040C of the extension).
  *
+ * The extension's 0400 also says which of its changes are on
+ * (SYSTEM.INI, docs/DRIVER_CONFIG.md): the ones turned off are
+ * listed by their key.
+ *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
  * Licensed under GPL Version 3.0
@@ -26,6 +30,35 @@
 static HWND edit;
 
 #define ADD (p + strlen(p))
+
+// the VxD's changes that SYSTEM.INI can turn off
+static const struct {
+  u16 bit;
+  const char *key;
+} vxd_keys[] = {
+    {VXD_S_VIRTUAL_FM, "VirtualFM"},      {VXD_S_TAKES_FM, "DosTakesFM"},
+    {VXD_S_KEEPS_FM, "DosKeepsFM"},       {VXD_S_FM_AUDIBLE, "DosFMAudible"},
+    {VXD_S_DOS_MIXER, "DosMixerRestore"}, {VXD_S_RESET_FM, "ResetDosFM"},
+};
+
+static void settings_text(char *p) {
+  u16 s = vxd.ext_settings;
+  int i, off = 0;
+
+  strcat(p, s & VXD_S_READ ? "VxD settings:\tfrom SYSTEM.INI"
+                           : "VxD settings:\tthe defaults (loaded after "
+                             "Windows started)");
+  for (i = 0; i < (int)(sizeof(vxd_keys) / sizeof(vxd_keys[0])); i++)
+    if (!(s & vxd_keys[i].bit)) {
+      strcat(p, off++ ? ", " : ", off: ");
+      strcat(p, vxd_keys[i].key);
+    }
+  sprintf(ADD, "\r\nVxD Audio 2:\t%s, filter %s\r\n",
+          s & VXD_S_A2_4X ? "4x oversampling" : "not oversampled",
+          s & VXD_S_A2_4X       ? "bypassed (4x)"
+          : s & VXD_S_A2_FILTER ? "in use"
+                                : "bypassed");
+}
 
 static const char *owner_name(u32 handle) {
   switch (vxd_owner_class(handle)) {
@@ -67,7 +100,10 @@ void info_text(char *buf, unsigned size) {
               vxd.ext_version >> 8, vxd.ext_version & 0xFF, vxd.ext_count,
               vxd.ext_features);
     else
-      strcat(p, "Register API:\tnot present (stock driver)\r\n");
+      strcat(p, "Register API:\tnot present (ESS's driver, or "
+                "RegisterAPI=0)\r\n");
+    if (vxd.ext_features & VXD_F_SETTINGS)
+      settings_text(p);
     if (vxd_read_adi() == 0) {
       flags = vxd_adi_word(ADI_FLAGS);
       sprintf(ADD, "Devnode:\t%08lXh\r\n",

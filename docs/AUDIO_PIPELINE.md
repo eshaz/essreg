@@ -34,12 +34,17 @@ Mixer 71h picks how the Audio 2 DAC turns samples into sound (DS p.64):
 
 | Where 71h is written | ESS's drivers | `build/ES1869.DRV`, extended `ES1869.VXD` |
 |---|---|---|
-| ES1869.DRV, wave-out open, close and resume (1:115A) | bits 4 and 1 set | bits 3 and 1 set |
-| ES1869.DRV, each playback start (6:2DEB) | bits 4 and 1 set | bit 4 cleared |
+| ES1869.DRV, wave-out open, close and resume (1:1157) | bits 4 and 1 set | bit 4 cleared, bits 3 and 1 set |
+| ES1869.DRV, each playback start (6:2DE6) | bits 4 and 1 set | bit 4 cleared, bits 3 and 1 set |
 | ES1869.VXD, its own Audio 2 start (o5:3603) and a VM taking the DSP (o5:198C) | bits 4 and 1 set | bit 4 cleared, bits 3 and 1 set |
 | What plays | the samples interpolated 4x, no SCF | the samples as they are, no SCF |
 
 The other bits stay as they were, like bit 5 for 48 kHz recording. Linux's `es18xx` driver turns the oversampling on too (71h = 32h).
+
+`SYSTEM.INI` chooses the rebuilt drivers' mode, read when Windows starts ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#62-es1869drv)):
+* `[ES1869.DRV] Audio2Oversampling=1` sets bit 4 again: ESS's 4x.
+* `Audio2Filter=1` clears bit 3: the SCF in use, when bit 4 is clear.
+* Both 1 is ESS's mode. Both drivers read the two keys.
 
 **Why it sounds better:**
 * The SCF is out of the way with either setting: 4x oversampling bypasses it too. So the whole difference is the 4x interpolation.

@@ -47,7 +47,7 @@ Control messages handled by `AUDDRV_Control` (o1:03E0):
 |---|---|---|
 | Sys_VM_Init, VM_Critical_Init | o5:1000 | per-VM set-up of trapping |
 | VM_Not_Executeable | o5:0F84 | a dying VM gives up what it owned (its "previous owner" becomes FFFFFFFFh, so the next owner gets a reset) |
-| Sys_Dynamic_Device_Init | o7:0000 | start |
+| Sys_Dynamic_Device_Init | o7:0000 | start (the extended driver reads SYSTEM.INI first) |
 | Sys_Dynamic_Device_Exit | o3:0000 | unload |
 | PnP_New_DevNode | o4:0ACE | a new ES1869 (or the no-DMA child) |
 
@@ -82,19 +82,19 @@ With ESS's driver:
 * When a child program ends, its parent's next FM access resets the synthesizer under it.
 * When a DOS program gives the DSP back, 11 mixer registers go back to Windows' values. The others stay as it left them: the 3-D effect, the record source and levels, the wave volume, MONO_IN and MONO_OUT.
 
-The extended driver (`src/vxd/essext.asm`) changes this:
-* **FM detection always succeeds.** A VM that can't have the FM chip gets a virtual one, allocated on its first access (1.3 KB).
+The extended driver (`src/vxd/essext.asm`) changes this. Each change has a key in SYSTEM.INI's `[ES1869.VXD]`, on by default, and `0` gives back ESS's behavior ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings)):
+* **FM detection always succeeds** (`VirtualFM`). A VM that can't have the FM chip gets a virtual one, allocated on its first access (1.3 KB).
   * It answers like the ES1869: the OPL3 registers of both banks, the timers (80 and 320 us per count) with the status port's IRQ, FT1 and FT2 flags, bits 4:0 reading 0 as on an OPL3, and ESFM native mode with its readback.
   * The timers run on the processor's time stamp counter, calibrated against the system time, or on the system time.
   * Writes go to it and nothing reaches the chip: the program runs, silently.
 * **Hand-over.** When the chip is free, the VM's next FM access takes it. Its virtual registers go to the chip first, key-on last, then its address latch, then the access.
-* **Windows gives way.** Windows gets FM from a port access only until a DOS program wants it. `ESFM.DRV`'s 0102 still keeps it until MODM_CLOSE.
-* **The same VM keeps its chip.** A DOS VM taking back the chip it had last isn't reset, since nobody used the chip in between.
-* **DOS FM is heard.** A DOS FM owner gets the music DAC and, if 36h was 00h, FM volume FFh. When it lets go, both go back, unless something changed them meanwhile.
+* **Windows gives way** (`DosTakesFM`). Windows gets FM from a port access only until a DOS program wants it. `ESFM.DRV`'s 0102 still keeps it until MODM_CLOSE.
+* **The same VM keeps its chip** (`DosKeepsFM`). A DOS VM taking back the chip it had last isn't reset, since nobody used the chip in between.
+* **DOS FM is heard** (`DosFMAudible`). A DOS FM owner gets the music DAC and, if 36h was 00h, FM volume FFh. When it lets go, both go back, unless something changed them meanwhile.
   * `ESFM.DRV` releases FM before it tells ES1869.DRV that MIDI closed. When a DOS box takes FM in that moment, the first DSP release by Windows afterwards (0003) gives the DOS box the music DAC and the volume again.
-* **Windows' mixer comes back.** When a DOS VM takes the DSP, 30 mixer registers are saved (`ESSREG_Snap_Regs`); when it lets go, all of them go back after ESS's 11. A change made meanwhile through the register interface (essctl, ess3d) counts as Windows'.
-  * 71h comes back with the driver's Audio 2 mode, no 4x oversampling and the filter bypassed: ESS's code sets it before the save (o5:198C).
-* **Windows' next use resets FM.** When Windows acquires through the API, to play a sound, change a level (0002), open MIDI (0102) or the MPU-401 (0302), FM a DOS program left is reset: notes still sounding stop, and the next DOS program starts from a clean chip.
+* **Windows' mixer comes back** (`DosMixerRestore`). When a DOS VM takes the DSP, 30 mixer registers are saved (`ESSREG_Snap_Regs`); when it lets go, all of them go back after ESS's 11. A change made meanwhile through the register interface (essctl, ess3d) counts as Windows'.
+  * 71h comes back with the driver's Audio 2 mode (by default no 4x oversampling and the filter bypassed): ESS's code sets it before the save (o5:198C).
+* **Windows' next use resets FM** (`ResetDosFM`). When Windows acquires through the API, to play a sound, change a level (0002), open MIDI (0102) or the MPU-401 (0302), FM a DOS program left is reset: notes still sounding stop, and the next DOS program starts from a clean chip.
 * A program's end drops the notes and timers of its VM's virtual chip, and closing the VM frees it.
 
 ## Hardware volume
@@ -151,11 +151,18 @@ The essreg extension changes the original only in these places, each the same le
 * the ten FM trap handlers (PDAT), now `ESSREG_FM_Trap`
 * in `Acquire_Resources` and `Release_Resources`: the FM reset (o5:1229), `FM_Enable_Local_Trapping` (o5:10B1), `Save_DOS_Mixer` (o5:1279) and `Restore_DOS_Mixer` (o5:110B)
 * the size of the ADI (E9h becomes 110h, o4:0235) and of the per-VM node (2Eh becomes 34h: o4:00AB, o5:100D, o7:0042)
-* in the control dispatcher, VM_Not_Executeable and Sys_Dynamic_Device_Exit; the node removal of a device that goes (o4:09C1)
+* in the control dispatcher, Sys_Dynamic_Device_Init (the settings first), VM_Not_Executeable and Sys_Dynamic_Device_Exit; the node removal of a device that goes (o4:09C1)
 * the DOSMGR hook's jump to the next hook (o1:0511), which now goes through `ESSREG_App_End`
-* the two writes of mixer 71h, the Audio 2 mode, when a VM takes the DSP (o5:198C) and at the VxD's own Audio 2 start (o5:3603): through `ESSREG_A2_Mode`, no 4x oversampling and the filter bypassed ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter))
+* the two writes of mixer 71h, the Audio 2 mode, when a VM takes the DSP (o5:198C) and at the VxD's own Audio 2 start (o5:3603): through `ESSREG_A2_Mode`, by default no 4x oversampling and the filter bypassed ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter))
 
 Everything else is appended, so ESS's code stays at its addresses: Windows' sound, DirectSound and the interrupt handlers run the same bytes as in ESS's driver. `EssCodeTest` in `tests/test_vxdext.py` compares the two builds after their fixups, and a new hook goes in its list. `PcmPathTest` runs ES1869.DRV's calls around a wave device and DirectSound's acquire and release in both, and compares the port accesses.
+
+**Settings.** `ESSREG_Read_Settings` reads the keys at `Sys_Dynamic_Device_Init`, once, into `ESSREG_Opts`, and each changed routine checks its bit.
+* VMM's profile services (`Get_Profile_String`) exist only while Windows starts. The VxD reads SYSTEM.INI only if `VMM_GetSystemInitState` is still below 40000000h (before Init_Complete ends). A VxD loaded later, for a card found while Windows runs, keeps the defaults.
+* A value is read as `GetPrivateProfileInt` reads it in the 16-bit drivers: its leading digits, 0 without any. So `VirtualFM=0` and `VirtualFM=no` both turn the change off.
+* `RegisterAPI=0` sets group 4's function count to 0, so 04xx fails with CF set and AX unchanged, as in ESS's driver.
+* Function 0400 returns the settings in CX ([VXD_API.md](VXD_API.md)). essctl's *Device information* page lists the changes that are off, and whether SYSTEM.INI was read.
+* `tests/test_vxdini.py` reads each key, checks what each one turns off, and runs DOS programs, Windows' sound and MIDI with every key at 0 against ESS's driver: the same port accesses, owners, messages and trapping.
 
 ## Installing the extended driver
 
@@ -165,7 +172,7 @@ Everything else is appended, so ESS's code stays at its addresses: Windows' soun
 
 1. Copy `C:\WINDOWS\SYSTEM\ES1869.VXD` to `ES1869.ORG` in the same directory.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
-3. Restart Windows. essctl's *Device information* page now shows "Register API: version 1.10".
+3. Restart Windows. essctl's *Device information* page now shows "Register API: version 1.11".
 
 **If Windows doesn't start** or sound stops working: restart, press F8 at "Starting Windows 95", choose *Command prompt only*, and run:
 

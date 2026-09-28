@@ -64,13 +64,30 @@ int VXD_CALL vxd_raw_call(void ESS_FAR *entry, vxd_regs ESS_FAR *r);
 #define ADI_DEVNODE 0x55
 #define ADI_DMA2 0x79
 
-#define ADI_F_NODMA 0x0020     // no-DMA (PIO) emulation
+#define ADI_F_NODMA 0x0020      // no-DMA (PIO) emulation
 #define ADI_F_MPU_SHARED 0x2000 // MPU-401 shares the audio IRQ
+
+// feature bits of function 0400 (BX)
+#define VXD_F_DOS_FM 0x0080    // the virtual FM chip (VirtualFM=1)
+#define VXD_F_DOS_MIXER 0x0100 // Windows' mixer back (DosMixerRestore=1)
+#define VXD_F_SETTINGS 0x0200  // CX holds the settings (version 1.11)
+
+// the SYSTEM.INI settings the VxD runs with (0400, CX), 1 = on
+#define VXD_S_API 0x0001        // [ES1869.VXD] RegisterAPI
+#define VXD_S_VIRTUAL_FM 0x0002 // VirtualFM
+#define VXD_S_TAKES_FM 0x0004   // DosTakesFM
+#define VXD_S_KEEPS_FM 0x0008   // DosKeepsFM
+#define VXD_S_FM_AUDIBLE 0x0010 // DosFMAudible
+#define VXD_S_DOS_MIXER 0x0020  // DosMixerRestore
+#define VXD_S_RESET_FM 0x0040   // ResetDosFM
+#define VXD_S_A2_4X 0x0100      // [ES1869.DRV] Audio2Oversampling
+#define VXD_S_A2_FILTER 0x0200  // Audio2Filter
+#define VXD_S_READ 0x8000       // read from SYSTEM.INI, else the defaults
 
 // owner classes reported by function 040C
 #define VXD_OWNER_NONE 0
-#define VXD_OWNER_SELF 1  // the caller's VM, Windows itself
-#define VXD_OWNER_OTHER 2 // another VM, a DOS box
+#define VXD_OWNER_SELF 1    // the caller's VM, Windows itself
+#define VXD_OWNER_OTHER 2   // another VM, a DOS box
 #define VXD_OWNER_UNKNOWN 3 // stock driver, Windows' VM handle isn't known yet
 
 struct vxd_owners {
@@ -82,10 +99,11 @@ struct vxd_owners {
 struct vxd_state {
   void ESS_FAR *entry; // 0 when AUDDRV isn't loaded
   u32 devnode;
-  u16 version;      // function 0000
-  u16 ext_version;  // function 0400, 0 on the stock driver
+  u16 version;     // function 0000
+  u16 ext_version; // function 0400, 0 on the stock driver
   u16 ext_features;
   u16 ext_count;    // number of group 4 functions
+  u16 ext_settings; // VXD_S_*, when ext_features has VXD_F_SETTINGS
   u8 adi[ADI_COPY_SIZE];
   u8 adi_valid;
   u8 dsp_taken; // vxd_dsp_begin acquired the DSP and has to release it
@@ -112,11 +130,11 @@ u32 vxd_adi_dword(unsigned offset);
 int vxd_owner_class(u32 owner);
 
 int vxd_dma_count(int channel, u16 *count); // 0004 (0 = audio 1)
-int vxd_gpo_read(u8 *bits);                // 0005 with EAX != 0
-int vxd_config_port(u16 *port);            // 0008
-int vxd_global_flag(u8 *flag);             // 000A
-int vxd_fm_info(u16 *port);                // 0101
-int vxd_mpu_info(u16 *port, u8 *irq);      // 0301
+int vxd_gpo_read(u8 *bits);                 // 0005 with EAX != 0
+int vxd_config_port(u16 *port);             // 0008
+int vxd_global_flag(u8 *flag);              // 000A
+int vxd_fm_info(u16 *port);                 // 0101
+int vxd_mpu_info(u16 *port, u8 *irq);       // 0301
 
 // bracket direct port access with these (group 4 functions don't need it)
 // the stock and the extended driver both trap the ports, so every port

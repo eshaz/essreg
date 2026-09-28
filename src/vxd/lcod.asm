@@ -227,7 +227,11 @@ AUDDRV_Control:
         cmp eax,byte Sys_VM_Init                        ; 03F2
         jz near AUDDRV_VM_Init                          ; 03F5
         cmp eax,byte Sys_Dynamic_Device_Init            ; 03FB
+%if ESSREG_EXT
+        jz near ESSREG_Dynamic_Init                     ; essreg: SYSTEM.INI first
+%else
         jz near AUDDRV_Dynamic_Init                     ; 03FE
+%endif
         cmp eax,byte Sys_Dynamic_Device_Exit            ; 0404
 %if ESSREG_EXT
         jz near ESSREG_Dynamic_Exit                     ; essreg: virtual FM chips

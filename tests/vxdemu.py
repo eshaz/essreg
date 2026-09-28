@@ -41,6 +41,7 @@ ADI = 0x21000000
 LISTS = 0x22000000
 BUFFER = 0x23000000
 STUB = 0x24000000
+PROFILE = 0x24000800       # Get_Profile_String's answers
 GDT = 0x25000000           # and the LDT at GDT + 10000h
 LDT = 0x25010000
 HEAP = 0x26000000
@@ -73,6 +74,8 @@ SVC_LIST_REMOVE = 0x000100A1
 SVC_LIST_DEALLOCATE = 0x000100A2
 SVC_LIST_GET_FIRST = 0x000100A3
 SVC_LIST_GET_NEXT = 0x000100A4
+SVC_GET_PROFILE_STRING = 0x000100B3
+SVC_GET_SYSTEM_INIT_STATE = 0x00010111
 SVC_SHELL_MESSAGE = 0x00170004
 SVC_VDMAD_GET_PHYS_COUNT = 0x0004001C
 NOOP_SERVICES = {
@@ -364,6 +367,10 @@ class VxDEmu:
         self.messages = []
         self.dma_count = 0x2B10         # VDMAD_Get_Phys_Count's next answer
         self.has_tsc = True
+        # SYSTEM.INI: {(section, key): value}, as VMM finds it while
+        # Windows starts (VMM_GetSystemInitState below 40000000h)
+        self.ini = {}
+        self.init_state = 0x20000000
         self.use32 = set()         # VMs whose protected mode code is 32-bit
         self.selectors = {}
         self.add_selector(0x1234, BUFFER, 0xFFF)
@@ -420,6 +427,34 @@ class VxDEmu:
         fl = (fl | 0x40) if zf else (fl & ~0x40)
         self.uc.reg_write(UC_X86_REG_EFLAGS, fl)
 
+    def _set_cf(self, cf):
+        fl = self.uc.reg_read(UC_X86_REG_EFLAGS)
+        self.uc.reg_write(UC_X86_REG_EFLAGS, (fl | 1) if cf else (fl & ~1))
+
+    def cstr(self, addr):
+        out = bytearray()
+        while self.read8(addr + len(out)):
+            out.append(self.read8(addr + len(out)))
+        return out.decode("latin-1")
+
+    def _profile_string(self, uc):
+        """Get_Profile_String: ESI = section (0: [386Enh]), EDI = key;
+        CF clear and EDX = the value if found. Like VMM, only while
+        Windows starts: afterwards the service is gone"""
+        if self.init_state >= 0x40000000:
+            raise RuntimeError("Get_Profile_String after initialization")
+        esi = uc.reg_read(UC_X86_REG_ESI)
+        section = self.cstr(esi) if esi else "386Enh"
+        key = self.cstr(uc.reg_read(UC_X86_REG_EDI))
+        found = {(s.lower(), k.lower()): v for (s, k), v in self.ini.items()}
+        value = found.get((section.lower(), key.lower()))
+        if value is None:
+            self._set_cf(True)
+            return
+        uc.mem_write(PROFILE, value.encode("latin-1") + b"\0")
+        uc.reg_write(UC_X86_REG_EDX, PROFILE)
+        self._set_cf(False)
+
     def _arg(self, n):
         return self.read32(self.uc.reg_read(UC_X86_REG_ESP) + 4 * n)
 
@@ -469,6 +504,11 @@ class VxDEmu:
             uc.reg_write(UC_X86_REG_EBX, VMS[(VMS.index(ebx) + 1) % len(VMS)])
         elif svc == SVC_GET_SYSTEM_TIME:
             uc.reg_write(UC_X86_REG_EAX, self.clock.us // 1000)
+        elif svc == SVC_GET_SYSTEM_INIT_STATE:
+            uc.reg_write(UC_X86_REG_EAX, self.init_state)
+            uc.reg_write(UC_X86_REG_ECX, 0)
+        elif svc == SVC_GET_PROFILE_STRING:
+            self._profile_string(uc)
         elif svc == SVC_HEAP_ALLOCATE:
             size, flags = self._arg(0), self._arg(1)
             addr = self.heap_next
@@ -697,3 +737,19 @@ class Machine:
         """VM_Not_Executeable"""
         self.emu.current_vm = vm
         self.emu.run(self.syms["AUDDRV_Control"], {"EAX": 0x0B, "EBX": vm})
+
+    def start(self, ini, state=0x20000000):
+        """Sys_Dynamic_Device_Init with SYSTEM.INI as in ini, {(section,
+        key): value}; ESS's own init is left out (this setup is made by
+        hand), so it only returns"""
+        self.emu.ini = dict(ini)
+        self.emu.init_state = state
+        self.emu.uc.mem_write(self.syms["AUDDRV_Dynamic_Init"], b"\xF8\xC3")
+        out = self.emu.run(self.syms["AUDDRV_Control"],
+                           {"EAX": 0x1B, "EBX": VM_SYS})
+        return not out["EFlags"] & 1
+
+    def opts(self):
+        """the settings the extension runs with (ESSREG_Opts)"""
+        return struct.unpack("<H", self.emu.uc.mem_read(
+            self.syms["ESSREG_Opts"], 2))[0]

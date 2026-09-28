@@ -8,7 +8,7 @@ Tools and rebuilt drivers for the ESS ES1869 sound chip on DOS and Windows 9x. [
 * `src/win/`: `essctl.exe`, the 16-bit Windows control panel, and `ess3dw.c`, the Windows side of `ess3d.exe` (the 3-D effect from the command line, for keys). `ess3dtr.c` is ess3d's tray icon and panel. Its icons come from `tools/ess3dico.py`. `esfmrec.c` records the FM digitally to a WAV file.
 * `src/vxd/`: `ES1869.VXD` as NASM source, from `tools/vxd2asm.py`. `essext.asm` adds the register API and the DOS box improvements (the virtual FM chip, Windows' mixer around a DOS program); `essext.inc` has its layout.
 * `src/esfm/`: `ESFM.DRV` as NASM source, from `tools/ne2asm.py`. `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm` and `esfmgm.asm` are the fixes and General MIDI, assembled with `ESFM_FIX=1`.
-* `src/es1869/`: `ES1869.DRV` (wave, mixer and aux) as NASM source, from `tools/ne2asm.py` with `names.txt`. Changes are assembled with `ES1869_FIX=1`.
+* `src/es1869/`: `ES1869.DRV` (wave, mixer and aux) as NASM source, from `tools/ne2asm.py` with `names.txt`. Changes are assembled with `ES1869_FIX=1`: `a2mode.asm` (the Audio 2 mode), `settings.asm` (SYSTEM.INI), `fixdata.asm` (their data), `fix.inc`.
 * `driver/`: ESS's original drivers, the reference for the byte-identical rebuilds.
 * `build/`: the committed binaries.
 * `tools/`: builders, RE tools, `guard.py`, `wineshot.sh`. `tests/`: Python tests, `tests/host/`: C tests.
@@ -45,6 +45,7 @@ tools/wineshot.sh run ess3d.exe /sim tray         # a second program on its desk
 ## Rules
 
 * **Byte-identical stock builds.** `build_esfm.py`, `build_vxd.py` and `build_es1869drv.py` with `--stock --verify` must stay identical to `driver/`. Driver changes go under `%if ESFM_FIX` (ESFM.DRV), `%if ES1869_FIX` (ES1869.DRV) or in the extension (`ESSREG_EXT`, the VxD).
+* **SYSTEM.INI settings.** Every change to ESS's drivers has a key in the driver's section (`[ES1869.VXD]`, `[ES1869.DRV]`), read once when the driver starts, and `0` gives back what ESS's driver does there. A new change gets a key with its default, a row in [DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings) section 6, and tests of both values (`tests/test_vxdini.py`, `tests/test_es1869drv.py`).
 * **ES1869.DRV changes:** ESS's code keeps its addresses, as in the VxD: a changed instruction has the same length, and new code goes after ESS's. ESS copies its interrupt handler to a fixed block and patches it by offset, so moved code would break it. A changed instruction goes in `HOOKS` of `tests/test_es1869drv.py`, which compares ESS's segments byte for byte and relocation for relocation.
 * **VxD extension hooks:** ESS's code changes only under `%if ESSREG_EXT`, with instructions of the same length, never an added one: ESS's code keeps its addresses. `EssCodeTest` (`tests/test_vxdext.py`) checks it, and a new hook goes in its `HOOKS` list. The extension's per-device state goes after ESS's E9h bytes of the ADI, and a VM's after ESS's 2Eh bytes of its node (`essext.inc`). `tests/test_vxddos.py` runs the DOS box paths in the emulator.
 * **Committed binaries.** After changing their sources, rebuild `build/ESFM.DRV`, `build/ES1869.VXD` or `build/ES1869.DRV`, and copy the changed programs from `out/ow2/` to `build/`. `test_build_is_current` checks `ESFM.DRV` and `ES1869.DRV`.

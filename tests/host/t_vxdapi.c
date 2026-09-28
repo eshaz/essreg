@@ -6,7 +6,8 @@
  *   - 0001 copies an ADI whose owner fields the test controls
  *   - 0002/0003 acquire and release the DSP like Acquire_Resources and
  *     Release_Resources
- *   - group 4 exists only when `ext` is set
+ *   - group 4 exists only when `ext` is set: 1 is version 1.00, 2 is
+ *     1.11 with its SYSTEM.INI settings in CX
  *
  * Every call is logged, so the test can prove that functions with side
  * effects are called only when intended and that the callback functions
@@ -92,8 +93,14 @@ int vxd_raw_call(void *entry, vxd_regs *r) {
       return fail(r, 1);
     switch (fn) {
     case 0x0400:
-      r->eax = 0x0100;
-      r->ebx = 0x7F;
+      if (fake.ext == 2) {
+        r->eax = 0x0111;
+        r->ebx = 0x03FF & ~VXD_F_DOS_FM;
+        r->ecx = 0x805D; // read; VirtualFM=0, DosMixerRestore=0
+      } else {
+        r->eax = 0x0100; // CX keeps the devnode
+        r->ebx = 0x7F;
+      }
       r->edx = 13;
       return 0;
     case 0x0401:
@@ -222,6 +229,7 @@ static void test_open_ext(void) {
   CHECK_EQ(vxd.ext_version, 0x0100);
   CHECK_EQ(vxd.ext_features, 0x7F);
   CHECK_EQ(vxd.ext_count, 13);
+  CHECK_EQ(vxd.ext_settings, 0); // not the devnode left in CX
   CHECK_EQ(vxd_ext_call(ESSX_MIXER_READ, 0x36, 0, 0, &v), 0);
   CHECK_EQ(v, 0x5A);
   CHECK_EQ(fake.last_bl, 0x36);
@@ -245,6 +253,23 @@ static void test_open_ext(void) {
   vxd_dsp_end();
   CHECK_EQ(count_calls(0x0002), 1);
   CHECK_EQ(count_calls(0x0003), 1);
+}
+
+static void test_open_settings(void) {
+  fake_reset(2);
+  CHECK_EQ(vxd_open(), 0);
+  CHECK_EQ(vxd.ext_version, 0x0111);
+  CHECK(vxd.ext_features & VXD_F_SETTINGS);
+  CHECK_EQ(vxd.ext_settings, 0x805D);
+  CHECK(vxd.ext_settings & VXD_S_READ);
+  CHECK(!(vxd.ext_settings & VXD_S_VIRTUAL_FM));
+  CHECK(!(vxd.ext_settings & VXD_S_DOS_MIXER));
+  CHECK(!(vxd.ext_settings & VXD_S_A2_4X));
+  // the stock driver: nothing
+  fake_reset(0);
+  CHECK_EQ(vxd_open(), 0);
+  CHECK_EQ(vxd.ext_version, 0);
+  CHECK_EQ(vxd.ext_settings, 0);
 }
 
 static void test_dsp_bracket(void) {
@@ -314,6 +339,7 @@ int main(void) {
   test_open_stock();
   test_open_missing();
   test_open_ext();
+  test_open_settings();
   test_dsp_bracket();
   test_never_called();
   return CHECK_DONE("t_vxdapi");
