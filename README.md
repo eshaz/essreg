@@ -167,6 +167,7 @@ file       the WAV file, FMREC001.WAV and up if left out
   * A game whose child program ends keeps its FM instruments. ESS's driver resets the synthesizer under it.
   * After a DOS game, all of Windows' mixer settings come back: the 3-D effect, the record source and levels, the wave volume and the rest. ESS's driver puts back 11 levels.
   * The next time Windows plays a sound or a level changes, FM left by a DOS game is reset, so no note keeps sounding. After a DOS game, moving a slider in the tray's volume control resets the card.
+  * *Note: the Sound Blaster part and the MPU-401 still belong to one program at a time, as with ESS's driver. While Windows plays a sound, a DOS game starting then finds no Sound Blaster; it finds it once the sound ends.*
 * Otherwise it works like the ESS driver. `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte for byte.
 * Install: keep a copy of `C:\WINDOWS\SYSTEM\ES1869.VXD`, copy `build\ES1869.VXD` over it and restart Windows.
   * See [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#installing-the-extended-driver) for the steps, and how to go back if something goes wrong.
