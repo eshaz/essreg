@@ -74,9 +74,11 @@ SVC_LIST_DEALLOCATE = 0x000100A2
 SVC_LIST_GET_FIRST = 0x000100A3
 SVC_LIST_GET_NEXT = 0x000100A4
 SVC_SHELL_MESSAGE = 0x00170004
+SVC_VDMAD_GET_PHYS_COUNT = 0x0004001C
 NOOP_SERVICES = {
     0x00030002, 0x00030003, 0x00030004, 0x00030008, 0x00030009,  # VPICD
     0x00040013, 0x00040014,                                      # VDMAD
+    0x0017000E,                         # SHELL_CallAtAppyTime
 }
 SVC_VPICD_STATUS = 0x00030005
 
@@ -360,6 +362,7 @@ class VxDEmu:
         self.lists = {}
         self.trap_off = set()      # (vm, port) with trapping disabled
         self.messages = []
+        self.dma_count = 0x2B10         # VDMAD_Get_Phys_Count's next answer
         self.has_tsc = True
         self.use32 = set()         # VMs whose protected mode code is 32-bit
         self.selectors = {}
@@ -488,6 +491,10 @@ class VxDEmu:
             self.messages.append(ebx)
         elif svc == SVC_VPICD_STATUS:
             uc.reg_write(UC_X86_REG_ECX, 0)
+        elif svc == SVC_VDMAD_GET_PHYS_COUNT:
+            # a transfer that plays: the count goes down on every look
+            self.dma_count = (self.dma_count - 0x123) & 0xFFFF
+            uc.reg_write(UC_X86_REG_ECX, self.dma_count)
         elif svc in NOOP_SERVICES:
             pass
         else:

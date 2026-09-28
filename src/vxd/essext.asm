@@ -1680,8 +1680,11 @@ ESSREG_VFM_Forget:
 
 ; a program ended in VM EBX (DOSMGR_End_V86_App): its virtual chips let
 ; go of the notes and timers it left, so they don't sound when the chip
-; comes to the VM
+; comes to the VM. In place of the jump to the next hook at the end of
+; ESS's hook (L1_04B8), so ESS's code keeps its size: every register and
+; flag goes on as it came
 ESSREG_App_End:
+        pushfd
         pushad
         mov     esi,[ADI_List]
         or      esi,esi
@@ -1720,7 +1723,8 @@ ESSREG_App_End:
         or      eax,eax
         jnz     .next
 .done:  popad
-        ret
+        popfd
+        jmp     [D1_02B6]               ; the next hook
 
 ; free the virtual chip of VM EBX for the ADI in EDI
 ESSREG_VFM_Drop:

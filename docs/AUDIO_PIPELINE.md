@@ -48,6 +48,8 @@ Recording runs the other way, on Audio 1: a 256-byte FIFO, demand transfers of 2
 
 ## Finding out on the card
 
+Change one thing at a time, and put it back if the skips get worse: a restart undoes the DRQ latch, and single mode DMA goes off with its check box and a restart.
+
 1. In essctl, *Plug and Play* shows *DRQ latch*, and *Status & interrupts* shows *PnP data source* (internal ROM or EEPROM).
 2. If the DRQ latch is off, turn on Expert mode and switch it on.
    * If it stays on (essctl reads it back), listen: do the skips go? A write lasts until the computer restarts.
@@ -62,4 +64,4 @@ Recording runs the other way, on Audio 1: a 256-byte FIFO, demand transfers of 2
 * If the DRQ latch takes a write, ES1869.VXD's extension could set it each time the device starts.
 * If it doesn't, the card's EEPROM could be changed: a tool that reads it, saves a copy, and rewrites the one header byte. That's only possible with an EEPROM (not the internal ROM), and a bad write can make the card vanish from Plug and Play until the EEPROM is written again.
 * The driver's buffering is generous (62 ms per block), so changing ES1869.DRV wouldn't help a FIFO that runs dry. ES1869.DRV isn't rebuilt from source yet anyway.
-* The rebuilt ES1869.VXD has ESS's audio code unchanged, so it plays the same way as ESS's.
+* The rebuilt ES1869.VXD has ESS's audio code unchanged and at its addresses, so it plays the same way as ESS's. `EssCodeTest` and `PcmPathTest` in `tests/test_vxdext.py` check both. The one difference DirectX can see is the certification mark ([VXD_INTERNALS.md](VXD_INTERNALS.md#installing-the-extended-driver)).

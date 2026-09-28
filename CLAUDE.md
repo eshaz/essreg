@@ -42,7 +42,7 @@ tools/wineshot.sh run ess3d.exe /sim tray         # a second program on its desk
 ## Rules
 
 * **Byte-identical stock builds.** `build_esfm.py --stock --verify` and `build_vxd.py --stock --verify` must stay identical to `driver/`. Driver changes go under `%if ESFM_FIX` (ESFM.DRV) or in the extension (`ESSREG_EXT`, the VxD).
-* **VxD extension hooks:** ESS's code changes only under `%if ESSREG_EXT`, with instructions of the same length. The extension's per-device state goes after ESS's E9h bytes of the ADI, and a VM's after ESS's 2Eh bytes of its node (`essext.inc`). `tests/test_vxddos.py` runs the DOS box paths in the emulator.
+* **VxD extension hooks:** ESS's code changes only under `%if ESSREG_EXT`, with instructions of the same length, never an added one: ESS's code keeps its addresses. `EssCodeTest` (`tests/test_vxdext.py`) checks it, and a new hook goes in its `HOOKS` list. The extension's per-device state goes after ESS's E9h bytes of the ADI, and a VM's after ESS's 2Eh bytes of its node (`essext.inc`). `tests/test_vxddos.py` runs the DOS box paths in the emulator.
 * **Committed binaries.** After changing their sources, rebuild `build/ESFM.DRV` or `build/ES1869.VXD`, and copy the changed programs from `out/ow2/` to `build/`. `test_build_is_current` checks `ESFM.DRV`.
 * **ESFM_FIX code:**
   * A label at a relocation site is a `..@` name, so it doesn't end NASM's local label scope.

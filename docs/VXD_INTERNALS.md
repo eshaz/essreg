@@ -151,9 +151,9 @@ The essreg extension changes the original only in these places, each the same le
 * in `Acquire_Resources` and `Release_Resources`: the FM reset (o5:1229), `FM_Enable_Local_Trapping` (o5:10B1), `Save_DOS_Mixer` (o5:1279) and `Restore_DOS_Mixer` (o5:110B)
 * the size of the ADI (E9h becomes 110h, o4:0235) and of the per-VM node (2Eh becomes 34h: o4:00AB, o5:100D, o7:0042)
 * in the control dispatcher, VM_Not_Executeable and Sys_Dynamic_Device_Exit; the node removal of a device that goes (o4:09C1)
-* one call added to the DOSMGR hook (o1:04B8)
+* the DOSMGR hook's jump to the next hook (o1:0511), which now goes through `ESSREG_App_End`
 
-Everything else is appended.
+Everything else is appended, so ESS's code stays at its addresses: Windows' sound, DirectSound and the interrupt handlers run the same bytes as in ESS's driver. `EssCodeTest` in `tests/test_vxdext.py` compares the two builds after their fixups, and a new hook goes in its list. `PcmPathTest` runs ES1869.DRV's calls around a wave device and DirectSound's acquire and release in both, and compares the port accesses.
 
 ## Installing the extended driver
 

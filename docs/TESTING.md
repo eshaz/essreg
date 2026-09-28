@@ -13,6 +13,7 @@ python3 tests/run_tests.py
   * `ESFM.DRV` in a CPU emulator with an FM chip model and simulated interrupts: the hanging notes of ESS's driver, and the fixed driver (`test_esfmdrv`, [ESFM_MIDI.md](ESFM_MIDI.md))
   * the fixed driver's bank file in the same emulator, with `SYSTEM.INI`, files with dates and the global heap simulated
   * the register API of the rebuilt VxD, run in a CPU emulator against a simulated ES1869, and its refusals and checks (`test_vxdext`)
+  * that the extended VxD keeps ESS's code where it was, byte for byte apart from the hooks, and that Windows' own sound (ES1869.DRV's calls around a wave device, a mixer change, DirectSound taking the DSP) makes the same port accesses as with ESS's driver (`test_vxdext`)
   * DOS boxes and the rebuilt VxD in the same emulator, with an FM chip model after ESFMu, VMs and per-VM port trapping (`test_vxddos`): FM detection whoever has FM, the virtual FM chip and its hand-over, the music DAC, Windows' mixer around a DOS game, and the reset when Windows uses the card again. The stock driver runs the same steps where it differs.
   * `esfmpat` on copies of `ESFM.DRV`
   * that the generated documentation is current
@@ -136,6 +137,8 @@ tools/wineshot.sh stop
 3. essctl's title bar says "VxD register API 1.10", and the owners line (bottom right) shows the DSP/FM/MPU owners.
 4. With a DOS game playing, change *Audio 2 volume* or *Master volume* in essctl. The change applies right away and the game keeps its sound. That's the point of the register API!
 5. Put the original driver back if anything misbehaves, and note what.
+6. **Long playback.** Play a stream or a long MP3 for 10 minutes in Winamp, once with the DirectSound output and once with waveOut, with essctl, the tray and DOS boxes closed. Listen for skips.
+   * If it skips, restart with `ES1869.ORG` in place and play the same stream. Skips with both drivers come from the card's DMA, see [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#finding-out-on-the-card). Skips with the extended driver only are this repository's, so note which output and how often.
 
 ### E2. DOS boxes with the extended driver
 

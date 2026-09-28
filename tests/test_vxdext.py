@@ -328,5 +328,143 @@ class ExtensionTest(VxDBuilds, unittest.TestCase):
         self.assertEqual(out["EDX"] & 0xFFFF, 0x0100)   # ADI flags
 
 
+# where the extension changes ESS's code: (object, first byte, last byte),
+# each an instruction of the same length or a constant (CLAUDE.md)
+HOOKS = [
+    (1, 0x03EE, 0x03F1),    # VM_Not_Executeable: ESSREG_VM_Not_Executeable
+    (1, 0x0409, 0x040C),    # Sys_Dynamic_Device_Exit: ESSREG_Dynamic_Exit
+    (1, 0x0511, 0x0516),    # the DOSMGR hook's last jump: ESSREG_App_End
+    (4, 0x00AC, 0x00AC),    # the per-VM node's size
+    (4, 0x0236, 0x0237),    # the ADI's size
+    (4, 0x09C2, 0x09C5),    # a node removed: ESSREG_Node_Remove
+    (5, 0x100E, 0x100E),    # the per-VM node's size
+    (5, 0x10B2, 0x10B5),    # Release_Resources, FM: ESSREG_FM_Released
+    (5, 0x110C, 0x110F),    # Release_Resources, DSP: ESSREG_DSP_Restore
+    (5, 0x122A, 0x122D),    # Acquire_Resources, FM: ESSREG_FM_Reset
+    (5, 0x127A, 0x127D),    # Acquire_Resources, DSP: ESSREG_DSP_Save
+    (5, 0x1362, 0x1362),    # the API's groups: 0-4
+    (5, 0x136D, 0x1370),    # and their table
+    (7, 0x0043, 0x0043),    # the per-VM node's size
+] + [(6, off, off + 3) for off in (     # the FM ports' trap handler
+    0x02D6, 0x02DC, 0x02E2, 0x02E8, 0x0306, 0x030C,
+    0x0338, 0x033E, 0x0344, 0x034A)]
+
+
+def image(le):
+    """every object of le with its fixups applied, each at its own base"""
+    import struct
+    mem = {o.index: bytearray(o.data) for o in le.objects}
+    for f in le.fixups:
+        src = 0x10000000 * f.obj + f.off
+        tgt = 0x10000000 * f.tobj + f.toff
+        val = tgt if f.type == 7 else tgt - (src + 4)
+        mem[f.obj][f.off:f.off + 4] = struct.pack("<I", val & 0xFFFFFFFF)
+    return mem
+
+
+@unittest.skipUnless(have_nasm(), "needs nasm")
+class EssCodeTest(VxDBuilds, unittest.TestCase):
+    """ESS's code keeps its place in the extended driver: Windows' sound,
+    DirectSound and the interrupt handlers run the same bytes."""
+
+    def test_ess_code_unchanged(self):
+        stock, ext = image(self.builds[False][0]), image(self.builds[True][0])
+        hooks = {(o, i) for o, a, b in HOOKS for i in range(a, b + 1)}
+        for obj, old in stock.items():
+            new = ext[obj]
+            if obj in (1, 6):       # the extension goes after ESS's LCOD, PDAT
+                self.assertGreater(len(new), len(old))
+            else:
+                self.assertEqual(len(new), len(old), "object %d" % obj)
+            moved = ["%d:%04X" % (obj, i) for i in range(len(old))
+                     if old[i] != new[i] and (obj, i) not in hooks]
+            self.assertEqual(moved, [])
+        # and each hook is still there, so the list stays current
+        for obj, a, b in HOOKS:
+            self.assertNotEqual(stock[obj][a:b + 1], ext[obj][a:b + 1],
+                                "%d:%04X" % (obj, a))
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class PcmPathTest(VxDBuilds, unittest.TestCase):
+    """Windows' own sound, without DOS programs, does what it does with ESS's
+    driver: ES1869.DRV's calls around a wave device, a mixer change, and
+    DirectSound taking and giving back the DSP make the same port accesses,
+    hardware service calls and owners."""
+
+    # the services that touch the hardware or its trapping
+    HW_SERVICES = (0x00030000, 0x00040000, 0x00170000)
+    TRAPPING = (0x00010098, 0x0001009A)
+
+    def run_steps(self, ext):
+        import vxdemu
+        m = self.machine(ext)
+        e = m.emu
+        e.write32(vxdemu.ADI + 0x4D, 0x7100)    # the DMA channels' handles
+        e.write32(vxdemu.ADI + 0x7A, 0x7101)
+        # DirectSound's devnode, as its driver's open sets it (L1_0F3C)
+        e.write32(m.syms["Global_Flag_0329"], vxdemu.DEVNODE)
+        sys_vm = vxdemu.VM_SYS
+
+        def ds(name):
+            # DirectSound's buffer takes or gives back the DSP: cdecl, the
+            # devnode on the stack
+            e.write32(vxdemu.STACK - 0x100 + 4, vxdemu.DEVNODE)
+            return e.run(m.syms[name], {"EBX": sys_vm})["EAX"]
+
+        def api(fn):
+            # ES1869.DRV: AX = Audio_Base, BX = 1 (the DSP)
+            return m.api(sys_vm, fn, EAX=0x220, EBX=1)
+
+        steps = [
+            ("wave open", lambda: api(0x0002)),
+            ("position", lambda: api(0x0004)),
+            ("position", lambda: api(0x0004)),
+            ("mixer", lambda: m.outb(sys_vm, 0x224, 0x7C)),
+            ("mixer", lambda: m.outb(sys_vm, 0x225, 0x88)),
+            ("wave close", lambda: api(0x0003)),
+            ("mixer change", lambda: api(0x0002)),
+            ("mixer change", lambda: api(0x0003)),
+            ("DirectSound", lambda: ds("L1_125C")),
+            ("position", lambda: api(0x0004)),
+            ("DirectSound", lambda: ds("L1_12BA")),
+            # ESSDC.EXE's look at the mixer, while nobody has the DSP
+            ("mixer port", lambda: m.inb(sys_vm, 0x224)),
+            ("wave close", lambda: api(0x0003)),
+        ]
+        out = []
+        for name, step in steps:
+            log, svc = len(m.hw.log), len(e.services)
+            result = step()
+            if isinstance(result, tuple):       # an API call: AX and CF
+                result = (result[0]["EAX"] & 0xFFFF, result[1])
+            out.append((name, result, m.hw.log[log:], [
+                s for s in e.services[svc:]
+                if s & 0xFFFF0000 in self.HW_SERVICES or s in self.TRAPPING],
+                [m.adi32(o) for o in (vxdemu.ADI_DSP_OWNER,
+                                      vxdemu.ADI_FM_OWNER,
+                                      vxdemu.ADI_MPU_OWNER)],
+                sorted(e.trap_off)))
+        return out
+
+    def test_windows_sound_as_with_ess_driver(self):
+        import vxdemu
+        stock, ext = self.run_steps(False), self.run_steps(True)
+        for s, x in zip(stock, ext):
+            self.assertEqual(x, s, s[0])
+        # the steps did what they're for: Windows took the DSP and gave it
+        # back each time, DirectSound too, and the position moved
+        sys_vm = vxdemu.VM_SYS
+        self.assertEqual([step[4][0] for step in stock],
+                         [sys_vm] * 5 + [0, sys_vm, 0, sys_vm, sys_vm, 0,
+                                         sys_vm, 0])
+        self.assertEqual([step[1] for step in stock
+                          if step[0] in ("wave open", "wave close",
+                                         "mixer change", "DirectSound")],
+                         [(0, False)] * 4 + [1, 0, (0, False)])
+        self.assertNotEqual(stock[1][1], stock[2][1])
+        self.assertTrue(stock[5][2])            # the DSP reset of a release
+
+
 if __name__ == "__main__":
     unittest.main()

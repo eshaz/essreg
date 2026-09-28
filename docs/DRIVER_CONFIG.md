@@ -181,7 +181,9 @@ Also:
 
 * In ES1869.DRV but never referenced: StartupMuteMsg, MIDIInPersistence, MonoInMicMute, LeftMonoInMic, RightMonoInMic, Do Not Want ES938.
 * In OEMSETUP.INF / `ess_windows_regs.txt` but read by neither driver: "Telegaming". Only "Telegaming Vol" is read. Nothing in either driver sets telegaming mode (mixer 48h bit 1).
-* ESSDC.EXE, the "DC Drift daemon" started by the INF, uses no registry value names and wasn't analyzed further.
+* ESSDC.EXE, the "DC Drift daemon", is a 16-bit Windows program the INF starts from the Run key. It uses no registry value names.
+  * Once, it checks whether mixer 64h bit 5 takes a write, and puts it back.
+  * 10 seconds after it starts, then every 10 minutes, it makes a short recording through ES1869.DRV (2 or 8 KB, 16-bit stereo) and writes the ADC offset registers, controller BAh and BBh, with DSP commands (`adc.off_l` and `adc.off_r` in essctl).
 
 ## 3. VxD calls made by ES1869.DRV
 

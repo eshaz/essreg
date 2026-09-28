@@ -323,9 +323,6 @@ L1_04AA:
 L1_04B8:
         pusha                                           ; 04B8
         pushf                                           ; 04B9
-%if ESSREG_EXT
-        call ESSREG_App_End                     ; essreg: virtual FM key-ons off
-%endif
         VxDCall Test_Sys_VM_Handle                      ; 04BA
         jz short L1_050F                                ; 04C0
         mov esi,[dword ADI_List]                        ; 04C2
@@ -368,7 +365,12 @@ L1_0500:
 L1_050F:
         popf                                            ; 050F
         popa                                            ; 0510
+%if ESSREG_EXT
+        jmp near ESSREG_App_End                 ; essreg: virtual FM key-ons off
+        nop
+%else
         jmp [dword D1_02B6]                             ; 0511
+%endif
         db 0x90                                         ; 0517
 L1_0518:
         push byte +0x4                                  ; 0518
