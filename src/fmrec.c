@@ -1,11 +1,13 @@
 /*
- * The WAV header, peak levels and test tone of esfmrec (see fmrec.h).
+ * The WAV header, file names, peak levels and test tone of esfmrec (see
+ * fmrec.h).
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
  * Licensed under GPL Version 3.0
  */
 
+#include <stdio.h>
 #include <string.h>
 
 #include "fmrec.h"
@@ -35,6 +37,53 @@ void fmrec_wav_header(u8 *hdr, u32 rate, u32 data_bytes) {
   put16(hdr + 34, 16); // bits per sample
   memcpy(hdr + 36, "data", 4);
   put32(hdr + 40, data_bytes);
+}
+
+int fmrec_wav_fix(u8 *hdr, u32 file_size, u32 *data_bytes) {
+  u8 want[FMREC_HEADER];
+
+  // everything but the two lengths, at 4 and 40
+  fmrec_wav_header(want, FMREC_RATE, 0);
+  if (file_size < FMREC_HEADER || memcmp(hdr, want, 4) ||
+      memcmp(hdr + 8, want + 8, 32))
+    return -1;
+  *data_bytes = (file_size - FMREC_HEADER) & ~3UL;
+  fmrec_wav_header(hdr, FMREC_RATE, *data_bytes);
+  return 0;
+}
+
+int fmrec_part_name(const char *first, unsigned n, char *out, unsigned size) {
+  const char *name = first, *dot, *p;
+  char suffix[16];
+  unsigned dir, base, keep, len;
+
+  if (n < 2) {
+    if (strlen(first) >= size)
+      return -1;
+    strcpy(out, first);
+    return 0;
+  }
+  for (p = first; *p; p++)
+    if (*p == '\\' || *p == ':')
+      name = p + 1;
+  dot = strrchr(name, '.');
+  if (!dot)
+    dot = name + strlen(name);
+  sprintf(suffix, "_%u", n);
+  // 8.3: the name and its suffix in 8 characters
+  len = (unsigned)strlen(suffix);
+  keep = len < 8 ? 8 - len : 0;
+  base = (unsigned)(dot - name);
+  if (base > keep)
+    base = keep;
+  dir = (unsigned)(name - first);
+  if (dir + base + len + strlen(dot) >= size)
+    return -1;
+  memcpy(out, first, dir);
+  memcpy(out + dir, name, base);
+  strcpy(out + dir + base, suffix);
+  strcat(out, dot);
+  return 0;
 }
 
 // --- levels -----------------------------------------------------------------

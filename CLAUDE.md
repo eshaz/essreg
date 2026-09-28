@@ -4,7 +4,7 @@ Tools and rebuilt drivers for the ESS ES1869 sound chip on DOS and Windows 9x. [
 
 ## Layout
 
-* `src/*.c`: the DOS programs (`essreg`, `1869opl3`, `esfmpat`) and the shared code: `esshw` (port protocols), `esscat` (register catalog, `esscat.tbl`), `profile`, `vxdapi`, `simhw` (a simulated ES1869 for the tests), `ess3d` (the commands of `ess3d.exe`), `fmrec` (esfmrec's WAV header and levels).
+* `src/*.c`: the DOS programs (`essreg`, `1869opl3`, `esfmpat`) and the shared code: `esshw` (port protocols), `esscat` (register catalog, `esscat.tbl`), `profile`, `vxdapi`, `simhw` (a simulated ES1869 for the tests), `ess3d` (the commands of `ess3d.exe`), `fmrec` (esfmrec's WAV header, file names and levels).
 * `src/win/`: `essctl.exe`, the 16-bit Windows control panel, and `ess3dw.c`, the Windows side of `ess3d.exe` (the 3-D effect from the command line, for keys). `ess3dtr.c` is ess3d's tray icon and panel. Its icons come from `tools/ess3dico.py`. `esfmrec.c` records the FM digitally to a WAV file.
 * `src/vxd/`: `ES1869.VXD` as NASM source, from `tools/vxd2asm.py`. `essext.asm` adds the register API.
 * `src/esfm/`: `ESFM.DRV` as NASM source, from `tools/ne2asm.py`. `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm` and `esfmgm.asm` are the fixes and General MIDI, assembled with `ESFM_FIX=1`.

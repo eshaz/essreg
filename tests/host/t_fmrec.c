@@ -1,6 +1,7 @@
 /*
  * t_fmrec checks the parts of esfmrec that don't need Windows: the WAV
- * header, peak levels in dB and the /sim test tone.
+ * header and its repair, the names of a long recording's files, peak
+ * levels in dB and the /sim test tone.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -33,6 +34,56 @@ static void test_header(void) {
   CHECK_EQ(h[34] | h[35] << 8, 16);
   CHECK(!memcmp(h + 36, "data", 4));
   CHECK_EQ(get32(h + 40), 1000);
+}
+
+// the header of a recording that stopped without its last header
+static void test_fix(void) {
+  u8 h[FMREC_HEADER];
+  u32 data = 1;
+
+  fmrec_wav_header(h, FMREC_RATE, 0);
+  CHECK_EQ(fmrec_wav_fix(h, 44 + 4000 + 3, &data), 0);
+  CHECK_EQ(data, 4000); // whole frames only
+  CHECK_EQ(get32(h + 4), 36 + 4000);
+  CHECK_EQ(get32(h + 40), 4000);
+  // an old length is replaced too
+  CHECK_EQ(fmrec_wav_fix(h, 44 + 8, &data), 0);
+  CHECK_EQ(get32(h + 40), 8);
+  CHECK_EQ(fmrec_wav_fix(h, 44, &data), 0);
+  CHECK_EQ(data, 0);
+  CHECK_EQ(fmrec_wav_fix(h, 43, &data), -1);
+  // another rate or format isn't esfmrec's
+  fmrec_wav_header(h, 44100, 0);
+  CHECK_EQ(fmrec_wav_fix(h, 1000, &data), -1);
+  fmrec_wav_header(h, FMREC_RATE, 0);
+  h[22] = 1;
+  CHECK_EQ(fmrec_wav_fix(h, 1000, &data), -1);
+  memset(h, 0, sizeof(h)); // raw PCM
+  CHECK_EQ(fmrec_wav_fix(h, 1000, &data), -1);
+}
+
+static void test_parts(void) {
+  char out[32];
+
+  CHECK_EQ(fmrec_part_name("C:\\REC\\GAME.WAV", 1, out, sizeof(out)), 0);
+  CHECK(!strcmp(out, "C:\\REC\\GAME.WAV"));
+  CHECK_EQ(fmrec_part_name("C:\\REC\\GAME.WAV", 2, out, sizeof(out)), 0);
+  CHECK(!strcmp(out, "C:\\REC\\GAME_2.WAV"));
+  CHECK_EQ(fmrec_part_name("C:\\REC\\LONGNAME.WAV", 2, out, sizeof(out)), 0);
+  CHECK(!strcmp(out, "C:\\REC\\LONGNA_2.WAV"));
+  CHECK_EQ(fmrec_part_name("C:\\REC\\LONGNAME.WAV", 12, out, sizeof(out)), 0);
+  CHECK(!strcmp(out, "C:\\REC\\LONGN_12.WAV"));
+  CHECK_EQ(fmrec_part_name("A:TAKE", 3, out, sizeof(out)), 0);
+  CHECK(!strcmp(out, "A:TAKE_3"));
+  // a dot in a directory name isn't the extension
+  CHECK_EQ(fmrec_part_name("C:\\R.1\\FM", 2, out, sizeof(out)), 0);
+  CHECK(!strcmp(out, "C:\\R.1\\FM_2"));
+  CHECK_EQ(fmrec_part_name("FM.PCM", 99999, out, sizeof(out)), 0);
+  CHECK(!strcmp(out, "FM_99999.PCM"));
+  // too long for out
+  CHECK_EQ(fmrec_part_name("C:\\REC\\GAME.WAV", 2, out, 17), -1);
+  CHECK_EQ(fmrec_part_name("C:\\REC\\GAME.WAV", 2, out, 18), 0);
+  CHECK_EQ(fmrec_part_name("C:\\REC\\GAME.WAV", 1, out, 15), -1);
 }
 
 static void test_levels(void) {
@@ -83,6 +134,8 @@ static void test_tone(void) {
 
 int main(void) {
   test_header();
+  test_fix();
+  test_parts();
   test_levels();
   test_tone();
   return CHECK_DONE("t_fmrec");

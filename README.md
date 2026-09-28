@@ -122,10 +122,17 @@ ess3d reg 54 A0
 * Records the FM of Windows programs and of DOS games in a DOS box, while they go on playing.
 * `esfmrec` starts recording to `FMREC001.WAV` next to esfmrec.exe (then 002 and so on). *Stop* saves the file, *Record* starts the next one.
   * The window shows the time, the size, the rate the samples come in at and the peak levels.
+  * Enter and Esc don't stop a recording: click *Stop* or *Close*.
 * How it works:
   * Mixer 7Fh bit 4 sends the music DAC's samples to Audio 1's DMA, in place of the ADC's (DS p.65). esfmrec opens ESS's wave input like any recording program and sets the bit while it records.
   * While it records, the music DAC belongs to FM (7Fh bit 0 off). Both bits go back to what they were at the end.
   * It turns off ESS's DC offset correction (DCdrift) for the recording, and back on after ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)).
+* Made for long sessions on Windows 98:
+  * Every 5 s the WAV header gets the length so far and the file is written through to the disk. If Windows hangs or the power goes, only the last seconds are lost.
+  * A file never passes 2 h 45 min (just under 2 GB, FAT16's limit). The recording goes on in `NAME_2.WAV` (or the next `FMRECnnn.WAV`) without a gap. `/split=` makes the files shorter.
+  * A full disk stops the recording, and the file stays playable.
+  * Before it changes anything, esfmrec saves the old settings in `ESFMREC.RST`. If it's ended by force (Ctrl+Alt+Del, a crash), its next start puts them back and repairs the file's header. Until then, other programs would record the FM instead of the microphone.
+  * Every 2 s it checks mixer 7Fh, and sets it again if ESS's driver changed it (a MIDI program closing, a mixer reset). The log says when.
 * *Note: Audio 1 is also the channel Sound Blaster digital sound plays through, so a DOS game's Sound Blaster sound and a recording can't play at the same time. Its FM music records. While esfmrec records, the game gets no digital sound (Windows may say the device is in use); while the game plays digital sound, esfmrec can't start.*
 * Only one program can record at a time.
 
@@ -134,15 +141,17 @@ esfmrec [options] [file]
 
 file       the WAV file, FMREC001.WAV and up if left out
 /t=N       stop after N seconds, then exit
+/split=N   go on in a new file every N seconds
 /raw       the samples alone, without a WAV header
 /min       start minimized
-/q         no message boxes (problems go to ESFMREC.LOG)
-/log=file  append each result to a file, problems too
+/q         no message boxes, problems only go to the log
+/log=file  the log, ESFMREC.LOG next to esfmrec.exe if left out
 /sim       simulated ES1869, with a test tone for the FM
 /base, /cfg, /novxd  as for essctl
 ```
 
-* The log line says how long the file is. If the samples came in slower than 49,716 Hz, ESS's driver lost some, and it says that too.
+* The log has a line for each file: how long it is, and, if the samples came in slower than 49,716 Hz, that ESS's driver lost some. Problems go there too.
+* *Note: esfmrec is a 16-bit program and takes 8.3 names. For a folder with a long name, use its short name, like `C:\MYDOCU~1\FM.WAV`.*
 * *Note: with essctl's Options > FM keeps the music DAC, ESS's driver never gives the music DAC to I2S, between recordings either.*
 
 ## [`ES1869.VXD`](build) with a register interface

@@ -24,8 +24,9 @@ BEGIN
     LTEXT "", 102, 6, 18, 208, 9
     LTEXT "", 103, 6, 30, 208, 9
     LTEXT "", 104, 6, 42, 208, 9
-    DEFPUSHBUTTON "&Stop", 105, 110, 58, 50, 14
-    PUSHBUTTON "Close", IDCANCEL, 164, 58, 50, 14
+    /* no default button: Enter and Esc don't end a recording by accident */
+    PUSHBUTTON "&Stop", 105, 110, 58, 50, 14
+    PUSHBUTTON "Close", 106, 164, 58, 50, 14
 END
 
 1 VERSIONINFO

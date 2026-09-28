@@ -27,13 +27,19 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   and "ess3d exit" closes it
 - esfmrec: /sim records the test tone for /t= seconds into a WAV file at
   the music DAC's rate, and /raw writes the samples alone
+- esfmrec ended by force: the header it saved every 5 s holds the
+  samples, and the next start repairs it and removes the marker
+- esfmrec on a full disk (a file size limit): it stops, and the WAV file
+  holds what was written; /split= goes on in NAME_2.WAV without a gap
 
 Win16 wants 8.3 path names, so the work directory is reached through a
 short symbolic link in /tmp.
 """
 
 import os
+import resource
 import shutil
+import signal
 import struct
 import subprocess
 import sys
@@ -90,6 +96,9 @@ class WineTest(unittest.TestCase):
                                     stdout=subprocess.DEVNULL,
                                     stderr=subprocess.DEVNULL)
         time.sleep(1.5)
+        # a server of its own, so it never inherits a test's file size limit
+        os.makedirs(cls.env["WINEPREFIX"])
+        subprocess.run(["wineserver", "-p"], env=cls.env, timeout=60)
         subprocess.run(["wineboot", "-i"], env=cls.env, timeout=300,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -373,6 +382,70 @@ class WineTest(unittest.TestCase):
         raw = read(self.path("FM.PCM"))
         self.assertEqual(len(raw), 49716 * 4)
         self.assertEqual(raw[:4000], data[44:4044])
+
+    def wav_lengths(self, name):
+        data = read(self.path(name))
+        return len(data), struct.unpack("<I", data[4:8])[0] + 8, \
+            struct.unpack("<I", data[40:44])[0]
+
+    def test_esfmrec_ended_by_force(self):
+        rec = subprocess.Popen(["wine", "esfmrec.exe", "/sim", "/q",
+                                "/log=KILL.LOG", "KILL.WAV"], env=self.env,
+                               cwd=self.link, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        deadline = time.time() + 60
+        while not os.path.exists(self.path("KILL.LOG")):
+            self.assertLess(time.time(), deadline)
+            time.sleep(0.1)
+        # past the first save at 5 s, then End Task
+        time.sleep(7)
+        self.wine("taskkill", "/f", "/im", "winevdm.exe")
+        rec.wait(timeout=60)
+        self.assertTrue(os.path.exists(self.path("ESFMSIM.RST")))
+        size, riff, data = self.wav_lengths("KILL.WAV")
+        self.assertGreaterEqual(data, 5 * 49716 * 4)
+        self.assertLess(data, size - 44)
+        # the next start repairs the header and removes the marker
+        self.wine("esfmrec.exe", "/sim", "/t=1", "/q", "/log=KILL.LOG",
+                  "NEXT.WAV")
+        size, riff, data = self.wav_lengths("KILL.WAV")
+        self.assertEqual(riff, size)
+        self.assertEqual(data, (size - 44) // 4 * 4)
+        self.assertFalse(os.path.exists(self.path("ESFMSIM.RST")))
+        log = read(self.path("KILL.LOG")).decode()
+        self.assertIn("ended by force", log)
+        self.assertIn("KILL.WAV is repaired, 0:00:0", log)
+        self.assertIn("NEXT.WAV: 1.0 s", log)
+
+    def test_esfmrec_disk_full(self):
+        def limit():
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (600 * 1024,) * 2)
+
+        subprocess.run(["wine", "esfmrec.exe", "/sim", "/t=10", "/q",
+                        "/log=FULL.LOG", "FULL.WAV"], env=self.env,
+                       cwd=self.link, timeout=120, preexec_fn=limit,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        size, riff, data = self.wav_lengths("FULL.WAV")
+        self.assertLessEqual(size, 600 * 1024)
+        self.assertEqual(riff, size)
+        self.assertEqual(data, (size - 44) // 4 * 4)
+        log = read(self.path("FULL.LOG")).decode()
+        self.assertIn("FULL.WAV failed: is the disk full?", log)
+        self.assertFalse(os.path.exists(self.path("ESFMSIM.RST")))
+
+    def test_esfmrec_split(self):
+        self.wine("esfmrec.exe", "/sim", "/t=3", "/split=1", "/q", "SP.WAV")
+        pcm = b""
+        for name in ("SP.WAV", "SP_2.WAV", "SP_3.WAV"):
+            data = read(self.path(name))
+            self.assertEqual(len(data), 44 + 49716 * 4)
+            pcm += data[44:]
+        self.assertFalse(os.path.exists(self.path("SP_4.WAV")))
+        # the tone runs on across the files
+        left = struct.unpack("<%dh" % (len(pcm) // 2), pcm)[0::2]
+        rising = sum(a < 0 <= b for a, b in zip(left, left[1:]))
+        self.assertLessEqual(abs(rising - 3000), 1)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ python3 tests/run_tests.py
   * ess3d's command line and 3-D register changes (`t_ess3d`)
   * essreg's register functions that the original didn't have, like the 3-D limit (`t_regs`)
   * patch banks (`t_esfm`)
+  * esfmrec's WAV header and its repair, the names of a long recording's files, the levels and the test tone (`t_fmrec`)
   * a port trace proving that the refactored essreg talks to the chip exactly like the original did (`t_trace`)
 
 **With Open Watcom v2** (`OW2=/path/to/open-watcom`), the tests also:
@@ -35,7 +36,7 @@ To compile everything with Open Watcom on Linux:
 tools/ow2build.sh /path/to/open-watcom     # binaries in out/ow2/
 ```
 
-**Under Wine.** `tests/test_wine.py` runs `essctl.exe` and `ess3d.exe` as 16-bit Windows programs (`ESSREG_WINE=1`, needs 32-bit Wine and Xvfb):
+**Under Wine.** `tests/test_wine.py` runs `essctl.exe`, `ess3d.exe` and `esfmrec.exe` as 16-bit Windows programs (`ESSREG_WINE=1`, needs 32-bit Wine and Xvfb):
 * profile save/load against the simulated chip
 * the ESFM live load against the real `ESFM.DRV`
 * the ESFM voice table of `essctl /dump`, with ESS's driver and the fixed one
@@ -45,6 +46,9 @@ tools/ow2build.sh /path/to/open-watcom     # binaries in out/ow2/
 * ess3d's box: a second ess3d hands its setting to the box of the first one and exits
 * ess3d's tray icon: a second `ess3d tray` opens the panel of the first one, and `ess3d exit` closes it
   * *Note: Wine shows no tray icon for a 16-bit program, since its 16-bit and 32-bit icon handles differ. Windows 9x has one kind, so the icon only shows there.*
+* esfmrec's recording of the test tone, `/raw` and `/split=`
+* esfmrec ended by force (Wine's `taskkill /f`): the header it saved every 5 s holds the samples, and the next start repairs it
+* esfmrec on a full disk, made with a file size limit: it stops, and the file stays playable
 
 **Screenshots.** `tools/wineshot.sh` runs essctl under Wine on a virtual screen, to click through it and see the pages:
 
@@ -236,6 +240,12 @@ Copy `build\esfmrec.exe` to `C:\ESSREG`.
    * quit, start esfmrec, then the game: the game gets no digital sound, or a message that the device is in use, and its FM music records.
 5. From Start > *Run*, `C:\ESSREG\esfmrec.exe /t=10 /q /log=REC.LOG`: it records 10 s and exits. `REC.LOG` says "10.0 s".
 6. After esfmrec: Sound Recorder records the microphone as before, and essctl shows *Music DAC digital record* off.
+7. **Ended by force.** Record for a minute, then Ctrl+Alt+Del > *End Task* on esfmrec.
+   * essctl shows *Music DAC digital record* still on, and Sound Recorder records the FM instead of the microphone.
+   * Start esfmrec again: a box says it put the chip's settings back, and that the file is repaired with its length. The file plays to the end.
+   * Sound Recorder records the microphone again.
+8. `esfmrec /split=60` for three minutes: `FMREC00n.WAV` and the next two, one minute each, playing on without a gap.
+9. Press Enter and Esc while it records: it goes on.
 
 ### J. Expert mode (last)
 
