@@ -2559,7 +2559,11 @@ L1_151B:
         test byte [bp+0xa],0x80                         ; 151B
         jz short L1_1529                                ; 151F
         mov al,[bp+0xa]                                 ; 1521
+%if ESFM_FIX
+        call fix_status                                 ; esfmgm.asm
+%else
         mov [running_status],al                         ; 1524
+%endif
         jmp short L1_1544                               ; 1527
 
 L1_1529:
@@ -2601,6 +2605,9 @@ modm_longdata:
         jmp near modmsg_ret_ax                          ; 157D
 
 L1_1580:
+%if ESFM_FIX
+        call fix_long_load                              ; esfmgm.asm
+%endif
         mov ax,[es:di]                                  ; 1580
         mov dx,[es:di+0x2]                              ; 1583
         mov_ cx,ax                                      ; 1587
@@ -2805,6 +2812,9 @@ L1_16FF:
         jmp near L1_15A9                                ; 1709
 
 L1_170C:
+%if ESFM_FIX
+        call fix_long_save                              ; esfmgm.asm
+%endif
         or byte [es:bx+0x10],0x1                        ; 170C
         push word [bp-0x18]                             ; 1711
         mov ax,0x3c9                                    ; 1714

@@ -154,12 +154,15 @@ class FMChip:
 
 
 class Inject:
-    """A nested modMessage call, as if made by an interrupt handler."""
+    """A nested modMessage call, as if made by an interrupt handler. With
+    poke=(para, off, bytes) and no message, a write to memory at that
+    point instead, for a change the driver can't make itself there."""
 
-    def __init__(self, msg, dw1=0, dw2=0, after_writes=None,
+    def __init__(self, msg=None, dw1=0, dw2=0, after_writes=None,
                  after_insns=None, in_callback=None, user=None,
-                 on_lock=False):
+                 on_lock=False, poke=None):
         self.msg, self.dw1, self.dw2 = msg, dw1, dw2
+        self.poke = poke
         self.after_writes, self.after_insns = after_writes, after_insns
         self.in_callback = in_callback      # MOM_* message to react to
         # when the fixed driver takes its lock (fix_lock goes 0 -> 1)
@@ -220,6 +223,9 @@ class ESFMEmu:
         self.freed = set()       # blocks freed and not given out again
         self.check_selectors = False
         self.stale = []          # (cs, ip, register) holding a freed block
+        # GlobalUnWire and GlobalPageUnlock return with ES on the block, as
+        # Windows' KERNEL may
+        self.es_on_block = False
         self.gmem_fail = False   # GlobalAlloc fails
         # SYSTEM.INI and the files DOS3Call reads
         self.ini = {}            # (section, key), lower case -> value
@@ -231,6 +237,9 @@ class ESFMEmu:
         # carry set, as on Windows 3.1, "nocarry": the carry clear
         self.lfn = True
         self.opens = []          # paths opened, in order
+        self.open_calls = []     # (AX, BX, DX) of each open call
+        self.not_ready = False   # every open finds the drive not ready
+        self.int24 = []          # opens that would show a critical error
         self.reads = 0           # INT 21h 3Fh calls
         self._lock_seen = False
 
@@ -451,6 +460,11 @@ class ESFMEmu:
                     raise EmuError("emulation ended at %04x:%04x" % (cs, ip))
                 if self.stop[0] == "inject":
                     inj = self.stop[1]
+                    if inj.poke is not None:
+                        para, off, data = inj.poke
+                        self.wr(para, off, data)
+                        inj.started = inj.done = True
+                        continue
                     if uc.reg_read(UC_X86_REG_EFLAGS) & IF_FLAG:
                         cs, ip = self._inject(inj, cs, ip, True)
                     else:
@@ -506,7 +520,11 @@ class ESFMEmu:
         code += b"\x9A" + struct.pack("<HH", self.marker, STUB_PARA)
         code += b"\x07\x1F\x61\xCF"                    # pop es, ds; popa; iret
         tramp = TRAMP_OFF + 0x40 * self.depth
-        self.uc.mem_write(STUB_PARA * 16 + tramp, bytes(code))
+        at = STUB_PARA * 16 + tramp
+        self.uc.mem_write(at, bytes(code))
+        # the trampoline of an earlier injection at this depth may still be
+        # translated: without this, it would run again with its message
+        self.uc.ctl_remove_cache(at, at + len(code))
         # the marker stub is reached with a far call: drop its return address
         self.depth += 1
         return STUB_PARA, tramp
@@ -567,15 +585,23 @@ class ESFMEmu:
         ax, flags = r["AX"], uc.reg_read(UC_X86_REG_EFLAGS)
         err = None
         out = {}
-        if ax == 0x716C or ax >> 8 == 0x3D:
+        if ax in (0x716C, 0x6C00) or ax >> 8 == 0x3D:
+            self.open_calls.append((ax, r["BX"], r["DX"]))
             if ax == 0x716C and self.lfn is not True:
                 out["AX"] = 0x7100
                 err = self.lfn is False
             else:
                 name = self.rdstr((r["DS"] << 16) | (
-                    r["SI"] if ax == 0x716C else r["DX"])).upper()
+                    r["DX"] if ax >> 8 == 0x3D else r["SI"])).upper()
                 self.opens.append(name)
-                if name in self.files:
+                if self.not_ready:
+                    # a floppy or CD-ROM drive without a disk: without BX
+                    # bit 13, DOS asks INT 24h, a system-modal box
+                    if ax >> 8 == 0x3D or not r["BX"] & 0x2000:
+                        self.int24.append(name)
+                    out["AX"] = 0x15        # drive not ready
+                    err = True
+                elif name in self.files:
                     h = 5 + len(self.handles)
                     while h in self.handles:
                         h += 1
@@ -741,6 +767,8 @@ class ESFMEmu:
         uc.reg_write(UC_X86_REG_AX, ax)
         uc.reg_write(UC_X86_REG_DX, dx)
         uc.reg_write(UC_X86_REG_SP, sp + 4 + pop)
+        if self.es_on_block and key in (("KERNEL", 112), ("KERNEL", 192)):
+            uc.reg_write(UC_X86_REG_ES, arg(0))
         if inject_after is not None:
             # the client's callback sends data before returning
             return self._inject(inject_after, ret_cs, ret_ip, interrupt=False)

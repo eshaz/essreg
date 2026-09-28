@@ -131,7 +131,8 @@ Read when a program opens the device, if its date or time changed: 5 checks, 2 l
 
 **How it works** ([`src/esfm/esfmfile.asm`](../src/esfm/esfmfile.asm)):
 * `modMessage` checks the file for `MODM_OPEN`, before ESS's code, unless a program already has the device open (that open is refused).
-* The path comes from `GetPrivateProfileString`. The file is opened with `DOS3Call`: INT 21h 716Ch for long file names, or 3Dh where that call doesn't exist.
+* The path comes from `GetPrivateProfileString`. The file is opened with `DOS3Call`: INT 21h 716Ch for long file names, or 6C00h where that call doesn't exist.
+  * Both ask DOS to return errors (BX bit 13). A path on a drive without a disk fails the open, and no "drive not ready" box stops the program that opened the MIDI device.
 * INT 21h 5700h gives its date and time. The driver keeps them with the name of the file it last read, and reads the file only when they differ.
 * The bank goes into a new `GMEM_SHARE` block, like the one `bank_load` allocates.
 * The new block replaces the old one at DGROUP:0014 while the driver is held ([ESFM_MIDI.md](ESFM_MIDI.md#the-fix-buildesfmdrv)), and the old one is freed. If the bank is page-locked, the new block is locked the same way (`GlobalWire`, `GlobalPageLock`).

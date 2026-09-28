@@ -46,7 +46,8 @@ VOICE_HDR0      equ 0x18    ; byte 0 of the patch voice header
 NUM_VOICES      equ 18
 
 ; ESFM_FIX: queue of messages that arrive while the driver is held
-QSIZE           equ 64          ; entries, a power of 2
+QSIZE           equ 256         ; entries, a power of 2: a GM file's
+                                ; first tick is over 100 messages
 QENTRY          equ 16
 Q_MSG           equ 0           ; word: uMsg (0 = dropped)
 Q_USER          equ 2           ; dword: dwUser
@@ -68,4 +69,8 @@ DEV_GM_COARSE   equ 0x391   ; 16 bytes: coarse tuning (RPN 2), 40h = none
 DEV_GM_MASTER   equ 0x3A1   ; byte: master volume attenuation, 0.75 dB steps
 DEV_GM_OPREGS   equ 0x3A2   ; 2 bytes for each operator (voice * 4 + op):
                             ; the patch's registers 0 and 6
-DEV_FIX_SIZE    equ DEV_GM_OPREGS + NUM_VOICES * 4 * 2
+DEV_LONG_IDX    equ 0x432   ; byte: the long-message parser at the end of
+DEV_LONG_LEFT   equ 0x433   ; byte: the last buffer, to go on in the next
+DEV_LONG_MSG    equ 0x434   ; dword: (seg1 modm_longdata, [bp-2], [bp-15h],
+                            ; [bp-14h])
+DEV_FIX_SIZE    equ 0x438

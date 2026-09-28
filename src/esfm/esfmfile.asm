@@ -272,7 +272,8 @@ fix_open:
         push    di
         ; the long file name call first (Windows 95)
         mov     ax,0x716C
-        mov     bx,0x0040               ; read only, deny none
+        mov     bx,0x2040               ; read only, deny none, errors
+                                        ; returned: no "not ready" box
         xor     cx,cx
         mov     dx,0x0001               ; open, fail if missing
         mov     si,fix_bpath
@@ -289,8 +290,11 @@ fix_open:
         stc
         jne     .out
 .dos:
-        mov     ax,0x3D40               ; open, read only, deny none
-        mov     dx,fix_bpath
+        mov     ax,0x6C00               ; the same without long names
+        mov     bx,0x2040
+        xor     cx,cx
+        mov     dx,0x0001
+        mov     si,fix_bpath
         kernel  DOS3Call
 .out:
         pop     di
@@ -503,6 +507,8 @@ fix_install:
         push    si
         kernel  GlobalUnWire
 .free:
+        push    ds                      ; ES may hold the old block
+        pop     es
         push    si
         kernel  GlobalFree
 .done:

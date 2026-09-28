@@ -9,7 +9,10 @@
 ;    client's MOM_DONE callback), it answers MIDIERR_NOTREADY and the
 ;    caller drops the message.  A lost note off leaves the note sounding.
 ;    Here the message is queued instead, and the call that holds the
-;    driver handles the queue, in order, before it returns.
+;    driver handles the queue, in order, before it returns.  A long
+;    message always goes back to the program: refused (queue full) with
+;    its flags as they were, or with MOM_DONE when it's played, dropped by
+;    a close, or refused by ESS's code when its turn comes.
 ; 2. MODM_OPEN and MODM_CLOSE hold the driver too, so a message from an
 ;    interrupt can't write FM registers between the address and the data
 ;    write of the chip reset or of the silencing at close.  Queued
@@ -24,7 +27,8 @@
 ;    a GM, GS or XG reset (esfmgm.asm).
 ; 7. What General MIDI asks for beyond ESS's code: modulation, channel
 ;    pressure, tuning, master volume, controller 121 as RP-015
-;    (esfmgm.asm), and running status in long messages (seg1.asm).
+;    (esfmgm.asm), and running status in long messages (seg1.asm), across
+;    buffers and around real-time bytes (esfmgm.asm).
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
@@ -94,16 +98,18 @@ modMessage:
         ; OPEN and CLOSE come at task time, so if the driver is already
         ; held, the caller itself holds it (a callback): just count
         inc     word [fix_lock]
-        call    call_orig
         cmp     word [ARG_MSG],MODM_CLOSE
-        jne     .unlock
-        or      ax,ax
-        jnz     .unlock
+        jne     .orig
+        call    q_purge                 ; while the client is still there
+        call    call_orig
         push    ax
         push    dx
-        call    q_purge
+        call    q_drop                  ; what came during the close
         pop     dx
         pop     ax
+        jmp     .unlock
+.orig:
+        call    call_orig
 .unlock:
         push    ax
         push    dx
@@ -142,22 +148,29 @@ call_orig:
 ; AX = result for the caller
 q_put:
         cmp     word [ARG_MSG],MODM_LONGDATA
-        jne     .put
+        jne     .room
         les     bx,[ARG_DW1]
         test    byte [es:bx+MIDIHDR_FLAGS],MHDR_PREPARED
-        jnz     .prepared
+        jnz     .room
         mov     ax,MIDIERR_UNPREPARED
         ret
-.prepared:
-        and     byte [es:bx+MIDIHDR_FLAGS],~MHDR_DONE & 0xFF
-        or      byte [es:bx+MIDIHDR_FLAGS],MHDR_INQUEUE
-.put:
+.room:
         mov     bx,[q_tail]
         mov     ax,bx
         inc     ax
         and     ax,QSIZE - 1
         cmp     ax,[q_head]
         je      .full
+        ; a long message's header changes only once it's queued: refused,
+        ; its flags stay as the program left them
+        cmp     word [ARG_MSG],MODM_LONGDATA
+        jne     .put
+        push    bx
+        les     bx,[ARG_DW1]
+        and     byte [es:bx+MIDIHDR_FLAGS],~MHDR_DONE & 0xFF
+        or      byte [es:bx+MIDIHDR_FLAGS],MHDR_INQUEUE
+        pop     bx
+.put:
         mov     [q_tail],ax
         shl     bx,4
         add     bx,fix_queue
@@ -187,46 +200,64 @@ q_put:
         xor     ax,ax
         ret
 .full:
-        cmp     word [ARG_MSG],MODM_LONGDATA
-        jne     .refuse
-        les     bx,[ARG_DW1]
-        and     byte [es:bx+MIDIHDR_FLAGS],~MHDR_INQUEUE & 0xFF
-.refuse:
         add     word [fix_overflow],1
         adc     word [fix_overflow+2],0
         mov     ax,MIDIERR_NOTREADY
         ret
 
-; drop the queued messages of the client that was just closed (dwUser of
-; this call) and mark its queued long messages done
+; drop the queued messages of the client that is closing (dwUser of this
+; call). Before ESS's close frees it (q_purge), its long messages go back
+; to it with MOM_DONE, as a reset would send them; after (q_drop), the
+; ones that came meanwhile are only marked done
 q_purge:
+        mov     al,1
+        jmp     q_purge_mode
+q_drop:
+        xor     al,al
+q_purge_mode:
         push    si
         push    di
+        mov     ah,al
+        mov     bx,[q_head]
+.next:
         pushf
         cli
         pop     dx
-        mov     bx,[q_head]
-.next:
         cmp     bx,[q_tail]
         je      .done
         mov     si,bx
         shl     si,4
         add     si,fix_queue
-        mov     ax,[si+Q_USER]
-        cmp     ax,[ARG_USER]
+        mov     cx,[si+Q_USER]
+        cmp     cx,[ARG_USER]
         jne     .skip
-        mov     ax,[si+Q_USER+2]
-        cmp     ax,[ARG_USER+2]
+        mov     cx,[si+Q_USER+2]
+        cmp     cx,[ARG_USER+2]
         jne     .skip
-        cmp     word [si+Q_MSG],MODM_LONGDATA
-        jne     .drop
-        les     di,[si+Q_DW1]
-        and     byte [es:di+MIDIHDR_FLAGS],~MHDR_INQUEUE & 0xFF
-        or      byte [es:di+MIDIHDR_FLAGS],MHDR_DONE
-.drop:
+        mov     cx,[si+Q_MSG]
+        jcxz    .skip                   ; dropped already
         mov     word [si+Q_MSG],0
         inc     word [fix_purged]
+        cmp     cx,MODM_LONGDATA
+        jne     .skip
+        les     di,[si+Q_DW1]
+        call    restore_if
+        or      ah,ah
+        jz      .mark
+        push    ax
+        push    bx
+        push    word [ARG_USER]
+        call    fix_long_done
+        pop     bx
+        pop     ax
+        jmp     .advance
+.mark:
+        and     byte [es:di+MIDIHDR_FLAGS],~MHDR_INQUEUE & 0xFF
+        or      byte [es:di+MIDIHDR_FLAGS],MHDR_DONE
+        jmp     .advance
 .skip:
+        call    restore_if
+.advance:
         inc     bx
         and     bx,QSIZE - 1
         jmp     .next
@@ -235,6 +266,24 @@ q_purge:
         pop     di
         pop     si
         ret
+
+; fix_long_done(client) with ES:DI = MIDIHDR: a long message is done
+; without ESS's code playing it; the client gets MOM_DONE as usual
+fix_long_done:
+        push    bp
+        mov     bp,sp
+        and     byte [es:di+MIDIHDR_FLAGS],~MHDR_INQUEUE & 0xFF
+        or      byte [es:di+MIDIHDR_FLAGS],MHDR_DONE
+        push    word [bp+4]             ; the client
+        push    word 0x3C9              ; MOM_DONE
+        push    es
+        push    di
+        push    word 0
+        push    word 0
+        push    cs
+        call    driver_callback
+        pop     bp
+        ret     2
 
 ; hold the driver (counted, the outermost fix_unlock releases it)
 fix_enter:
@@ -265,7 +314,12 @@ fix_unlock:
         mov     ax,[si+Q_MSG]
         or      ax,ax
         jz      .dropped
-        ; copy the entry to the stack before interrupts can reuse the slot
+        ; copy the entry to the stack before interrupts can reuse the slot,
+        ; with what a refused long message needs afterwards
+        push    word [si+Q_DW1+2]
+        push    word [si+Q_DW1]
+        push    word [si+Q_USER]
+        push    ax
         push    word 0
         push    ax
         push    word [si+Q_USER+2]
@@ -282,6 +336,19 @@ fix_unlock:
         call    restore_if
         push    cs
         call    fix_process             ; esfmgm.asm
+        pop     cx                      ; the message
+        pop     bx                      ; the client
+        pop     di                      ; the header, for a long message
+        pop     dx
+        cmp     cx,MODM_LONGDATA
+        jne     .again
+        or      ax,ax
+        jz      .again
+        ; ESS's code refused it (the device was suspended meanwhile): the
+        ; program gets its buffer back all the same
+        mov     es,dx
+        push    bx
+        call    fix_long_done
         jmp     .again
 .dropped:
         call    restore_if

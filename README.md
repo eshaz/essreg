@@ -179,7 +179,8 @@ file       the WAV file, FMREC001.WAV and up if left out
 * It also silences every voice when a program closes the device with the sustain pedal down.
 * A sustain pedal that a song leaves down doesn't hold notes forever: a program change, or a GM, GS or XG reset, lets it up.
 * General MIDI: modulation and channel pressure (vibrato), fine and coarse tuning, the bend range in cents, master volume, GM, GS and XG resets, and controller 121 as GM wants it. See [docs/ESFM_GM.md](docs/ESFM_GM.md).
-* Running status in `midiOutLongMsg` buffers no longer mixes up notes.
+* Running status in `midiOutLongMsg` buffers no longer mixes up notes. It goes on across buffers, and a clock or active sensing byte no longer breaks it.
+* A program always gets its `midiOutLongMsg` buffers back, also when the queue is full, when it closes the device while one waits, or when the device is suspended.
 * Its built-in patch bank is [`bnk_com_better_square_wave.bin`](esfm_patch_banks).
 * It can play a patch bank straight from a file named in `SYSTEM.INI`. The file is read when a program opens the MIDI device, if its date or time changed. See [docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv).
 * See [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md) for the details.

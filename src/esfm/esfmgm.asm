@@ -20,7 +20,11 @@
 ;    already sound, not only the next ones
 ; 5. a GM, GM2, GS or XG reset in a long message sets every channel back
 ;    to the GM defaults and turns its notes off, and the master volume
-;    (F0 7F dd 04 01 ll mm F7) turns every voice down (fix_process)
+;    (F0 7F dd 04 01 ll mm F7) turns every voice down (fix_process), on
+;    the devices that have FM
+; 6. running status as the MIDI spec has it: a real-time byte leaves it
+;    alone, and the long-message parser goes on in the next buffer where
+;    the last one stopped (fix_status, fix_long_load)
 ; The GM state of each channel is kept after ESS's fields of the device
 ; (DEV_GM_* in esfmdev.inc), and chip_reset sets it to the defaults.
 ;
@@ -54,6 +58,71 @@ fix_gm_init:
         cmp     bx,16
         jb      .chan
         mov     byte [di+DEV_GM_MASTER],0
+        mov     word [di+DEV_LONG_IDX],0
+        mov     word [di+DEV_LONG_MSG],0
+        mov     word [di+DEV_LONG_MSG+2],0
+        ret
+
+; modm_longdata (seg1): the parser goes on where the last buffer left it,
+; so a message split between two buffers, or running status across them,
+; isn't lost. SI = dev, BP = modMessage's frame; keeps all but AX
+fix_long_load:
+        mov     al,[si+DEV_LONG_IDX]
+        mov     [bp-0x2],al
+        mov     al,[si+DEV_LONG_LEFT]
+        mov     [bp-0x15],al
+        mov     ax,[si+DEV_LONG_MSG]
+        mov     [bp-0x14],ax
+        mov     ax,[si+DEV_LONG_MSG+2]
+        mov     [bp-0x12],ax
+        ret
+
+; and keeps it at the end of the buffer; keeps all but AX
+fix_long_save:
+        push    si
+        mov     si,[bp-0x10]            ; dev
+        mov     al,[bp-0x2]
+        mov     [si+DEV_LONG_IDX],al
+        mov     al,[bp-0x15]
+        mov     [si+DEV_LONG_LEFT],al
+        mov     ax,[bp-0x14]
+        mov     [si+DEV_LONG_MSG],ax
+        mov     ax,[bp-0x12]
+        mov     [si+DEV_LONG_MSG+2],ax
+        pop     si
+        ret
+
+; short message status byte AL (seg1 modm_data), SI = dev: a real-time
+; byte (F8h-FFh) changes nothing, a system common one (F0h-F7h) ends the
+; running status and a channel one starts it, for the next long message
+; too, as if all the bytes came one after the other. ESS's code made any
+; status byte the running status. Keeps all but AX
+fix_status:
+        cmp     al,0xF8
+        jae     .keep
+        xor     ah,ah
+        cmp     al,0xF0
+        jb      .channel
+        xor     al,al
+        mov     [si+DEV_LONG_IDX],ax    ; and DEV_LONG_LEFT: no message
+        jmp     .set
+.channel:
+        ; a long message goes on with its data bytes, one for Cn and Dn
+        mov     ah,2
+        cmp     al,0xC0
+        jb      .left
+        cmp     al,0xE0
+        jae     .left
+        mov     ah,1
+.left:
+        mov     byte [si+DEV_LONG_IDX],1
+        mov     [si+DEV_LONG_LEFT],ah
+        xor     ah,ah
+.set:
+        mov     [si+DEV_LONG_MSG],ax
+        mov     word [si+DEV_LONG_MSG+2],0
+        mov     [running_status],al
+.keep:
         ret
 
 ; a controller (short_msg, frame of short_msg): the ones GM adds or that
@@ -106,6 +175,8 @@ fix_control:
         jb      .setpan
         mov     al,0x30
 .setpan:
+        cmp     [bx+si+DEV_CHAN_PAN],al
+        je      .done                   ; the three positions: often the same
         mov     [bx+si+DEV_CHAN_PAN],al
         call    fix_refresh
         jmp     .done
@@ -643,8 +714,8 @@ fix_gm_reset:
 .dev:
         or      si,si
         jz      .done
-        cmp     word [si+DEV_OPEN],0
-        je      .nextdev
+        call    fix_has_fm
+        jz      .nextdev
         xor     di,di
 .chan:
         ; controllers 121 (reset all controllers, the pedal up) and 123 (all
@@ -696,8 +767,8 @@ fix_master_volume:
 .dev:
         or      si,si
         jz      .done
-        cmp     word [si+DEV_OPEN],0
-        je      .next
+        call    fix_has_fm
+        jz      .next
         mov     [si+DEV_GM_MASTER],al
         push    ax
         ; update_volume(dev, FFh): every channel
@@ -711,6 +782,23 @@ fix_master_volume:
         jmp     .dev
 .done:
         pop     si
+        ret
+
+; ZF clear if device SI is open and has FM: not while it's suspended, when
+; FM isn't Windows' and ES1869.VXD traps the ports (ESS's code refuses the
+; messages then)
+fix_has_fm:
+        cmp     word [si+DEV_OPEN],0
+        je      .out
+        cmp     word [si+DEV_ACTIVE],0
+        je      .out
+        test    byte [si+DEV_FLAGS],4
+        jnz     .none
+        or      sp,sp
+.out:
+        ret
+.none:
+        cmp     ax,ax                   ; ZF set
         ret
 
 ; attenuation in 0.75 dB steps for the master volume / 512: 40 log10(v / 127)

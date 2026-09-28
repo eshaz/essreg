@@ -27,7 +27,7 @@ What General MIDI (GM Level 1) asks of a synthesizer, what ESS's `ESFM.DRV` does
 | Channel pressure | ignored | vibrato |
 | GM System On (and GM2, GS and XG resets) | ignored | every channel back to the defaults |
 | Master volume, `F0 7F dd 04 01 ll mm F7` | ignored | turns every voice down |
-| Running status | short messages only | long messages too |
+| Running status | short messages, lost after a real-time byte | short and long messages, across buffers |
 
 ## Modulation and channel pressure
 
@@ -64,6 +64,8 @@ What General MIDI (GM Level 1) asks of a synthesizer, what ESS's `ESFM.DRV` does
   * bend range 2 semitones, no tuning, no modulation or pressure, no RPN selected
   * the pedal up, all notes off, master volume full
 * `midiOutReset` and opening the device reset the same, apart from the programs, which they keep as ESS's driver does.
+* The reset happens before the rest of its buffer plays. Programs send it as a buffer of its own (a SysEx event of a MIDI file is one), so this only matters for a buffer that mixes it with notes.
+* While the device is suspended, ESS's code refuses every message, and a reset or master volume in one changes nothing either.
 
 ## Master volume
 
@@ -76,11 +78,14 @@ What General MIDI (GM Level 1) asks of a synthesizer, what ESS's `ESFM.DRV` does
 
 * The chip sends each operator left, right or both, so pan has 3 positions, as with ESS's driver: 0-47 left, 48-80 both, 81-127 right.
 * Controllers 10 (pan) and 8 (balance, the same here) now move the notes that sound too.
+* A value in the position the channel already has writes nothing, so a pan sweep rewrites the notes 3 times, not 128.
 
-## Running status in long messages
+## Running status
 
 * In a buffer sent with `midiOutLongMsg`, ESS's parser kept the data bytes of the last message when running status started the next one, and ORed the new ones in: `90 3C 7F 40 7F` played notes 3Ch and 7Ch.
 * A note off sent this way turned off the wrong note, and left the right one hanging ([ESFM_MIDI.md](ESFM_MIDI.md#5-running-status-in-long-messages)).
+* A real-time byte (F8h-FFh) sent with `midiOutShortMsg` became ESS's running status, so the next message in running status was lost. It now leaves the running status alone, and a system common byte (F0h-F7h) ends it.
+* Each long buffer started afresh. The parser now goes on where the last buffer stopped, and a short message's status is the running status of the next buffer, as if all the bytes came one after the other ([ESFM_MIDI.md](ESFM_MIDI.md#6-running-status-after-a-real-time-byte-and-between-buffers)).
 
 ## Voices
 
@@ -103,6 +108,7 @@ What General MIDI (GM Level 1) asks of a synthesizer, what ESS's `ESFM.DRV` does
 | Master volume at 64 | no change | voices 11.25 dB quieter |
 | Pan on a note that sounds | no change | moves |
 | `90 3C 7F 40 7F` in a long message | notes 3Ch and 7Ch | notes 3Ch and 40h |
+| `90 3C`, then `7F 40 7F` in the next long message | nothing | notes 3Ch and 40h |
 
 ## Listening on the hardware
 

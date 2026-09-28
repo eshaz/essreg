@@ -43,10 +43,11 @@ from retools.ne import NEFile  # noqa: E402
 
 try:
     import esfmemu
-    from esfmemu import (ESFMEmu, Inject, MODM_DATA, MODM_LONGDATA,
-                         MODM_RESET, MOM_DONE, MIDIERR_NOTREADY, DRV_POWER,
-                         PWR_SUSPENDREQUEST, PWR_SUSPENDRESUME, DRV_ENABLE,
-                         DRV_DISABLE)
+    from esfmemu import (ESFMEmu, Inject, MODM_CLOSE, MODM_DATA,
+                         MODM_LONGDATA, MODM_RESET, MOM_CLOSE, MOM_DONE,
+                         MIDIERR_NOTREADY, MHDR_DONE, MHDR_PREPARED,
+                         DRV_POWER, PWR_SUSPENDREQUEST, PWR_SUSPENDRESUME,
+                         DRV_ENABLE, DRV_DISABLE)
     HAVE_UNICORN = True
 except ImportError:
     HAVE_UNICORN = False
@@ -54,6 +55,7 @@ except ImportError:
 NOTE_A_ON, NOTE_A_OFF = 0x7F3C90, 0x003C80     # middle C, channel 1
 NOTE_B_ON, NOTE_B_OFF = 0x7F4090, 0x004090     # E, channel 1 (velocity 0)
 SUSTAIN_ON = 0x7F40B0
+DEV_FLAGS = 0x30E                               # bit 2: suspended
 _builds = {}
 
 
@@ -216,6 +218,60 @@ class StuckNoteTest(unittest.TestCase):
                 self.assertEqual(sorted({n for f, c, n in emu.voices()
                                          if f & 1}), hung)
 
+    def test_real_time_byte_keeps_running_status(self):
+        # a timing clock between a note on and its note off in running
+        # status: ESS's code took F8h as the running status
+        for which, hangs in (("stock", True), ("fixed", False)):
+            with self.subTest(which):
+                emu = self.emu(which)
+                emu.data(NOTE_A_ON)
+                emu.data(0xF8)
+                emu.data(0x003C)                # 3C 00: note off
+                self.assertEqual(bool(emu.keyed_voices()), hangs)
+        # a system common byte ends it: 40 7F isn't a note
+        emu = self.emu("fixed")
+        emu.data(NOTE_A_ON)
+        emu.data(0xF6)
+        emu.data(0x7F40)
+        self.assertEqual(emu.note_voices(0, 0x40), [])
+
+    def test_message_split_between_long_buffers(self):
+        for which, plays in (("stock", False), ("fixed", True)):
+            with self.subTest(which):
+                emu = self.emu(which)
+                emu.longdata(bytes([0x90, 0x3C]))
+                emu.longdata(bytes([0x7F, 0x40, 0x7F]))  # running status
+                self.assertEqual(bool(emu.note_voices(0, 0x3C)), plays)
+                self.assertEqual(bool(emu.note_voices(0, 0x40)), plays)
+        # the note offs in running status in the next buffers
+        emu.longdata(bytes([0x3C]))
+        emu.longdata(bytes([0x00, 0x40, 0x00]))
+        self.assertSilent(emu)
+        # a reset drops what was left
+        emu.longdata(bytes([0x90, 0x3C]))
+        emu.reset()
+        emu.longdata(bytes([0x7F]))
+        self.assertEqual(emu.driver_active(), [])
+        self.assertUnlocked(emu)
+
+    def test_short_messages_between_long_buffers(self):
+        # as if all the bytes came one after the other: a short message's
+        # status is the running status of the next long buffer, a
+        # real-time byte leaves it alone, a system common one ends it
+        emu = self.emu("fixed")
+        emu.longdata(bytes([0xC0, 0x05]))       # program 6
+        emu.data(0x6407B0)                      # volume 100
+        emu.longdata(bytes([0x07, 0x20]))       # B0 07 20
+        self.assertEqual(emu.dev8(DEV_CHAN_VOLUME), 0x20)
+        emu.data(0xFE)                          # active sensing
+        emu.longdata(bytes([0x07, 0x30]))
+        self.assertEqual(emu.dev8(DEV_CHAN_VOLUME), 0x30)
+        emu.data(0xF6)                          # tune request
+        emu.longdata(bytes([0x07, 0x40]))
+        self.assertEqual(emu.dev8(DEV_CHAN_VOLUME), 0x30)
+        self.assertEqual(emu.dev8(DEV_PROGRAM), 5)
+        self.assertUnlocked(emu)
+
     def sweep(self, which, step):
         """Send a note off from an interrupt at every step-th instruction
         of a note on, and count the trials that leave a note sounding."""
@@ -275,6 +331,8 @@ class StuckNoteTest(unittest.TestCase):
                 Inject(MODM_DATA, dw1=0x004591, after_writes=start + 90)]
         emu.data(NOTE_B_ON, injects=injs)
         self.assertEqual([i.result for i in injs], [0, 0, 0])
+        # the second one played: a voice has its note, keyed off by the third
+        self.assertIn((2, 1, 0x45), emu.voices())
         emu.data(NOTE_B_OFF)
         self.assertSilent(emu)
         self.assertEqual(emu.fix_state()["maxdepth"], 3)
@@ -286,15 +344,82 @@ class StuckNoteTest(unittest.TestCase):
         qsize = emu.fix_state()["qsize"]
         injs = [Inject(MODM_DATA, dw1=0x0064B1 | (i & 0x3F) << 16,
                        after_writes=start + 1 + 3 * i)
-                for i in range(qsize + 5)]
-        emu.data(NOTE_A_ON, injects=injs)
+                for i in range(qsize + 4)]
+        # a long message refused keeps the flags the program left
+        hdr = emu.header(bytes([0x90, 0x43, 0x7F]))
+        emu.wr(hdr >> 16, (hdr & 0xFFFF) + 16,
+               struct.pack("<I", MHDR_DONE | MHDR_PREPARED))
+        injs.append(Inject(MODM_LONGDATA, dw1=hdr, dw2=0x20,
+                           after_writes=start + 1 + 3 * len(injs)))
+        # a chord in one long message holds the driver long enough
+        chord = (0x3C, 0x40, 0x43, 0x48, 0x4C)
+        r, _flags = emu.longdata(bytes([0x90]) + bytes(
+            b for n in chord for b in (n, 0x7F)), injects=injs)
+        self.assertEqual(r, 0)
         results = [i.result for i in injs]
         self.assertEqual(results.count(0), qsize - 1)
         self.assertEqual(results.count(MIDIERR_NOTREADY), 6)
+        self.assertEqual(results[-1], MIDIERR_NOTREADY)
+        self.assertEqual(emu.header_flags(hdr), MHDR_DONE | MHDR_PREPARED)
         st = emu.fix_state()
         self.assertEqual((st["overflow"], st["maxdepth"]), (6, qsize - 1))
-        emu.data(NOTE_A_OFF)
+        emu.longdata(bytes([0x80]) + bytes(b for n in chord
+                                           for b in (n, 0x00)))
         self.assertSilent(emu)
+        self.assertUnlocked(emu)
+
+    def test_close_gives_queued_long_messages_back(self):
+        # the program closes the device from its MOM_DONE callback while
+        # another long message of it waits: that one comes back first
+        emu = self.emu("fixed")
+        hdr = emu.header(bytes([0x90, 0x43, 0x7F]))
+        injs = [Inject(MODM_LONGDATA, dw1=hdr, dw2=0x20,
+                       after_writes=emu.chip.writes + 10),
+                Inject(MODM_CLOSE, in_callback=MOM_DONE)]
+        r, _flags = emu.longdata(bytes([0x90, 0x3C, 0x7F]), injects=injs)
+        self.assertEqual((r, injs[0].result, injs[1].result), (0, 0, 0))
+        self.assertEqual(emu.header_flags(hdr) & 0x11, 0x01)  # done
+        self.assertEqual([(m, d1) for m, _i, d1, _d2 in emu.callbacks[-3:]],
+                         [(MOM_DONE, (esfmemu.STUB_PARA << 16) | 0xD000),
+                          (MOM_DONE, hdr), (MOM_CLOSE, 0)])
+        self.assertEqual(emu.keyed_voices(), [])        # 43h never played
+        self.assertEqual(emu.fix_state()["purged"], 1)
+        self.assertUnlocked(emu)
+
+    def test_long_message_during_close(self):
+        # queued during ESS's close: marked done, no callback to a client
+        # that is gone
+        emu = self.emu("fixed")
+        emu.data(NOTE_A_ON)
+        hdr = emu.header(bytes([0x90, 0x43, 0x7F]))
+        inj = Inject(MODM_LONGDATA, dw1=hdr, dw2=0x20,
+                     after_writes=emu.chip.writes + 1)
+        self.assertEqual(emu.close(injects=[inj]), 0)
+        self.assertEqual(inj.result, 0)
+        self.assertEqual(emu.header_flags(hdr) & 0x11, 0x01)
+        self.assertEqual(emu.callbacks[-1][0], MOM_CLOSE)
+        self.assertEqual(emu.keyed_voices(), [])
+        self.assertEqual(emu.chip.splits, [])
+        self.assertUnlocked(emu)
+
+    def test_long_message_refused_when_its_turn_comes(self):
+        # the device is suspended while the message waits: ESS's code
+        # refuses it, and the program gets its buffer back all the same
+        emu = self.emu("fixed")
+        hdr = emu.header(bytes([0x90, 0x43, 0x7F]))
+        start = emu.chip.writes
+        suspended = bytes([emu.dev8(DEV_FLAGS) | 4])
+        injs = [Inject(MODM_LONGDATA, dw1=hdr, dw2=0x20,
+                       after_writes=start + 10),
+                Inject(poke=(esfmemu.SEG_PARA[4], emu.dev + DEV_FLAGS,
+                             suspended), after_writes=start + 20)]
+        emu.data(NOTE_A_ON, injects=injs)
+        self.assertEqual(injs[0].result, 0)
+        self.assertTrue(injs[1].done)
+        self.assertEqual(emu.header_flags(hdr) & 0x11, 0x01)
+        self.assertEqual((emu.callbacks[-1][0], emu.callbacks[-1][2]),
+                         (MOM_DONE, hdr))
+        self.assertEqual(emu.note_voices(0, 0x43), [])
         self.assertUnlocked(emu)
 
 
@@ -762,6 +887,36 @@ class GMTest(unittest.TestCase):
         stock.data(cc(0, 10, 0))
         self.assertEqual(self.regs(stock, voices, 6), reg6)
 
+    def test_same_pan_position_writes_nothing(self):
+        # a pan sweep changes the position three times: the rest of it
+        # doesn't rewrite the sounding notes
+        emu = self.emu()
+        voices = self.play(emu)
+        reg6 = self.regs(emu, voices, 6)
+        emu.data(cc(0, 10, 0))
+        writes = emu.chip.writes
+        for value in range(1, 0x30):
+            emu.data(cc(0, 10, value))
+        self.assertEqual(emu.chip.writes, writes)
+        emu.data(cc(0, 10, 0x40))               # moved: written
+        self.assertGreater(emu.chip.writes, writes)
+        self.assertEqual(self.regs(emu, voices, 6), reg6)
+
+    def test_suspended_device_changes_nothing(self):
+        # suspended, FM isn't Windows' and ESS's code refuses the messages:
+        # a GM reset or the master volume in one changes nothing either
+        emu = self.emu(msgs=[0x0030C0, cc(0, 7, 50)])
+        self.play(emu)
+        emu.driverproc(DRV_POWER, PWR_SUSPENDREQUEST)
+        self.assertTrue(emu.dev8(DEV_FLAGS) & 4)
+        writes = emu.chip.writes
+        for sysex in (GM_ON, GS_RESET, master_volume(0x1000)):
+            self.assertEqual(emu.longdata(sysex)[0], 3)    # not enabled
+        self.assertEqual(emu.chip.writes, writes)
+        self.assertEqual((emu.dev8(DEV_PROGRAM), emu.dev8(DEV_CHAN_VOLUME),
+                          emu.dev8(DEV_GM_MASTER)), (0x30, 50, 0))
+        self.assertEqual(emu.fix_state()["lock"], 0)
+
 
 # the bank file (esfmfile.asm)
 BS_NONE, BS_LOADED, BS_MISSING, BS_BAD, BS_NOMEM = range(5)
@@ -881,6 +1036,25 @@ class BankFileTest(unittest.TestCase):
                 emu.open()
                 self.assertEqual(emu.bank(len(bank)), bank)
                 self.assertEqual(emu.opens, [PATH])
+                self.assertEqual([ax for ax, _bx, _dx in emu.open_calls],
+                                 [0x716C, 0x6C00])
+                self.assertClean(emu)
+
+    def test_drive_not_ready(self):
+        # Bank= on a floppy or CD-ROM without a disk: the open fails with
+        # no "not ready" box, both calls with BX bit 13, open only
+        for lfn in (True, False):
+            with self.subTest(lfn=lfn):
+                emu = self.emu(files={PATH: marked(self.base(), 0x5A)})
+                emu.lfn = lfn
+                emu.not_ready = True
+                emu.open()
+                self.assertEqual(emu.int24, [])
+                self.assertTrue(emu.open_calls)
+                for ax, bx, dx in emu.open_calls:
+                    self.assertEqual((bx & 0x2000, dx), (0x2000, 0x0001))
+                self.assertEqual(emu.fix_state()["bstate"], BS_MISSING)
+                self.assertEqual(emu.bank(len(self.builtin)), self.builtin)
                 self.assertClean(emu)
 
     def test_no_setting(self):
@@ -1063,6 +1237,7 @@ class BankFileTest(unittest.TestCase):
         base = self.base()
         emu = ESFMEmu(builds()["fixed"])
         emu.check_selectors = True
+        emu.es_on_block = True
         emu.ini[("esfm.drv", "bank")] = PATH
         emu.files[PATH] = marked(base, 0x5A)
         emu.driverproc(DRV_ENABLE)
