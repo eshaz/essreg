@@ -132,6 +132,9 @@ static struct {
   u32 t_saved, t_checked;
   double first_frames; // frames at the end of the first block
   int got_first, quiet, refused;
+  int queued;         // blocks the driver holds
+  unsigned dry;       // times it held none, so samples were lost
+  unsigned dry_new;   // of those, not in the log yet
   u16 peak_l, peak_r; // since the display last showed them
   int prev_drec;      // 7Fh bit 4 before, -1 if esfmrec didn't set it
   int prev_i2s;       // 7Fh bit 0 before, -1 if esfmrec didn't clear it
@@ -439,6 +442,8 @@ static UINT queue_block(WAVEHDR FAR *h) {
   h->dwUser = ++rec.seq;
   h->dwFlags &= ~WHDR_DONE;
   err = waveInAddBuffer(rec.hwi, h, sizeof(WAVEHDR));
+  if (!err)
+    rec.queued++;
   if (err && rec.on && !rec.refused) {
     rec.refused = 1;
     log_line("The driver refused a recording block, there are fewer left");
@@ -505,7 +510,7 @@ static int file_save(void) {
 
 // the file done: its header, and its line in the log; 0 or -1
 static int file_close(const char *more) {
-  char line[256];
+  char line[320];
   u32 f = rec.part_frames;
   int err;
 
@@ -515,7 +520,7 @@ static int file_close(const char *more) {
   if (close(rec.fd))
     err = -1;
   rec.fd = -1;
-  sprintf(line, "%.140s: %lu.%lu s, %lu bytes at %lu Hz%s", rec.path,
+  sprintf(line, "%.140s: %lu.%lu s, %lu bytes at %lu Hz%.120s", rec.path,
           f / FMREC_RATE, f % FMREC_RATE * 10 / FMREC_RATE, f * 4, FMREC_RATE,
           more);
   log_line(line);
@@ -643,8 +648,17 @@ static void take(const s16 FAR *pcm, u16 frames) {
 // back to the driver, unless the recording is closing
 static void drain(int requeue) {
   WAVEHDR FAR *next;
-  int i;
+  int i, done = 0;
 
+  // every block the driver had is back: it has none for the samples that
+  // come in until one goes back, and they're lost
+  for (i = 0; requeue && i < BUFS; i++)
+    if (rec.hdr[i] && (rec.hdr[i]->dwFlags & WHDR_DONE) && rec.hdr[i]->dwUser)
+      done++;
+  if (done && done == rec.queued) {
+    rec.dry++;
+    rec.dry_new++;
+  }
   for (;;) {
     next = 0;
     for (i = 0; i < BUFS; i++)
@@ -654,6 +668,7 @@ static void drain(int requeue) {
     if (!next)
       return;
     next->dwUser = 0;
+    rec.queued--;
     take((s16 FAR *)next->lpData, (u16)(next->dwBytesRecorded / 4));
     if (requeue)
       queue_block(next);
@@ -838,7 +853,7 @@ static void show(void) {
 }
 
 static void rec_stop(void) {
-  char more[100], text[200];
+  char more[120], text[200];
   u32 rate;
 
   if (!rec.on)
@@ -851,6 +866,9 @@ static void rec_stop(void) {
   rate = measured_rate();
   if (rate && rec.t_now - rec.t_first >= 30000 && rate + 50 < FMREC_RATE)
     sprintf(more, ", but only %lu Hz came in: samples were lost", rate);
+  if (rec.dry)
+    sprintf(more + strlen(more), ", the driver ran out of blocks %u times",
+            rec.dry);
   // only the log: a box isn't safe while the window closes
   if (file_close(more) && !rec.failed) {
     rec.failed = 1;
@@ -976,6 +994,13 @@ static void tick(void) {
     drain(1);
     watchdog(now);
   }
+  if (rec.dry_new && rec.dry <= 10) {
+    clock_text(text);
+    strcat(text, ": the driver had no free block, samples were lost (Windows "
+                 "was busy)");
+    log_line(text);
+  }
+  rec.dry_new = 0;
   if (!rec.failed && now - rec.t_saved >= SAVE_MS) {
     rec.t_saved = now;
     if (file_save()) {
