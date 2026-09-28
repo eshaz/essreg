@@ -190,11 +190,11 @@ file       the WAV file, FMREC001.WAV and up if left out
   * Step by step: [Installing and testing on Windows 98](#installing-and-testing-on-windows-98).
 
 ## [`ES1869.DRV`](build) with the Audio 2 DAC unfiltered
-* ESS's wave, mixer and aux driver 4.04.00.1319, with one change: the Audio 2 DAC, which plays every Windows sound, plays the samples as they are. No 4x oversampling, and the filter bypassed.
+* ESS's wave, mixer and aux driver 4.04.00.1319, with one change: the Audio 2 DAC, which plays Windows' wave output, plays the samples as they are. No 4x oversampling, and the filter bypassed, at every sample rate.
   * ESS's driver turns the 4x oversampling on at every playback. Its interpolation most likely dulls the treble. Why, and what each setting does: [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter).
-  * *Note: sounds at 11 or 22 kHz, like many Windows sounds, keep more of the DAC's images, which can sound harsher.*
+  * *Note: this is how a non-oversampling (NOS) DAC plays. At low sample rates, like the 11 and 22 kHz of many Windows sounds, its images are audible: treble above the sound's own.*
   * *Note: DirectSound plays through `ES1869.VXD`. The [extended one](#es1869vxd-with-a-register-interface-and-better-dos-boxes) plays it the same way. ESS's turns the 4x oversampling on.*
-* It isn't rebuilt from source. `python3 tools/build_es1869drv.py` changes the operand of the two instructions that write the Audio 2 mode (mixer 71h), after checking ESS's bytes. The rest is ESS's file, byte for byte.
+* It isn't rebuilt from source. `python3 tools/build_es1869drv.py` changes the two instructions that make the Audio 2 mode (mixer 71h), 2 bytes each, after checking ESS's bytes. The rest is ESS's file, byte for byte.
 * It replaces ESS's 4.04.00.1319 only. Check the version as for [`ESFM.DRV`](#before-you-start).
 * Install it from MS-DOS mode, since Windows has the driver open (Start > *Shut Down* > *Restart in MS-DOS mode*), with the file copied to `C:\ESSREG`:
   ```
@@ -202,7 +202,7 @@ file       the WAV file, FMREC001.WAV and up if left out
   copy C:\ESSREG\ES1869.DRV C:\WINDOWS\SYSTEM\ES1869.DRV
   ```
   Type `exit` to go back to Windows. To go back to ESS's driver, copy `ES1869.ORG` over `ES1869.DRV` the same way.
-* To try each setting live, essctl's *Audio 2 channel* page has *Audio 2 4x oversampling* and *Audio 2 filter bypass*. The driver puts its own setting back when a sound starts.
+* To try each setting live, essctl's *Audio 2 channel* page has *Audio 2 4x oversampling* and *Audio 2 filter bypass*. The driver puts its own setting back the next time a program opens the wave device and plays.
 
 ## [`essreg.exe`](build)
 * Utility to control otherwise unsupported registers for the ES1869 audio chip.

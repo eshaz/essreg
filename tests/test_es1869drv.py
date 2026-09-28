@@ -202,7 +202,7 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(build_es1869drv.build(False),
                          build_es1869drv.original())
 
-    def test_only_the_two_operands(self):
+    def test_only_the_two_instructions(self):
         stock = build_es1869drv.build(False)
         fixed = build_es1869drv.build(True)
         self.assertEqual(len(stock), len(fixed))

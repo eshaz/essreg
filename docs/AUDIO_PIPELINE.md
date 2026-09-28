@@ -51,10 +51,10 @@ The other bits stay as they were, like bit 5 for 48 kHz recording. Linux's `es18
 * ES1869.DRV sets 72h for a corner at 87.5% of half the sample rate: 9.7 kHz at 22,050 Hz, 4.9 kHz at 11,025 Hz.
 * At 44.1 and 48 kHz it writes FDh, a corner near 29 kHz, above the band. At those rates the SCF filters nothing audible and only adds its own switching noise.
 
-**What the plain DAC leaves in.** With neither the oversampling nor the SCF, the DAC's images reach the output: a tone at *f* also sounds at the sample rate minus *f*, a little quieter.
+**What the plain DAC leaves in.** With neither the oversampling nor the SCF, the DAC plays like a non-oversampling (NOS) DAC, and its images reach the output: a tone at *f* also sounds at the sample rate minus *f*, quieter the lower *f* is.
 * At 44.1 and 48 kHz the images are above 22 kHz, which nobody hears.
-* At low sample rates they fall in the audible band. At 22,050 Hz, a 5 kHz tone also sounds at 17,050 Hz, 11 dB quieter. Windows sounds recorded at 11 or 22 kHz can sound harsher.
-* *Note: for a low-rate sound, the SCF alone (bits 4 and 3 clear) removes those images.*
+* At low sample rates they fall in the audible band, above the sound's own treble. At 22,050 Hz, a 5 kHz tone also sounds at 17,050 Hz, 11 dB quieter. Windows sounds recorded at 11 or 22 kHz get this treble.
+* The drivers play every sample rate this way. *Note: the SCF alone (bits 4 and 3 clear) would remove those images.*
 
 **Trying each setting.** In essctl, on the *Audio 2 channel* page, change *Audio 2 4x oversampling* and *Audio 2 filter bypass* while music plays. The change is heard at once. The driver puts its own setting back at the next wave open and playback start.
 
