@@ -55,18 +55,46 @@ Control messages handled by `AUDDRV_Control` (o1:03E0):
 
 There are three resources: the **DSP** (the audio part, Audio_Base+4h to +Fh except +8h/+9h), **FM** and the **MPU-401**. Each one has an owner VM and a previous owner in the ADI.
 
+* **FM ports.** Audio_Base+0h to +3h (ADI 08h holds Audio_Base: it's the FM port 0101 reports and 0102/0103 expect), +8h/+9h, and the alias 388h to 38Bh (ADI 0Ah).
 * **Trap handlers.** `DSP_Port_Trap` (o5:0C7C), `FM_Port_Trap` (o5:0D28) and `MPU_Port_Trap` (o5:0CE4) handle a trapped port access:
   * The owner gets the real port through `Simulate_IO` or a direct `in`/`out`. So does a VM that finds the resource unowned, which makes it the owner (`Acquire_Resources`, o5:1177).
-  * Any other VM gets `Show_Contention_Message` (o5:0F0F), a SHELL message box shown once per VM unless "Disable Warning" is set, and reads return FFh.
+  * Any other VM gets `Show_Contention_Message` (o5:0F0F), and reads return FFh.
+  * The message is a SHELL message box, shown once per VM, unless "Disable Warning" is set; ESS's INF sets it. It says "Unable to play sound - the ESS AudioDrive is in use by another application." for the DSP, "Unable to play MIDI - the ESS FM Synthesizer is in use by another application." for FM and "Unable to access MIDI port - the ESS MPU-401 is in use by another application." for the MPU-401.
 * **Acquiring** stops trapping for the new owner.
+  * Every FM acquisition resets the FM synthesizer (o5:19C4: Audio_Base+7h bit 5 high for 25 reads, 36h muted meanwhile). One that comes from a port access then writes 65 registers (o5:0BD0): OPL2 mode, all operators silent, the timers masked.
   * When the DSP changes hands (the new owner isn't the previous one), it resets the DSP (`DSP_Reset`, o5:195C: Audio_Base+6h = 1, three reads, 0) and prepares Audio 2 (mixer 71h |= 12h, and 74h, 76h, 78h and 7Ah cleared).
-  * For a DOS VM it saves the mixer registers 7Ch, 1Ah, 32h, 36h, 38h, 3Eh, 3Ah, 3Ch, 64h, 60h and 62h (`Save_DOS_Mixer`).
+  * For a DOS VM it saves the mixer registers 7Ch, 1Ah, 32h, 36h, 38h, 3Eh, 3Ah, 3Ch, 64h, 60h and 62h (`Save_DOS_Mixer`), and gives FM the music DAC (7Fh bit 0 cleared, `L1_039C`).
   * For the system VM it disables DMA address translation of both channels.
 * **Releasing** (`Release_Resources`, o5:1061) turns trapping back on.
   * It resets the DSP and sends DSP commands 10h and 80h (`DSP_Reset_On_Release`: direct output of silence).
-  * For a DOS VM it restores the saved mixer registers (`Restore_DOS_Mixer`). Before that it sends DSP commands C6h and C3h, reads a byte and, if its bit 0 is clear, sends C2h 01h. These commands aren't in the data sheet.
+  * For a DOS VM it restores the saved mixer registers (`Restore_DOS_Mixer`) and 7Fh bit 0. Before that it sends DSP commands C6h and C3h, reads a byte and, if its bit 0 is clear, sends C2h 01h. These commands aren't in the data sheet.
+  * Releasing FM doesn't silence the synthesizer: notes left on sound until the next FM acquisition resets it.
   * When nothing is owned any more and "Want Local Powerdown" is set, it powers the digital section down (o5:2122: Audio_Base+7h bits 3 and 2 set, wait for Audio_Base+6h bit 3, then bit 2 cleared).
-* **Who acquires.** `ES1869.DRV` acquires the DSP when a wave device opens and releases it on close. So on an idle Windows desktop the DSP is unowned, and the first program in any VM that touches a port becomes its owner.
+* **A program's end.** The driver hooks DOSMGR_End_V86_App (o7:0076, handler o1:04B8). When any program in a DOS VM ends, the VM gives back everything it owns, even if the program was a child and its parent goes on.
+* **Who acquires.** `ES1869.DRV` acquires the DSP when a wave device opens and releases it on close, and around every mixer change. `ESFM.DRV` acquires FM from MODM_OPEN to MODM_CLOSE. So on an idle Windows desktop nothing is owned, and the first program in any VM that touches a port becomes its owner.
+
+## DOS boxes
+
+With ESS's driver:
+* A DOS program's FM detection works only while FM is free or already its VM's. While a Windows MIDI program or another DOS box has FM, every read returns FFh, and the AdLib, OPL3 and ESFM detections all fail.
+* A Windows program that touches an FM port while FM is free makes Windows the owner until a MIDI program opens and closes. DOS boxes then have no FM.
+* The FM owner doesn't get the music DAC (7Fh bit 0) nor an FM volume (36h). While no Windows MIDI program is open, ES1869.DRV gives them to I2S and IIS, so a DOS program that only uses FM can be silent. `1869opl3` works around this.
+* When a child program ends, its parent's next FM access resets the synthesizer under it.
+* When a DOS program gives the DSP back, 11 mixer registers go back to Windows' values. The others stay as it left them: the 3-D effect, the record source and levels, the wave volume, MONO_IN and MONO_OUT.
+
+The extended driver (`src/vxd/essext.asm`) changes this:
+* **FM detection always succeeds.** A VM that can't have the FM chip gets a virtual one, allocated on its first access (1.3 KB).
+  * It answers like the ES1869: the OPL3 registers of both banks, the timers (80 and 320 us per count) with the status port's IRQ, FT1 and FT2 flags, bits 4:0 reading 0 as on an OPL3, and ESFM native mode with its readback.
+  * The timers run on the processor's time stamp counter, calibrated against the system time, or on the system time.
+  * Writes go to it and nothing reaches the chip: the program runs, silently.
+* **Hand-over.** When the chip is free, the VM's next FM access takes it. Its virtual registers go to the chip first, key-on last, then its address latch, then the access.
+* **Windows gives way.** Windows gets FM from a port access only until a DOS program wants it. `ESFM.DRV`'s 0102 still keeps it until MODM_CLOSE.
+* **The same VM keeps its chip.** A DOS VM taking back the chip it had last isn't reset, since nobody used the chip in between.
+* **DOS FM is heard.** A DOS FM owner gets the music DAC and, if 36h was 00h, FM volume FFh. When it lets go, both go back, unless something changed them meanwhile.
+  * `ESFM.DRV` releases FM before it tells ES1869.DRV that MIDI closed. When a DOS box takes FM in that moment, the first DSP release by Windows afterwards (0003) gives the DOS box the music DAC and the volume again.
+* **Windows' mixer comes back.** When a DOS VM takes the DSP, 30 mixer registers are saved (`ESSREG_Snap_Regs`); when it lets go, all of them go back after ESS's 11. A change made meanwhile through the register interface (essctl, ess3d) counts as Windows'.
+* **Windows' next use resets FM.** When Windows acquires through the API, to play a sound, change a level (0002), open MIDI (0102) or the MPU-401 (0302), FM a DOS program left is reset: notes still sounding stop, and the next DOS program starts from a clean chip.
+* A program's end drops the notes and timers of its VM's virtual chip, and closing the VM frees it.
 
 ## Hardware volume
 
@@ -96,7 +124,7 @@ This mode is flag 0020h of the ADI. Function 0004 then reports an emulated count
 | `lcod.asm` ... `icod.asm` | one file per LE object |
 | `vxd.inc`, `services.inc`, `ctlmsg.inc` | VxD service and control message macros and names |
 | `adi.inc` | ADI field names |
-| `essext.asm` | the essreg register API (group 4) |
+| `essext.asm`, `essext.inc` | the essreg register API (group 4) and the DOS box improvements |
 | `layout.json`, `stub.bin`, `version.bin`, `gap.bin`, `slack.bin` | the parts of the file that are not code: object order and flags, header fields, the stub, the version resource, and the bytes between the tables |
 | `names.txt` | the names and comments given to addresses; `tools/vxd2asm.py` generated the source from the original with them |
 
@@ -117,21 +145,25 @@ python3 tools/build_vxd.py --stock --verify # must equal driver/ES1869.VXD byte 
 * Some data is reached through a base label plus an offset (for example `[D2_0000+0Ch]`). Inserting bytes inside such a structure breaks those references. Append new data at the end of PDAT (or LCOD, if it must be locked).
 * The padding between routines and about a dozen instructions are kept as `db` bytes, because NASM has no spelling that reproduces their original encoding. Two of them are short jumps with fixed distances (o4:0A27 and o4:0AC1 in `pnp.asm`): don't insert code between them and their targets.
 
-The essreg extension changes the original in only two places, both the same length:
-* the dispatcher's group bound (`cmp ah,4` becomes `cmp ah,5`)
-* the address of the group table (a copy with a fifth entry, at the end of PDAT)
+The essreg extension changes the original only in these places, each the same length, under `%if ESSREG_EXT`:
+* the dispatcher's group bound (`cmp ah,4` becomes `cmp ah,5`), and the address of its group table: a copy with a fifth entry, whose groups 0, 1 and 3 wrap 0002, 0003, 0102, 0103 and 0302
+* the ten FM trap handlers (PDAT), now `ESSREG_FM_Trap`
+* in `Acquire_Resources` and `Release_Resources`: the FM reset (o5:1229), `FM_Enable_Local_Trapping` (o5:10B1), `Save_DOS_Mixer` (o5:1279) and `Restore_DOS_Mixer` (o5:110B)
+* the size of the ADI (E9h becomes 110h, o4:0235) and of the per-VM node (2Eh becomes 34h: o4:00AB, o5:100D, o7:0042)
+* in the control dispatcher, VM_Not_Executeable and Sys_Dynamic_Device_Exit; the node removal of a device that goes (o4:09C1)
+* one call added to the DOSMGR hook (o1:04B8)
 
 Everything else is appended.
 
 ## Installing the extended driver
 
-* The extended `build/ES1869.VXD` behaves like the original for Windows, DOS programs and the ESS drivers, and adds the register API.
+* The extended `build/ES1869.VXD` behaves like the original for Windows and the ESS drivers, adds the register API, and does better for DOS programs ([DOS boxes](#dos-boxes)).
 * **Keep a copy of the original.**
 * Replacing the driver removes its DirectX certification mark (`Cert DX2`). DirectX setup may then report the driver as uncertified.
 
 1. Copy `C:\WINDOWS\SYSTEM\ES1869.VXD` to `ES1869.ORG` in the same directory.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
-3. Restart Windows. essctl's *Device information* page now shows "Register API: version 1.00".
+3. Restart Windows. essctl's *Device information* page now shows "Register API: version 1.10".
 
 **If Windows doesn't start** or sound stops working: restart, press F8 at "Starting Windows 95", choose *Command prompt only*, and run:
 

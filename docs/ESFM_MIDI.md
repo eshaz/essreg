@@ -73,7 +73,7 @@ A dropped note off leaves the voice keyed on until it's stolen for another note 
 
 * **Driver logic:** voice allocation, voice stealing, retriggering a note that's already playing, controller 64 itself, the controllers (including 120, 121 and 123-127), RPN pitch bend range, running status in short messages, the long-message parser apart from SysEx (see 4) and running status (see 5), and MODM_RESET, which silences everything.
 * **The chip:** [ESFMu](https://github.com/Kagamiin/ESFMu), the hardware-accurate ESFM emulator, releases a key off that comes during an envelope delay right away. The chip doesn't hold notes on its own.
-* **`ES1869.VXD`:** once Windows owns FM, the VxD doesn't trap the FM ports at all.
+* **`ES1869.VXD`:** once Windows owns FM, the VxD doesn't trap Windows' accesses to the FM ports, so it isn't in the path of the notes. It still traps DOS boxes' accesses ([VXD_INTERNALS.md](VXD_INTERNALS.md#dos-boxes)).
 * **Not in the repository:** the Microsoft parts (`MMSYSTEM.DLL`, `MIDIMAP.DRV`, `MCISEQ.DRV`) are described here from their documented behaviour.
 
 ## Proof

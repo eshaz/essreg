@@ -6,6 +6,12 @@ section PDAT progbits alloc noexec write align=1
 
 global D6_035C, D6_037C
 
+%if ESSREG_EXT
+%define FM_TRAP ESSREG_FM_Trap                 ; essreg: DOS FM
+%else
+%define FM_TRAP FM_Port_Trap
+%endif
+
 ; 9 x {value name, "Config"} read at init
 Registry_Value_Table:
         db "Disable Warning", 0                         ; 0000
@@ -173,13 +179,13 @@ D6_0270:
         dd DSP_Port_Trap                                ; 02CE
 D6_02D2:
         db 0x10, 0x00, 0x00, 0x00                       ; 02D2
-        dd FM_Port_Trap                                 ; 02D6
+        dd FM_TRAP                                      ; 02D6
         db 0x01, 0x00                                   ; 02DA
-        dd FM_Port_Trap                                 ; 02DC
+        dd FM_TRAP                                      ; 02DC
         db 0x02, 0x00                                   ; 02E0
-        dd FM_Port_Trap                                 ; 02E2
+        dd FM_TRAP                                      ; 02E2
         db 0x03, 0x00                                   ; 02E6
-        dd FM_Port_Trap                                 ; 02E8
+        dd FM_TRAP                                      ; 02E8
         db 0x04, 0x00                                   ; 02EC
         dd DSP_Port_Trap                                ; 02EE
         db 0x05, 0x00                                   ; 02F2
@@ -189,9 +195,9 @@ D6_02D2:
         db 0x07, 0x00                                   ; 02FE
         dd DSP_Port_Trap                                ; 0300
         db 0x08, 0x00                                   ; 0304
-        dd FM_Port_Trap                                 ; 0306
+        dd FM_TRAP                                      ; 0306
         db 0x09, 0x00                                   ; 030A
-        dd FM_Port_Trap                                 ; 030C
+        dd FM_TRAP                                      ; 030C
         db 0x0a, 0x00                                   ; 0310
         dd DSP_Port_Trap                                ; 0312
         db 0x0b, 0x00                                   ; 0316
@@ -206,13 +212,13 @@ D6_02D2:
         dd DSP_Port_Trap                                ; 0330
 D6_0334:
         db 0x04, 0x00, 0x00, 0x00                       ; 0334
-        dd FM_Port_Trap                                 ; 0338
+        dd FM_TRAP                                      ; 0338
         db 0x01, 0x00                                   ; 033C
-        dd FM_Port_Trap                                 ; 033E
+        dd FM_TRAP                                      ; 033E
         db 0x02, 0x00                                   ; 0342
-        dd FM_Port_Trap                                 ; 0344
+        dd FM_TRAP                                      ; 0344
         db 0x03, 0x00                                   ; 0348
-        dd FM_Port_Trap                                 ; 034A
+        dd FM_TRAP                                      ; 034A
 D6_034E:
         db 0x02, 0x00, 0x00, 0x00                       ; 034E
         dd MPU_Port_Trap                                ; 0352

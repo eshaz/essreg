@@ -12,7 +12,8 @@ python3 tests/run_tests.py
   * LE and NE tooling, and the byte-identical rebuilds of `ES1869.VXD` and `ESFM.DRV`
   * `ESFM.DRV` in a CPU emulator with an FM chip model and simulated interrupts: the hanging notes of ESS's driver, and the fixed driver (`test_esfmdrv`, [ESFM_MIDI.md](ESFM_MIDI.md))
   * the fixed driver's bank file in the same emulator, with `SYSTEM.INI`, files with dates and the global heap simulated
-  * the register API of the rebuilt VxD, run in a CPU emulator against a simulated ES1869
+  * the register API of the rebuilt VxD, run in a CPU emulator against a simulated ES1869, and its refusals and checks (`test_vxdext`)
+  * DOS boxes and the rebuilt VxD in the same emulator, with an FM chip model after ESFMu, VMs and per-VM port trapping (`test_vxddos`): FM detection whoever has FM, the virtual FM chip and its hand-over, the music DAC, Windows' mixer around a DOS game, and the reset when Windows uses the card again. The stock driver runs the same steps where it differs.
   * `esfmpat` on copies of `ESFM.DRV`
   * that the generated documentation is current
 * **C tests** (`tests/host/t_*.c`), built with gcc against a simulated ES1869 (`src/simhw.c`):
@@ -132,9 +133,24 @@ tools/wineshot.sh stop
 
 1. Install `build\ES1869.VXD` as in [VXD_INTERNALS.md](VXD_INTERNALS.md#installing-the-extended-driver) and restart.
 2. Windows sounds, MIDI, a DirectSound game and a DOS game in a window all work like before.
-3. essctl's title bar says "VxD register API 1.00", and the owners line (bottom right) shows the DSP/FM/MPU owners.
+3. essctl's title bar says "VxD register API 1.10", and the owners line (bottom right) shows the DSP/FM/MPU owners.
 4. With a DOS game playing, change *Audio 2 volume* or *Master volume* in essctl. The change applies right away and the game keeps its sound. That's the point of the register API!
 5. Put the original driver back if anything misbehaves, and note what.
+
+### E2. DOS boxes with the extended driver
+
+Use an FM-only DOS game or player (AdLib music, no Sound Blaster), and one that uses the Sound Blaster too.
+1. **FM while nothing else has it.** Run the FM game in a DOS box, without `1869opl3`. It detects the AdLib or OPL3 and its music plays: the driver gave it the music DAC and an FM volume. Quit it: essctl's *3-D, mic, MONO, I2S* page shows the music DAC back as before.
+2. **FM while Windows' MIDI has it.** Open a MIDI file in the Media Player and pause it. Start the FM game.
+   * It must detect the FM synthesizer and run, silently.
+   * Close the Media Player: the game's music starts within a moment, with its instruments.
+3. **Two DOS boxes.** Start the FM game in two DOS boxes. The second one detects FM and runs silently. Quit the first one: the second one's music starts.
+4. **Windows' mixer after a DOS game.** In the Windows volume control and essctl, note the 3-D effect, the record source (Recording) and the wave volume. Play the Sound Blaster game (most reset the mixer), then quit it.
+   * Everything is as it was. With ESS's driver the 3-D effect, the record source and the wave volume stayed as the game left them.
+5. **The reset.** Kill the FM game in the middle of a note (close the DOS box window, or Ctrl+Alt+Del). If a note keeps sounding, move a slider in the tray's volume control, or play any Windows sound: the note stops.
+6. **A game that runs other programs** (a menu that starts the game, a cutscene player): its music keeps its instruments after the other program ends.
+7. **Recording a DOS game.** With esfmrec recording, play the FM game: the recording has its music (esfmrec keeps 7Fh bit 4 on; the driver changes only bit 0 and 36h).
+8. Note anything that differs, and the game.
 
 ### F. ESFM patch banks
 

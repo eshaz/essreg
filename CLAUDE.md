@@ -6,7 +6,7 @@ Tools and rebuilt drivers for the ESS ES1869 sound chip on DOS and Windows 9x. [
 
 * `src/*.c`: the DOS programs (`essreg`, `1869opl3`, `esfmpat`) and the shared code: `esshw` (port protocols), `esscat` (register catalog, `esscat.tbl`), `profile`, `vxdapi`, `simhw` (a simulated ES1869 for the tests), `ess3d` (the commands of `ess3d.exe`), `fmrec` (esfmrec's WAV header, file names and levels).
 * `src/win/`: `essctl.exe`, the 16-bit Windows control panel, and `ess3dw.c`, the Windows side of `ess3d.exe` (the 3-D effect from the command line, for keys). `ess3dtr.c` is ess3d's tray icon and panel. Its icons come from `tools/ess3dico.py`. `esfmrec.c` records the FM digitally to a WAV file.
-* `src/vxd/`: `ES1869.VXD` as NASM source, from `tools/vxd2asm.py`. `essext.asm` adds the register API.
+* `src/vxd/`: `ES1869.VXD` as NASM source, from `tools/vxd2asm.py`. `essext.asm` adds the register API and the DOS box improvements (the virtual FM chip, Windows' mixer around a DOS program); `essext.inc` has its layout.
 * `src/esfm/`: `ESFM.DRV` as NASM source, from `tools/ne2asm.py`. `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm` and `esfmgm.asm` are the fixes and General MIDI, assembled with `ESFM_FIX=1`.
 * `driver/`: ESS's original drivers, the reference for the byte-identical rebuilds.
 * `build/`: the committed binaries.
@@ -42,6 +42,7 @@ tools/wineshot.sh run ess3d.exe /sim tray         # a second program on its desk
 ## Rules
 
 * **Byte-identical stock builds.** `build_esfm.py --stock --verify` and `build_vxd.py --stock --verify` must stay identical to `driver/`. Driver changes go under `%if ESFM_FIX` (ESFM.DRV) or in the extension (`ESSREG_EXT`, the VxD).
+* **VxD extension hooks:** ESS's code changes only under `%if ESSREG_EXT`, with instructions of the same length. The extension's per-device state goes after ESS's E9h bytes of the ADI, and a VM's after ESS's 2Eh bytes of its node (`essext.inc`). `tests/test_vxddos.py` runs the DOS box paths in the emulator.
 * **Committed binaries.** After changing their sources, rebuild `build/ESFM.DRV` or `build/ES1869.VXD`, and copy the changed programs from `out/ow2/` to `build/`. `test_build_is_current` checks `ESFM.DRV`.
 * **ESFM_FIX code:**
   * A label at a relocation site is a `..@` name, so it doesn't end NASM's local label scope.

@@ -27,7 +27,11 @@ L7_0013:
         push ebx                                        ; 003C
 L7_003D:
         mov eax,0x5                                     ; 003D
+%if ESSREG_EXT
+        mov ecx,ESSREG_NODE_SIZE                        ; essreg: room for NODE_VFM
+%else
         mov ecx,0x2e                                    ; 0042
+%endif
         VxDCall List_Create                             ; 0047
         jc short L7_0088                                ; 004D
         mov [edi+ebx],esi                               ; 004F

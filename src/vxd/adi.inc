@@ -16,8 +16,8 @@
 
 ADI_Flags               equ 0x04    ; word: 0020h no-DMA (PIO) emulation, 2000h MPU IRQ shared
 ADI_AudioBase           equ 0x06    ; word: Audio_Base (e.g. 220h)
-ADI_FMBase              equ 0x08    ; word: FM port (e.g. 388h), FFFFh if none
-ADI_FMAlias             equ 0x0A    ; word: FM alias base, negative if none
+ADI_FMBase              equ 0x08    ; word: the FM port ESS uses (Audio_Base), FFFFh if none
+ADI_FMAlias             equ 0x0A    ; word: FM alias base (e.g. 388h), negative if none
 ADI_MPUBase             equ 0x0C    ; word: MPU-401 port (e.g. 330h), FFFFh if none
 ADI_MPUIRQ              equ 0x0E    ; byte
 ADI_DSPOwner            equ 0x35    ; dword: VM handle that owns the DSP, 0 = none

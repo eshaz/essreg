@@ -86,7 +86,11 @@ L4_008D:
         push eax                                        ; 00A6
         mov_ edi,eax                                    ; 00A7
         xor_ eax,eax                                    ; 00A9
+%if ESSREG_EXT
+        mov ecx,ESSREG_NODE_SIZE                        ; essreg: clear NODE_VFM too
+%else
         mov ecx,0x2e                                    ; 00AB
+%endif
         shr ecx,byte 0x2                                ; 00B0
         rep stosd                                       ; 00B3
         pop eax                                         ; 00B5
@@ -253,7 +257,11 @@ ADI_Create:
         VxDCall List_Attach_Tail                        ; 0227
         mov dword [eax],0x0                             ; 022D
         push byte +0x1                                  ; 0233
+%if ESSREG_EXT
+        push dword ESSREG_ADI_SIZE                      ; essreg: the extension's fields
+%else
         push dword 0xe9                                 ; 0235
+%endif
         VxDCall _HeapAllocate                           ; 023A
         add esp,byte +0x8                               ; 0240
         or_ eax,eax                                     ; 0243
@@ -892,7 +900,11 @@ L4_09B8:
         VxDCall Get_Sys_VM_Handle                       ; 09BA
         push ebx                                        ; 09C0
 L4_09C1:
+%if ESSREG_EXT
+        call ESSREG_Node_Remove                         ; essreg: its virtual FM chip
+%else
         call L4_00CB                                    ; 09C1
+%endif
         VxDCall Get_Next_VM_Handle                      ; 09C6
         cmp ebx,[esp]                                   ; 09CC
         jnz short L4_09C1                               ; 09CF

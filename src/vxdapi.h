@@ -47,8 +47,8 @@ int VXD_CALL vxd_raw_call(void ESS_FAR *entry, vxd_regs ESS_FAR *r);
 #define ADI_COPY_SIZE 0xE9 // the most 0001 copies
 #define ADI_FLAGS 0x04
 #define ADI_AUDIO_BASE 0x06
-#define ADI_FM_BASE 0x08
-#define ADI_FM_ALIAS 0x0A
+#define ADI_FM_BASE 0x08  // the FM port the driver uses: Audio_Base
+#define ADI_FM_ALIAS 0x0A // the FM alias (388h), FFFFh if none
 #define ADI_MPU_BASE 0x0C
 #define ADI_MPU_IRQ 0x0E
 #define ADI_IRQ 0x0F

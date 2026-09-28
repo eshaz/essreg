@@ -153,8 +153,8 @@ int vxd_raw_call(void *entry, vxd_regs *r) {
     r->eax = 1;
     return 0;
   case 0x0101:
-    buf[6] = 0x88;
-    buf[7] = 0x03;
+    buf[6] = 0x20; // ADI 08h: Audio_Base, not the 388h alias
+    buf[7] = 0x02;
     r->eax = 1;
     return 0;
   case 0x0301:
@@ -194,7 +194,7 @@ static void test_open_stock(void) {
   CHECK_EQ(vxd_global_flag(&v), 0);
   CHECK_EQ(v, 1);
   CHECK_EQ(vxd_fm_info(&port), 0);
-  CHECK_EQ(port, 0x388);
+  CHECK_EQ(port, 0x220);
   CHECK_EQ(vxd_mpu_info(&port, &irq), 0);
   CHECK_EQ(port, 0x330);
   CHECK_EQ(irq, 9);

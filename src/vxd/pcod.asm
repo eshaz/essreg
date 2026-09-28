@@ -1538,7 +1538,11 @@ AUDDRV_VM_Init:
         pushf                                           ; 1001
         mov edi,[dword AUDDRV_Globals]                  ; 1002
         mov eax,0x5                                     ; 1008
+%if ESSREG_EXT
+        mov ecx,ESSREG_NODE_SIZE                        ; essreg: room for NODE_VFM
+%else
         mov ecx,0x2e                                    ; 100D
+%endif
         VxDCall List_Create                             ; 1012
         jc short L5_1059                                ; 1018
         mov [edi+ebx],esi                               ; 101A
@@ -1602,7 +1606,11 @@ L5_1099:
         mov eax,0xffffffff                              ; 10A6
         call L5_1EAD                                    ; 10AB
         pop eax                                         ; 10B0
+%if ESSREG_EXT
+        call ESSREG_FM_Released                         ; essreg: DOS FM volume back
+%else
         call FM_Enable_Local_Trapping                   ; 10B1
+%endif
         mov dword [edi+0x3d],0x0                        ; 10B6
         and dword [esi],byte -0x3                       ; 10BD
 L5_10C0:
@@ -1627,7 +1635,11 @@ L5_10FB:
         movzx edx,word [edi+0x6]                        ; 1100
         call DSP_Reset_On_Release                       ; 1104
         jc short L5_1110                                ; 1109
+%if ESSREG_EXT
+        call ESSREG_DSP_Restore                         ; essreg: all of the mixer
+%else
         call Restore_DOS_Mixer                          ; 110B
+%endif
 L5_1110:
         mov dword [edi+0x35],0x0                        ; 1110
         and dword [esi],byte -0x2                       ; 1117
@@ -1725,7 +1737,11 @@ L5_120E:
         pop eax                                         ; 1224
 L5_1225:
         movzx edx,word [edi+0x6]                        ; 1225
+%if ESSREG_EXT
+        call ESSREG_FM_Reset                            ; essreg: not for a returning VM
+%else
         call L5_19C4                                    ; 1229
+%endif
         call FM_Disable_Local_Trapping                  ; 122E
         mov [edi+0x41],ebx                              ; 1233
 L5_1236:
@@ -1749,7 +1765,11 @@ L5_1252:
 L5_126D:
         mov [edi+0x39],ebx                              ; 126D
         and word [edi+0xb3],0xc801                      ; 1270
+%if ESSREG_EXT
+        call ESSREG_DSP_Save                            ; essreg: all of the mixer
+%else
         call Save_DOS_Mixer                             ; 1279
+%endif
         call Audio_Disable_Local_Trapping               ; 127E
         test word [edi+0x4],0x20                        ; 1283
         jnz short L5_12B2                               ; 1289

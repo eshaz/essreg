@@ -101,8 +101,8 @@ Known ADI fields:
 |---|---|---|
 | 04h | word | flags, low word (0001h no "in use" warnings, 0020h no-DMA emulation, 2000h MPU-401 shares the audio IRQ; see [DRIVER_CONFIG.md](DRIVER_CONFIG.md)) |
 | 06h | word | Audio_Base |
-| 08h | word | FM port, FFFFh if none |
-| 0Ah | word | FM alias base |
+| 08h | word | FM port the driver uses: Audio_Base (220h), FFFFh if none |
+| 0Ah | word | FM alias base (388h), FFFFh if none |
 | 0Ch | word | MPU-401 port, FFFFh if none |
 | 0Eh | byte | MPU-401 IRQ |
 | 0Fh | byte | audio IRQ |
@@ -121,7 +121,7 @@ Known ADI fields:
 
 ### 0002 / 0003: acquire / release
 
-In: AX = Audio_Base (BX = 1, DSP) or the FM port (BX = 2, FM).
+In: AX = Audio_Base (BX = 1, DSP) or the FM port of 0101 (BX = 2, FM), which is Audio_Base too.
 
 Out: AX = 0. On failure CF is set and:
 
@@ -170,12 +170,12 @@ In: AX = 1, ECX = devnode, ES:BX = buffer whose first dword is its size (at most
 
 Out:
 * word at +4 = 1
-* word at +6 = FM port
+* word at +6 = FM port: ADI 08h, Audio_Base, not the 388h alias
 * dword at +0Ch = devnode
 
 ### 0102 / 0103: acquire / release FM
 
-In: AX = FM port.
+In: AX = the FM port of 0101 (Audio_Base). With 388h they fail with AX = 1.
 
 Out: AX = 0. On failure CF is set and AX = 1 (no device), 2 (in use) or 3 (not the owner).
 
@@ -201,8 +201,10 @@ Trapping stops only for the VM that owns the device.
   * This goes through `Acquire_Resources`, with all the side effects above.
   * It applies to Windows itself (the system VM) as much as to a DOS box.
 * **A port access while another VM owns the device:**
-  * shows "Unable to play sound..." (unless "Disable Warning" is set)
+  * shows "Unable to play sound...", "Unable to play MIDI..." or "Unable to access MIDI port..." (unless "Disable Warning" is set)
   * returns FFh for reads and ignores writes
+
+The rebuilt driver answers FM ports differently: a VM that can't have FM gets a virtual FM chip, and Windows gets FM from a port access only until a DOS program wants it. See [VXD_INTERNALS.md](VXD_INTERNALS.md#dos-boxes).
 
 **What this means for a register tool.** With the stock driver, essctl brackets each batch of port accesses:
 1. It reads the owner from the ADI (0001).
@@ -224,9 +226,9 @@ Common rules:
   | Code | Meaning |
   |---|---|
   | 1 | NODEV: ECX is not an ES1869 devnode |
-  | 2 | INUSE: another VM owns the DSP (controller registers only) |
-  | 3 | PARAM: register or offset out of range, bad buffer |
-  | 4 | BUSY: the DSP write buffer stays busy |
+  | 2 | INUSE: another VM owns what the access would disturb (see below) |
+  | 3 | PARAM: register or offset out of range, a port that's never written, bad buffer |
+  | 4 | BUSY: the DSP write buffer stays busy, or ESS powered the chip down |
   | 5 | TIMEOUT: the DSP returned no data |
   | 6 | NOCFG: configuration port not found |
 
@@ -235,7 +237,7 @@ Common rules:
 
 | DX | In | Out |
 |---|---|---|
-| 0400 | - | AX = 0100h (version 1.00), BX = feature bits (007Fh), DX = number of functions (13) |
+| 0400 | - | AX = 0110h (version 1.10), BX = feature bits (01FFh), DX = number of functions (13) |
 | 0401 | BL = mixer register | AL = value |
 | 0402 | BL = mixer register, BH = value | - |
 | 0403 | BL = controller register A0h-BFh | AL = value |
@@ -243,16 +245,28 @@ Common rules:
 | 0405 | BL = offset 0-Fh | AL = Audio_Base+offset |
 | 0406 | BL = offset 0-Fh, BH = value | - |
 | 0407 | BL = offset 0-7 | AL = Config_Base+offset |
-| 0408 | BL = offset 0-7, BH = value | - |
+| 0408 | BL = offset 0-7, except 2-4, BH = value | - |
 | 0409 | BL = logical device (FFh = card level), BH = PnP register | AL = value |
 | 040A | BL = logical device (FFh = card level), BH = PnP register, AL = value | - |
 | 040B | ES:DI = 128-byte buffer | mixer registers 00h-7Fh (40h reads as 0: its reads advance the identification sequence) |
 | 040C | - | AL = DSP owner, AH = FM owner, BL = MPU-401 owner (0 none, 1 the caller's VM, 2 another VM); BH = Audio_Base+Ch; DX = ADI flags |
 
 **Controller registers (0403, 0404)** go through the DSP command channel:
-* C6h (extended mode), then C0h and the register to read, or the register and the value to write.
+* The DSP must be idle first. That wait, up to 2000h polls, runs with interrupts on; the rest with interrupts off.
+* A byte nobody read (a late answer) is dropped first.
+* C6h (extended mode), then C0h and the register to read, or the register and the value to write. While no VM owns the DSP, C7h follows, so the next owner finds extended mode off as after a reset.
 * Read data is polled on Audio_Base+Ch bit 6. Reading Audio_Base+Eh would clear the audio interrupt.
-* They fail with INUSE while another VM owns the DSP, and with BUSY or TIMEOUT if the DSP doesn't respond within 2000h polls.
+* They fail with INUSE while another VM owns the DSP, and with BUSY or TIMEOUT if the DSP doesn't take the command's first byte within 200h polls, the rest within 2000h, or doesn't answer. While ESS has the chip powered down (ADI flag 0080h) they fail with BUSY at once.
+
+**What else is refused:**
+* While another VM owns the DSP: 0405 of Audio_Base+Ah, +Eh and +Fh (its read data, interrupt and FIFO), and 0406 of +6h, +Ch and +Fh (its reset, commands and FIFO).
+* While another VM owns FM: 0406 of the FM ports (+0h-3h, +8h, +9h). Their reads stay allowed.
+* 0408 of Config_Base+2h-4h, the EEPROM data, command (erase all, write all) and address ports.
+
+**Other checks:**
+* The configuration port is looked up on every call, as ESS's 0008 finds it, and used only if it's in 100h-FF8h, a multiple of 8, and its logical device 1 has Audio_Base as I/O base.
+* 040B's buffer must be the caller's writable memory: in V86 mode DI up to FF80h; in protected mode a present, writable, expand-up segment whose limit covers the 128 bytes at the offset Map_Flat used.
+* A 0402 by Windows while a DOS box has the DSP also changes the value Windows gets back afterwards.
 
 Feature bits of 0400 (BX):
 
@@ -265,6 +279,8 @@ Feature bits of 0400 (BX):
 | 4 | PnP |
 | 5 | mixer block |
 | 6 | owner information |
+| 7 | DOS FM: the virtual FM chip and the rest of [DOS boxes](VXD_INTERNALS.md#dos-boxes) |
+| 8 | DOS mixer: Windows' mixer saved and put back around a DOS program |
 
 ### Detecting the extension
 
@@ -272,6 +288,6 @@ Feature bits of 0400 (BX):
 // after getting the entry point and the devnode (function 0001)
 r.edx = 0x0400; r.ecx = devnode;
 if (!vxd_raw_call(entry, &r))      // carry clear
-    version = (u16)r.eax;          // 0100h: extension present
+    version = (u16)r.eax;          // 0100h or later: extension present
 // the stock driver: carry set, AX unchanged
 ```

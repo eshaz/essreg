@@ -19,7 +19,7 @@ This repository contains utilities and drivers designed for the ESS AudioDrive E
 * **Profiles**: File > *Save profile* stores the 56 ordinary settings in an INI file, and File > *Load profile* restores them.
   * The ESS driver resets the mixer whenever Windows starts and only puts back its own settings ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)). Put `essctl /load C:\ESS\MY.INI` in the StartUp group to restore yours at every start of Windows.
   * A save reads the chip first, then writes `MY.$$$` and renames it over `MY.INI`. A crash, a full disk or a DOS game that has the sound device leaves the old profile as it was. A setting the chip didn't answer for keeps its old value, and sections of your own in the file stay.
-* **The music DAC**: ESS's driver gives the music DAC to the I2S input (mixer 7Fh bit 0) whenever no program has the MIDI synthesizer open. FM from a DOS box or another program then doesn't play, on cards whose MODE pin enables I2S, or plays at the IIS line's volume.
+* **The music DAC**: ESS's driver gives the music DAC to the I2S input (mixer 7Fh bit 0) whenever no program has the MIDI synthesizer open. FM from a DOS box or another program then doesn't play, on cards whose MODE pin enables I2S, or plays at the IIS line's volume. The rebuilt `ES1869.VXD` gives a DOS box's FM the music DAC by itself.
   * Options > *FM keeps the music DAC*, or `essctl /i2s=off`, stops that: FM has the DAC at all times. `/i2s=on` goes back to ESS's default.
   * It sets `ESSWaveTableChip` in the driver's registry settings, which ESS's driver reads when Windows starts ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md)). essctl also clears 7Fh bit 0 right away.
   * The Windows mixer then leaves out the IIS line. Until a program first opens the MIDI synthesizer, the FM volume (36h) is the chip's default; a profile loaded at startup sets it.
@@ -158,9 +158,16 @@ file       the WAV file, FMREC001.WAV and up if left out
 * *Note: esfmrec is a 16-bit program and takes 8.3 names. For a folder with a long name, use its short name, like `C:\MYDOCU~1\FM.WAV`.*
 * *Note: with essctl's Options > FM keeps the music DAC, ESS's driver never gives the music DAC to I2S, between recordings either.*
 
-## [`ES1869.VXD`](build) with a register interface
+## [`ES1869.VXD`](build) with a register interface and better DOS boxes
 * The Windows 95 driver of the ES1869, rebuilt from source in [`src/vxd`](src/vxd), with a register interface for programs added ([docs/VXD_API.md](docs/VXD_API.md)).
-* Otherwise it works exactly like the ESS driver. `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte for byte.
+* DOS boxes get the sound card as a DOS game expects it ([docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#dos-boxes)):
+  * **FM detection always succeeds**, for AdLib, OPL3 and ESFM, whoever has the FM synthesizer. A DOS box that can't have it, because a Windows MIDI program or another DOS box does, gets a virtual one: the game runs and plays silently. When the synthesizer is free, the game's next FM access takes it, with everything the game wrote so far.
+  * A Windows program that only touched an FM port no longer keeps FM from DOS boxes. A Windows MIDI program still does, until it closes.
+  * FM from a DOS box is heard: the game gets the music DAC, and FM volume if the IIS volume was 0. `1869opl3` isn't needed.
+  * A game whose child program ends keeps its FM instruments. ESS's driver resets the synthesizer under it.
+  * After a DOS game, all of Windows' mixer settings come back: the 3-D effect, the record source and levels, the wave volume and the rest. ESS's driver puts back 11 levels.
+  * The next time Windows plays a sound or a level changes, FM left by a DOS game is reset, so no note keeps sounding. After a DOS game, moving a slider in the tray's volume control resets the card.
+* Otherwise it works like the ESS driver. `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte for byte.
 * Install: keep a copy of `C:\WINDOWS\SYSTEM\ES1869.VXD`, copy `build\ES1869.VXD` over it and restart Windows.
   * See [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#installing-the-extended-driver) for the steps, and how to go back if something goes wrong.
 * *Note: the rebuilt driver no longer carries ESS's DirectX certification mark.*
@@ -223,6 +230,7 @@ Example: `essreg r=before.txt 3=0 m=1 pa=1 t=0 r=after.txt`
 * The sound card's I/O port comes from the `BLASTER` variable (`A220`), 220h without it.
 * The IIS mixer control must not be muted in the Windows volume mixer. However, the volume can be set to 0.
 * The exit code is the command's, or 1 if it couldn't run.
+* *Note: with the rebuilt `ES1869.VXD` it isn't needed: the driver gives a DOS box's FM the music DAC and a volume itself.*
 
 ```
 Example:

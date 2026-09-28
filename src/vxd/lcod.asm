@@ -219,13 +219,21 @@ AUDDRV_Control:
         cmp eax,byte VM_Critical_Init                   ; 03E0
         jz near AUDDRV_VM_Init                          ; 03E3
         cmp eax,byte VM_Not_Executeable                 ; 03E9
+%if ESSREG_EXT
+        jz near ESSREG_VM_Not_Executeable               ; essreg: virtual FM chips
+%else
         jz near AUDDRV_VM_Not_Executeable               ; 03EC
+%endif
         cmp eax,byte Sys_VM_Init                        ; 03F2
         jz near AUDDRV_VM_Init                          ; 03F5
         cmp eax,byte Sys_Dynamic_Device_Init            ; 03FB
         jz near AUDDRV_Dynamic_Init                     ; 03FE
         cmp eax,byte Sys_Dynamic_Device_Exit            ; 0404
+%if ESSREG_EXT
+        jz near ESSREG_Dynamic_Exit                     ; essreg: virtual FM chips
+%else
         jz near AUDDRV_Dynamic_Exit                     ; 0407
+%endif
         cmp eax,byte PnP_New_DevNode                    ; 040D
         jz near AUDDRV_PnP_New_DevNode                  ; 0410
         clc                                             ; 0416
@@ -315,6 +323,9 @@ L1_04AA:
 L1_04B8:
         pusha                                           ; 04B8
         pushf                                           ; 04B9
+%if ESSREG_EXT
+        call ESSREG_App_End                     ; essreg: virtual FM key-ons off
+%endif
         VxDCall Test_Sys_VM_Handle                      ; 04BA
         jz short L1_050F                                ; 04C0
         mov esi,[dword ADI_List]                        ; 04C2

@@ -15,6 +15,9 @@
 %endif
 
 %include "vxd.inc"
+%if ESSREG_EXT
+%include "essext.inc"
+%endif
 
 %include "lcod.asm"
 %include "mcod.asm"

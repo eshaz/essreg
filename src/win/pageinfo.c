@@ -76,8 +76,12 @@ void info_text(char *buf, unsigned size) {
       sprintf(ADD, "IRQ:\t\t%u\r\n", vxd.adi[ADI_IRQ]);
       sprintf(ADD, "DMA:\t\t%u (audio 1), %u (audio 2)\r\n", vxd.adi[ADI_DMA1],
               vxd.adi[ADI_DMA2]);
-      if (vxd_adi_word(ADI_FM_BASE) != 0xFFFF)
-        sprintf(ADD, "FM:\t\t%03Xh\r\n", vxd_adi_word(ADI_FM_BASE));
+      if (vxd_adi_word(ADI_FM_BASE) != 0xFFFF) {
+        sprintf(ADD, "FM:\t\t%03Xh", vxd_adi_word(ADI_FM_BASE));
+        if (vxd_adi_word(ADI_FM_ALIAS) != 0xFFFF)
+          sprintf(ADD, " and %03Xh", vxd_adi_word(ADI_FM_ALIAS));
+        strcat(p, "\r\n");
+      }
       if (vxd_adi_word(ADI_MPU_BASE) != 0xFFFF)
         sprintf(ADD, "MPU-401:\t%03Xh, IRQ %u%s\r\n",
                 vxd_adi_word(ADI_MPU_BASE), vxd.adi[ADI_MPU_IRQ],
