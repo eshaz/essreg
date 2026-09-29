@@ -48,7 +48,7 @@ Safety classes:
 | 0007 | o5:142A | internal | Set up the no-DMA (PIO) emulation buffer |
 | 0008 | o5:1459 | info | Configuration port |
 | 0009 | o5:1404 | internal | Set a second callback |
-| 000A | o5:1922 | info | A global flag byte |
+| 000A | o5:1922 | info | Whether DirectSound has the DSP |
 | 000B | o5:1930 | internal | Set a third callback |
 | 0100 | o5:14F2 | info | Version (same handler as 0000) |
 | 0101 | o5:16D1 | info | FM information |
@@ -162,7 +162,9 @@ Out: DX = the ES1869's configuration port (Config_Base). The driver finds it wit
 
 ### 000A: global flag
 
-Out: EAX = a byte the driver keeps at o1:0328. What it means isn't known.
+Out: EAX = the byte at o1:0328: 1 while DirectSound has the DSP (its acquire at o1:125C sets it).
+
+*Note: ES1869.DRV calls 000A with EAX = a 16:16 callback (4:01A7, `dsp_busy_callback` at 3:4C3C), as if it registered one. This version of the VxD ignores it, so the callback never runs.*
 
 ### 0101: FM information
 

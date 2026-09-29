@@ -10,7 +10,11 @@
         dw seg7_data_end, seg7_end
         dw L2_0000
         dw L4_02DA
+%if ES1869_FIX
+        dw es_wod_message
+%else
         dw L6_18E4
+%endif
         dw L6_0FF2
         dw L6_1D1C
         dw L5_1BA4

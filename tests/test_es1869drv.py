@@ -41,7 +41,9 @@ AUDIO_BASE = 0x220
 DEV = 0x4000                # a device structure in the data segment
 DEMAND = 0x80               # dev+2Bh bit 7, demand transfers
 PPINT = (1, 127)            # KERNEL.GetPrivateProfileInt
+OPT_A1_DEVICE, OPT_A1_SHARED, OPT_A1_FILTER = 0x0001, 0x0002, 0x0004
 OPT_A2_4X, OPT_A2_FILTER, OPT_READ = 0x0100, 0x0200, 0x8000
+OPT_DEFAULT = OPT_A1_DEVICE | OPT_A1_SHARED
 
 
 def profile_int(value):
@@ -252,7 +254,8 @@ class Audio2ModeTest(unittest.TestCase):
 
     def test_defaults(self):
         d = Drv(self.fixed, self.syms)
-        self.assertEqual(d.opts, 0)     # not oversampled, filter bypassed
+        # not oversampled, filter bypassed; the Audio 1 player on
+        self.assertEqual(d.opts, OPT_DEFAULT)
 
     def test_wave_open(self):
         for old in (0x00, 0x10, 0x20, 0x30, 0x38):
@@ -332,8 +335,11 @@ class SettingsTest(unittest.TestCase):
 
     def test_without_the_keys(self):
         d = self.enable({})
-        self.assertEqual(d.opts, OPT_READ)
+        self.assertEqual(d.opts, OPT_READ | OPT_DEFAULT)
         self.assertEqual(d.ppint, [
+            ("ES1869.DRV", "Audio1Device", 1, "SYSTEM.INI"),
+            ("ES1869.DRV", "SharedWaveOut", 1, "SYSTEM.INI"),
+            ("ES1869.DRV", "Audio1Filter", 0, "SYSTEM.INI"),
             ("ES1869.DRV", "Audio2Oversampling", 0, "SYSTEM.INI"),
             ("ES1869.DRV", "Audio2Filter", 0, "SYSTEM.INI")])
 
@@ -344,12 +350,14 @@ class SettingsTest(unittest.TestCase):
                               ("yes", False), ("", False)):
                 with self.subTest(key=key, value=value):
                     d = self.enable({("ES1869.DRV", key): value})
-                    self.assertEqual(d.opts, OPT_READ | (bit if on else 0))
+                    self.assertEqual(d.opts, OPT_READ | OPT_DEFAULT |
+                                     (bit if on else 0))
 
     def test_other_sections_ignored(self):
         d = self.enable({("ES1869.VXD", "Audio2Filter"): "1",
-                         ("ESFM.DRV", "Audio2Oversampling"): "1"})
-        self.assertEqual(d.opts, OPT_READ)
+                         ("ESFM.DRV", "Audio2Oversampling"): "1",
+                         ("ES1869.VXD", "Audio1Device"): "0"})
+        self.assertEqual(d.opts, OPT_READ | OPT_DEFAULT)
 
     def test_read_once(self):
         d = self.enable({("ES1869.DRV", "Audio2Filter"): "1"})
@@ -357,7 +365,7 @@ class SettingsTest(unittest.TestCase):
         d.ppint = []
         d.call_far("es_read_config", DEV)       # a later first enable
         self.assertEqual(d.ppint, [])
-        self.assertEqual(d.opts, OPT_READ | OPT_A2_FILTER)
+        self.assertEqual(d.opts, OPT_READ | OPT_DEFAULT | OPT_A2_FILTER)
 
     def test_ess_mode_from_system_ini(self):
         d = self.enable({("ES1869.DRV", "Audio2Oversampling"): "1",
@@ -373,9 +381,14 @@ class SettingsTest(unittest.TestCase):
 HOOKS = [
     (1, 0x1158, 0x1159),    # audio2_init: 71h read through a2_mode_read
     (1, 0x115B, 0x115B),    # and or al,02h (ESS: 12h)
+    (3, 0x47E2, 0x47E3),    # the device structure: the Audio 1 player after
     (3, 0x4B57, 0x4B58),    # the first enable: es_read_config, SYSTEM.INI
+    (3, 0x4D1C, 0x4D1D),    # APM resume: es_wid_resume, and the player
+    (3, 0x4E21, 0x4E22),    # the last disable's record stop: a1_disable
+    (6, 0x2D79, 0x2D7A),    # playback start's D3h through a1_d3_gate
     (6, 0x2DE7, 0x2DE8),    # playback start: 71h read through a2_mode_read
     (6, 0x2DEC, 0x2DEC),    # and or al,02h (ESS: 12h)
+    (7, 0x00AE, 0x00AF),    # isr_srv_table[0]: a1_isr, the player's user 1
 ]
 
 
@@ -440,6 +453,19 @@ class BuildTest(unittest.TestCase):
         syms = build_es1869drv.symbols(True)
         site = syms["..@ES_I_PPINT"][1]
         self.assertEqual(sites(fixed, 3)[site], (3, 1, (1, 127)))
+
+    def test_exports(self):
+        # wodMessage is es_wod_message, in front of ESS's; the rest as ESS
+        stock = NEFile(build_es1869drv.build(False)).entries
+        fixed = NEFile(build_es1869drv.build(True)).entries
+        syms = build_es1869drv.symbols(True)
+        self.assertEqual(set(stock), set(fixed))
+        for ordinal in stock:
+            if ordinal == 3:
+                self.assertEqual(stock[3][:2], (6, 0x18E4))
+                self.assertEqual(fixed[3][:2], syms["es_wod_message"])
+            else:
+                self.assertEqual(fixed[ordinal], stock[ordinal])
 
     def test_hooks_changed_and_clear_of_relocations(self):
         stock = NEFile(build_es1869drv.build(False))

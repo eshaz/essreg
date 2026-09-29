@@ -168,7 +168,7 @@ file       the WAV file, FMREC001.WAV and up if left out
   * After a DOS game, all of Windows' mixer settings come back: the 3-D effect, the record source and levels, the wave volume and the rest. ESS's driver puts back 11 levels.
   * The next time Windows plays a sound or a level changes, FM left by a DOS game is reset, so no note keeps sounding. After a DOS game, moving a slider in the tray's volume control resets the card.
   * *Note: the Sound Blaster part and the MPU-401 still belong to one program at a time, as with ESS's driver. While Windows plays a sound, a DOS game starting then finds no Sound Blaster; it finds it once the sound ends.*
-* DirectSound and the rest of the driver's own Audio 2 playback play without 4x oversampling and with the filter bypassed, as [`ES1869.DRV`](#es1869drv-with-the-audio-2-dac-unfiltered) below does for Windows sounds.
+* DirectSound and the rest of the driver's own Audio 2 playback play without 4x oversampling and with the filter bypassed, as [`ES1869.DRV`](#es1869drv-with-two-wave-devices-and-the-audio-2-dac-unfiltered) below does for Windows sounds.
 * Otherwise it works like the ESS driver. `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte for byte.
 * Each change can be turned off in `SYSTEM.INI`, one key each under `[ES1869.VXD]`, read when Windows starts. See [docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings).
 * Install: keep a copy of `C:\WINDOWS\SYSTEM\ES1869.VXD`, copy `build\ES1869.VXD` over it and restart Windows.
@@ -191,13 +191,19 @@ file       the WAV file, FMREC001.WAV and up if left out
 * Install it from DOS, since Windows has the driver open: keep a copy of `C:\WINDOWS\SYSTEM\ESFM.DRV`, copy `build\ESFM.DRV` over it and restart Windows.
   * Step by step: [Installing and testing on Windows 98](#installing-and-testing-on-windows-98).
 
-## [`ES1869.DRV`](build) with the Audio 2 DAC unfiltered
-* ESS's wave, mixer and aux driver 4.04.00.1319, with one change: the Audio 2 DAC, which plays Windows' wave output, plays the samples as they are. No 4x oversampling, and the filter bypassed, at every sample rate.
+## [`ES1869.DRV`](build) with two wave devices and the Audio 2 DAC unfiltered
+* ESS's wave, mixer and aux driver 4.04.00.1319, with two changes.
+* **A second wave device**, "ESS AudioDrive Audio 1", plays through the chip's other DAC, the one ESS's driver only records with. Two programs play at once, each on its own DAC.
+  * A program that opens the first device while another plays there gets the second DAC too, instead of "the device is in use".
+  * Audio 1 records or plays, one at a time: while something plays on it, Sound Recorder can't record, and the other way round.
+  * `Audio1Device=0` and `SharedWaveOut=0` under `[ES1869.DRV]` in `SYSTEM.INI` give ESS's single device back.
+  * How it works, and what ESS's driver and the data sheet say about Audio 1: [docs/AUDIO1.md](docs/AUDIO1.md).
+* **The Audio 2 DAC**, which plays Windows' wave output, plays the samples as they are. No 4x oversampling, and the filter bypassed, at every sample rate.
   * `SYSTEM.INI` chooses it, read when Windows starts. `Audio2Oversampling=1` and `Audio2Filter=1` under `[ES1869.DRV]` give ESS's mode back, for DirectSound too. See [docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#62-es1869drv).
   * ESS's driver turns the 4x oversampling on at every playback. Its interpolation most likely dulls the treble. Why, and what each setting does: [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter).
   * *Note: this is how a non-oversampling (NOS) DAC plays. At low sample rates, like the 11 and 22 kHz of many Windows sounds, its images are audible: treble above the sound's own.*
   * *Note: DirectSound plays through `ES1869.VXD`. The [extended one](#es1869vxd-with-a-register-interface-and-better-dos-boxes) plays it the same way. ESS's turns the 4x oversampling on.*
-* Rebuilt from source in [`src/es1869`](src/es1869). `python3 tools/build_es1869drv.py --stock --verify` rebuilds the original byte for byte. The change is five instructions of ESS's, each the same length, and code added after ESS's, which stays at its addresses.
+* Rebuilt from source in [`src/es1869`](src/es1869). `python3 tools/build_es1869drv.py --stock --verify` rebuilds the original byte for byte. The changes are ten instructions and table entries of ESS's, each the same length, and code added after ESS's, which stays at its addresses.
 * It replaces ESS's 4.04.00.1319 only. Check the version as for [`ESFM.DRV`](#before-you-start).
 * Install it from MS-DOS mode, since Windows has the driver open (Start > *Shut Down* > *Restart in MS-DOS mode*), with the file copied to `C:\ESSREG`:
   ```
@@ -358,6 +364,7 @@ More checks are in [docs/TESTING.md](docs/TESTING.md) (G, G2 and G3).
 * [docs/ESFM_BANK.md](docs/ESFM_BANK.md): FM patch banks and `ESFM.DRV`.
 * [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md): why ESFM notes hang, the MIDI driver stack, and the fixed `ESFM.DRV`.
 * [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md): where skipped samples come from, the Audio 2 DAC's oversampling and filter, and what to try on the card.
+* [docs/AUDIO1.md](docs/AUDIO1.md): the chip's Audio 1 channel, telegaming, and the second wave device of `ES1869.DRV`.
 * [docs/RE_NOTES.md](docs/RE_NOTES.md): how the drivers were reverse-engineered.
 * [docs/TESTING.md](docs/TESTING.md): automated tests and a checklist for real hardware.
 * [docs/datasheet](docs/datasheet): the ES1869, ES938 and ES1868 data sheets.

@@ -24,7 +24,11 @@ prtvx_regs:
 
 ; far pointers by user - 1: Audio 1 users 1-4 at +0 (isr_record, isr_record, isr_play, isr_play), Audio 2 users 1-2 at +8
 isr_srv_table:
+%if ES1869_FIX
+        dw a1_isr                       ; essreg: user 1, the Audio 1 player
+%else
         db 0xB4, 0x19                                   ; 00AE
+%endif
 R7_00B0: dw 0xFFFF                                      ; 00B0 seg1
         db 0xB4, 0x19                                   ; 00B2
 R7_00B4: dw R7_00B0                                     ; 00B4 seg1

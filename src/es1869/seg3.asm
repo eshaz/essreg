@@ -7881,7 +7881,11 @@ L3_47C4:
 L3_47DD:
         mov ax,0x40                                     ; 47DD
         push ax                                         ; 47E0
+%if ES1869_FIX
+        mov ax,DEV_FIX_SIZE             ; essreg: the Audio 1 player after it
+%else
         mov ax,0x132                                    ; 47E1
+%endif
         push ax                                         ; 47E4
         callp R3_47E6, 0xFFFF, 0x0000                   ; 47E5 KERNEL.LocalAlloc
         mov_ si,ax                                      ; 47EA
@@ -8511,7 +8515,11 @@ L3_4D08:
         push si                                         ; 4D14
         callf wod_resume, R3_4D18, R3_4D1E              ; 4D15 far seg6
         push si                                         ; 4D1A
+%if ES1869_FIX
+        callf es_wid_resume, R3_4D1E, R3_4838   ; essreg: and the Audio 1 player
+%else
         callf L6_0D40, R3_4D1E, R3_4838                 ; 4D1B far seg6
+%endif
 
 L3_4D20:
         mov si,[si+0x125]                               ; 4D20
@@ -8623,7 +8631,11 @@ L3_4E0F:
         or_ ax,ax                                       ; 4E1B
         jnz short L3_4E4A                               ; 4E1D
         push si                                         ; 4E1F
+%if ES1869_FIX
+        callf a1_disable, R3_4E23, R3_4E29      ; essreg: and the Audio 1 player
+%else
         callf L1_1602, R3_4E23, R3_4E29                 ; 4E20 far seg1
+%endif
         push si                                         ; 4E25
         callf audio2_stop, R3_4E29, R3_4E34             ; 4E26 far seg1
         push si                                         ; 4E2B

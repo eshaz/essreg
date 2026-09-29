@@ -5077,6 +5077,7 @@ L1_264C:
 
 %if ES1869_FIX
 %include "a2mode.asm"
+%include "a1play.asm"
 %endif
 
 seg1_data_end:

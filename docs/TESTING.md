@@ -15,6 +15,7 @@ python3 tests/run_tests.py
   * the register API of the rebuilt VxD, run in a CPU emulator against a simulated ES1869, and its refusals and checks (`test_vxdext`)
   * that the extended VxD keeps ESS's code where it was, byte for byte apart from the hooks, and that Windows' own sound (ES1869.DRV's calls around a wave device, a mixer change, DirectSound taking the DSP) makes the same port accesses as with ESS's driver, apart from the Audio 2 mode (`test_vxdext`)
   * `ES1869.DRV` rebuilt from `src/es1869`: ESS's driver byte for byte, and in the changed build ESS's code at its addresses, apart from the listed instructions. Its writes of the Audio 2 mode run in the CPU emulator inside ESS's code, for both builds (`test_es1869drv`)
+  * the Audio 1 player of `ES1869.DRV` in the CPU emulator with a model of the DSP, the mixer and the DMA controller (`tests/drvemu.py`), its interrupts through ESS's own handler (`test_a1play`): what the DMA takes is what the program wrote, headers come back once played, underruns, loops, pause, reset, close, who gets Audio 1, device 0 falling back to it, the resume and the last disable, and with its keys at 0 ESS's answers
   * DOS boxes and the rebuilt VxD in the same emulator, with an FM chip model after ESFMu, VMs and per-VM port trapping (`test_vxddos`): FM detection whoever has FM, the virtual FM chip and its hand-over, the music DAC, Windows' mixer around a DOS game, and the reset when Windows uses the card again. The stock driver runs the same steps where it differs.
   * the SYSTEM.INI settings of all three drivers, read with emulated profile calls: each key and its default, read once, and each change off doing what ESS's driver does. With every key at 0, the VxD (`test_vxdini`) and `ESFM.DRV` (`SettingsTest` in `test_esfmdrv`) make the same port accesses as ESS's drivers, step by step
   * `esfmpat` on copies of `ESFM.DRV`
@@ -164,12 +165,26 @@ See [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-f
 1. With ESS's `ES1869.DRV`, play music at 44.1 kHz in Winamp with the waveOut output, and open essctl on *Audio 2 channel*. F5: *Audio 2 4x oversampling* is on.
    * Switch it off and *Audio 2 filter bypass* on while the music plays, and back. Note what changes.
    * Stop and play again: the oversampling is on again.
-2. Install `build\ES1869.DRV` as in the [README](../README.md#es1869drv-with-the-audio-2-dac-unfiltered) and restart. Play the same music: F5 shows the oversampling off and the filter bypassed, and it sounds like the setting of step 1.
+2. Install `build\ES1869.DRV` as in the [README](../README.md#es1869drv-with-two-wave-devices-and-the-audio-2-dac-unfiltered) and restart. Play the same music: F5 shows the oversampling off and the filter bypassed, and it sounds like the setting of step 1.
 3. Winamp's DirectSound output: the same with the extended `ES1869.VXD` (E). With ESS's, the oversampling is on.
 4. Play Windows sounds at 11 and 22 kHz, like those in `C:\WINDOWS\MEDIA`, and music at 44.1 and 48 kHz: each plays at its pitch and speed.
 5. If the computer has a standby: pause Winamp, Start > *Shut Down* > *Stand by*, wake the computer and play on. The music keeps its pitch, and F5 shows the same setting.
 6. Record the Wave output with each setting, as in [Measuring the DAC on the card](AUDIO_PIPELINE.md#measuring-the-dac-on-the-card), and keep both files.
 7. Sound Recorder records, a MIDI file plays, and a DOS game in a window has its sound, as before.
+
+### E3b. The Audio 1 device
+
+See [AUDIO1.md](AUDIO1.md#the-audio-1-player-in-buildes1869drv). With `build\ES1869.DRV` installed:
+1. Control Panel > *Multimedia* > *Audio*: the playback list has "ESS AudioDrive Playback (220)" and "ESS AudioDrive Audio 1 (220)".
+2. Play music in Winamp on the first device, and a WAV file in Media Player with *Audio 1* as the preferred device. Both play, each at its pitch, and neither skips.
+   * essctl's *Audio 1 controller* page, F5: B8h shows the DAC direction and bit 0 set while Media Player plays.
+3. With the music playing on Audio 1, start recording in Sound Recorder: it says the device is in use. Stop the music and record: it works.
+4. Leave Audio 1 as the preferred device off, play the music on the first device, and start a second player on it: it plays on Audio 1 now.
+5. Play a short Windows sound many times on Audio 1 (each start of a sound opens the device): no clicks at the start or the end, and no sound left looping after the last.
+6. Pause and go on in Media Player on Audio 1, and seek: it picks up where it was. Its position display runs at the right speed.
+7. The volume of Audio 1: essctl's *Audio 1 (wave) volume* (mixer 14h). A program's own volume control on device 1 sets it too.
+8. If the computer has a standby: play on Audio 1, stand by, wake it: the sound goes on.
+9. `SharedWaveOut=0` and `Audio1Device=0`, restart: one playback device, and a second player on it says it's in use, as with ESS's driver.
 
 ### E4. SYSTEM.INI settings
 

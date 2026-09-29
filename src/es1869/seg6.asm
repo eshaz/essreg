@@ -5437,7 +5437,11 @@ L6_2D57:
         push word [bp+0x6]                              ; 2D72
         mov al,0xd3                                     ; 2D75
         push ax                                         ; 2D77
+%if ES1869_FIX
+        callf a1_d3_gate, R6_2D7B, R6_2D9B      ; essreg: not while Audio 1 plays
+%else
         callf dsp_write, R6_2D7B, R6_2D9B               ; 2D78 far seg1
+%endif
         mov bx,[bp+0x6]                                 ; 2D7D
         cmp word [bx+0xaa],byte +0x0                    ; 2D80
         jz short L6_2D8A                                ; 2D85
@@ -5755,6 +5759,10 @@ L6_3024:
         retf                                            ; 3028
         db 0x90                                         ; 3029
 
+%if ES1869_FIX
+%include "a1wave.asm"
+%endif
+
 seg6_data_end:
 
 ; relocation table
@@ -5772,5 +5780,8 @@ seg6_rel_start:
         reloc 3, 1, R6_1CC5, 0x0002, 0x00B0             ; USER.LoadString
         reloc 3, 1, R6_1CF1, 0x0001, 0x0161             ; KERNEL.lstrcpyn
         reloc 3, 1, R6_2A0F, 0x0003, 0x025F             ; MMSYSTEM.timeGetTime
+%if ES1869_FIX
+        a1wave_relocs
+%endif
 seg6_rel_end:
 seg6_end:
