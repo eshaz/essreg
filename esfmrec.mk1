@@ -1,0 +1,29 @@
+# Builds esfmrec.exe, which records the ES1869's FM synthesizer digitally
+# to a WAV file (16-bit Windows, large model).
+#
+# Notes:
+#
+# It uses WIN_CFLAGS and the w_ objects of essctl.mk1, so the Makefile
+# includes it after essctl.mk1.
+#
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+
+w_fmrec.obj : src\fmrec.c .AUTODEPEND
+ *wcc src\fmrec.c $(WIN_CFLAGS) -fo=w_fmrec.obj
+
+w_esfmrec.obj : src\win\esfmrec.c .AUTODEPEND
+ *wcc src\win\esfmrec.c $(WIN_CFLAGS) -fo=w_esfmrec.obj
+
+esfmrec.res : src\win\esfmrec.rc src\win\essctl.ico
+ *wrc -q -r -bt=windows -i="$(%watcom)/h;$(%watcom)/h/win;src\win" src\win\esfmrec.rc -fo=esfmrec.res
+
+esfmrec.exe : w_esfmrec.obj w_fmrec.obj w_winio.obj w_esshw.obj w_esscat.obj w_essio.obj w_simhw.obj w_vxdapi.obj w_vxdcall.obj esfmrec.res nestamp.exe .AUTODEPEND
+ @%write esfmrec.lk1 FIL w_esfmrec.obj,w_fmrec.obj,w_winio.obj,w_esshw.obj,w_esscat.obj,w_essio.obj,w_simhw.obj,w_vxdapi.obj,w_vxdcall.obj
+ @%append esfmrec.lk1 LIBR mmsystem.lib
+ @%append esfmrec.lk1 SEGMENT CLASS 'CODE' MOVEABLE DISCARDABLE
+ @%append esfmrec.lk1 OPTION DESCRIPTION 'ES1869 FM Recorder'
+ *wlink name esfmrec sys windows op m op maxe=10 op q op el op stack=8k op heapsize=4k @esfmrec.lk1
+ *wrc -q -bt=windows esfmrec.res esfmrec.exe
+ nestamp esfmrec.exe
