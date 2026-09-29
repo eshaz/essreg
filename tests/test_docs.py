@@ -66,6 +66,23 @@ class DocsTest(unittest.TestCase):
         listed = set(re.findall(r"^\| ([0-9A-F]{4}) \|", section, re.M))
         self.assertEqual(listed, codes)
 
+    def test_notepad(self):
+        """every markdown file reads in Windows 98's Notepad: CRLF, plain
+        ASCII, 76 columns, under 60,000 bytes (tools/mdfmt.py)"""
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import mdfmt
+        problems = []
+        for path in markdown_files():
+            name = os.path.relpath(path, ROOT)
+            with open(path, "rb") as f:
+                raw = f.read()
+            text = raw.decode("ascii", "replace")
+            new = mdfmt.format_text(text, name, problems)
+            mdfmt.check_rules(name, new, problems)
+            if new.replace("\n", "\r\n").encode("ascii", "replace") != raw:
+                problems.append(name + ": run python3 tools/mdfmt.py")
+        self.assertEqual(problems, [])
+
     def test_links(self):
         """relative links and #anchors in the markdown files lead somewhere"""
         bad = []

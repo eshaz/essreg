@@ -5,7 +5,7 @@
 *.rc text eol=crlf
 *.tbl text eol=crlf
 *.py text eol=lf
-*.md text eol=lf
+*.md text eol=crlf
 *.json text eol=lf
 *.sh text eol=lf
 *.pdf binary

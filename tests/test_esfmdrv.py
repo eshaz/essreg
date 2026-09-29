@@ -851,9 +851,10 @@ class GMTest(unittest.TestCase):
                              "run python3 tools/gmcheck.py")
 
     def test_gmcheck_steps_in_testing_md(self):
+        # word for word: the doc wraps the list for Notepad
         with open(os.path.join(ROOT, "docs", "TESTING.md")) as f:
-            doc = f.read().replace("\n   ", "\n")
-        self.assertIn(gmcheck.steps_table(), doc)
+            doc = " ".join(f.read().split())
+        self.assertIn(" ".join(gmcheck.steps_table().split()), doc)
 
     def test_gmcheck_plays(self):
         emu = self.emu()

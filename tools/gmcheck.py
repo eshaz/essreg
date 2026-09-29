@@ -39,8 +39,9 @@ STEPS = [
 
 
 def steps_table():
-    """The steps as the rows of a markdown table."""
-    return "".join("| %g-%g s | %s |\n" % s for s in STEPS)
+    """The steps as a markdown list, as docs/TESTING.md has them."""
+    return "".join("* %g-%g s, %s%s\n" % (a, b, t[0].lower(), t[1:])
+                   for a, b, t in STEPS)
 
 
 def events():
