@@ -22,6 +22,8 @@
 #define A1_STATE (DEV_SIZE + 0x12)
 #define A1_FMT (DEV_SIZE + 0x13)
 #define A1_SIZEOF 0x54
+#define FM_STATE (DEV_SIZE + A1_SIZEOF) // version 2
+#define FM_SIZEOF 0x26
 
 static u16 rd16(const u8 ESS_FAR *p) { return p[0] | (p[1] << 8); }
 
@@ -48,7 +50,11 @@ int wavestat_parse(const u8 ESS_FAR *dg, u32 size, struct wavestat *ws) {
       break;
     }
   dev = rd16(dg + DG_DEVICES);
-  if (dev && (u32)dev + DEV_SIZE + (ws->rebuilt ? A1_SIZEOF : 0) <= size) {
+  if (dev &&
+      (u32)dev + DEV_SIZE +
+              (ws->rebuilt ? A1_SIZEOF + (ws->version >= 2 ? FM_SIZEOF : 0)
+                           : 0) <=
+          size) {
     ws->device = 1;
     ws->a1_user = dg[dev + DEV_A1_USER];
     ws->a2_user = dg[dev + DEV_A2_USER];
@@ -56,6 +62,8 @@ int wavestat_parse(const u8 ESS_FAR *dg, u32 size, struct wavestat *ws) {
     if (ws->rebuilt) {
       ws->a1_state = dg[dev + A1_STATE];
       ws->a1_fmt = dg[dev + A1_FMT];
+      if (ws->version >= 2)
+        ws->fm_state = dg[dev + FM_STATE];
     }
   }
   return 0;
@@ -68,6 +76,7 @@ static const struct {
     {WAVE_OPT_A1_DEVICE, "Audio1Device"},
     {WAVE_OPT_A1_SHARED, "SharedWaveOut"},
     {WAVE_OPT_DUAL, "DualPlayback"},
+    {WAVE_OPT_FM_RECORD, "FMRecordDevice"},
 };
 
 void wavestat_text(const struct wavestat *ws, char *out) {
@@ -118,7 +127,8 @@ void wavestat_text(const struct wavestat *ws, char *out) {
                                                 : "plays the Audio 1 device");
     break;
   case 2:
-    strcat(out, "records");
+    strcat(out, ws->fm_state & WAVE_FM_OPEN ? "records the FM digitally"
+                                            : "records");
     break;
   default:
     strcat(out, "in use");

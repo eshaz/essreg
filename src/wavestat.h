@@ -8,8 +8,9 @@
  * The data segment is ESS's 4.04.00.1319 layout: "CPQB023" at 00D2h, the
  * device list at 0BD2h. The rebuilt driver adds "ESDRVFIX" after ESS's
  * data, then its version and settings (src/es1869/fixdata.asm), and its
- * Audio 1 player's state after ESS's 132h bytes of the device structure
- * (src/es1869/fix.inc). See docs/AUDIO1.md.
+ * Audio 1 player's state after ESS's 132h bytes of the device structure,
+ * followed from version 2 by the FM recording device's (src/es1869/fix.inc).
+ * See docs/AUDIO1.md.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -26,6 +27,7 @@
 #define WAVE_OPT_A1_SHARED 0x0002 // SharedWaveOut
 #define WAVE_OPT_A1_FILTER 0x0004 // Audio1Filter
 #define WAVE_OPT_DUAL 0x0008      // DualPlayback
+#define WAVE_OPT_FM_RECORD 0x0010 // FMRecordDevice
 #define WAVE_OPT_A2_4X 0x0100     // Audio2Oversampling
 #define WAVE_OPT_A2_FILTER 0x0200 // Audio2Filter
 #define WAVE_OPT_READ 0x8000      // SYSTEM.INI was read
@@ -34,6 +36,10 @@
 #define WAVE_A1_OPEN 0x01
 #define WAVE_A1_SHARED 0x08
 #define WAVE_A1_DUAL 0x80
+
+// the FM recording device's FM_STATE, from version 2
+#define WAVE_FM_OPEN 0x01
+#define WAVE_FM_ROUTED 0x02
 
 struct wavestat {
   int known;   // ESS's data layout was found
@@ -46,6 +52,7 @@ struct wavestat {
   u8 busy;     // the VxD gave the chip to DirectSound or a DOS box
   u8 a1_state; // the player's, WAVE_A1_*
   u8 a1_fmt;
+  u8 fm_state; // the FM recording device's, WAVE_FM_*
 };
 
 // ES1869.DRV's data segment, size bytes at dg: 0, or -1 if it isn't ESS's

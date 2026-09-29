@@ -109,11 +109,34 @@ es_wod_message:
         inc     ax
         jmp     .ret
 
-.caps:  call    a1_device1              ; the devnode is dwParam2
+.caps:  cmp     word [bp+14h],0
+        je      .caps0
+        call    a1_device1              ; the devnode is dwParam2
         jc      .ess
         jnz     .ret
         les     bx,[bp+0Ah]             ; the MDEVICECAPSEX
         call    a1_caps
+        xor     ax,ax
+        jmp     .ret
+
+; device 0 is "Audio 2" while device 1 plays through Audio 1
+.caps0: test    byte [es_opts],OPT_A1_DEVICE
+        jz      .ess
+        call    a1_ess
+        or      ax,ax
+        jnz     .done
+        push    word [bp+8]             ; the devnode (dwParam2)
+        push    word [bp+6]
+        fcall   3, L3_4EAE
+        mov     si,ax
+        or      si,si
+        jz      .ret
+        call    a1_capable
+        jc      .caps00
+        les     bx,[bp+0Ah]
+        mov     ax,a2_name
+        call    caps_rename
+.caps00:
         xor     ax,ax
         jmp     .ret
 
@@ -559,38 +582,8 @@ a1_caps:
         stosw
         mov     ax,0404h
         stosw
-        push    si
-        mov     si,a1_name
-.name:  lodsb
-        or      al,al
-        jz      .base
-        stosb
-        jmp     .name
-.base:  pop     si
-        mov     dx,[si+DEV_BASE]        ; Audio_Base, as ESS's %X
-        mov     cx,4
-        xor     bx,bx                   ; digits so far
-.hex:   rol     dx,4
-        mov     al,dl
-        and     al,0Fh
-        jnz     .digit
-        or      bx,bx
-        jnz     .digit
-        cmp     cx,1
-        jne     .next                   ; no leading zero
-.digit: add     al,'0'
-        cmp     al,'9'
-        jbe     .put
-        add     al,'A' - '9' - 1
-.put:   stosb
-        inc     bx
-.next:  loop    .hex
-        mov     ax,')'                  ; and the NUL
-        stosw
-        lea     cx,[bp-30h+6+32]
-        sub     cx,di
-        xor     al,al
-        rep     stosb                   ; the rest of szPname
+        mov     ax,a1_name
+        call    caps_name
         mov     ax,0FFFh                ; every standard format
         stosw
         xor     ax,ax
@@ -616,6 +609,80 @@ a1_caps:
 .max:   mov     ax,30h
 .n:     push    ax
         fcall   1, L1_1AD3
+        mov     sp,bp
+        pop     bp
+        ret
+
+; a device's name, 32 bytes at ES:DI: the prefix AX (in DS), Audio_Base
+; in hex as ESS's %X, ")" and NULs; SI = dev
+caps_name:
+        push    si
+        push    di
+        mov     dx,[si+DEV_BASE]
+        mov     si,ax
+.name:  lodsb
+        or      al,al
+        jz      .base
+        stosb
+        jmp     .name
+.base:  mov     cx,4
+        xor     bx,bx                   ; digits so far
+.hex:   rol     dx,4
+        mov     al,dl
+        and     al,0Fh
+        jnz     .digit
+        or      bx,bx
+        jnz     .digit
+        cmp     cx,1
+        jne     .next                   ; no leading zero
+.digit: add     al,'0'
+        cmp     al,'9'
+        jbe     .put
+        add     al,'A' - '9' - 1
+.put:   stosb
+        inc     bx
+.next:  loop    .hex
+        mov     al,')'
+        stosb
+        pop     cx                      ; the start: NULs to 32 bytes
+        add     cx,32
+        sub     cx,di
+        xor     al,al
+        rep     stosb
+        pop     si
+        ret
+
+; ESS's answer to GETDEVCAPS renamed: the prefix AX (in DS), Audio_Base
+; and ")" over szPname in the MDEVICECAPSEX at ES:BX, as far as its size
+; reaches; SI = dev
+caps_rename:
+        push    bp
+        mov     bp,sp
+        sub     sp,20h
+        push    di
+        mov     cx,[es:bx]              ; the size, up to szPname's end
+        cmp     word [es:bx+2],0
+        jne     .big
+        cmp     cx,CAPS_NAME + 32
+        jbe     .size
+.big:   mov     cx,CAPS_NAME + 32
+.size:  sub     cx,CAPS_NAME
+        jbe     .done
+        push    word [es:bx+6]          ; to pCaps + 6
+        mov     dx,[es:bx+4]
+        add     dx,CAPS_NAME
+        push    dx
+        push    ss                      ; from the name made here
+        lea     dx,[bp-20h]
+        push    dx
+        push    cx                      ; that many bytes
+        push    ss
+        pop     es
+        mov     di,dx
+        cld
+        call    caps_name
+        fcall   1, L1_1AD3
+.done:  pop     di
         mov     sp,bp
         pop     bp
         ret
@@ -1022,8 +1089,9 @@ a1_dma_off:
         ret
 
 ; es_wid_resume(dev), far pascal, in place of ESS's wave-in resume at an
-; APM resume (3:4D1B): that, then the player set up again on the chip
-; hw_init reset, and started again if it played
+; APM resume (3:4D1B): that, the FM recording's 7Fh again after the mixer
+; reset, then the player set up again on the chip hw_init reset, and
+; started again if it played
 es_wid_resume:
         push    bp
         mov     bp,sp
@@ -1034,6 +1102,10 @@ es_wid_resume:
         call    L6_0D40
         push    ax
         mov     si,[bp+6]
+        push    si                      ; the FM recording, on 7Fh again
+        mov     ax,2
+        push    ax
+        fcall   1, fm_route
         test    byte [si+A1_STATE],A1F_OPEN
         jz      .done
         mov     al,[si+A1_STATE]

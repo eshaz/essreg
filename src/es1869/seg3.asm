@@ -8877,7 +8877,11 @@ R3_4F9F: dw R3_4FD3                                     ; seg1
         callf mixer_read, R3_4FD3, R3_4FDB              ; 4FD0 far seg1
         or al,0x1                                       ; 4FD5
         push ax                                         ; 4FD7
+%if ES1869_FIX
+        callf es_fm_dac, R3_4FDB, R3_4887       ; essreg: FM kept while recorded
+%else
         callf mixer_write, R3_4FDB, R3_4887             ; 4FD8 far seg1
+%endif
         mov byte [si+0x117],0x0                         ; 4FDD
         jmp short L3_4F89                               ; 4FE2
 

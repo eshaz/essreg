@@ -42,9 +42,9 @@ DEV = 0x4000                # a device structure in the data segment
 DEMAND = 0x80               # dev+2Bh bit 7, demand transfers
 PPINT = (1, 127)            # KERNEL.GetPrivateProfileInt
 OPT_A1_DEVICE, OPT_A1_SHARED, OPT_A1_FILTER = 0x0001, 0x0002, 0x0004
-OPT_DUAL = 0x0008
+OPT_DUAL, OPT_FM_RECORD = 0x0008, 0x0010
 OPT_A2_4X, OPT_A2_FILTER, OPT_READ = 0x0100, 0x0200, 0x8000
-OPT_DEFAULT = OPT_A1_DEVICE | OPT_A1_SHARED | OPT_DUAL
+OPT_DEFAULT = OPT_A1_DEVICE | OPT_A1_SHARED | OPT_DUAL | OPT_FM_RECORD
 
 
 def profile_int(value):
@@ -342,6 +342,7 @@ class SettingsTest(unittest.TestCase):
             ("ES1869.DRV", "SharedWaveOut", 1, "SYSTEM.INI"),
             ("ES1869.DRV", "Audio1Filter", 0, "SYSTEM.INI"),
             ("ES1869.DRV", "DualPlayback", 1, "SYSTEM.INI"),
+            ("ES1869.DRV", "FMRecordDevice", 1, "SYSTEM.INI"),
             ("ES1869.DRV", "Audio2Oversampling", 0, "SYSTEM.INI"),
             ("ES1869.DRV", "Audio2Filter", 0, "SYSTEM.INI")])
 
@@ -387,6 +388,8 @@ HOOKS = [
     (3, 0x4B57, 0x4B58),    # the first enable: es_read_config, SYSTEM.INI
     (3, 0x4D1C, 0x4D1D),    # APM resume: es_wid_resume, and the player
     (3, 0x4E21, 0x4E22),    # the last disable's record stop: a1_disable
+    (3, 0x4FD9, 0x4FDA),    # the MPU-401 release's 7Fh: es_fm_dac
+    (5, 0x206E, 0x206F),    # the FM driver's close's 7Fh: es_fm_dac
     (6, 0x2D79, 0x2D7A),    # playback start's D3h through a1_d3_gate
     (6, 0x2DE7, 0x2DE8),    # playback start: 71h read through a2_mode_read
     (6, 0x2DEC, 0x2DEC),    # and or al,02h (ESS: 12h)
@@ -457,7 +460,8 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(sites(fixed, 3)[site], (3, 1, (1, 127)))
 
     def test_exports(self):
-        # wodMessage is es_wod_message, in front of ESS's; the rest as ESS
+        # wodMessage and widMessage are es_wod_message and es_wid_message,
+        # in front of ESS's; the rest as ESS's
         stock = NEFile(build_es1869drv.build(False)).entries
         fixed = NEFile(build_es1869drv.build(True)).entries
         syms = build_es1869drv.symbols(True)
@@ -466,6 +470,9 @@ class BuildTest(unittest.TestCase):
             if ordinal == 3:
                 self.assertEqual(stock[3][:2], (6, 0x18E4))
                 self.assertEqual(fixed[3][:2], syms["es_wod_message"])
+            elif ordinal == 4:
+                self.assertEqual(stock[4][:2], (6, 0x0FF2))
+                self.assertEqual(fixed[4][:2], syms["es_wid_message"])
             else:
                 self.assertEqual(fixed[ordinal], stock[ordinal])
 

@@ -35,7 +35,7 @@ except ImportError:
 
 A1_MAGIC = 0xA1A1
 OPT_A1_DEVICE, OPT_A1_SHARED, OPT_A1_FILTER = 0x0001, 0x0002, 0x0004
-OPT_DUAL = 0x0008
+OPT_DUAL, OPT_FM_RECORD = 0x0008, 0x0010
 OPT_A2_4X, OPT_A2_FILTER, OPT_READ = 0x0100, 0x0200, 0x8000
 MMSYSERR_BADDEVICEID, MMSYSERR_NOTENABLED = 2, 3
 MMSYSERR_ALLOCATED, MMSYSERR_NOTSUPPORTED = 4, 8
@@ -115,6 +115,7 @@ class DeviceTest(A1Case):
         self.assertEqual((fmts, chans, support), (0xFFF, 2, 0x2C))
 
     def test_device_0_caps_are_ess(self):
+        # but for its name, which tests/test_fmwave.py checks
         caps = []
         for stock in (True, False):
             e = self.emu(stock=stock)
@@ -122,8 +123,8 @@ class DeviceTest(A1Case):
             ex = e.alloc(struct.pack("<II", 0x30, buf))
             self.assertEqual(e.wod(0, WODM_GETDEVCAPS, 0, ex, DEVNODE), 0)
             caps.append(e.rd(e.far_lin(buf), 0x30))
-        self.assertEqual(caps[0], caps[1])
-        self.assertIn(b"ESS AudioDrive Playback (220)", caps[1])
+        self.assertEqual(caps[0][:6] + caps[0][38:], caps[1][:6] + caps[1][38:])
+        self.assertIn(b"ESS AudioDrive Playback (220)", caps[0])
 
     def test_caps_short_buffer(self):
         e = self.emu()
@@ -748,16 +749,18 @@ class SettingsTest(A1Case):
     def test_defaults(self):
         e = self.enable({})
         self.assertEqual(self.opts(e), OPT_READ | OPT_A1_DEVICE |
-                         OPT_A1_SHARED | OPT_DUAL)
+                         OPT_A1_SHARED | OPT_DUAL | OPT_FM_RECORD)
         self.assertEqual([k for _s, k, _d, _f in e.ppint], [
             "Audio1Device", "SharedWaveOut", "Audio1Filter",
-            "DualPlayback", "Audio2Oversampling", "Audio2Filter"])
+            "DualPlayback", "FMRecordDevice", "Audio2Oversampling",
+            "Audio2Filter"])
 
     def test_each_key(self):
         for key, bit, default in (("Audio1Device", OPT_A1_DEVICE, 1),
                                   ("SharedWaveOut", OPT_A1_SHARED, 1),
                                   ("Audio1Filter", OPT_A1_FILTER, 0),
-                                  ("DualPlayback", OPT_DUAL, 1)):
+                                  ("DualPlayback", OPT_DUAL, 1),
+                                  ("FMRecordDevice", OPT_FM_RECORD, 1)):
             for value, on in (("1", True), ("0", False), ("yes", False)):
                 with self.subTest(key=key, value=value):
                     e = self.enable({("ES1869.DRV", key): value})

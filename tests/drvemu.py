@@ -66,6 +66,9 @@ WODM_PREPARE, WODM_UNPREPARE, WODM_WRITE, WODM_PAUSE = 7, 8, 9, 10
 WODM_RESTART, WODM_RESET, WODM_GETPOS = 11, 12, 13
 WODM_GETVOLUME, WODM_SETVOLUME, WODM_BREAKLOOP = 16, 17, 20
 WOM_OPEN, WOM_CLOSE, WOM_DONE = 0x3BB, 0x3BC, 0x3BD
+WIDM_GETNUMDEVS, WIDM_GETDEVCAPS, WIDM_OPEN, WIDM_CLOSE = 50, 51, 52, 53
+WIDM_ADDBUFFER, WIDM_START, WIDM_STOP, WIDM_RESET = 56, 57, 58, 59
+WIM_OPEN, WIM_CLOSE, WIM_DATA = 0x3BE, 0x3BF, 0x3C0
 CALLBACK_FUNCTION = 0x00030000
 WHDR_DONE, WHDR_PREPARED, WHDR_BEGINLOOP = 1, 2, 4
 WHDR_ENDLOOP, WHDR_INQUEUE = 8, 0x10
@@ -623,6 +626,26 @@ class DrvEmu:
                                       instance, 0, DEVNODE))
         user_ptr = self.alloc(b"\0" * 4)
         r = self.wod(dev_id, WODM_OPEN, user_ptr, desc,
+                     flags | CALLBACK_FUNCTION)
+        return r, self.r32(user_ptr >> 16, user_ptr & 0xFFFF)
+
+    def wid(self, dev_id, msg, user=0, dw1=0, dw2=0):
+        """widMessage, the export (ordinal 4)"""
+        seg, off, _f = self.ne.entries[4]
+        return self.call((SEG_PARA[seg], off), (
+            dev_id, msg, user >> 16, user & 0xFFFF, dw1 >> 16, dw1 & 0xFFFF,
+            dw2 >> 16, dw2 & 0xFFFF))
+
+    def open_in(self, dev_id=1, rate=49716, channels=2, bits=16, flags=0,
+                instance=0x33334444, hwave=0x0BED):
+        """WIDM_OPEN with a PCMWAVEFORMAT: (result, dwUser)"""
+        align = channels * bits // 8
+        fmt = self.alloc(struct.pack("<HHIIHH", 1, channels, rate,
+                                     rate * align, align, bits))
+        desc = self.alloc(struct.pack("<HIIIHI", hwave, fmt, 0x5000BBBB,
+                                      instance, 0, DEVNODE))
+        user_ptr = self.alloc(b"\0" * 4)
+        r = self.wid(dev_id, WIDM_OPEN, user_ptr, desc,
                      flags | CALLBACK_FUNCTION)
         return r, self.r32(user_ptr >> 16, user_ptr & 0xFFFF)
 

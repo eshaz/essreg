@@ -13,10 +13,11 @@ OPT_A1_DEVICE   equ 0x0001      ; Audio1Device: a second wave-out device
 OPT_A1_SHARED   equ 0x0002      ; SharedWaveOut: device 0 falls back to it
 OPT_A1_FILTER   equ 0x0004      ; Audio1Filter: its filter in use
 OPT_DUAL        equ 0x0008      ; DualPlayback: 4 channels on both DACs
+OPT_FM_RECORD   equ 0x0010      ; FMRecordDevice: the FM recorded digitally
 OPT_A2_4X       equ 0x0100      ; Audio2Oversampling: ESS's 4x
 OPT_A2_FILTER   equ 0x0200      ; Audio2Filter: the filter in use
 OPT_READ        equ 0x8000      ; SYSTEM.INI was read
-OPT_DEFAULT     equ OPT_A1_DEVICE | OPT_A1_SHARED | OPT_DUAL
+OPT_DEFAULT     equ OPT_A1_DEVICE | OPT_A1_SHARED | OPT_DUAL | OPT_FM_RECORD
 
 ; mixer 71h, the Audio 2 mode
 A2_4X           equ 0x10        ; 4x oversampling (the filter bypassed too)
@@ -68,6 +69,7 @@ DEV_A2_BUF_SEL  equ 0xF7        ; selector,
 DEV_A2_PHYS     equ 0xF9        ; physical address, low word
 DEV_A2_PHYS_PG  equ 0xFB        ; and page
 DEV_A2_USER     equ 0x100       ; the Audio 2 user: 1 wave-out, 2 the player
+DEV_FM_DAC      equ 0x117       ; 1 while FM or an ES689 has the music DAC
 DEV_WAVE_VOL    equ 0x124       ; the wave volume, 7Ch
 DEV_BUSY        equ 0x127       ; bit 0: the VxD gave the chip away
 DEV_SIZE        equ 0x132
@@ -109,7 +111,28 @@ A1_WRING        equ A1_BASE + 0x4E      ; WPOS in the ring
 A1_LOOPW        equ A1_BASE + 0x50      ; WPOS (low word) at the pass's start
 A1_SPLITN       equ A1_BASE + 0x52      ; bytes a1_split puts in each ring
 A1_SIZEOF       equ 0x54
-DEV_FIX_SIZE    equ DEV_SIZE + A1_SIZEOF
+
+; the FM recording device (fmwave.asm, fmdac.asm), after the player's
+; block
+FM_BASE         equ A1_BASE + A1_SIZEOF
+FM_STATE        equ FM_BASE + 0x00      ; FMF_*
+FM_SAVED        equ FM_BASE + 0x01      ; FMS_*: what it changed, as it was
+FM_FORMAT       equ FM_BASE + 0x02      ; the format ESS's open gets
+FM_DESC         equ FM_BASE + 0x12      ; the WAVEOPENDESC ESS's open gets
+FM_SIZEOF       equ 0x26
+DEV_FIX_SIZE    equ DEV_SIZE + A1_SIZEOF + FM_SIZEOF
+
+; FM_STATE
+FMF_OPEN        equ 0x01        ; device 1 has ESS's wave-in
+FMF_ROUTED      equ 0x02        ; 7Fh sends the FM to Audio 1's DMA
+
+; FM_SAVED
+FMS_DCDRIFT     equ 0x01        ; DEV_FLAGS bit 0, ESS's DC drift removal
+FMS_I2S         equ 0x02        ; 7Fh bit 0, as ESS's code last left it
+FMS_DREC        equ 0x04        ; 7Fh bit 4 was set
+
+FM_RATE         equ 49716       ; the music DAC's rate, the recording's
+FM_OPEN_RATE    equ 48000       ; what ESS's open is given for it
 
 A1_MAGIC        equ 0xA1A1      ; the high word of the instance (dwUser)
 
@@ -138,6 +161,13 @@ WODM_GETPOS     equ 13
 WODM_GETVOLUME  equ 16
 WODM_SETVOLUME  equ 17
 WODM_BREAKLOOP  equ 20
+WIDM_GETNUMDEVS equ 50
+WIDM_GETDEVCAPS equ 51
+WIDM_OPEN       equ 52
+WIDM_CLOSE      equ 53
+WIDM_START      equ 57
+WIDM_STOP       equ 58
+WIDM_RESET      equ 59
 WOM_OPEN        equ 0x3BB
 WOM_CLOSE       equ 0x3BC
 MMSYSERR_BADDEVICEID    equ 2
@@ -174,6 +204,21 @@ WOD_FORMAT      equ 0x02        ; far: the PCMWAVEFORMAT
 WOD_CALLBACK    equ 0x06
 WOD_INSTANCE    equ 0x0A
 WOD_DEVNODE     equ 0x10
+WOD_SIZE        equ 0x14
+
+; PCMWAVEFORMAT
+WF_TAG          equ 0x00
+WF_CHANNELS     equ 0x02
+WF_RATE         equ 0x04        ; dword
+WF_AVG          equ 0x08        ; dword: bytes per second
+WF_ALIGN        equ 0x0C
+WF_BITS         equ 0x0E
+WF_SIZE         equ 0x10
+
+; WAVEINCAPS and WAVEOUTCAPS, in the MDEVICECAPSEX's pCaps
+CAPS_NAME       equ 0x06        ; szPname, 32 bytes
+CAPS_FORMATS    equ 0x26        ; dword
+CAPS_CHANNELS   equ 0x2A
 
 ; controller registers (DSP commands A0h-BFh write them, C0h reads)
 CR_RATE         equ 0xA1
@@ -197,5 +242,7 @@ MX_A2_COUNT_HI  equ 0x76
 MX_A2_CONTROL1  equ 0x78        ; bit 0 go, bit 1 DMA, bit 4 auto, 7:6 demand
 MX_A2_CONTROL2  equ 0x7A        ; bit 0 16-bit, 1 stereo, 2 signed, 6 IRQ
 MX_A2_VOLUME    equ 0x7C
+MX_DREC         equ 0x7F        ; bit 4 the music DAC's samples to Audio
+                                ; 1's DMA, bit 0 the music DAC to I2S
 
 %endif

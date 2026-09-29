@@ -15,7 +15,11 @@
 %else
         dw L6_18E4
 %endif
+%if ES1869_FIX
+        dw es_wid_message
+%else
         dw L6_0FF2
+%endif
         dw L6_1D1C
         dw L5_1BA4
         dw L1_22F4

@@ -85,8 +85,9 @@ int main(int argc, char **argv) {
   CHECK(opts() != 0);
   CHECK_EQ(wavestat_parse(dg, sizeof(dg), &ws), 0);
   CHECK(ws.rebuilt);
-  CHECK_EQ(ws.version, 1);
-  CHECK_EQ(ws.opts, WAVE_OPT_A1_DEVICE | WAVE_OPT_A1_SHARED | WAVE_OPT_DUAL);
+  CHECK_EQ(ws.version, 2);
+  CHECK_EQ(ws.opts, WAVE_OPT_A1_DEVICE | WAVE_OPT_A1_SHARED | WAVE_OPT_DUAL |
+                        WAVE_OPT_FM_RECORD);
   CHECK(!ws.device);
   text[0] = 0;
   wavestat_text(&ws, text);
@@ -100,7 +101,7 @@ int main(int argc, char **argv) {
   text[0] = 0;
   wavestat_text(&ws, text);
   CHECK(strstr(text, "settings from SYSTEM.INI, off: Audio1Device, "
-                     "DualPlayback\r\n") != 0);
+                     "DualPlayback, FMRecordDevice\r\n") != 0);
   CHECK(strstr(text, "filter bypassed; Audio 2: 4x oversampling, filter "
                      "bypassed (4x)") != 0);
   CHECK(strstr(text, "Audio 1:\tplays the Audio 1 device\r\n") != 0);
@@ -116,6 +117,15 @@ int main(int argc, char **argv) {
   wavestat_text(&ws, text);
   CHECK(strstr(text, "Audio 1:\tdual playback\r\nAudio 2:\tdual playback") !=
         0);
+
+  // the FM recording device has Audio 1
+  device(2, 0, 0, 0);
+  dg[DEV + 0x132 + 0x54] = WAVE_FM_OPEN | WAVE_FM_ROUTED;
+  wavestat_parse(dg, sizeof(dg), &ws);
+  CHECK_EQ(ws.fm_state, WAVE_FM_OPEN | WAVE_FM_ROUTED);
+  text[0] = 0;
+  wavestat_text(&ws, text);
+  CHECK(strstr(text, "Audio 1:\trecords the FM digitally\r\n") != 0);
 
   // the VxD gave the chip away
   dg[DEV + 0x127] = 1;

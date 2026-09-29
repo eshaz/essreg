@@ -3631,7 +3631,11 @@ L5_202B:
         callf mixer_read, R5_2068, R5_2070              ; 2065 far seg1
         or al,0x1                                       ; 206A
         push ax                                         ; 206C
+%if ES1869_FIX
+        callf es_fm_dac, R5_2070, R5_0B39       ; essreg: FM kept while recorded
+%else
         callf mixer_write, R5_2070, R5_0B39             ; 206D far seg1
+%endif
         mov bx,[bp-0x2]                                 ; 2072
         mov byte [bx+0x117],0x0                         ; 2075
         push bx                                         ; 207A

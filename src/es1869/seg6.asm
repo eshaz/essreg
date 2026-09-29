@@ -5761,6 +5761,7 @@ L6_3024:
 
 %if ES1869_FIX
 %include "a1wave.asm"
+%include "fmwave.asm"
 %endif
 
 seg6_data_end:

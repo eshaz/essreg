@@ -676,7 +676,7 @@ a1_hwstop:
 
 ; a1_disable(dev), far pascal, in place of ESS's record stop at the last
 ; DRVM_DISABLE (3:4E20), which frees the interrupt handler after: that,
-; and the player's DMA stopped too
+; 7Fh as the FM recording found it, and the player's DMA stopped too
 a1_disable:
         push    bp
         mov     bp,sp
@@ -685,6 +685,11 @@ a1_disable:
         push    si
         push    cs
         call    L1_1602
+        push    si                      ; the FM recording's 7Fh back
+        xor     ax,ax
+        push    ax
+        push    cs
+        call    fm_route
         call    a1_halt
         pop     si
         pop     bp
