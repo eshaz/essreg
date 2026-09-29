@@ -15,7 +15,8 @@ python3 tests/run_tests.py
   * the register API of the rebuilt VxD, run in a CPU emulator against a simulated ES1869, and its refusals and checks (`test_vxdext`)
   * that the extended VxD keeps ESS's code where it was, byte for byte apart from the hooks, and that Windows' own sound (ES1869.DRV's calls around a wave device, a mixer change, DirectSound taking the DSP) makes the same port accesses as with ESS's driver, apart from the Audio 2 mode (`test_vxdext`)
   * `ES1869.DRV` rebuilt from `src/es1869`: ESS's driver byte for byte, and in the changed build ESS's code at its addresses, apart from the listed instructions. Its writes of the Audio 2 mode run in the CPU emulator inside ESS's code, for both builds (`test_es1869drv`)
-  * the Audio 1 player of `ES1869.DRV` in the CPU emulator with a model of the DSP, the mixer and the DMA controller (`tests/drvemu.py`), its interrupts through ESS's own handler (`test_a1play`): what the DMA takes is what the program wrote, headers come back once played, underruns, loops, pause, reset, close, who gets Audio 1, device 0 falling back to it, the resume and the last disable, and with its keys at 0 ESS's answers
+  * `tools/dualwav.py`: what each mode puts on the Audio 2 DAC next to the Audio 1 DAC's part, delays, gains and input formats (`test_dualwav`)
+  * the Audio 1 player of `ES1869.DRV` in the CPU emulator with a model of the DSP, the mixer and the DMA controller (`tests/drvemu.py`), its interrupts through ESS's own handler (`test_a1play`): what the DMA takes is what the program wrote, headers come back once played, underruns, loops, pause, reset, close, who gets Audio 1, device 0 falling back to it, dual playback on both DACs in step (Audio 2 on an 8 or 16-bit channel), the resume and the last disable, and with its keys at 0 ESS's answers
   * DOS boxes and the rebuilt VxD in the same emulator, with an FM chip model after ESFMu, VMs and per-VM port trapping (`test_vxddos`): FM detection whoever has FM, the virtual FM chip and its hand-over, the music DAC, Windows' mixer around a DOS game, and the reset when Windows uses the card again. The stock driver runs the same steps where it differs.
   * the SYSTEM.INI settings of all three drivers, read with emulated profile calls: each key and its default, read once, and each change off doing what ESS's driver does. With every key at 0, the VxD (`test_vxdini`) and `ESFM.DRV` (`SettingsTest` in `test_esfmdrv`) make the same port accesses as ESS's drivers, step by step
   * `esfmpat` on copies of `ESFM.DRV`
@@ -185,6 +186,23 @@ See [AUDIO1.md](AUDIO1.md#the-audio-1-player-in-buildes1869drv). With `build\ES1
 7. The volume of Audio 1: essctl's *Audio 1 (wave) volume* (mixer 14h). A program's own volume control on device 1 sets it too.
 8. If the computer has a standby: play on Audio 1, stand by, wake it: the sound goes on.
 9. `SharedWaveOut=0` and `Audio1Device=0`, restart: one playback device, and a second player on it says it's in use, as with ESS's driver.
+
+### E3c. Dual playback
+
+See [AUDIO1.md](AUDIO1.md#dual-playback). Make the files on any computer with Python 3, and copy them over:
+
+```
+python3 tools/dualwav.py same --tone 1000 same1k.wav
+python3 tools/dualwav.py invert --tone 1000 null1k.wav
+python3 tools/dualwav.py same music.wav music4.wav
+```
+
+1. essctl: set *Audio 1 (wave) volume* (14h) and the Wave volume (7Ch) alike, a few steps below the top.
+2. Play `same1k.wav` in Media Player (if it refuses the format, make *Audio 1* the preferred playback device): one tone, louder than a stereo 1 kHz file. essctl's *Audio 2 channel* page, F5: 71h bit 1 is clear, and 78h shows the DMA and FIFO bits.
+3. Play `null1k.wav`: much quieter than `same1k.wav`. Try `--delay2` and `--gain2` for a quieter one, and note the best values.
+4. Play `music4.wav`, and the stereo `music.wav` on the first device, at the same loudness: note what differs.
+5. While a dual file plays, start a Windows sound and a recording: both say the device is in use. After it, both work.
+6. Pause and go on in Media Player: the null file stays as quiet as before.
 
 ### E4. SYSTEM.INI settings
 

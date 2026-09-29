@@ -12,10 +12,11 @@
 OPT_A1_DEVICE   equ 0x0001      ; Audio1Device: a second wave-out device
 OPT_A1_SHARED   equ 0x0002      ; SharedWaveOut: device 0 falls back to it
 OPT_A1_FILTER   equ 0x0004      ; Audio1Filter: its filter in use
+OPT_DUAL        equ 0x0008      ; DualPlayback: 4 channels on both DACs
 OPT_A2_4X       equ 0x0100      ; Audio2Oversampling: ESS's 4x
 OPT_A2_FILTER   equ 0x0200      ; Audio2Filter: the filter in use
 OPT_READ        equ 0x8000      ; SYSTEM.INI was read
-OPT_DEFAULT     equ OPT_A1_DEVICE | OPT_A1_SHARED
+OPT_DEFAULT     equ OPT_A1_DEVICE | OPT_A1_SHARED | OPT_DUAL
 
 ; mixer 71h, the Audio 2 mode
 A2_4X           equ 0x10        ; 4x oversampling (the filter bypassed too)
@@ -48,9 +49,26 @@ DEV_BUF_PHYS    equ 0x45        ; physical address, low word
 DEV_BUF_PAGE    equ 0x47        ; and page
 DEV_A1_USER     equ 0x5D        ; the Audio 1 user: 2 wave-in, 1 the player here
 DEV_WID_FLAGS   equ 0x6F        ; wave-in: bit 0 open
+DEV_WOD_FLAGS   equ 0x70        ; wave-out: bit 0 open, bit 2 suspended
 DEV_VOICE_SUSP  equ 0x76        ; a voice recording held for a playback
 DEV_VOICE       equ 0x78        ; dword: its instance
-DEV_A2_USER     equ 0x100       ; the Audio 2 user: 1 wave-out
+DEV_A2_DMA      equ 0xD4        ; the Audio 2 DMA channel
+DEV_A2_BUFSIZE  equ 0xD9        ; its buffer's size
+DEV_A2_ADDR     equ 0xE3        ; its 8237 ports and values, as Audio 1's
+DEV_A2_COUNT    equ 0xE4
+DEV_A2_MASK     equ 0xE5
+DEV_A2_MODE     equ 0xE6
+DEV_A2_FF       equ 0xE7
+DEV_A2_PAGE     equ 0xE8
+DEV_A2_ON       equ 0xE9
+DEV_A2_OFF      equ 0xEA
+DEV_A2_PLAY     equ 0xEC
+DEV_A2_BUF_OFF  equ 0xF5        ; the Audio 2 DMA buffer: offset,
+DEV_A2_BUF_SEL  equ 0xF7        ; selector,
+DEV_A2_PHYS     equ 0xF9        ; physical address, low word
+DEV_A2_PHYS_PG  equ 0xFB        ; and page
+DEV_A2_USER     equ 0x100       ; the Audio 2 user: 1 wave-out, 2 the player
+DEV_WAVE_VOL    equ 0x124       ; the wave volume, 7Ch
 DEV_BUSY        equ 0x127       ; bit 0: the VxD gave the chip away
 DEV_SIZE        equ 0x132
 
@@ -89,7 +107,8 @@ A1_GAPEND       equ A1_BASE + 0x48      ; dword: WPOS after the last gap
 A1_PRING        equ A1_BASE + 0x4C      ; PPOS in the ring
 A1_WRING        equ A1_BASE + 0x4E      ; WPOS in the ring
 A1_LOOPW        equ A1_BASE + 0x50      ; WPOS (low word) at the pass's start
-A1_SIZEOF       equ 0x52
+A1_SPLITN       equ A1_BASE + 0x52      ; bytes a1_split puts in each ring
+A1_SIZEOF       equ 0x54
 DEV_FIX_SIZE    equ DEV_SIZE + A1_SIZEOF
 
 A1_MAGIC        equ 0xA1A1      ; the high word of the instance (dwUser)
@@ -100,9 +119,11 @@ A1F_RUN         equ 0x02        ; the DMA runs
 A1F_PAUSED      equ 0x04
 A1F_SHARED      equ 0x08        ; opened as device 0 (SharedWaveOut)
 
-; A1_FMT, the format word of rate_setup (6:1FF4)
+; A1_FMT: the format word of rate_setup (6:1FF4), for each DAC
 FMT_16BIT       equ 0x01
 FMT_STEREO      equ 0x02
+FMT_DUAL        equ 0x80        ; 4 channels: 1-2 Audio 1, 3-4 Audio 2
+A1_SPLIT        equ 512         ; ring bytes split at a time (a1_bounce)
 
 ; the Windows wave API (MMSYSTEM.H, MMDDK.H)
 WODM_GETNUMDEVS equ 3
@@ -171,5 +192,10 @@ DSP_A1_ON       equ 0xD1        ; the Audio 1 DAC into the mixer
 DSP_A1_OFF      equ 0xD3
 MX_A1_VOLUME    equ 0x14
 MX_A2_MODE      equ 0x71
+MX_A2_COUNT_LO  equ 0x74
+MX_A2_COUNT_HI  equ 0x76
+MX_A2_CONTROL1  equ 0x78        ; bit 0 go, bit 1 DMA, bit 4 auto, 7:6 demand
+MX_A2_CONTROL2  equ 0x7A        ; bit 0 16-bit, 1 stereo, 2 signed, 6 IRQ
+MX_A2_VOLUME    equ 0x7C
 
 %endif

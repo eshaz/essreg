@@ -22,6 +22,12 @@
 ; starts the DMA; the close turns the DAC off (D3h).  All DSP commands are
 ; sent here, at task time.
 ;
+; DualPlayback=1: device 1 also takes 4 channels.  Channels 1-2 play on
+; the Audio 1 DAC and 3-4 on the Audio 2 DAC, which the player takes as
+; its user 2 and slaves to Audio 1's clock (71h bit 1 clear), so both play
+; each frame at the same tick.  Both DMAs run on rings of the same size
+; and start together; Audio 1's interrupt serves both.
+;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
 ; Licensed under GPL Version 3.0
@@ -215,6 +221,16 @@ a1_capable:
 .no:    stc
         ret
 
+; CF clear if Audio 2 can play the second half of dual playback: its
+; buffer holds two blocks; SI = dev
+a1_capable2:
+        cmp     word [si+DEV_A2_BUFSIZE],1000h
+        jb      .no
+        clc
+        ret
+.no:    stc
+        ret
+
 ; a message to an instance of the player: SI = dev
 a1_message:
         mov     ax,MMSYSERR_NOTENABLED
@@ -263,11 +279,19 @@ a1_open:
         cmp     word [es:bx],WAVE_FORMAT_PCM
         jne     .ret
         mov     cx,[es:bx+2]            ; channels
-        dec     cx
+        cmp     cx,4
+        jne     .ch12
+        or      di,di
+        jnz     .ret                    ; 4 on device 1 only
+        test    byte [es_opts],OPT_DUAL
+        jz      .ret
+        mov     cx,FMT_DUAL | FMT_STEREO
+        jmp     .ch
+.ch12:  dec     cx
         cmp     cx,1
         ja      .ret
         shl     cl,1                    ; FMT_STEREO
-        mov     dx,[es:bx+0Eh]          ; bits
+.ch:        mov     dx,[es:bx+0Eh]          ; bits
         cmp     dx,8
         je      .bits
         cmp     dx,16
@@ -291,19 +315,37 @@ a1_open:
         call    a1_capable
         pop     cx
         jc      .ret
-        mov     ax,MMSYSERR_ALLOCATED
+        test    cl,FMT_DUAL
+        jz      .dead
+        push    cx
+        call    a1_capable2
+        pop     cx
+        jc      .ret
+.dead:        mov     ax,MMSYSERR_ALLOCATED
         cmp     word [si+DEV_DEAD],0
         jne     .ret
         test    byte [si+A1_STATE],A1F_OPEN
         jnz     .ret
-        push    cx
+        mov     ax,MMSYSERR_ALLOCATED
+        test    cl,FMT_DUAL
+        jz      .a1
+        test    byte [si+DEV_BUSY],1
+        jnz     .ret
+        cmp     byte [si+DEV_A2_USER],0 ; Audio 2 free, as wod_acquire finds
+        jne     .ret                    ; it (4:0054)
+        test    byte [si+DEV_WOD_FLAGS],1
+        jnz     .ret
+.a1:    push    cx
         push    dx
         call    a1_acquire
         pop     dx
         pop     cx
         mov     ax,MMSYSERR_ALLOCATED
         jc      .ret
-        ; the block from zero, then what the program asked for
+        test    cl,FMT_DUAL
+        jz      .init
+        mov     byte [si+DEV_A2_USER],2
+.init:        ; the block from zero, then what the program asked for
         push    cx
         push    di
         push    ds
@@ -370,10 +412,14 @@ a1_close:
         call    a1_stop
         mov     al,DSP_A1_OFF
         call    a1_dsp
-        mov     al,MX_A2_MODE           ; Audio 1's filter as ESS leaves it
-        call    a1_mixer_read
+        mov     al,MX_A2_MODE           ; Audio 1's filter as ESS leaves it,
+        call    a1_mixer_read           ; and Audio 2 at its own rate again
         and     al,~A1_BYPASS & 0FFh
-        mov     ah,al
+        test    byte [si+A1_FMT],FMT_DUAL
+        jz      .mode
+        or      al,A2_ASYNC
+        mov     byte [si+DEV_A2_USER],0
+.mode:  mov     ah,al
         mov     al,MX_A2_MODE
         call    a1_mixer_write
         call    a1_release
@@ -421,37 +467,27 @@ a1_write:
 .done:  xor     ax,ax
         ret
 
-; WODM_PAUSE: the DMA stops where it is
+; WODM_PAUSE: the DMA stops where it is.  In dual playback both DACs have
+; to start again together, so it stops for both and a restart starts the
+; ring again from what wasn't played (a1_ready)
 a1_pause:
         test    byte [si+A1_STATE],A1F_PAUSED
         jnz     .done
         or      byte [si+A1_STATE],A1F_PAUSED
         test    byte [si+A1_STATE],A1F_RUN
         jz      .done
-        mov     al,CR_CONTROL
-        call    a1_reg_read
-        and     al,0FEh
-        mov     ah,al
-        mov     al,CR_CONTROL
-        call    a1_reg_write
+        call    a1_stop
+        push    si
+        fcall   1, a1_freeze
 .done:  xor     ax,ax
         ret
 
-; WODM_RESTART: on from there, or the first start
+; WODM_RESTART: on from where it stopped, or the first start
 a1_restart:
         test    byte [si+A1_STATE],A1F_PAUSED
         jz      .done
         and     byte [si+A1_STATE],~A1F_PAUSED & 0FFh
-        test    byte [si+A1_STATE],A1F_RUN
-        jz      .start
-        mov     al,CR_CONTROL
-        call    a1_reg_read
-        or      al,1
-        mov     ah,al
-        mov     al,CR_CONTROL
-        call    a1_reg_write
-        jmp     .done
-.start: mov     ax,[si+A1_HEAD]
+        mov     ax,[si+A1_HEAD]
         or      ax,[si+A1_HEAD+2]
         jz      .done
         call    a1_start
@@ -479,7 +515,13 @@ a1_getpos:
         fcall   1, a1_played
         les     bx,[bp+0Ah]
         cmp     word [es:bx],TIME_BYTES
-        je      .put
+        jne     .samples
+        test    byte [si+A1_FMT],FMT_DUAL
+        jz      .put
+        shl     ax,1                    ; the program's bytes: both halves
+        rcl     dx,1
+        jmp     .put
+.samples:
         mov     word [es:bx],TIME_SAMPLES
         mov     cx,[si+A1_ALIGN]
 .frame: shr     cx,1
@@ -706,7 +748,15 @@ a1_setup:
         cmp     ax,3FFCh                ; the ring stays under 32 KB
         jbe     .block
         mov     ax,3FFCh
-.block: mov     [si+A1_BLOCK],ax
+.block: test    byte [si+A1_FMT],FMT_DUAL
+        jz      .blk
+        mov     cx,[si+DEV_A2_BUFSIZE]  ; and in Audio 2's buffer
+        shr     cx,1
+        and     cl,0FCh
+        cmp     ax,cx
+        jbe     .blk
+        mov     ax,cx
+.blk:   mov     [si+A1_BLOCK],ax
         shl     ax,1
         mov     [si+A1_RING],ax
         mov     ax,[si+A1_BLOCK]
@@ -770,12 +820,46 @@ a1_setup:
         call    a1_mixer_write
         ; the DAC into the mixer
         mov     al,DSP_A1_ON
-        jmp     a1_dsp
+        call    a1_dsp
+        test    byte [si+A1_FMT],FMT_DUAL
+        jz      .done
+        ; Audio 2 slaved to Audio 1's clock and filter clock, without 4x
+        ; oversampling, its filter as Audio 1's
+        mov     al,MX_A2_MODE
+        call    a1_mixer_read
+        and     al,~(A2_4X | A2_ASYNC | A2_BYPASS) & 0FFh
+        test    al,A1_BYPASS
+        jz      .a2f
+        or      al,A2_BYPASS
+.a2f:   mov     ah,al
+        mov     al,MX_A2_MODE
+        call    a1_mixer_write
+        ; its format as ESS's playback start writes it (6:2DB6), no interrupt
+        mov     ah,FMT_STEREO
+        test    byte [si+A1_FMT],FMT_16BIT
+        jz      .a2c
+        or      ah,05h                  ; 16-bit, signed
+.a2c:   mov     al,MX_A2_CONTROL2
+        call    a1_mixer_write
+        mov     ax,[si+A1_BLOCK]
+        neg     ax
+        push    ax
+        mov     ah,al
+        mov     al,MX_A2_COUNT_LO
+        call    a1_mixer_write
+        pop     ax
+        mov     al,MX_A2_COUNT_HI
+        call    a1_mixer_write
+        mov     ah,[si+DEV_WAVE_VOL]
+        mov     al,MX_A2_VOLUME
+        call    a1_mixer_write
+.done:  ret
 
-; the DMA started on the ring (a1_prefill filled it)
+; the DMA started on the ring, from what wasn't played (a1_ready); in
+; dual playback Audio 2's too, both at once
 a1_start:
         push    si
-        fcall   1, a1_prefill
+        fcall   1, a1_ready
         ; DAC direction, auto-initialize, not going yet
         mov     al,CR_CONTROL
         call    a1_reg_read
@@ -837,12 +921,85 @@ a1_start:
         out     dx,al
         or      byte [si+A1_STATE],A1F_RUN
         popf
+        test    byte [si+A1_FMT],FMT_DUAL
+        jnz     .dual
         ; go
         pop     ax
         or      al,1
         mov     ah,al
         mov     al,CR_CONTROL
         jmp     a1_reg_write
+        ; Audio 2's DMA on its ring, into its FIFO but not to the DAC yet
+.dual:  call    a1_dma2
+        mov     ah,13h                  ; auto-initialize, DMA, FIFO to DAC
+        test    byte [si+DEV_FLAGS+1],DEMAND_HI
+        jz      .xfer
+        mov     ah,93h                  ; 4-byte demand transfers, as ESS
+.xfer:  push    ax
+        and     ah,~1 & 0FFh
+        mov     al,MX_A2_CONTROL1
+        call    a1_mixer_write
+        ; both go, as close together as the ports allow
+        pop     bx
+        pop     ax
+        pushf
+        cli
+        push    bx
+        or      al,1
+        mov     ah,al
+        mov     al,CR_CONTROL
+        call    a1_reg_write
+        pop     ax
+        mov     al,MX_A2_CONTROL1
+        call    a1_mixer_write
+        popf
+        ret
+
+; Audio 2's 8237 channel on its ring, as ESS's playback start programs it
+; (6:2C6E), a 16-bit channel in words
+a1_dma2:
+        pushf
+        cli
+        xor     dh,dh
+        mov     dl,[si+DEV_A2_MASK]
+        mov     al,[si+DEV_A2_OFF]
+        out     dx,al
+        mov     dl,[si+DEV_A2_FF]
+        xor     al,al
+        out     dx,al
+        mov     al,[si+DEV_A2_PLAY]
+        test    byte [si+DEV_FLAGS+1],DEMAND_HI
+        jz      .mode
+        and     al,3Fh
+.mode:  mov     dl,[si+DEV_A2_MODE]
+        out     dx,al
+        mov     ax,[si+DEV_A2_PHYS]
+        mov     cx,[si+A1_RING]
+        mov     bl,[si+DEV_A2_PHYS_PG]
+        cmp     byte [si+DEV_A2_DMA],3
+        jbe     .addr
+        shr     bl,1                    ; a word address, 17 bits
+        rcr     ax,1
+        shl     bl,1
+        shr     cx,1
+.addr:  mov     dl,[si+DEV_A2_ADDR]
+        out     dx,al
+        mov     al,ah
+        out     dx,al
+        mov     al,bl
+        mov     dl,[si+DEV_A2_PAGE]
+        out     dx,al
+        mov     ax,cx
+        dec     ax
+        mov     dl,[si+DEV_A2_COUNT]
+        out     dx,al
+        mov     al,ah
+        out     dx,al
+        mov     al,[si+DEV_A2_ON]
+        mov     dl,[si+DEV_A2_MASK]
+        out     dx,al
+        popf
+        ret
 
 ; the DMA stopped, if it runs
 a1_stop:
@@ -886,9 +1043,7 @@ es_wid_resume:
         call    a1_setup
         pop     ax
         test    al,A1F_RUN
-        jz      .done
-        test    al,A1F_PAUSED
-        jnz     .done                   ; WODM_RESTART starts it
+        jz      .done                   ; paused: WODM_RESTART starts it
         call    a1_start
 .done:  pop     ax
         pop     di

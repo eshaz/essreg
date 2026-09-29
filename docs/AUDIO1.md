@@ -70,9 +70,34 @@ The code: [`src/es1869/a1wave.asm`](../src/es1869/a1wave.asm) (the wave messages
 
 ### Its limits
 
-* Audio 1 on an 8-bit DMA channel (0, 1 or 3), and not in the VxD's no-DMA mode. Otherwise `WODM_GETNUMDEVS` stays 1.
+* Audio 1 on an 8-bit DMA channel (0, 1 or 3), and not in the VxD's no-DMA mode. Otherwise `WODM_GETNUMDEVS` stays 1. Audio 2 may be on any channel for dual playback, 16-bit channel 5 too, as ESS's playback programs it.
 * `Audio1Filter=1` uses the CODEC's switched-capacitor filter. By default it's bypassed (71h bit 2), as the Audio 2 DAC's is.
 * DirectSound can't start while the player holds the DSP, as with ESS's wave-out.
+
+## Dual playback
+
+`DualPlayback=1` (the default) lets device 1 take a 4-channel stream: channels 1-2 play on the Audio 1 DAC and 3-4 on the Audio 2 DAC, both from Audio 1's clock.
+* **One clock.** The player takes Audio 2 too (its user 2) and clears mixer 71h bit 1, so the Audio 2 DAC runs at Audio 1's sample rate and filter clock (DS p.64). Both DACs turn a frame into voltage at the same tick. 4x oversampling is off, and Audio 2's filter is set like Audio 1's (`Audio1Filter`).
+* **In step.** Both DMAs play rings of the same size. At the start Audio 2's DMA fills its FIFO first, with 78h bit 0 clear, then Audio 1 starts (B8h bit 0) and right after it Audio 2's FIFO goes to its DAC (78h bit 0), with interrupts off. Audio 1's interrupt refills both rings, and a pause stops both and starts both again from where they were.
+* **What the program writes**: 4-channel PCM, 8 or 16 bits, 4000 to 49000 Hz, on device 1. Programs that use the wave mapper, like Media Player, get device 1 for it when it's the preferred playback device (Control Panel > *Multimedia*), and usually also when the first device is, since that one refuses 4 channels.
+* **Refused** while Audio 2 plays (wave-out, DirectSound) or Audio 1 records. While it plays, both are busy.
+* `tools/dualwav.py` makes the files, from a WAV or from a tone, a sweep or noise it generates.
+
+### What two DACs can do together
+
+The mixer adds the two DACs' outputs, after each DAC's volume (14h, 7Ch). It can't multiply them or shift frequencies, so what each pair does is what their sum is:
+
+| `dualwav.py` mode | Audio 1 plays | Audio 2 plays | The sum | Worth hearing for |
+|---|---|---|---|---|
+| `same` | x | x | 2x, 6 dB up; the DACs' own noise adds 3 dB | 3 dB less noise from the DACs, once the volumes are 6 dB down |
+| `invert` | x | −x | only what differs between the two DACs: level, DC, filter, timing | the null test: line the DACs up with `--delay2` and `--gain2` until the tone is quietest |
+| `split` | x + d | x − d | 2x; d, a 2 Hz triangle, cancels | each DAC plays other codes, so their code-by-code errors don't add up alike |
+| `half` | x | x half a sample later | x through a two-tap filter, zero at half the sample rate | a gentle treble roll-off: what a digital filter would do |
+| `hilbert` | x | x turned 90° | x's spectrum, 3 dB up, every frequency 45° shifted | the same sound: an all-pass. The 90° pair only makes a frequency shift with multipliers, which the mixer doesn't have |
+
+*Note: the two DACs share one clock, so they change at the same instants. The images above half the sample rate can't cancel that way: that would take the second DAC half a sample period later, a clock the chip doesn't have. A half-sample pair filters the samples, as any digital filter would.*
+
+**Lining them up.** The DACs' paths may differ by a fraction of a sample, and the two starts by a few microseconds. With `invert` and a tone, try `--delay2` or `--delay1` (whichever DAC is ahead) in steps of 0.25 frame, and `--gain2` in steps of 0.1 dB, and keep the quietest. Those values go into every file made after. Recording the output ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#measuring-the-dac-on-the-card)) measures it better than ears.
 
 ## Programming the Audio 1 DAC
 

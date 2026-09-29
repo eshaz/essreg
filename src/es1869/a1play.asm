@@ -175,11 +175,22 @@ a1_copy:
         or      ax,[si+A1_CUR+2]
         jz      .full
         mov     ax,[si+A1_CURLEFT]
-        cmp     word [si+A1_CURLEFT+2],0
-        jne     .big
+        mov     dx,[si+A1_CURLEFT+2]
+        test    byte [si+A1_FMT],FMT_DUAL
+        jz      .left1
+        shr     dx,1                    ; each ring gets half, in whole
+        rcr     ax,1                    ; frames
+        mov     cx,[si+A1_ALIGN]
+        dec     cx
+        not     cx
+        and     ax,cx
+.left1: or      dx,dx
+        jnz     .big
         or      ax,ax
         jnz     .some
-        call    a1_next                 ; this one is copied
+        mov     [si+A1_CURLEFT],ax      ; copied, but for part of a frame
+        mov     [si+A1_CURLEFT+2],ax
+        call    a1_next
         jmp     .hdr
 .big:   mov     ax,di
 .some:  cmp     ax,di
@@ -188,8 +199,15 @@ a1_copy:
 .end:   mov     cx,[si+A1_RING]
         sub     cx,[si+A1_WRING]        ; not past the ring's end
         cmp     ax,cx
-        jbe     .copy
+        jbe     .n
         mov     ax,cx
+.n:     test    byte [si+A1_FMT],FMT_DUAL
+        jz      .copy
+        cmp     ax,A1_SPLIT
+        jbe     .split
+        mov     ax,A1_SPLIT
+.split: call    a1_split
+        jmp     .copied
 .copy:  push    ax
         push    word [si+DEV_BUF_SEL]
         mov     cx,[si+DEV_BUF_OFF]
@@ -204,6 +222,7 @@ a1_copy:
         pop     ax
         sub     [si+A1_CURLEFT],ax
         sbb     word [si+A1_CURLEFT+2],0
+.copied:
         add     [si+A1_DPOS],ax
         adc     word [si+A1_DPOS+2],0
         call    a1_wrote
@@ -215,6 +234,57 @@ a1_copy:
 .left:  or      di,di
         jnz     .hdr
 .full:  ret
+
+; AX bytes (whole frames, at most A1_SPLIT) of each ring from 4-channel
+; frames, at WRING: channels 1-2 to Audio 1's ring, 3-4 to Audio 2's; AX
+; kept; SI = dev
+a1_split:
+        push    ax
+        push    di
+        mov     [si+A1_SPLITN],ax
+        pushf
+        cli                             ; a1_bounce is shared
+        push    ds                      ; the frames to a1_bounce: the
+        mov     cx,a1_bounce            ; source is huge
+        push    cx
+        push    word [si+A1_CURPTR+2]
+        push    word [si+A1_CURPTR]
+        shl     ax,1
+        push    ax
+        call    L1_1AF4
+        mov     [si+A1_CURPTR],ax
+        mov     [si+A1_CURPTR+2],dx
+        mov     bx,a1_bounce
+        mov     es,[si+DEV_BUF_SEL]
+        mov     di,[si+DEV_BUF_OFF]
+        call    .half
+        mov     bx,a1_bounce
+        add     bx,[si+A1_ALIGN]
+        mov     es,[si+DEV_A2_BUF_SEL]
+        mov     di,[si+DEV_A2_BUF_OFF]
+        call    .half
+        popf
+        pop     di
+        pop     ax
+        mov     cx,ax
+        shl     cx,1
+        sub     [si+A1_CURLEFT],cx
+        sbb     word [si+A1_CURLEFT+2],0
+        ret
+; every other ALIGN bytes from DS:BX to the ring at ES:DI, from WRING
+.half:  add     di,[si+A1_WRING]
+        mov     dx,[si+A1_SPLITN]
+        mov     ax,[si+A1_ALIGN]
+        push    si
+        mov     si,bx
+        cld
+.frame: mov     cx,ax
+        rep     movsb
+        add     si,ax                   ; past the other DAC's half
+        sub     dx,ax
+        jnz     .frame
+        pop     si
+        ret
 
 ; AX more bytes written, AX kept; SI = dev
 a1_wrote:
@@ -229,15 +299,29 @@ a1_wrote:
         pop     ax
         ret
 
-; CX bytes of silence into the ring from offset AX, wrapping at its end;
-; SI = dev
+; CX bytes of silence into the ring from offset AX, wrapping at its end,
+; and into Audio 2's in dual playback; SI = dev
 a1_quiet:
         jcxz    .done
         push    di
+        push    cx
+        push    ax
         mov     es,[si+DEV_BUF_SEL]
-        mov     dx,[si+A1_RING]
-        sub     dx,ax                   ; bytes to the end
         mov     di,[si+DEV_BUF_OFF]
+        call    .ring
+        pop     ax
+        pop     cx
+        test    byte [si+A1_FMT],FMT_DUAL
+        jz      .one
+        mov     es,[si+DEV_A2_BUF_SEL]
+        mov     di,[si+DEV_A2_BUF_OFF]
+        call    .ring
+.one:   pop     di
+.done:  ret
+; CX bytes from offset AX of the ring at ES:DI
+.ring:  mov     dx,[si+A1_RING]
+        sub     dx,ax                   ; bytes to the end
+        push    di
         add     di,ax
         mov     al,[si+A1_SILENCE]
         cld
@@ -246,11 +330,12 @@ a1_quiet:
         sub     cx,dx
         xchg    cx,dx
         rep     stosb
-        mov     di,[si+DEV_BUF_OFF]
+        pop     di
+        push    di
         mov     cx,dx
 .last:  rep     stosb
         pop     di
-.done:  ret
+        ret
 
 ; the header being copied is all in the ring: it's played once PPOS gets
 ; to WPOS; then the loop's next pass, or the next header; SI = dev
@@ -318,23 +403,88 @@ a1_again:
 
 ; --- far routines for a1wave.asm, at task time -------------------------
 
-; a1_prefill(dev), far pascal: the ring from its start, before the DMA
-; runs: empty from WPOS on, then filled
-a1_prefill:
+; a1_ready(dev), far pascal: the ring for a DMA that starts at its
+; beginning, the DMA stopped: turned so what it didn't play comes first,
+; then filled
+a1_ready:
         push    bp
         mov     bp,sp
         push    si
         push    di
         mov     si,[bp+6]
-        mov     ax,[si+A1_WPOS]
-        mov     [si+A1_PPOS],ax
-        mov     ax,[si+A1_WPOS+2]
-        mov     [si+A1_PPOS+2],ax
-        xor     ax,ax
-        mov     [si+A1_PRING],ax
+        mov     ax,[si+A1_WPOS]         ; the DMA went past the data: none
+        mov     dx,[si+A1_WPOS+2]       ; to keep
+        sub     ax,[si+A1_PPOS]
+        sbb     dx,[si+A1_PPOS+2]
+        jns     .turn
+        mov     ax,[si+A1_PPOS]
+        mov     dx,[si+A1_PPOS+2]
+        mov     [si+A1_WPOS],ax
+        mov     [si+A1_WPOS+2],dx
+        mov     [si+A1_GAPEND],ax
+        mov     [si+A1_GAPEND+2],dx
+        mov     ax,[si+A1_PRING]
         mov     [si+A1_WRING],ax
-        call    a1_fill
+.turn:  cmp     word [si+A1_PRING],0
+        je      .fill
+        mov     es,[si+DEV_BUF_SEL]
+        mov     di,[si+DEV_BUF_OFF]
+        call    .ring
+        test    byte [si+A1_FMT],FMT_DUAL
+        jz      .pos
+        mov     es,[si+DEV_A2_BUF_SEL]
+        mov     di,[si+DEV_A2_BUF_OFF]
+        call    .ring
+.pos:   mov     ax,[si+A1_WRING]
+        sub     ax,[si+A1_PRING]
+        jae     .w
+        add     ax,[si+A1_RING]
+.w:     mov     [si+A1_WRING],ax
+        mov     word [si+A1_PRING],0
+.fill:  call    a1_fill
         pop     di
+        pop     si
+        pop     bp
+        retf    2
+; the ring at ES:DI turned left by PRING: three reversals
+.ring:  mov     ax,di
+        mov     dx,[si+A1_PRING]
+        call    .rev
+        mov     ax,di
+        add     ax,[si+A1_PRING]
+        mov     dx,[si+A1_RING]
+        sub     dx,[si+A1_PRING]
+        call    .rev
+        mov     ax,di
+        mov     dx,[si+A1_RING]
+; DX bytes at ES:AX reversed
+.rev:   or      dx,dx
+        jz      .rdone
+        push    si
+        push    di
+        mov     si,ax
+        mov     di,ax
+        add     di,dx
+        dec     di
+.swap:  cmp     si,di
+        jae     .rend
+        mov     al,[es:si]
+        xchg    al,[es:di]
+        mov     [es:si],al
+        inc     si
+        dec     di
+        jmp     .swap
+.rend:  pop     di
+        pop     si
+.rdone: ret
+
+; a1_freeze(dev), far pascal: PPOS where the stopped DMA is
+a1_freeze:
+        push    bp
+        mov     bp,sp
+        push    si
+        mov     si,[bp+6]
+        call    a1_advance
         pop     si
         pop     bp
         retf    2
@@ -575,11 +725,37 @@ a1_halt:
         out     dx,al
         add     dx,8
         in      al,dx                   ; Audio_Base+Eh
+        test    byte [si+A1_FMT],FMT_DUAL
+        jz      .done
+        ; Audio 2 as well: stopped, its channel masked, its latch clear
+        mov     ax,MX_A2_CONTROL1
+        call    .mixer
+        xor     dh,dh
+        mov     dl,[si+DEV_A2_MASK]
+        mov     al,[si+DEV_A2_OFF]
+        out     dx,al
+        push    si
+        mov     al,MX_A2_CONTROL2
+        push    ax
+        push    cs
+        call    mixer_read
+        and     al,3Fh
+        mov     ah,al
+        mov     al,MX_A2_CONTROL2
+        call    .mixer
 .done:  ret
 .dsp:   push    si
         push    ax
         push    cs
         call    dsp_write
+        ret
+; mixer register AL = AH
+.mixer: push    si
+        push    ax
+        mov     al,ah
+        push    ax
+        push    cs
+        call    mixer_write
         ret
 
 ; a1_d3_gate(dev, command), far pascal, in place of dsp_write where

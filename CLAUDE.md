@@ -11,7 +11,7 @@ Tools and rebuilt drivers for the ESS ES1869 sound chip on DOS and Windows 9x. [
 * `src/es1869/`: `ES1869.DRV` (wave, mixer and aux) as NASM source, from `tools/ne2asm.py` with `names.txt`. Changes are assembled with `ES1869_FIX=1`: `a2mode.asm` (the Audio 2 mode), `a1wave.asm` and `a1play.asm` (the Audio 1 player: its wave messages, and its interrupt in fixed code), `settings.asm` (SYSTEM.INI), `fixdata.asm` (their data), `fix.inc` (constants, ESS's device fields).
 * `driver/`: ESS's original drivers, the reference for the byte-identical rebuilds.
 * `build/`: the committed binaries.
-* `tools/`: builders, RE tools, `guard.py`, `wineshot.sh`. `tests/`: Python tests (`esfmemu.py`, `vxdemu.py` and `drvemu.py` run the drivers in a CPU emulator), `tests/host/`: C tests.
+* `tools/`: builders, RE tools, `guard.py`, `wineshot.sh`, `dualwav.py` (4-channel files for dual playback). `tests/`: Python tests (`esfmemu.py`, `vxdemu.py` and `drvemu.py` run the drivers in a CPU emulator), `tests/host/`: C tests.
 * `docs/`: [TESTING.md](docs/TESTING.md), [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md), [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md), [VXD_INTERNALS.md](docs/VXD_INTERNALS.md), [SPATIALIZER.md](docs/SPATIALIZER.md), [DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md), [AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md), [AUDIO1.md](docs/AUDIO1.md), [RE_NOTES.md](docs/RE_NOTES.md), [STYLE.md](docs/STYLE.md). `REGISTERS.md` is generated. `docs/datasheet/` has the ES1869, ES938 and ES1868 data sheets.
 
 ## Environment
@@ -35,6 +35,7 @@ tools/ow2build.sh $OW2                            # DOS and Win16 programs, into
 python3 tools/regdoc.py                           # docs/REGISTERS.md from src/esscat.tbl
 python3 tools/gmcheck.py                          # build/GMCHECK.MID
 python3 tools/ess3dico.py                         # the tray icons, src/win/ess3d*.ico
+python3 tools/dualwav.py same in.wav out.wav      # a 4-channel file for dual playback
 flake8                                            # Python lint, clean
 clang-format --dry-run FILE.c                     # C style (.clang-format wants CRLF)
 tools/guard.py [REV]                              # only comments changed since REV

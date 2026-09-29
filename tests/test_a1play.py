@@ -35,6 +35,7 @@ except ImportError:
 
 A1_MAGIC = 0xA1A1
 OPT_A1_DEVICE, OPT_A1_SHARED, OPT_A1_FILTER = 0x0001, 0x0002, 0x0004
+OPT_DUAL = 0x0008
 OPT_A2_4X, OPT_A2_FILTER, OPT_READ = 0x0100, 0x0200, 0x8000
 MMSYSERR_BADDEVICEID, MMSYSERR_NOTENABLED = 2, 3
 MMSYSERR_ALLOCATED, MMSYSERR_NOTSUPPORTED = 4, 8
@@ -523,6 +524,133 @@ class SharedTest(A1Case):
                          s.wod(0, drvemu.WODM_GETPOS, user, spos, 8))
 
 
+def quad(a, b, width):
+    """4-channel frames: each frame's first half from a, second from b"""
+    out = bytearray()
+    for i in range(0, len(a), width):
+        out += a[i:i + width] + b[i:i + width]
+    return bytes(out)
+
+
+class DualTest(A1Case):
+    def dual(self, bits=16, rate=44100, a2_dma=None, **kw):
+        e = self.emu(kw.pop("opts", None))
+        if a2_dma is not None:
+            e.set_a2_dma(a2_dma)
+        r, user = e.open(rate=rate, channels=4, bits=bits)
+        self.assertEqual(r, 0)
+        return e, user
+
+    def test_open(self):
+        e, user = self.dual()
+        self.assertEqual(e.dev8(0x100), 2)         # Audio 2's user: ours
+        self.assertEqual(e.dev8(0x5D), 1)
+        m = e.chip.mixer
+        self.assertFalse(m[0x71] & 0x02)            # slaved to Audio 1
+        self.assertFalse(m[0x71] & 0x10)            # no 4x oversampling
+        self.assertEqual(bool(m[0x71] & 0x08), bool(m[0x71] & 0x04))
+        self.assertEqual(m[0x7A], 0x07)             # 16-bit signed stereo
+        block = e.dev16(A1_BLOCK)
+        self.assertEqual((m[0x76] << 8) | m[0x74], (0x10000 - block) & 0xFFFF)
+        self.assertEqual(e.chip.regs[0xA8] & 3, 1)  # Audio 1 in stereo
+
+    def test_both_play_in_step(self):
+        for bits, width in ((16, 4), (8, 2)):
+            with self.subTest(bits=bits):
+                e, user = self.dual(bits=bits, rate=22050)
+                block = e.dev16(A1_BLOCK)
+                a, b = pattern(block * 5, 11), pattern(block * 5, 12)
+                data = quad(a, b, width)
+                for i in range(0, len(data), 7000):
+                    e.write(user, e.header(data[i:i + 7000]))
+                log = [x for x in e.chip.log
+                       if x[:2] in (("mixer", 0x78), ("reg", 0xB8))]
+                go = 0x93                           # demand transfers
+                self.assertEqual(log[-3:], [("mixer", 0x78, go & ~1),
+                                            ("reg", 0xB8, 0x05),
+                                            ("mixer", 0x78, go)])
+                self.play(e, 8)
+                self.assertEqual(len(e.played), len(e.played2))
+                self.assertEqual(bytes(e.played[:len(a)]), a)
+                self.assertEqual(bytes(e.played2[:len(b)]), b)
+                self.assertEqual(e.getpos(user)[1:], (TIME_BYTES, len(data)))
+                self.assertEqual(e.getpos(user, TIME_SAMPLES)[2],
+                                 len(a) // width)
+
+    def test_16_bit_audio2_channel(self):
+        e, user = self.dual(a2_dma=5)
+        block = e.dev16(A1_BLOCK)
+        a, b = pattern(block * 3, 13), pattern(block * 3, 14)
+        e.write(user, e.header(quad(a, b, 4)))
+        d = e.chip.dma[5]
+        self.assertEqual(d["count"], block - 1)     # words
+        self.assertEqual(d["addr"], (drvemu.A2_BUF_PARA * 16 >> 1) & 0xFFFF)
+        self.play(e, 5)
+        self.assertEqual(bytes(e.played[:len(a)]), a)
+        self.assertEqual(bytes(e.played2[:len(b)]), b)
+
+    def test_pause_keeps_them_in_step(self):
+        e, user = self.dual(rate=22050)
+        block = e.dev16(A1_BLOCK)
+        a, b = pattern(block * 6, 15), pattern(block * 6, 16)
+        e.write(user, e.header(quad(a, b, 4)))
+        e.dma(block + 100)
+        e.interrupt()
+        e.dma(300)
+        self.assertEqual(e.wod(0, WODM_PAUSE, user), 0)
+        self.assertTrue(e.chip.dma[drvemu.A1_DMA]["mask"])
+        self.assertTrue(e.chip.dma[drvemu.A2_DMA]["mask"])
+        pos = e.getpos(user)[2]
+        self.assertEqual(pos, 2 * (block + 400))
+        self.assertEqual(e.wod(0, WODM_RESTART, user), 0)
+        self.play(e, 8)
+        self.assertEqual(bytes(e.played[:len(a)]), a)
+        self.assertEqual(bytes(e.played2[:len(b)]), b)
+
+    def test_close(self):
+        e, user = self.dual()
+        e.write(user, e.header(quad(pattern(4000), pattern(4000, 2), 4)))
+        e.wod(0, WODM_RESET, user)
+        self.assertEqual(e.wod(0, WODM_CLOSE, user), 0)
+        self.assertEqual(e.dev8(0x100), 0)
+        self.assertTrue(e.chip.mixer[0x71] & 0x02)  # at its own rate again
+        self.assertEqual(e.chip.mixer[0x78], 0)
+        self.assertTrue(e.chip.dma[drvemu.A2_DMA]["mask"])
+        # and ESS's wave-out can have Audio 2
+        self.assertEqual(e.call((drvemu.SEG_PARA[4], 0x0054),
+                                (drvemu.DEV_OFF,)) & 0xFFFF, 0)
+
+    def test_wave_out_refused_while_dual(self):
+        e, _u = self.dual()
+        self.assertEqual(e.call((drvemu.SEG_PARA[4], 0x0054),
+                                (drvemu.DEV_OFF,)) & 0xFFFF, 0xFFFF)
+        self.assertEqual(e.open(dev_id=0)[0], MMSYSERR_ALLOCATED)
+
+    def test_refused(self):
+        e = self.emu()
+        self.assertEqual(e.open(dev_id=0, channels=4)[0], WAVERR_BADFORMAT)
+        e = self.emu(OPT_A1_DEVICE | OPT_A1_SHARED)
+        self.assertEqual(e.open(channels=4)[0], WAVERR_BADFORMAT)
+        e = self.emu()
+        e.set_dev8(0x100, 1)                        # wave-out plays
+        e.set_dev8(0x70, 1)
+        self.assertEqual(e.open(channels=4)[0], MMSYSERR_ALLOCATED)
+        self.assertEqual(e.dev8(0x5D), 0)
+        e = self.emu()
+        e.set_dev8(0x5D, 2)                         # wave-in records
+        e.set_dev8(0x6F, 1)
+        self.assertEqual(e.open(channels=4)[0], MMSYSERR_ALLOCATED)
+        self.assertEqual(e.dev8(0x100), 0)
+
+    def test_disable_stops_both(self):
+        e, user = self.dual()
+        e.write(user, e.header(quad(pattern(4000), pattern(4000, 2), 4)))
+        e.call_name("a1_disable", drvemu.DEV_OFF)
+        self.assertTrue(e.chip.dma[drvemu.A1_DMA]["mask"])
+        self.assertTrue(e.chip.dma[drvemu.A2_DMA]["mask"])
+        self.assertEqual(e.chip.mixer[0x78], 0)
+
+
 class GateTest(A1Case):
     def gate(self, e):
         e.chip.log = []
@@ -620,15 +748,16 @@ class SettingsTest(A1Case):
     def test_defaults(self):
         e = self.enable({})
         self.assertEqual(self.opts(e), OPT_READ | OPT_A1_DEVICE |
-                         OPT_A1_SHARED)
+                         OPT_A1_SHARED | OPT_DUAL)
         self.assertEqual([k for _s, k, _d, _f in e.ppint], [
             "Audio1Device", "SharedWaveOut", "Audio1Filter",
-            "Audio2Oversampling", "Audio2Filter"])
+            "DualPlayback", "Audio2Oversampling", "Audio2Filter"])
 
     def test_each_key(self):
         for key, bit, default in (("Audio1Device", OPT_A1_DEVICE, 1),
                                   ("SharedWaveOut", OPT_A1_SHARED, 1),
-                                  ("Audio1Filter", OPT_A1_FILTER, 0)):
+                                  ("Audio1Filter", OPT_A1_FILTER, 0),
+                                  ("DualPlayback", OPT_DUAL, 1)):
             for value, on in (("1", True), ("0", False), ("yes", False)):
                 with self.subTest(key=key, value=value):
                     e = self.enable({("ES1869.DRV", key): value})

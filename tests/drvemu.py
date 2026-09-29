@@ -59,7 +59,7 @@ BUF_SIZE = 0x4000
 DEV_OFF = 0x2000            # the device structure in DGROUP
 HEAP_OFF = 0x3000           # LocalAlloc from here
 IF_FLAG = 0x200
-PAGE_PORTS = {0: 0x87, 1: 0x83, 2: 0x81, 3: 0x82}
+PAGE_PORTS = {0: 0x87, 1: 0x83, 2: 0x81, 3: 0x82, 5: 0x8B, 6: 0x89, 7: 0x8A}
 
 WODM_GETNUMDEVS, WODM_GETDEVCAPS, WODM_OPEN, WODM_CLOSE = 3, 4, 5, 6
 WODM_PREPARE, WODM_UNPREPARE, WODM_WRITE, WODM_PAUSE = 7, 8, 9, 10
@@ -114,10 +114,10 @@ class Chip:
         self.log = []                   # ("cmd", c), ("reg", r, v), ...
         self.ext_errors = []            # register commands without C6h
         self.a1_irq = False
-        # 8237: per channel
+        # 8237: per channel, 0-3 in bytes and 5-7 in words
         self.dma = {ch: {"mask": True, "mode": 0, "addr": 0, "count": 0,
-                         "page": 0, "pos": 0} for ch in range(4)}
-        self.ff = 0
+                         "page": 0, "pos": 0} for ch in (0, 1, 2, 3, 5, 6, 7)}
+        self.ff = {0: 0, 1: 0}
         self.dma_log = []
 
     def _dsp_byte(self, v):
@@ -164,7 +164,8 @@ class Chip:
                 self.mixer[0x7C] = 0
         elif port == b + 0xC:
             self._dsp_byte(v)
-        elif port < 0x10 or port in PAGE_PORTS.values():
+        elif port < 0x10 or 0xC0 <= port < 0xE0 or \
+                port in PAGE_PORTS.values():
             self._dma_out(port, v)
 
     def inp(self, port):
@@ -187,20 +188,29 @@ class Chip:
                 if p == port:
                     self.dma[ch]["page"] = v
             return
-        if port == 0x0A:
-            self.dma[v & 3]["mask"] = bool(v & 4)
-        elif port == 0x0B:
-            self.dma[v & 3]["mode"] = v
-        elif port == 0x0C:
-            self.ff = 0
-        elif port < 8:
-            ch = port >> 1
-            key = "count" if port & 1 else "addr"
-            if self.ff == 0:
+        # the 16-bit controller: channels 4-7, registers at C0h + 2n
+        hi, reg = (1, (port - 0xC0) >> 1) if port >= 0xC0 else (0, port)
+        base = 4 if hi else 0
+        if reg == 0x0A:
+            ch = base + (v & 3)
+            if ch in self.dma:
+                self.dma[ch]["mask"] = bool(v & 4)
+        elif reg == 0x0B:
+            ch = base + (v & 3)
+            if ch in self.dma:
+                self.dma[ch]["mode"] = v
+        elif reg == 0x0C:
+            self.ff[hi] = 0
+        elif reg < 8:
+            ch = base + (reg >> 1)
+            key = "count" if reg & 1 else "addr"
+            if ch not in self.dma:
+                return
+            if self.ff[hi] == 0:
                 self.dma[ch][key] = (self.dma[ch][key] & 0xFF00) | v
             else:
                 self.dma[ch][key] = (self.dma[ch][key] & 0x00FF) | (v << 8)
-            self.ff ^= 1
+            self.ff[hi] ^= 1
             self.dma[ch]["pos"] = 0
 
     def dma_count(self, ch):
@@ -237,6 +247,8 @@ class DrvEmu:
         self.app = APP_PARA * 16
         self.clock = 0
         self.played = bytearray()      # what the chip took from Audio 1
+        self.played2 = bytearray()     # and from Audio 2's buffer
+        self.a2_dma = A2_DMA
         uc.hook_add(UC_HOOK_INTR, self._intr)
         uc.hook_add(UC_HOOK_INSN, self._in, None, 1, 0, UC_X86_INS_IN)
         uc.hook_add(UC_HOOK_INSN, self._out, None, 1, 0, UC_X86_INS_OUT)
@@ -391,7 +403,7 @@ class DrvEmu:
             self.w8(dg, d + off, v)
         self.w16(dg, d + 0x5B, 0x6000 | 0x65)       # the EOI word
         # Audio 2's DMA (3:4A33-4AE3)
-        self.w8(dg, d + 0xD4, A2_DMA)
+        self.set_a2_dma(A2_DMA)
         self.w16(dg, d + 0xD5, (A2_BUF_PARA * 16) & 0xFFFF)
         self.w8(dg, d + 0xD7, (A2_BUF_PARA * 16) >> 16)
         self.w16(dg, d + 0xD9, BUF_SIZE)
@@ -401,17 +413,29 @@ class DrvEmu:
         self.w16(dg, d + 0xF7, A2_BUF_PARA)
         self.w16(dg, d + 0xF9, (A2_BUF_PARA * 16) & 0xFFFF)
         self.w8(dg, d + 0xFB, (A2_BUF_PARA * 16) >> 16)
-        for off, v in ((0xE3, A2_DMA * 2), (0xE4, A2_DMA * 2 + 1),
-                       (0xE5, 0x0A), (0xE6, 0x0B), (0xE7, 0x0C),
-                       (0xE8, PAGE_PORTS[A2_DMA]), (0xE9, A2_DMA),
-                       (0xEA, A2_DMA + 4), (0xEB, 0x54 + A2_DMA),
-                       (0xEC, 0x58 + A2_DMA)):
-            self.w8(dg, d + off, v)
         # the interrupt handler, as isr_install copies it (3:0261)
         code = self.rd(SEG_PARA[3] * 16 + 0x01B9, 0xA8)
         self.wr(ISR_PARA * 16, code)
         self.w16(ISR_PARA, 0x0A, d)
         self.w16(dg, d + 0x53, ISR_PARA)
+
+    def set_a2_dma(self, ch):
+        """Audio 2 on DMA channel ch, its 8237 fields as the enable sets
+        them (3:4A5A-4AE3)"""
+        dg, d = DGROUP, DEV_OFF
+        self.a2_dma = ch
+        self.w8(dg, d + 0xD4, ch)
+        if ch > 3:
+            ports = ((ch & 3) * 4 + 0xC0, (ch & 3) * 4 + 0xC2, 0xD4, 0xD6,
+                     0xD8)
+        else:
+            ports = (ch * 2, ch * 2 + 1, 0x0A, 0x0B, 0x0C)
+        for off, v in zip((0xE3, 0xE4, 0xE5, 0xE6, 0xE7), ports):
+            self.w8(dg, d + off, v)
+        for off, v in ((0xE8, PAGE_PORTS[ch]), (0xE9, ch & 3),
+                       (0xEA, (ch & 3) + 4), (0xEB, 0x54 + (ch & 3)),
+                       (0xEC, 0x58 + (ch & 3))):
+            self.w8(dg, d + off, v)
 
     # --- hooks ------------------------------------------------------------
 
@@ -566,7 +590,7 @@ class DrvEmu:
         elif dx == 0x0000:
             ax = 0x0404
         elif dx == 0x0004:
-            ch = A1_DMA if bx == 0 else A2_DMA
+            ch = A1_DMA if bx == 0 else self.a2_dma
             ax = self.chip.dma_count(ch)
         elif dx not in (0x0002, 0x0003):
             raise EmuError("VxD function %04x" % dx)
@@ -626,20 +650,27 @@ class DrvEmu:
 
     # --- the hardware running -----------------------------------------------
 
-    def dma(self, n, ch=A1_DMA):
-        """the chip takes n bytes: the 8237 moves on, and what it read from
-        the Audio 1 buffer is kept in played"""
-        d = self.chip.dma[ch]
-        if d["mask"]:
-            return
-        size = d["count"] + 1
-        base = (d["page"] << 16) | d["addr"]
-        for _i in range(n):
-            if ch == A1_DMA:
-                self.played.append(self.rd(base + d["pos"], 1)[0])
-            d["pos"] += 1
-            if d["pos"] >= size:
-                d["pos"] = 0
+    def dma(self, n):
+        """the chip takes n bytes from each channel that runs, in step: the
+        8237 moves on, and what it read is kept, Audio 1's in played and
+        Audio 2's in played2"""
+        for ch, out in ((A1_DMA, self.played), (self.a2_dma, self.played2)):
+            d = self.chip.dma[ch]
+            if d["mask"]:
+                continue
+            if ch >= 4:     # words: a 17-bit word address, the page's bit 0
+                size = (d["count"] + 1) * 2
+                base = ((d["page"] & 0xFE) << 16) | (d["addr"] << 1)
+            else:
+                size = d["count"] + 1
+                base = (d["page"] << 16) | d["addr"]
+            pos = d["pos"] * 2 if ch >= 4 else d["pos"]
+            for _i in range(n):
+                out.append(self.rd(base + pos, 1)[0])
+                pos += 1
+                if pos >= size:
+                    pos = 0
+            d["pos"] = pos // 2 if ch >= 4 else pos
 
     def interrupt(self):
         """an Audio 1 interrupt through ESS's handler: DX:AX unused"""

@@ -348,10 +348,11 @@ The Audio 1 player is described in [AUDIO1.md](AUDIO1.md#the-audio-1-player-in-b
 | Audio1Device | 1 | A second wave-out device, "ESS AudioDrive Audio 1", played through the Audio 1 DAC | One device, as ESS's driver |
 | SharedWaveOut | 1 | A program opening device 0 while another plays there gets the Audio 1 DAC | It gets `MMSYSERR_ALLOCATED`, as with ESS's driver |
 | Audio1Filter | 0 | While the Audio 1 player plays, the CODEC's switched-capacitor filter smooths the DAC's steps | The filter is bypassed while it plays (71h bit 2 set, and clear again at its close) |
+| DualPlayback | 1 | Device 1 also takes 4 channels: 1-2 on the Audio 1 DAC, 3-4 on the Audio 2 DAC, from one clock ([AUDIO1.md](AUDIO1.md#dual-playback)) | 4 channels are refused (`WAVERR_BADFORMAT`) |
 | Audio2Oversampling | 0 | ESS's 4x oversampling on the Audio 2 DAC (mixer 71h bit 4), which also bypasses the filter | The DAC plays the samples as they are |
 | Audio2Filter | 0 | Without 4x oversampling, the switched-capacitor filter smooths the DAC's steps (71h bit 3 clear) | The filter is bypassed (71h bit 3 set) |
 
-* With `Audio1Device=0` and `SharedWaveOut=0` the driver answers every wave-out message as ESS's does: `SettingsTest` in `tests/test_a1play.py` compares them. `Audio1Filter` then does nothing.
+* With `Audio1Device=0` and `SharedWaveOut=0` the driver answers every wave-out message as ESS's does: `SettingsTest` in `tests/test_a1play.py` compares them. `Audio1Filter` and `DualPlayback` then do nothing.
 * `Audio2Oversampling=1` with `Audio2Filter=1` writes ESS's value, 71h bits 4 and 1 set and bit 3 as it was.
 * ES1869.DRV applies them to Windows' wave output, at the open (1:1157) and at every playback start (6:2DE6). ES1869.VXD reads the same two keys for DirectSound and for a DOS program taking the DSP.
 * Why the defaults sound better: [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter).

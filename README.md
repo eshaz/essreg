@@ -196,6 +196,7 @@ file       the WAV file, FMREC001.WAV and up if left out
 * **A second wave device**, "ESS AudioDrive Audio 1", plays through the chip's other DAC, the one ESS's driver only records with. Two programs play at once, each on its own DAC.
   * A program that opens the first device while another plays there gets the second DAC too, instead of "the device is in use".
   * Audio 1 records or plays, one at a time: while something plays on it, Sound Recorder can't record, and the other way round.
+  * **Dual playback**: the second device also plays 4-channel files, channels 1-2 on one DAC and 3-4 on the other, both from one clock. [`tools/dualwav.py`](tools/dualwav.py) makes them, to hear the two DACs together: the same signal on both, one against the other (a null test), and more. What each does: [docs/AUDIO1.md](docs/AUDIO1.md#dual-playback).
   * `Audio1Device=0` and `SharedWaveOut=0` under `[ES1869.DRV]` in `SYSTEM.INI` give ESS's single device back.
   * How it works, and what ESS's driver and the data sheet say about Audio 1: [docs/AUDIO1.md](docs/AUDIO1.md).
 * **The Audio 2 DAC**, which plays Windows' wave output, plays the samples as they are. No 4x oversampling, and the filter bypassed, at every sample rate.

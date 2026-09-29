@@ -42,8 +42,9 @@ DEV = 0x4000                # a device structure in the data segment
 DEMAND = 0x80               # dev+2Bh bit 7, demand transfers
 PPINT = (1, 127)            # KERNEL.GetPrivateProfileInt
 OPT_A1_DEVICE, OPT_A1_SHARED, OPT_A1_FILTER = 0x0001, 0x0002, 0x0004
+OPT_DUAL = 0x0008
 OPT_A2_4X, OPT_A2_FILTER, OPT_READ = 0x0100, 0x0200, 0x8000
-OPT_DEFAULT = OPT_A1_DEVICE | OPT_A1_SHARED
+OPT_DEFAULT = OPT_A1_DEVICE | OPT_A1_SHARED | OPT_DUAL
 
 
 def profile_int(value):
@@ -340,6 +341,7 @@ class SettingsTest(unittest.TestCase):
             ("ES1869.DRV", "Audio1Device", 1, "SYSTEM.INI"),
             ("ES1869.DRV", "SharedWaveOut", 1, "SYSTEM.INI"),
             ("ES1869.DRV", "Audio1Filter", 0, "SYSTEM.INI"),
+            ("ES1869.DRV", "DualPlayback", 1, "SYSTEM.INI"),
             ("ES1869.DRV", "Audio2Oversampling", 0, "SYSTEM.INI"),
             ("ES1869.DRV", "Audio2Filter", 0, "SYSTEM.INI")])
 
