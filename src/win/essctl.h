@@ -72,6 +72,10 @@ void tray_notify(int reg);
 // returns 0, 1 done with problems, 2 failed
 int fmdac_set(int fm_only, char *report, unsigned size);
 
+// esfmlive.c
+// the handle of segment seg of a loaded module (ESFM.DRV's, ES1869.DRV's)
+HGLOBAL module_segment(HMODULE mod, unsigned seg);
+
 // dlgmain.c
 BOOL CALLBACK __export main_dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp);
 void set_help(const char *text);

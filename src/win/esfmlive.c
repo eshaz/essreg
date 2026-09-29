@@ -52,6 +52,7 @@
 
 #include "esfmbank.h"
 #include "esfmlive.h"
+#include "essctl.h"
 
 #define DG_BANK_LOCKS 0x10 // GlobalPageLock count of the bank
 #define DG_BANK_OFF 0x12
@@ -97,7 +98,7 @@ static HGLOBAL bank_handle(const struct live *lv) {
 // module database (ToolHelp's GlobalEntryModule is a stub in Wine)
 // the module database is the NE header in memory, its 10-byte segment table
 // entries end in the segment's handle
-static HGLOBAL module_segment(HMODULE mod, unsigned seg) {
+HGLOBAL module_segment(HMODULE mod, unsigned seg) {
   GLOBALENTRY ge;
   u8 __far *ne;
   HGLOBAL h = 0;

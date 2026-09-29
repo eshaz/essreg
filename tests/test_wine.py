@@ -18,6 +18,8 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
 - ESFM voices: "essctl /dump" with the ESS driver, then the fixed build,
   also with its SYSTEM.INI switches set,
   shows the driver's 18 voices and, for the fixed build, its counters
+- ES1869.DRV: "essctl /dump" with ESS's driver, then the rebuilt one,
+  loaded by drvhold, names it and the rebuilt one's settings
 - ESFM bank file: the fixed build loads the bank named in SYSTEM.INI
   [ESFM.DRV] Bank= when a program opens the device, and "essctl /load" of
   a profile with a bank names it there
@@ -224,7 +226,7 @@ class WineTest(unittest.TestCase):
         self.assertIn("ESFM bank loaded", read(self.path("ESSCTL.LOG"))
                       .decode())
 
-    def esfm_dump(self, driver):
+    def driver_dump(self, driver):
         shutil.copy(driver, self.path("DRV.DRV"))
         self.wine("drvhold.exe", "DRV.DRV", self.win,
                   "%s\\essctl.exe /sim /dump %s\\ESFM.TXT /q" %
@@ -256,7 +258,7 @@ class WineTest(unittest.TestCase):
             with open(ini, "ab") as f:
                 f.write(b"\r\n[ESFM.DRV]\r\nBank=%s\\MARK.BIN\r\n" %
                         self.win.encode())
-            text = self.esfm_dump(self.fixed_driver())
+            text = self.driver_dump(self.fixed_driver())
             # the driver read SYSTEM.INI, the file's date and the file
             # through KERNEL when drvhold opened the device
             self.assertEqual(read(self.path("BEFORE.BIN"))[:len(bank)],
@@ -293,12 +295,12 @@ class WineTest(unittest.TestCase):
                 f.write(saved)
 
     def test_esfm_voices_in_dump(self):
-        text = self.esfm_dump(os.path.join(ROOT, "driver", "ESFM.DRV"))
+        text = self.driver_dump(os.path.join(ROOT, "driver", "ESFM.DRV"))
         self.assertIn("ESFM.DRV", text)
         self.assertIn("The MIDI device is closed", text)
         self.assertIn("ESS driver: drops messages", text)
         self.assertEqual(text.count("  free"), 18)
-        text = self.esfm_dump(self.fixed_driver())
+        text = self.driver_dump(self.fixed_driver())
         self.assertIn("Fixed driver: 0 messages queued", text)
         self.assertIn("Settings: from SYSTEM.INI, the square-wave bank",
                       text)
@@ -314,7 +316,7 @@ class WineTest(unittest.TestCase):
             with open(ini, "ab") as f:
                 f.write(b"\r\n[ESFM.DRV]\r\nVibrato=0\r\nSysEx=0\r\n"
                         b"BetterSquareWave=0\r\n")
-            text = self.esfm_dump(self.fixed_driver())
+            text = self.driver_dump(self.fixed_driver())
             self.assertIn("Settings: from SYSTEM.INI, off: Vibrato, SysEx, "
                           "ESS's bank", text)
             ess = read(os.path.join(ROOT, "esfm_patch_banks", "bnk_com.bin"))
@@ -322,6 +324,25 @@ class WineTest(unittest.TestCase):
         finally:
             with open(ini, "wb") as f:
                 f.write(saved)
+
+    def test_wave_driver_in_dump(self):
+        # the Device information lines: none loaded, then ESS's and the
+        # rebuilt ES1869.DRV, loaded by drvhold without DRV_LOAD
+        self.wine("essctl.exe", "/sim", "/dump", "INFO.TXT", "/q")
+        text = read(self.path("INFO.TXT")).decode("latin-1")
+        self.assertIn("Wave driver:\tES1869.DRV isn't loaded\r", text)
+        text = self.driver_dump(os.path.join(ROOT, "driver", "ES1869.DRV"))
+        self.assertIn("Wave driver:\tESS's ES1869.DRV\r", text)
+        self.assertNotIn("Wave Audio 1:", text)
+        text = self.driver_dump(os.path.join(ROOT, "build", "ES1869.DRV"))
+        self.assertIn("Wave driver:\tthe rebuilt ES1869.DRV, not enabled "
+                      "yet\r", text)
+        self.assertIn("Wave Audio 1:\tfilter bypassed; Audio 2: not "
+                      "oversampled, filter bypassed\r", text)
+        # no device before DRV_LOAD, so no channels
+        self.assertNotIn("Audio 1:\tfree", text)
+        self.assertIn("a wave driver: loaded only",
+                      read(self.path("DRVHOLD.LOG")).decode("latin-1"))
 
     def ess3d(self, *args, log="E3.LOG"):
         """Run ess3d.exe, returns the lines it added to its log."""

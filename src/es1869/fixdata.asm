@@ -5,6 +5,10 @@
 ;
 ; Licensed under GPL Version 3.0
 
+; essctl finds the settings by this (src/wavestat.c); a layout change
+; bumps the version
+es_status:      db "ESDRVFIX", 0, 0
+                dw 1
 es_opts:        dw OPT_DEFAULT          ; OPT_*: the changes that are on
 
 ; SYSTEM.INI keys (settings.asm): the key, its es_opts bit

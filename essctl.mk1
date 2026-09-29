@@ -60,15 +60,21 @@ w_esfmlive.obj : src\win\esfmlive.c .AUTODEPEND
 w_esfmtest.obj : src\win\esfmtest.c .AUTODEPEND
  *wcc src\win\esfmtest.c $(WIN_CFLAGS) -fo=w_esfmtest.obj
 
+w_wavelive.obj : src\win\wavelive.c .AUTODEPEND
+ *wcc src\win\wavelive.c $(WIN_CFLAGS) -fo=w_wavelive.obj
+
+w_wavestat.obj : src\wavestat.c .AUTODEPEND
+ *wcc src\wavestat.c $(WIN_CFLAGS) -fo=w_wavestat.obj
+
 w_vxdcall.obj : src\win\vxdcall.asm
  *wasm src\win\vxdcall.asm -q -fo=w_vxdcall.obj
 
 essctl.res : src\win\essctl.rc src\win\resource.h src\win\essctl.ico
  *wrc -q -r -bt=windows -i="$(%watcom)/h;$(%watcom)/h/win;src\win" src\win\essctl.rc -fo=essctl.res
 
-essctl.exe : w_essctl.obj w_dlgmain.obj w_page.obj w_pagefld.obj w_pageraw.obj w_pageinfo.obj w_pageesfm.obj w_winio.obj w_drvcfg.obj w_esfmlive.obj w_esfmtest.obj w_esshw.obj w_esscat.obj w_essio.obj w_profile.obj w_simhw.obj w_vxdapi.obj w_esfmbank.obj w_vxdcall.obj essctl.res nestamp.exe .AUTODEPEND
+essctl.exe : w_essctl.obj w_dlgmain.obj w_page.obj w_pagefld.obj w_pageraw.obj w_pageinfo.obj w_pageesfm.obj w_winio.obj w_drvcfg.obj w_esfmlive.obj w_esfmtest.obj w_wavelive.obj w_wavestat.obj w_esshw.obj w_esscat.obj w_essio.obj w_profile.obj w_simhw.obj w_vxdapi.obj w_esfmbank.obj w_vxdcall.obj essctl.res nestamp.exe .AUTODEPEND
  @%write essctl.lk1 FIL w_essctl.obj,w_dlgmain.obj,w_page.obj,w_pagefld.obj,w_pageraw.obj,w_pageinfo.obj,w_pageesfm.obj,w_winio.obj,w_drvcfg.obj
- @%append essctl.lk1 FIL w_esfmlive.obj,w_esfmtest.obj,w_esshw.obj,w_esscat.obj,w_essio.obj,w_profile.obj,w_simhw.obj,w_vxdapi.obj,w_esfmbank.obj,w_vxdcall.obj
+ @%append essctl.lk1 FIL w_esfmlive.obj,w_esfmtest.obj,w_wavelive.obj,w_wavestat.obj,w_esshw.obj,w_esscat.obj,w_essio.obj,w_profile.obj,w_simhw.obj,w_vxdapi.obj,w_esfmbank.obj,w_vxdcall.obj
  @%append essctl.lk1 LIBR commdlg.lib,toolhelp.lib,mmsystem.lib
  @%append essctl.lk1 SEGMENT CLASS 'CODE' MOVEABLE DISCARDABLE
  @%append essctl.lk1 OPTION DESCRIPTION 'ES1869 Control'

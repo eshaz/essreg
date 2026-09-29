@@ -12,6 +12,10 @@
  * (SYSTEM.INI, docs/DRIVER_CONFIG.md): the ones turned off are
  * listed by their key.
  *
+ * ES1869.DRV's settings and who has each audio channel are
+ * read from its data segment (wavestat.h), without a call into
+ * the driver.
+ *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
  * Licensed under GPL Version 3.0
@@ -25,6 +29,7 @@
 #include "esshw.h"
 #include "resource.h"
 #include "vxdapi.h"
+#include "wavestat.h"
 #include "winio.h"
 
 static HWND edit;
@@ -79,6 +84,7 @@ void info_text(char *buf, unsigned size) {
   u8 v, irq, id[4];
   u16 flags;
   DWORD wt;
+  struct wavestat ws;
   int err;
 
   winio_path_text(path, sizeof(path));
@@ -140,12 +146,17 @@ void info_text(char *buf, unsigned size) {
       sprintf(ADD, ", audio 2 %04Xh", count);
     strcat(p, "\r\n");
     if (vxd_global_flag(&v) == 0)
-      sprintf(ADD, "Function 000A:\t%u\r\n", v);
+      sprintf(ADD, "DirectSound:\t%s (function 000A)\r\n",
+              v ? "has the DSP" : "doesn't have the DSP");
     if (vxd_fm_info(&port) == 0)
       sprintf(ADD, "FM info (0101):\tport %03Xh\r\n", port);
     if (vxd_mpu_info(&port, &irq) == 0)
       sprintf(ADD, "MPU info (0301):\tport %03Xh, IRQ %u\r\n", port, irq);
   }
+  if (wave_live(&ws) > 0)
+    strcat(p, "Wave driver:\tES1869.DRV isn't loaded\r\n");
+  else
+    wavestat_text(&ws, p);
   if (winio_path != WIO_VXDEXT) {
     sprintf(ADD, "Config_Base:\t%03Xh\r\n", esshw.config_base);
     err = winio_begin();

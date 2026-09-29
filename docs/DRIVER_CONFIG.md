@@ -353,6 +353,7 @@ The Audio 1 player is described in [AUDIO1.md](AUDIO1.md#the-audio-1-player-in-b
 | Audio2Filter | 0 | Without 4x oversampling, the switched-capacitor filter smooths the DAC's steps (71h bit 3 clear) | The filter is bypassed (71h bit 3 set) |
 
 * With `Audio1Device=0` and `SharedWaveOut=0` the driver answers every wave-out message as ESS's does: `SettingsTest` in `tests/test_a1play.py` compares them. `Audio1Filter` and `DualPlayback` then do nothing.
+* essctl's *Device information* page shows the settings the driver read and what each channel does: "Wave driver: the rebuilt ES1869.DRV, settings from SYSTEM.INI, off: ...", "Audio 1: records", "Audio 2: plays the first device".
 * `Audio2Oversampling=1` with `Audio2Filter=1` writes ESS's value, 71h bits 4 and 1 set and bit 3 as it was.
 * ES1869.DRV applies them to Windows' wave output, at the open (1:1157) and at every playback start (6:2DE6). ES1869.VXD reads the same two keys for DirectSound and for a DOS program taking the DSP.
 * Why the defaults sound better: [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter).

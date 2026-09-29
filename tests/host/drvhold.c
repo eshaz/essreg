@@ -18,12 +18,19 @@
  * The bank is found the way ESFM.DRV finds it, from the far pointer at
  * 0012h of its data segment.
  *
+ * A wave driver (ES1869.DRV, with a WODMESSAGE export) is only loaded: its
+ * DRV_LOAD looks for ES1869.VXD. essctl then reads its data segment. Its
+ * LibMain asks for the VDS version (INT 4Bh), which Wine doesn't have, so
+ * drvhold answers it while the driver loads.
+ *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
  * Licensed under GPL Version 3.0
  */
 
 #include <windows.h>
+
+#include <dos.h>
 
 #include <mmsystem.h>
 #include <stdio.h>
@@ -87,6 +94,17 @@ static void dump(const char *name) {
   GlobalUnlock(dgroup);
 }
 
+// VDS 2.00 to ES1869.DRV's LibMain, which refuses to load without it
+static void __interrupt __far vds(union INTPACK r) {
+  if (r.w.ax == 0x8102) {
+    r.w.cx = 0x0200;
+    r.w.dx = 0;
+    r.w.flags &= ~INTR_CF;
+  } else {
+    r.w.flags |= INTR_CF;
+  }
+}
+
 typedef LRESULT(FAR PASCAL *DRIVERPROC)(DWORD id, HDRVR drv, UINT msg,
                                         LPARAM p1, LPARAM p2);
 typedef DWORD(FAR PASCAL *MODMESSAGE)(UINT id, UINT msg, DWORD user,
@@ -100,6 +118,8 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   LRESULT r1, r2;
   DWORD start;
   MSG msg;
+  int wave;
+  void(__interrupt __far * old4b)();
 
   (void)inst;
   (void)prev;
@@ -112,12 +132,20 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     if (strchr(command, '"'))
       *strchr(command, '"') = 0;
   }
+  old4b = _dos_getvect(0x4B);
+  _dos_setvect(0x4B, vds);
   lib = LoadLibrary(driver);
+  _dos_setvect(0x4B, old4b);
   proc = (UINT)lib > 32 ? (DRIVERPROC)GetProcAddress(lib, "DriverProc") : 0;
   if (!proc) {
     sprintf(text, "LoadLibrary(%s): %04X, no DriverProc", driver, lib);
     note(text);
     return 1;
+  }
+  wave = GetProcAddress(lib, "WODMESSAGE") != 0;
+  if (wave) {
+    note("a wave driver: loaded only");
+    goto run;
   }
   r1 = proc(1, (HDRVR)1, DRV_LOAD, 0, 0);
   r2 = proc(1, (HDRVR)1, DRV_ENABLE, 0, 0);
@@ -137,6 +165,7 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     note(text);
   }
   dump("BEFORE.BIN");
+run:
   child = WinExec(command, SW_SHOWNORMAL);
   sprintf(text, "WinExec(%.300s): %04X", command, child);
   note(text);
@@ -151,9 +180,11 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
       Yield();
     }
   }
-  dump("AFTER.BIN");
-  proc(1, (HDRVR)1, DRV_DISABLE, 0, 0);
-  proc(1, (HDRVR)1, DRV_FREE, 0, 0);
+  if (!wave) {
+    dump("AFTER.BIN");
+    proc(1, (HDRVR)1, DRV_DISABLE, 0, 0);
+    proc(1, (HDRVR)1, DRV_FREE, 0, 0);
+  }
   FreeLibrary(lib);
   note("done");
   return 0;

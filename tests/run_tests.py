@@ -66,7 +66,10 @@ def c_tests(tmp):
               [os.path.join(ROOT, "driver", "ESFM.DRV"),
                os.path.join(ROOT, "esfm_patch_banks", "bnk_com.bin"),
                esfm_work]),
-             ("t_fmrec", src("fmrec.c"), [])]
+             ("t_fmrec", src("fmrec.c"), []),
+             ("t_wavestat", src("wavestat.c"),
+              [os.path.join(ROOT, "driver", "ES1869.DRV"),
+               os.path.join(ROOT, "build", "ES1869.DRV")])]
     for name, sources, args in tests:
         exe = os.path.join(tmp, name)
         cc(exe, [os.path.join(HOST, name + ".c")] + sources, libs=["-lm"])

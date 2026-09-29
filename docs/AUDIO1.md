@@ -51,6 +51,7 @@ Audio 1 records or plays, one at a time, first come first served:
 * While it plays, a recording is refused with `MMSYSERR_ALLOCATED`, as ESS's wave-in refuses a second recording. While a recording runs, the player's open is refused.
 * A voice recording (see above) gives way to it, as it does for wave-out, and goes on at its close unless wave-out still plays.
 * Sound Recorder and other full-duplex programs record on Audio 1 and play on Audio 2 as before, as long as nothing plays on device 1.
+* essctl's *Device information* page shows who has each channel ("Audio 1: records", "Audio 2: dual playback") and the settings the driver read, from its data segment.
 
 ### How it plays
 

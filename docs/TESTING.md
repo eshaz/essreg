@@ -30,6 +30,7 @@ python3 tests/run_tests.py
   * essreg's register functions that the original didn't have, like the 3-D limit (`t_regs`)
   * patch banks (`t_esfm`)
   * esfmrec's WAV header and its repair, the names of a long recording's files, the levels and the test tone (`t_fmrec`)
+  * what essctl reads from the data segment of ESS's `ES1869.DRV` and the rebuilt one (`t_wavestat`)
   * a port trace proving that the refactored essreg talks to the chip exactly like the original did (`t_trace`)
 
 **With Open Watcom v2** (`OW2=/path/to/open-watcom`), the tests also:
@@ -46,6 +47,8 @@ tools/ow2build.sh /path/to/open-watcom     # binaries in out/ow2/
 * profile save/load against the simulated chip
 * the ESFM live load against the real `ESFM.DRV`
 * the ESFM voice table of `essctl /dump`, with ESS's driver and the fixed one
+* the wave driver lines of `essctl /dump`, with no `ES1869.DRV`, ESS's and the rebuilt one
+  * *Note: `ES1869.DRV` doesn't load without VDS (INT 4Bh), which Wine doesn't have. The test's `drvhold.exe` answers the version call while the driver loads.*
 * the fixed `ESFM.DRV` loading the bank file named in `SYSTEM.INI` when the device is opened, and `essctl /load` naming it there
 * ess3d's commands against the simulated chip, a bad command and no card, read from its `/log=` file
   * *Note: Wine drops the exit code of a 16-bit Windows program (its process always exits with 0), so the log is what the test checks.*
@@ -179,6 +182,7 @@ See [AUDIO1.md](AUDIO1.md#the-audio-1-player-in-buildes1869drv). With `build\ES1
 1. Control Panel > *Multimedia* > *Audio*: the playback list has "ESS AudioDrive Playback (220)" and "ESS AudioDrive Audio 1 (220)".
 2. Play music in Winamp on the first device, and a WAV file in Media Player with *Audio 1* as the preferred device. Both play, each at its pitch, and neither skips.
    * essctl's *Audio 1 controller* page, F5: B8h shows the DAC direction and bit 0 set while Media Player plays.
+   * essctl's *Device information* page: "Audio 1: plays the Audio 1 device" and "Audio 2: plays the first device". After both stop, both are "free".
 3. With the music playing on Audio 1, start recording in Sound Recorder: it says the device is in use. Stop the music and record: it works.
 4. Leave Audio 1 as the preferred device off, play the music on the first device, and start a second player on it: it plays on Audio 1 now.
 5. Play a short Windows sound many times on Audio 1 (each start of a sound opens the device): no clicks at the start or the end, and no sound left looping after the last.
@@ -207,10 +211,10 @@ python3 tools/dualwav.py same music.wav music4.wav
 ### E4. SYSTEM.INI settings
 
 See [DRIVER_CONFIG.md](DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings). With the three rebuilt drivers installed:
-1. With no `[ES1869.VXD]`, `[ES1869.DRV]` or `[ESFM.DRV]` switches in `SYSTEM.INI`, essctl's *Device information* page says "VxD settings: from SYSTEM.INI" with nothing off, and the *ESFM patch bank* page "Settings: from SYSTEM.INI, the square-wave bank".
+1. With no `[ES1869.VXD]`, `[ES1869.DRV]` or `[ESFM.DRV]` switches in `SYSTEM.INI`, essctl's *Device information* page says "VxD settings: from SYSTEM.INI" and "Wave driver: the rebuilt ES1869.DRV, settings from SYSTEM.INI" with nothing off, and the *ESFM patch bank* page "Settings: from SYSTEM.INI, the square-wave bank".
    * If it says "the defaults (loaded after Windows started)", the VxD couldn't read `SYSTEM.INI` on this computer. Note it.
 2. Add every key at 0 (the example in DRIVER_CONFIG.md, and all of section 6.3), and `Audio2Oversampling=1` and `Audio2Filter=1`. Restart.
-   * Both pages list every change as off, and the ESFM page says "ESS's bank".
+   * Both pages list every change as off, "Wave driver" with "off: Audio1Device, SharedWaveOut, DualPlayback", and the ESFM page says "ESS's bank".
    * E2 step 2: the FM game doesn't detect FM while the Media Player has it, as with ESS's driver.
    * E3: F5 shows the 4x oversampling on.
    * G: the stress test reports refused messages, as ESS's driver does.

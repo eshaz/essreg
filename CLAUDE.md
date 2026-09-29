@@ -4,7 +4,7 @@ Tools and rebuilt drivers for the ESS ES1869 sound chip on DOS and Windows 9x. [
 
 ## Layout
 
-* `src/*.c`: the DOS programs (`essreg`, `1869opl3`, `esfmpat`) and the shared code: `esshw` (port protocols), `esscat` (register catalog, `esscat.tbl`), `profile`, `vxdapi`, `simhw` (a simulated ES1869 for the tests), `ess3d` (the commands of `ess3d.exe`), `fmrec` (esfmrec's WAV header, file names and levels).
+* `src/*.c`: the DOS programs (`essreg`, `1869opl3`, `esfmpat`) and the shared code: `esshw` (port protocols), `esscat` (register catalog, `esscat.tbl`), `profile`, `vxdapi`, `simhw` (a simulated ES1869 for the tests), `ess3d` (the commands of `ess3d.exe`), `fmrec` (esfmrec's WAV header, file names and levels), `wavestat` (what ES1869.DRV does, from its data segment, for essctl).
 * `src/win/`: `essctl.exe`, the 16-bit Windows control panel, and `ess3dw.c`, the Windows side of `ess3d.exe` (the 3-D effect from the command line, for keys). `ess3dtr.c` is ess3d's tray icon and panel. Its icons come from `tools/ess3dico.py`. `esfmrec.c` records the FM digitally to a WAV file.
 * `src/vxd/`: `ES1869.VXD` as NASM source, from `tools/vxd2asm.py`. `essext.asm` adds the register API and the DOS box improvements (the virtual FM chip, Windows' mixer around a DOS program); `essext.inc` has its layout.
 * `src/esfm/`: `ESFM.DRV` as NASM source, from `tools/ne2asm.py`. `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm` and `esfmgm.asm` are the fixes and General MIDI, and `esfmini.asm` their SYSTEM.INI switches, assembled with `ESFM_FIX=1`.
@@ -64,6 +64,7 @@ tools/wineshot.sh run ess3d.exe /sim tray         # a second program on its desk
   * Every long message goes back to its program: refused with its flags as they were, or with MOM_DONE, also when a close drops it or ESS's code refuses it. A program waits for its buffers.
   * DOS calls ask for their errors back (INT 21h 716Ch and 6C00h with BX bit 13): no critical error box at open.
 * **The status block** (`esfmfixd.asm`, found by `ESFMFIX`) is read by essctl at fixed offsets (`src/win/esfmlive.c`). A layout change bumps `fix_version`. The next one is 5.
+* **ES1869.DRV's status** (`es_status` in `src/es1869/fixdata.asm`, found by `ESDRVFIX`, and the player's block) is read by essctl (`src/wavestat.c`, `src/win/wavelive.c`). A layout change bumps its version word. The next one is 2.
 * **Spatializer registers:** a new one goes in `src/esscat.tbl` as an `fx.3d.*` field on `PG_EFFECTS`. essctl, `ess3d reg` and the tray panel pick it up from there (`ess3d_regs()` in `src/ess3d.c`), up to `ESS3D_MAX_REGS`. Its value at Windows start goes in `driver_regs` for `ess3d defaults`.
 * **Ranged settings** (levels, signed and raw values) are a text field with a slider on its right, in steps of one, in essctl, its bit editor and the tray panel.
 * **The VxD API from essctl:** only the *info* functions, and 0002 and 0003 as [VXD_API.md](docs/VXD_API.md#ownership-and-port-trapping) describes. Never 0006, 0007, 0009, 000B, 0200 or 0201: they register callbacks into the caller's code.
