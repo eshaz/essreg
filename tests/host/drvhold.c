@@ -107,8 +107,8 @@ static void __interrupt __far vds(union INTPACK r) {
 
 typedef LRESULT(FAR PASCAL *DRIVERPROC)(DWORD id, HDRVR drv, UINT msg,
                                         LPARAM p1, LPARAM p2);
-typedef DWORD(FAR PASCAL *MODMESSAGE)(UINT id, UINT msg, DWORD user,
-                                      DWORD p1, DWORD p2);
+typedef DWORD(FAR PASCAL *MODMESSAGE)(UINT id, UINT msg, DWORD user, DWORD p1,
+                                      DWORD p2);
 
 int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   char driver[128], command[300], text[400];

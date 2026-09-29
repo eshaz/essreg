@@ -101,8 +101,9 @@ void info_text(char *buf, unsigned size) {
     sprintf(ADD, "ES1869.VXD:\tversion %u.%02u (AUDDRV, device ID 3B07h)\r\n",
             vxd.version >> 8, vxd.version & 0xFF);
     if (vxd.ext_version)
-      sprintf(ADD, "Register API:\tversion %u.%02u, %u functions, "
-                   "features %04Xh\r\n",
+      sprintf(ADD,
+              "Register API:\tversion %u.%02u, %u functions, "
+              "features %04Xh\r\n",
               vxd.ext_version >> 8, vxd.ext_version & 0xFF, vxd.ext_count,
               vxd.ext_features);
     else
@@ -164,9 +165,8 @@ void info_text(char *buf, unsigned size) {
       err = esshw_mixer_id(id);
     winio_end();
     if (err == 0)
-      sprintf(ADD, "Mixer 40h ID:\t%02Xh %02Xh %02Xh %02Xh%s\r\n", id[0],
-              id[1], id[2], id[3],
-              id[0] == 0x18 && id[1] == 0x69 ? " (ES1869)" : "");
+      sprintf(ADD, "Mixer 40h ID:\t%02Xh %02Xh %02Xh %02Xh%s\r\n", id[0], id[1],
+              id[2], id[3], id[0] == 0x18 && id[1] == 0x69 ? " (ES1869)" : "");
     else
       sprintf(ADD, "Mixer 40h ID:\t%s\r\n", esshw_strerror(err));
   }
