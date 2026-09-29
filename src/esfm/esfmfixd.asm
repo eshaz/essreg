@@ -5,8 +5,8 @@
 ; Licensed under GPL Version 3.0
 
 fix_sig:        db 'ESFMFIX', 0
-fix_version:    dw 2            ; 2: the bank file.  3 was an earlier
-                                ; build's pedal times, the next is 4
+fix_version:    dw 4            ; 2: the bank file, 4: fix_opts.  3 was
+                                ; an earlier build's pedal times
 fix_lock:       dw 0            ; nonzero while a call holds the driver
 q_head:         dw 0            ; next entry to handle
 q_tail:         dw 0            ; next free entry
@@ -29,6 +29,31 @@ fix_bpath:      times FIX_PATH db 0     ; Bank= from SYSTEM.INI
 fix_bkey:       times FIX_PATH db 0     ; the file read last, "" for none
 fix_bkstate:    dw 0            ; and what it was, BS_LOADED or BS_BAD
 fix_polling:    dw 0            ; a check is running
+fix_opts:       dw OPT_DEFAULT  ; OPT_*: the changes that are on
+
+; SYSTEM.INI keys (esfmini.asm): the key, its fix_opts bit
+fix_settings:
+        dw fix_key_queue, OPT_QUEUE
+        dw fix_key_silence, OPT_SILENCE
+        dw fix_key_pedal, OPT_PEDAL
+        dw fix_key_vibrato, OPT_VIBRATO
+        dw fix_key_tuning, OPT_TUNING
+        dw fix_key_cc121, OPT_CC121
+        dw fix_key_pan, OPT_LIVE_PAN
+        dw fix_key_sysex, OPT_SYSEX
+        dw fix_key_running, OPT_RUNNING
+        dw fix_key_square, OPT_SQUARE
+        dw 0
+fix_key_queue:   db 'QueueWhileBusy', 0
+fix_key_silence: db 'SilenceOnClose', 0
+fix_key_pedal:   db 'PedalRelease', 0
+fix_key_vibrato: db 'Vibrato', 0
+fix_key_tuning:  db 'Tuning', 0
+fix_key_cc121:   db 'ResetControllers', 0
+fix_key_pan:     db 'LivePan', 0
+fix_key_sysex:   db 'SysEx', 0
+fix_key_running: db 'RunningStatus', 0
+fix_key_square:  db 'BetterSquareWave', 0
 fix_ini_sect:   db 'ESFM.DRV', 0
 fix_ini_key:    db 'Bank', 0
 fix_ini_file:   db 'SYSTEM.INI', 0

@@ -4,6 +4,7 @@ What General MIDI (GM Level 1) asks of a synthesizer, what ESS's `ESFM.DRV` does
 
 * The code is in [`src/esfm/esfmgm.asm`](../src/esfm/esfmgm.asm), assembled into the fixed driver only.
 * ESS's code is unchanged, apart from the calls into it (`%if ESFM_FIX` in [`src/esfm/seg1.asm`](../src/esfm/seg1.asm)).
+* `SYSTEM.INI` turns each part off, and ESS's code does it then: `Vibrato`, `Tuning`, `ResetControllers`, `LivePan`, `SysEx` and `RunningStatus` under `[ESFM.DRV]` ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv)).
 
 ## At a glance
 

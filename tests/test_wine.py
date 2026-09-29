@@ -16,6 +16,7 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   then starts "essctl /load" with a profile naming a bank larger than the
   driver's own, and dumps the bank the driver holds before and after
 - ESFM voices: "essctl /dump" with the ESS driver, then the fixed build,
+  also with its SYSTEM.INI switches set,
   shows the driver's 18 voices and, for the fixed build, its counters
 - ESFM bank file: the fixed build loads the bank named in SYSTEM.INI
   [ESFM.DRV] Bank= when a program opens the device, and "essctl /load" of
@@ -299,8 +300,28 @@ class WineTest(unittest.TestCase):
         self.assertEqual(text.count("  free"), 18)
         text = self.esfm_dump(self.fixed_driver())
         self.assertIn("Fixed driver: 0 messages queued", text)
+        self.assertIn("Settings: from SYSTEM.INI, the square-wave bank",
+                      text)
         self.assertIn("Bank file: none, the driver's own bank plays", text)
         self.assertEqual(text.count("  free"), 18)
+
+    def test_esfm_settings_from_system_ini(self):
+        # KERNEL's GetPrivateProfileInt at DRV_ENABLE, and ESS's bank
+        # (resource 1235) with BetterSquareWave=0
+        ini = self.system_ini()
+        saved = read(ini)
+        try:
+            with open(ini, "ab") as f:
+                f.write(b"\r\n[ESFM.DRV]\r\nVibrato=0\r\nSysEx=0\r\n"
+                        b"BetterSquareWave=0\r\n")
+            text = self.esfm_dump(self.fixed_driver())
+            self.assertIn("Settings: from SYSTEM.INI, off: Vibrato, SysEx, "
+                          "ESS's bank", text)
+            ess = read(os.path.join(ROOT, "esfm_patch_banks", "bnk_com.bin"))
+            self.assertEqual(read(self.path("BEFORE.BIN"))[:len(ess)], ess)
+        finally:
+            with open(ini, "wb") as f:
+                f.write(saved)
 
     def ess3d(self, *args, log="E3.LOG"):
         """Run ess3d.exe, returns the lines it added to its log."""

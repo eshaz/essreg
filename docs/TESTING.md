@@ -16,6 +16,7 @@ python3 tests/run_tests.py
   * that the extended VxD keeps ESS's code where it was, byte for byte apart from the hooks, and that Windows' own sound (ES1869.DRV's calls around a wave device, a mixer change, DirectSound taking the DSP) makes the same port accesses as with ESS's driver, apart from the Audio 2 mode (`test_vxdext`)
   * `ES1869.DRV` rebuilt from `src/es1869`: ESS's driver byte for byte, and in the changed build ESS's code at its addresses, apart from the listed instructions. Its writes of the Audio 2 mode run in the CPU emulator inside ESS's code, for both builds (`test_es1869drv`)
   * DOS boxes and the rebuilt VxD in the same emulator, with an FM chip model after ESFMu, VMs and per-VM port trapping (`test_vxddos`): FM detection whoever has FM, the virtual FM chip and its hand-over, the music DAC, Windows' mixer around a DOS game, and the reset when Windows uses the card again. The stock driver runs the same steps where it differs.
+  * the SYSTEM.INI settings of all three drivers, read with emulated profile calls: each key and its default, read once, and each change off doing what ESS's driver does. With every key at 0, the VxD (`test_vxdini`) and `ESFM.DRV` (`SettingsTest` in `test_esfmdrv`) make the same port accesses as ESS's drivers, step by step
   * `esfmpat` on copies of `ESFM.DRV`
   * that the generated documentation is current
 * **C tests** (`tests/host/t_*.c`), built with gcc against a simulated ES1869 (`src/simhw.c`):
@@ -169,6 +170,19 @@ See [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-f
 5. If the computer has a standby: pause Winamp, Start > *Shut Down* > *Stand by*, wake the computer and play on. The music keeps its pitch, and F5 shows the same setting.
 6. Record the Wave output with each setting, as in [Measuring the DAC on the card](AUDIO_PIPELINE.md#measuring-the-dac-on-the-card), and keep both files.
 7. Sound Recorder records, a MIDI file plays, and a DOS game in a window has its sound, as before.
+
+### E4. SYSTEM.INI settings
+
+See [DRIVER_CONFIG.md](DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings). With the three rebuilt drivers installed:
+1. With no `[ES1869.VXD]`, `[ES1869.DRV]` or `[ESFM.DRV]` switches in `SYSTEM.INI`, essctl's *Device information* page says "VxD settings: from SYSTEM.INI" with nothing off, and the *ESFM patch bank* page "Settings: from SYSTEM.INI, the square-wave bank".
+   * If it says "the defaults (loaded after Windows started)", the VxD couldn't read `SYSTEM.INI` on this computer. Note it.
+2. Add every key at 0 (the example in DRIVER_CONFIG.md, and all of section 6.3), and `Audio2Oversampling=1` and `Audio2Filter=1`. Restart.
+   * Both pages list every change as off, and the ESFM page says "ESS's bank".
+   * E2 step 2: the FM game doesn't detect FM while the Media Player has it, as with ESS's driver.
+   * E3: F5 shows the 4x oversampling on.
+   * G: the stress test reports refused messages, as ESS's driver does.
+3. Take the lines out and restart: every change is back.
+4. One at a time: `[ESFM.DRV] BetterSquareWave=0` alone. The square-wave instruments sound as with ESS's driver, and ESFM > *Restore original bank* puts ESS's bank back.
 
 ### F. ESFM patch banks
 

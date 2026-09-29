@@ -334,7 +334,13 @@ int esfm_stress_test(char *report, unsigned size) {
   } else if (after.device) {
     append(report, size, "No voice was left sounding.\r\n\r\n");
   }
-  if (after.device && after.fixed) {
+  if (after.device && after.fixed && after.version >= 4 &&
+      !(after.opts & ESFM_OPT_QUEUE)) {
+    append(report, size,
+           "Fixed ESFM.DRV with QueueWhileBusy=0 in SYSTEM.INI: "
+           "messages that arrive while it is busy are dropped, as "
+           "with the ESS driver.");
+  } else if (after.device && after.fixed) {
     sprintf(text,
             "Fixed ESFM.DRV: %lu messages arrived while it was busy "
             "and were queued (the ESS driver drops these), %lu "

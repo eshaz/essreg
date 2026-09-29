@@ -191,6 +191,23 @@ static u16 fix_version(const struct live *lv) {
   return fix ? *(u16 __far *)(fix + 8) : 0;
 }
 
+// the fixed driver's settings (version 4 and up), ESFM_OPT_*
+#define FIX_OPTS 304
+static u16 fix_opts(const struct live *lv) {
+  const u8 __far *fix = find_fix(lv);
+
+  if (!fix || *(u16 __far *)(fix + 8) < 4 ||
+      (u32)(FP_OFF(fix) - FP_OFF(lv->dg)) + FIX_OPTS + 2 >
+          GlobalSize(lv->dgroup))
+    return ESFM_OPT_SQUARE; // as before the settings
+  return *(u16 __far *)(fix + FIX_OPTS);
+}
+
+// the bank the driver calls its own: ESS's (1235) with BetterSquareWave=0
+static unsigned own_bank_id(const struct live *lv) {
+  return fix_opts(lv) & ESFM_OPT_SQUARE ? BANK_RES_ID : BANK_RES_ID + 1;
+}
+
 // 1 while a program has the MIDI device open and the bank is page-locked
 static int bank_locked(const struct live *lv) {
   return *(u16 __far *)(lv->dg + DG_BANK_LOCKS) != 0;
@@ -350,7 +367,7 @@ int esfm_live_restore(char *msg, unsigned size) {
     message(msg, size, text);
     return -1;
   }
-  res = FindResource(lv.mod, MAKEINTRESOURCE(BANK_RES_ID),
+  res = FindResource(lv.mod, MAKEINTRESOURCE(own_bank_id(&lv)),
                      MAKEINTRESOURCE(BANK_RES_TYPE));
   mem = res ? LoadResource(lv.mod, res) : 0;
   src = mem ? (u8 __far *)LockResource(mem) : 0;
@@ -452,6 +469,8 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
     d->file_time = *(u16 __far *)(fix + 42);
     _fmemcpy(d->file, fix + 44, sizeof(d->file) - 1);
   }
+  if (fix && d->version >= 4)
+    d->opts = fix_opts(&lv);
   close_live(&lv);
 
   d->device = 1;
@@ -522,6 +541,37 @@ static void file_text(const struct esfm_diag *d, const char *nl, char *buf,
   strncat(buf, line, size - strlen(buf) - 1);
 }
 
+// the fixed driver's changes that SYSTEM.INI turned off
+static const struct {
+  u16 bit;
+  const char *key;
+} esfm_keys[] = {
+    {ESFM_OPT_QUEUE, "QueueWhileBusy"},  {ESFM_OPT_SILENCE, "SilenceOnClose"},
+    {ESFM_OPT_PEDAL, "PedalRelease"},    {ESFM_OPT_VIBRATO, "Vibrato"},
+    {ESFM_OPT_TUNING, "Tuning"},         {ESFM_OPT_CC121, "ResetControllers"},
+    {ESFM_OPT_LIVE_PAN, "LivePan"},      {ESFM_OPT_SYSEX, "SysEx"},
+    {ESFM_OPT_RUNNING, "RunningStatus"},
+};
+
+static void settings_text(const struct esfm_diag *d, const char *nl, char *buf,
+                          unsigned size) {
+  static char line[240];
+  int i, off = 0;
+
+  strcpy(line, d->opts & ESFM_OPT_READ
+                   ? "Settings: from SYSTEM.INI"
+                   : "Settings: the defaults (not read yet)");
+  for (i = 0; i < (int)(sizeof(esfm_keys) / sizeof(esfm_keys[0])); i++)
+    if (!(d->opts & esfm_keys[i].bit)) {
+      strcat(line, off++ ? ", " : ", off: ");
+      strcat(line, esfm_keys[i].key);
+    }
+  strcat(line,
+         d->opts & ESFM_OPT_SQUARE ? ", the square-wave bank" : ", ESS's bank");
+  strcat(line, nl);
+  strncat(buf, line, size - strlen(buf) - 1);
+}
+
 static const char *note_name(u8 note, char *buf) {
   static const char names[] = "C C#D D#E F F#G G#A A#B ";
   buf[0] = names[(note % 12) * 2];
@@ -558,6 +608,8 @@ void esfm_diag_text(const struct esfm_diag *d, int rc, const char *nl,
             "busy%s",
             nl);
   strncat(buf, line, size - strlen(buf) - 1);
+  if (d->fixed && d->version >= 4)
+    settings_text(d, nl, buf, size);
   if (d->fixed && d->version >= 2)
     file_text(d, nl, buf, size);
   sprintf(line, "%sVoice  Channel  Note   State          Age  Chip%s", nl, nl);

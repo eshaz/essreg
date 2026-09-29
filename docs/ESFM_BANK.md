@@ -116,12 +116,13 @@ Bank=C:\BANKS\MYBANK.BIN
 * **Missing or broken file:** the bank that plays is kept (the file's last good version, or the driver's own bank). A broken file isn't read again until its date or time changes.
 * **No `Bank=`:** the driver plays its own bank. Removing the line puts the driver's own bank back the next time a program opens the device.
 * `DRV_ENABLE` (Windows starting) loads the driver's own bank as before. The file is read at the first open after it.
+* **The driver's own bank** is the square-wave bank built in as resource 1234. With `BetterSquareWave=0` in the same section, it's ESS's `bnk_com.bin`, which the fixed driver carries as resource 1235 ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv)). That key is read once, at `DRV_ENABLE`, like the driver's other switches. `Bank=` is read at every open.
 * ESS's `ESFM.DRV` doesn't read this setting.
 * *Note: use a full path, with the drive.*
 
 **essctl with this driver:**
 * ESFM > *Load patch bank* also writes `Bank=` to `SYSTEM.INI`, so the driver keeps playing the file after a restart.
-* ESFM > *Restore original bank* removes the `Bank=` line.
+* ESFM > *Restore original bank* removes the `Bank=` line, and puts the driver's own bank back: ESS's with `BetterSquareWave=0`.
 * The *ESFM patch bank* page and `essctl /dump` show the file and what the last open found:
 
 ```

@@ -29,6 +29,9 @@
 ;    pressure, tuning, master volume, controller 121 as RP-015
 ;    (esfmgm.asm), and running status in long messages (seg1.asm), across
 ;    buffers and around real-time bytes (esfmgm.asm).
+; 8. Each change can be turned off in SYSTEM.INI (esfmini.asm).  With
+;    QueueWhileBusy=0, 1, 2 and 4 are off: every message goes straight to
+;    ESS's code.  SilenceOnClose=0 turns off 3.
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
@@ -61,6 +64,8 @@ modMessage:
         movsel  ax, FIX_DS1, 0xFFFF
         mov     ds,ax
         mov     ax,[ARG_MSG]
+        test    word [fix_opts],OPT_QUEUE
+        jz      .direct
         cmp     ax,MODM_DATA
         je      .serial
         cmp     ax,MODM_LONGDATA
@@ -72,6 +77,15 @@ modMessage:
         cmp     ax,MODM_CLOSE
         je      .hold
         call    call_orig               ; no FM register access
+        jmp     .ret
+
+.direct:
+        ; QueueWhileBusy=0: ESS's code for every message, which refuses
+        ; the ones that come while it's busy; the bank file still first
+        cmp     ax,MODM_OPEN
+        jne     .plain
+        call    fix_bank_check
+.plain: call    call_orig
         jmp     .ret
 
 .serial:
@@ -366,8 +380,10 @@ fix_unlock:
         ret
 
 ; all_notes_off(dev), far: key off every voice and lift every sustain
-; pedal (close, power suspend)
+; pedal (close, power suspend); SilenceOnClose=0: ESS's code
 fix_all_off:
+        test    word [fix_opts],OPT_SILENCE
+        jz      ..@fix_ess_all_off
         push    bp
         mov     bp,sp
         push    di

@@ -93,8 +93,23 @@ struct esfm_diag {
   u16 file_date;   // DOS date and time of the file it read last
   u16 file_time;
   char file[128]; // Bank= from SYSTEM.INI
+  u16 opts;       // fixed driver 4 and up: ESFM_OPT_*, the changes on
   char why[96];   // why nothing could be read
 };
+
+// the fixed driver's SYSTEM.INI [ESFM.DRV] settings (src/esfm/esfmini.asm),
+// 1 = the change is on
+#define ESFM_OPT_QUEUE 0x0001    // QueueWhileBusy
+#define ESFM_OPT_SILENCE 0x0002  // SilenceOnClose
+#define ESFM_OPT_PEDAL 0x0004    // PedalRelease
+#define ESFM_OPT_VIBRATO 0x0008  // Vibrato
+#define ESFM_OPT_TUNING 0x0010   // Tuning
+#define ESFM_OPT_CC121 0x0020    // ResetControllers
+#define ESFM_OPT_LIVE_PAN 0x0040 // LivePan
+#define ESFM_OPT_SYSEX 0x0080    // SysEx
+#define ESFM_OPT_RUNNING 0x0100  // RunningStatus
+#define ESFM_OPT_SQUARE 0x0200   // BetterSquareWave: the built-in bank
+#define ESFM_OPT_READ 0x8000     // read from SYSTEM.INI (at DRV_ENABLE)
 
 // file_state: what the last MODM_OPEN found
 #define ESFM_FILE_NONE 0    // no bank file plays

@@ -56,6 +56,23 @@ Q_DW2           equ 10          ; dword: dwParam2
 
 ; ESFM_FIX: the bank file (esfmfile.asm)
 FIX_PATH        equ 128         ; bytes for Bank= from SYSTEM.INI
+BANK_ID         equ 1234        ; resource 256: the built-in bank
+BANK_ESS_ID     equ 1235        ; and ESS's bank, for BetterSquareWave=0
+
+; ESFM_FIX: the changes that are on (fix_opts), SYSTEM.INI [ESFM.DRV]
+; (esfmini.asm)
+OPT_QUEUE       equ 0x0001      ; QueueWhileBusy
+OPT_SILENCE     equ 0x0002      ; SilenceOnClose
+OPT_PEDAL       equ 0x0004      ; PedalRelease
+OPT_VIBRATO     equ 0x0008      ; Vibrato
+OPT_TUNING      equ 0x0010      ; Tuning
+OPT_CC121       equ 0x0020      ; ResetControllers
+OPT_LIVE_PAN    equ 0x0040      ; LivePan
+OPT_SYSEX       equ 0x0080      ; SysEx
+OPT_RUNNING     equ 0x0100      ; RunningStatus
+OPT_SQUARE      equ 0x0200      ; BetterSquareWave: the built-in bank
+OPT_READ        equ 0x8000      ; SYSTEM.INI was read
+OPT_DEFAULT     equ 0x03FF
 
 ; ESFM_FIX: General MIDI state (esfmgm.asm), after ESS's fields.  The fixed
 ; driver allocates DEV_FIX_SIZE bytes for each device

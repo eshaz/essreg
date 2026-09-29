@@ -19,13 +19,16 @@
 ; Licensed under GPL Version 3.0
 
 ; a program change (short_msg, after the program is stored): let go of the
-; channel's sustain pedal, as controller 64 with 0 would
+; channel's sustain pedal, as controller 64 with 0 would (not with
+; PedalRelease=0)
 ; fix_program(dev, channel), near, pops its arguments
 fix_program:
         push    bp
         mov     bp,sp
         push    si
         push    di
+        test    word [fix_opts],OPT_PEDAL
+        jz      .out
         mov     si,[bp+0x4]             ; dev
         mov     di,[bp+0x6]             ; channel
         and     di,0x0F

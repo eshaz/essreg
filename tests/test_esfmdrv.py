@@ -25,6 +25,11 @@ build (src/esfm/esfmgm.asm).
 BankFileTest: the fixed build plays the bank file named in SYSTEM.INI
 [ESFM.DRV] Bank=, read when a program opens the device if its date or time
 changed (src/esfm/esfmfile.asm).
+
+SettingsTest: SYSTEM.INI [ESFM.DRV] turns each change off, read once at the
+first DRV_ENABLE (src/esfm/esfmini.asm). Each key at 0 does what ESS's
+driver does, and with all of them at 0 the fixed build writes the same
+ports as ESS's.
 """
 
 import os
@@ -554,8 +559,8 @@ class SustainTest(unittest.TestCase):
                                   for v in emu.keyed_voices() if v < 16}, {0})
 
     def test_status_block_version(self):
-        # 3 was an earlier build's pedal times
-        self.assertEqual(self.emu("fixed").fix_state()["version"], 2)
+        # 3 was an earlier build's pedal times, 4 added the settings
+        self.assertEqual(self.emu("fixed").fix_state()["version"], 4)
 
 
 # General MIDI (esfmgm.asm): device fields, esfmdev.inc
@@ -1255,6 +1260,226 @@ class BankFileTest(unittest.TestCase):
         self.assertEqual(emu.fix_state()["bloads"], 2)
         self.assertEqual(emu.stale, [])
         self.assertClean(emu)
+
+
+# SYSTEM.INI [ESFM.DRV] keys, in the order of their fix_opts bits
+SETTINGS = ["QueueWhileBusy", "SilenceOnClose", "PedalRelease", "Vibrato",
+            "Tuning", "ResetControllers", "LivePan", "SysEx",
+            "RunningStatus", "BetterSquareWave"]
+OPT = {k: 1 << i for i, k in enumerate(SETTINGS)}
+OPT_DEFAULT, OPT_READ = 0x03FF, 0x8000
+GM_ON = bytes([0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7])
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs the unicorn module")
+class SettingsTest(unittest.TestCase):
+    def started(self, which="fixed", ini=None, open_it=True):
+        """the driver after DRV_ENABLE with SYSTEM.INI [ESFM.DRV] as in
+        ini, {key: value}, and a program's MODM_OPEN"""
+        e = ESFMEmu(builds()[which])
+        for key, value in (ini or {}).items():
+            e.ini[("esfm.drv", key.lower())] = value
+        self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
+        if open_it:
+            e.open()
+        return e
+
+    def off(self, *keys):
+        """keys at 0, and ESS's bank, as ESS's driver plays"""
+        ini = {k: "0" for k in keys}
+        ini["BetterSquareWave"] = "0"
+        return ini
+
+    # -- reading -----------------------------------------------------------
+
+    def test_read_at_the_first_enable(self):
+        e = self.started(open_it=False)
+        self.assertEqual(e.fix_state()["opts"], OPT_DEFAULT | OPT_READ)
+        self.assertEqual(e.int_reads, [("SYSTEM.INI", "ESFM.DRV", k, 1)
+                                       for k in SETTINGS])
+
+    def test_each_key(self):
+        for key in SETTINGS:
+            for value, on in (("0", False), ("1", True), ("2", True),
+                              ("no", False)):
+                with self.subTest(key=key, value=value):
+                    e = self.started(ini={key: value}, open_it=False)
+                    want = OPT_DEFAULT & ~OPT[key] | (OPT[key] if on else 0)
+                    self.assertEqual(e.fix_state()["opts"], want | OPT_READ)
+
+    def test_read_once(self):
+        e = self.started(ini={"Vibrato": "0"})
+        e.close()
+        e.driverproc(DRV_DISABLE)
+        e.ini = {}
+        self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
+        e.open()
+        self.assertEqual(len(e.int_reads), len(SETTINGS))
+        self.assertEqual(e.fix_state()["opts"],
+                         OPT_DEFAULT & ~OPT["Vibrato"] | OPT_READ)
+
+    def test_bank_read_at_every_open(self):
+        # Bank= isn't a setting read once: every MODM_OPEN reads it
+        e = self.started()
+        reads = len(e.ini_reads)
+        e.close()
+        e.open()
+        self.assertEqual(len(e.ini_reads), reads + 1)
+        self.assertEqual(e.ini_reads[-1], ("SYSTEM.INI", "ESFM.DRV", "Bank"))
+
+    def test_without_drv_enable_the_defaults(self):
+        e = ESFMEmu(builds()["fixed"])
+        e.open()
+        self.assertEqual(e.fix_state()["opts"], OPT_DEFAULT)
+
+    # -- each key at 0: ESS's driver ------------------------------------------
+
+    def compare(self, key, scenario):
+        """scenario(emu) with ESS's driver, the key at 0 and the default;
+        the first two alike, the default not"""
+        stock = scenario(self.started("stock"))
+        off = scenario(self.started(ini=self.off(key)))
+        on = scenario(self.started(ini={"BetterSquareWave": "0"}))
+        self.assertEqual(off, stock, key)
+        self.assertNotEqual(on, stock, key)
+        return stock, on
+
+    def test_queue_while_busy(self):
+        def note_off_during_note_on(e):
+            e.data(NOTE_A_ON)
+            inj = Inject(MODM_DATA, dw1=NOTE_A_OFF,
+                         after_writes=e.chip.writes + 10)
+            e.data(NOTE_B_ON, injects=[inj])
+            e.data(NOTE_B_OFF)
+            return inj.result, e.keyed_voices()
+        stock, _on = self.compare("QueueWhileBusy", note_off_during_note_on)
+        self.assertEqual(stock[0], MIDIERR_NOTREADY)
+
+    def test_silence_on_close(self):
+        def close_with_pedal(e):
+            e.data(SUSTAIN_ON)
+            e.data(NOTE_A_ON)
+            e.data(NOTE_A_OFF)
+            e.close()
+            return e.keyed_voices()
+        stock, on = self.compare("SilenceOnClose", close_with_pedal)
+        self.assertTrue(stock)
+        self.assertEqual(on, [])
+
+    def test_pedal_release(self):
+        def program_change_with_pedal(e):
+            e.data(SUSTAIN_ON)
+            e.data(NOTE_A_ON)
+            e.data(NOTE_A_OFF)
+            e.data(0x05C0)                      # program 6
+            return e.pedals(), e.keyed_voices()
+        stock, on = self.compare("PedalRelease", program_change_with_pedal)
+        self.assertEqual(stock[0], [0])
+        self.assertEqual(on, ([], []))
+
+    def regs_after(self, *msgs):
+        def scenario(e):
+            e.data(NOTE_A_ON)
+            for m in msgs:
+                if isinstance(m, bytes):
+                    e.longdata(m)
+                else:
+                    e.data(m)
+            e.data(0x7F4390)                    # and a new note
+            return bytes(e.chip.regs)
+        return scenario
+
+    def test_vibrato(self):
+        self.compare("Vibrato", self.regs_after(cc(0, 1, 100), 0x60D0))
+
+    def test_tuning(self):
+        self.compare("Tuning", self.regs_after(
+            *rpn(0, 1, 0x50), *rpn(0, 2, 0x42), *rpn(0, 0, 2, 50), 0x6000E0))
+
+    def test_reset_controllers(self):
+        # volume and expression only: pan and the bend are other keys'
+        self.compare("ResetControllers", self.regs_after(
+            cc(0, 7, 40), cc(0, 11, 60), cc(0, 121, 0)))
+
+    def test_live_pan(self):
+        self.compare("LivePan", self.regs_after(cc(0, 10, 0x7F), cc(0, 8, 0)))
+
+    def test_sysex(self):
+        def reset_with_pedal(e):
+            e.data(0x05C0)
+            e.data(SUSTAIN_ON)
+            e.data(NOTE_A_ON)
+            e.data(NOTE_A_OFF)
+            e.longdata(GM_ON)
+            e.longdata(master_volume(0x1000))
+            return e.pedals(), e.keyed_voices(), e.dev8(DEV_PROGRAM)
+        stock, on = self.compare("SysEx", reset_with_pedal)
+        self.assertEqual(stock[2], 5)
+        self.assertEqual(on, ([], [], 0))
+
+    def test_running_status(self):
+        def long_running_status(e):
+            e.data(0x7F3C90)
+            e.data(0x7F4090)
+            e.longdata(bytes([0x80, 0x3C, 0x00, 0x40, 0x00]))
+            e.data(NOTE_A_ON)
+            e.data(0xF8)
+            e.data(0x003C)
+            e.longdata(bytes([0x90, 0x45]))
+            e.longdata(bytes([0x7F, 0x47, 0x7F]))
+            return sorted({n for f, c, n in e.voices() if f & 1})
+        self.compare("RunningStatus", long_running_status)
+
+    def test_better_square_wave(self):
+        e = self.started(ini={"BetterSquareWave": "0"}, open_it=False)
+        self.assertEqual(e.bank(len(e.ess_bank_res)), e.ess_bank_res)
+        e.open()                                # no Bank=: the same bank
+        self.assertEqual(e.bank(len(e.ess_bank_res)), e.ess_bank_res)
+        self.assertNotEqual(e.ess_bank_res, e.bank_res)
+        with open(build_esfm.ESS_BANK, "rb") as f:
+            self.assertEqual(e.ess_bank_res, f.read())
+        e = self.started(open_it=False)
+        self.assertEqual(e.bank(len(e.bank_res)), e.bank_res)
+        self.assertEqual(e.freed_locked, [])
+
+    # -- all of them at 0 --------------------------------------------------------
+
+    def test_all_off_is_ess_driver(self):
+        """a song's worth of messages: every port write, callback and
+        answer as ESS's driver, with every key at 0"""
+        def song(e):
+            out = []
+            for m in (0x05C0, 0x7F3C90, 0x7F4090, SUSTAIN_ON, 0x003C80,
+                      cc(0, 1, 90), 0x50D0, *rpn(0, 1, 0x30),
+                      *rpn(0, 0, 4, 20), 0x7000E0, cc(0, 10, 0x10),
+                      cc(0, 8, 0x70), 0x7F4391, 0x0341C1, 0x7F4891,
+                      cc(0, 121, 0), 0xF8, 0x0040, 0x003C90,
+                      cc(0, 7, 30), 0x7F4590):
+                out.append(e.data(m))
+            for data in (bytes([0x90, 0x30, 0x7F, 0x32, 0x7F]),
+                         bytes([0x33]), bytes([0x7F, 0xF8, 0x30, 0x00]),
+                         GM_ON, master_volume(0x2000),
+                         bytes([0x91, 0x3C, 0x7F])):
+                out.append(e.longdata(data))
+            out.append(e.data(SUSTAIN_ON))
+            out.append(e.data(0x7F4C90))
+            out.append(e.reset())
+            out.append(e.data(SUSTAIN_ON))
+            out.append(e.data(0x7F4C90))
+            out.append(e.data(0x004C80))
+            out.append(e.close())
+            return (out, [(off, v) for _d, off, v in e.chip.events],
+                    e.callbacks, e.keyed_voices())
+        stock = song(self.started("stock"))
+        fixed = song(self.started(ini={k: "0" for k in SETTINGS}))
+        self.assertEqual(fixed[0], stock[0])
+        self.assertEqual(fixed[1], stock[1])
+        self.assertEqual(fixed[2], stock[2])
+        self.assertEqual(fixed[3], stock[3])
+        self.assertTrue(stock[3])               # ESS's close left notes on
+        # and the defaults differ
+        self.assertNotEqual(song(self.started(ini={"BetterSquareWave": "0"})),
+                            stock)
 
 
 if __name__ == "__main__":

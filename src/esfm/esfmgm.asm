@@ -28,6 +28,10 @@
 ; The GM state of each channel is kept after ESS's fields of the device
 ; (DEV_GM_* in esfmdev.inc), and chip_reset sets it to the defaults.
 ;
+; SYSTEM.INI turns each part off (esfmini.asm), and ESS's code does it
+; then: Vibrato (1), Tuning (2), ResetControllers (3), LivePan (4, pan),
+; SysEx (5) and RunningStatus (6).
+;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
 ; Licensed under GPL Version 3.0
@@ -67,6 +71,8 @@ fix_gm_init:
 ; so a message split between two buffers, or running status across them,
 ; isn't lost. SI = dev, BP = modMessage's frame; keeps all but AX
 fix_long_load:
+        test    word [fix_opts],OPT_RUNNING
+        jz      .out
         mov     al,[si+DEV_LONG_IDX]
         mov     [bp-0x2],al
         mov     al,[si+DEV_LONG_LEFT]
@@ -75,10 +81,12 @@ fix_long_load:
         mov     [bp-0x14],ax
         mov     ax,[si+DEV_LONG_MSG+2]
         mov     [bp-0x12],ax
-        ret
+.out:   ret
 
 ; and keeps it at the end of the buffer; keeps all but AX
 fix_long_save:
+        test    word [fix_opts],OPT_RUNNING
+        jz      .out
         push    si
         mov     si,[bp-0x10]            ; dev
         mov     al,[bp-0x2]
@@ -90,15 +98,20 @@ fix_long_save:
         mov     ax,[bp-0x12]
         mov     [si+DEV_LONG_MSG+2],ax
         pop     si
-        ret
+.out:   ret
 
 ; short message status byte AL (seg1 modm_data), SI = dev: a real-time
 ; byte (F8h-FFh) changes nothing, a system common one (F0h-F7h) ends the
 ; running status and a channel one starts it, for the next long message
 ; too, as if all the bytes came one after the other. ESS's code made any
-; status byte the running status. Keeps all but AX
+; status byte the running status, as it does with RunningStatus=0.
+; Keeps all but AX
 fix_status:
-        cmp     al,0xF8
+        test    word [fix_opts],OPT_RUNNING
+        jnz     .spec
+        mov     [running_status],al
+        ret
+.spec:  cmp     al,0xF8
         jae     .keep
         xor     ah,ah
         cmp     al,0xF0
@@ -157,15 +170,19 @@ fix_control:
         je      .rpn_msb
         cmp     al,121
         je      .reset
-        clc
+.ess:   clc
         jmp     .out
 
 .mod:
+        test    word [fix_opts],OPT_VIBRATO
+        jz      .ess
         mov     [bx+si+DEV_GM_MOD],ah
         call    fix_vibrato
         jmp     .done
 
 .pan:
+        test    word [fix_opts],OPT_LIVE_PAN
+        jz      .ess
         ; as ESS's code: above 50h right, below 30h left, else both
         mov     al,0x20
         cmp     ah,0x50
@@ -182,19 +199,27 @@ fix_control:
         jmp     .done
 
 .nrpn:
+        test    word [fix_opts],OPT_TUNING
+        jz      .ess
         add     bx,bx
         mov     word [bx+si+DEV_GM_RPN],RPN_NONE
         jmp     .done
 .rpn_lsb:
+        test    word [fix_opts],OPT_TUNING
+        jz      .ess
         add     bx,bx
         mov     [bx+si+DEV_GM_RPN],ah
         jmp     .done
 .rpn_msb:
+        test    word [fix_opts],OPT_TUNING
+        jz      .ess
         add     bx,bx
         mov     [bx+si+DEV_GM_RPN+1],ah
         jmp     .done
 
 .data_msb:
+        test    word [fix_opts],OPT_TUNING
+        jz      .ess
         add     bx,bx
         mov     dx,[bx+si+DEV_GM_RPN]
         cmp     dx,0x0001
@@ -218,6 +243,8 @@ fix_control:
         jmp     .bend
 
 .data_lsb:
+        test    word [fix_opts],OPT_TUNING
+        jz      .ess
         add     bx,bx
         mov     dx,[bx+si+DEV_GM_RPN]
         cmp     dx,0x0001
@@ -245,6 +272,8 @@ fix_control:
         jmp     .done
 
 .reset:
+        test    word [fix_opts],OPT_CC121
+        jz      .ess
         call    fix_ctl_reset
 .done:
         stc
@@ -291,6 +320,8 @@ fix_pressure:
         mov     bp,sp
         push    si
         push    di
+        test    word [fix_opts],OPT_VIBRATO
+        jz      .out
         mov     si,[bp+0x4]             ; dev
         mov     di,[bp+0x6]             ; channel
         and     di,0x0F
@@ -299,7 +330,7 @@ fix_pressure:
         mov     bx,di
         mov     [bx+si+DEV_GM_PRESS],al
         call    fix_vibrato
-        pop     di
+.out:   pop     di
         pop     si
         pop     bp
         ret     6
@@ -473,6 +504,8 @@ fix_op_reg6:
 ; not on channel 10 (drums)
 ; frame of program_operator, uses AX, BX
 fix_coarse:
+        test    word [fix_opts],OPT_TUNING
+        jz      .out
         mov     bx,[bp+0x14]
         and     bx,0x0F
         cmp     bx,9
@@ -508,7 +541,15 @@ fix_calc_pitch:
         mov     bp,sp
         push    si
         push    di
-        mov     si,[bp+0x4]             ; dev
+        test    word [fix_opts],OPT_TUNING
+        jnz     .gm
+        ; Tuning=0: ESS's call, calc_pitch(freq, bend, range)
+        push    word [bp+0xC]
+        push    word [bp+0xA]
+        push    word [bp+0x8]
+        call    calc_pitch
+        jmp     .out
+.gm:    mov     si,[bp+0x4]             ; dev
         mov     di,[bp+0x6]
         and     di,0x0F                 ; channel
         ; the range in cents, up to 12700 so that the division fits
@@ -561,7 +602,7 @@ fix_calc_pitch:
         mov     ax,24
         push    ax
         call    calc_pitch
-        pop     di
+.out:   pop     di
         pop     si
         pop     bp
         ret     0xA
@@ -572,6 +613,8 @@ fix_calc_pitch:
 fix_process:
         push    bp
         mov     bp,sp
+        test    word [fix_opts],OPT_SYSEX
+        jz      .orig
         cmp     word [bp+0x12],MODM_LONGDATA
         jne     .orig
         push    si

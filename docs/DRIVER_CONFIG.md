@@ -300,6 +300,7 @@ The drivers in `build/` change ESS's in the ways this repository describes. Each
 * A driver reads its section **once, when it starts**:
   * `ES1869.VXD` when Windows loads it (`Sys_Dynamic_Device_Init`)
   * `ES1869.DRV` at its first enable, right after ESS's registry values
+  * `ESFM.DRV` at its first `DRV_ENABLE`. Its `Bank=` isn't a switch: it names a bank file, and it's read again every time a program opens the MIDI device ([ESFM_BANK.md](ESFM_BANK.md#bank-file-buildesfmdrv)).
 * A change takes effect when Windows starts again.
 * Without the section or a key, the default applies.
 * A value is read as `GetPrivateProfileInt` reads it: its leading digits, 0 without any. Write `1` or `0`: `yes` and `on` read as 0.
@@ -346,3 +347,23 @@ The DOS box changes are described in [VXD_INTERNALS.md](VXD_INTERNALS.md#dos-box
 * `Audio2Oversampling=1` with `Audio2Filter=1` writes ESS's value, 71h bits 4 and 1 set and bit 3 as it was.
 * ES1869.DRV applies them to Windows' wave output, at the open (1:1157) and at every playback start (6:2DE6). ES1869.VXD reads the same two keys for DirectSound and for a DOS program taking the DSP.
 * Why the defaults sound better: [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter).
+
+### 6.3 [ESFM.DRV]
+
+The changes are described in [ESFM_MIDI.md](ESFM_MIDI.md#the-fix-buildesfmdrv) and [ESFM_GM.md](ESFM_GM.md).
+
+| Key | Default | 1 | 0, as ESS's driver |
+|---|---|---|---|
+| QueueWhileBusy | 1 | A message that comes while the driver is busy waits in a queue. Open, close and the chip reset hold the driver, so no register write is split | The message is refused with `MIDIERR_NOTREADY`, and a note off lost that way leaves the note sounding |
+| SilenceOnClose | 1 | Closing the device or a power suspend keys off every voice and lets every sustain pedal up | Notes the pedal holds keep sounding |
+| PedalRelease | 1 | A program change lets the channel's sustain pedal up | The pedal stays down |
+| Vibrato | 1 | Modulation (controller 1) and channel pressure turn on the chip's vibrato | Both are ignored |
+| Tuning | 1 | RPN 0 with cents, RPN 1 (fine tuning) and RPN 2 (coarse tuning) | RPN 0 in semitones only, RPN 1 and 2 ignored |
+| ResetControllers | 1 | Controller 121 resets what RP-015 lists, and keeps volume, pan and the bend range | ESS's reset: volume, pan and the bend range too, and sounding notes stay bent |
+| LivePan | 1 | Pan (controllers 8 and 10) moves the notes that sound | Controller 10 pans the next notes, 8 is ignored |
+| SysEx | 1 | GM, GM2, GS and XG resets and the GM master volume in long messages | Ignored |
+| RunningStatus | 1 | Running status as the MIDI spec has it, across long-message buffers and around real-time bytes | Each long message starts from the last one's data bytes, and a real-time byte becomes the running status |
+| BetterSquareWave | 1 | The built-in bank is `esfm_patch_banks/bnk_com_better_square_wave.bin` | ESS's `bnk_com.bin`, which the driver also carries (resource 1235) |
+
+* With every key at 0, the driver writes the chip's ports exactly as ESS's does: `SettingsTest` in `tests/test_esfmdrv.py` plays a song's worth of messages through both.
+* essctl's *ESFM patch bank* page lists the changes that are off and which bank is the driver's own. ESFM > *Restore original bank* puts that bank back.

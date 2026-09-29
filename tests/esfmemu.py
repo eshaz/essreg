@@ -86,6 +86,7 @@ STUB_ARGS = {
     ("KERNEL", 102): 0,     # DOS3Call: INT 21h registers
     ("KERNEL", 111): 2,     # GlobalWire(h)
     ("KERNEL", 112): 2,     # GlobalUnWire(h)
+    ("KERNEL", 127): 14,    # GetPrivateProfileInt(app, key, def, file)
     ("KERNEL", 128): 22,    # GetPrivateProfileString(app, key, def, buf,
                             # size, file)
     ("KERNEL", 191): 2,     # GlobalPageLock(sel)
@@ -174,6 +175,17 @@ class Inject:
         self.deferred = False
 
 
+def profile_int(value):
+    """what Windows' GetPrivateProfileInt makes of a value: its leading
+    digits after blanks, 0 without any"""
+    digits = ""
+    for ch in value.lstrip(" \t"):
+        if not ch.isdigit():
+            break
+        digits += ch
+    return int(digits) & 0xFFFF if digits else 0
+
+
 class ESFMEmu:
     def __init__(self, drv, bank=None):
         self.ne = ne = NEFile(drv)
@@ -207,6 +219,8 @@ class ESFMEmu:
         uc.hook_add(UC_HOOK_INSN, self._out, None, 1, 0, UC_X86_INS_OUT)
         # the driver's DGROUP state after DRV_LOAD and DRV_ENABLE
         self.bank_res = ne.resource_data(256, 1234)
+        # the fixed driver's copy of ESS's bank, None in ESS's driver
+        self.ess_bank_res = ne.resource_data(256, 1235)
         bank = bank if bank is not None else self.bank_res
         uc.mem_write(BANK_PARA * 16, bank)
         self.w16(4, 0x12, 0)
@@ -229,7 +243,8 @@ class ESFMEmu:
         self.gmem_fail = False   # GlobalAlloc fails
         # SYSTEM.INI and the files DOS3Call reads
         self.ini = {}            # (section, key), lower case -> value
-        self.ini_reads = []
+        self.ini_reads = []      # GetPrivateProfileString
+        self.int_reads = []      # GetPrivateProfileInt: (file, app, key, def)
         self.files = {}          # path in upper case -> bytes
         self.ftimes = {}         # path -> (DOS date, DOS time), if not new
         self.handles = {}        # DOS handle -> [path, position, bytes]
@@ -705,10 +720,15 @@ class ESFMEmu:
             ax, dx = size & 0xFFFF, size >> 16
         elif key == ("KERNEL", 60):         # FindResource
             rtype, name = arg(0, 4), arg(4, 4)
-            ax = 0x0B01 if (rtype, name) == (256, 1234) else 0
+            ax = {(256, 1234): 0x0B01, (256, 1235): 0x0B02}.get(
+                (rtype, name), 0)
+            if ax == 0x0B02 and self.ess_bank_res is None:
+                ax = 0
         elif key == ("KERNEL", 61):         # LoadResource
             if arg(0) == 0x0B01:
                 ax = self.galloc(len(self.bank_res), self.bank_res)
+            elif arg(0) == 0x0B02:
+                ax = self.galloc(len(self.ess_bank_res), self.ess_bank_res)
         elif key == ("KERNEL", 62):         # LockResource
             ax, dx = 0, arg(0)
         elif key == ("KERNEL", 63):         # FreeResource
@@ -716,6 +736,8 @@ class ESFMEmu:
         elif key == ("KERNEL", 65):         # SizeofResource
             if arg(0) == 0x0B01:
                 ax = len(self.bank_res)
+            elif arg(0) == 0x0B02:
+                ax = len(self.ess_bank_res)
         elif key == ("KERNEL", 88):         # lstrcpy(dst, src)
             src, dst = arg(0, 4), arg(4, 4)
             self.wrstr(dst, self.rdstr(src))
@@ -731,6 +753,12 @@ class ESFMEmu:
             h = arg(0)
             self.wires[h] = self.wires.get(h, 0) - 1
             ax = 1
+        elif key == ("KERNEL", 127):        # GetPrivateProfileInt
+            fname, default = self.rdstr(arg(0, 4)), arg(4)
+            keyname, app = self.rdstr(arg(6, 4)), self.rdstr(arg(10, 4))
+            self.int_reads.append((fname, app, keyname, default))
+            val = self.ini.get((app.lower(), keyname.lower()))
+            ax = default if val is None else profile_int(val)
         elif key == ("KERNEL", 128):        # GetPrivateProfileString
             fname, size, buf = self.rdstr(arg(0, 4)), arg(4), arg(6, 4)
             default, keyname = self.rdstr(arg(10, 4)), self.rdstr(arg(14, 4))
@@ -869,6 +897,8 @@ class ESFMEmu:
             st.update(zip(names, struct.unpack_from("<7H", dgroup, at + 30)))
             path = dgroup[at + 44:at + 44 + 128]
             st["bpath"] = path.split(b"\0")[0].decode("latin-1")
+        if st["version"] >= 4:                  # the SYSTEM.INI settings
+            st["opts"] = struct.unpack_from("<H", dgroup, at + 304)[0]
         return st
 
     def pedals(self):

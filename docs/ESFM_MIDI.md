@@ -129,9 +129,12 @@ A dropped note off leaves the voice keyed on until it's stolen for another note 
 * **General MIDI.** [`src/esfm/esfmgm.asm`](../src/esfm/esfmgm.asm) adds what GM asks for and ESS's code doesn't do: modulation, channel pressure, tuning, the bend range in cents, master volume and controller 121 as RP-015. See [ESFM_GM.md](ESFM_GM.md).
 * **Bank file.** [`src/esfm/esfmfile.asm`](../src/esfm/esfmfile.asm) lets the driver play a patch bank straight from a file named in `SYSTEM.INI`. It reads the file when a program opens the device, if the file's date or time changed. See [ESFM_BANK.md](ESFM_BANK.md#bank-file-buildesfmdrv).
 
+* **Settings.** Each change can be turned off in `SYSTEM.INI`, one key each under `[ESFM.DRV]`, read at the first `DRV_ENABLE` ([`src/esfm/esfmini.asm`](../src/esfm/esfmini.asm)). `QueueWhileBusy=0` turns off the queue and the holding at open, close and chip reset. See [DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv).
+
 Everything else is ESS's code, unchanged:
 * The bank loader is untouched, so `esfmpat` and essctl's *Load bank* work the same with the fixed driver.
 * The built-in patch bank is [`esfm_patch_banks/bnk_com_better_square_wave.bin`](../esfm_patch_banks). `--stock` keeps ESS's `bnk_com.bin`, and `--bank FILE` builds the driver with another bank.
+* The fixed driver also carries ESS's `bnk_com.bin` (resource 1235). `BetterSquareWave=0` plays it instead.
 
 ### Installing
 

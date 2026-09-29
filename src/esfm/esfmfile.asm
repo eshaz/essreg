@@ -32,6 +32,7 @@ KERNEL          equ 1
 %define KERNEL_DOS3Call 102
 %define KERNEL_GlobalWire 111
 %define KERNEL_GlobalUnWire 112
+%define KERNEL_GetPrivateProfileInt 127
 %define KERNEL_GetPrivateProfileString 128
 %define KERNEL_GlobalPageLock 191
 %define KERNEL_GlobalPageUnlock 192
@@ -72,16 +73,26 @@ BS_MISSING      equ 2           ; the file can't be opened or read
 BS_BAD          equ 3           ; the file isn't a patch bank
 BS_NOMEM        equ 4           ; no memory for it
 
-; DRV_ENABLE (DriverProc calls this instead of bank_load): the built-in
-; bank, and forget the file that was read, so the next MODM_OPEN reads it
-; again
+; DRV_ENABLE (DriverProc calls this instead of bank_load): SYSTEM.INI's
+; settings the first time (esfmini.asm), the built-in bank, and forget the
+; file that was read, so the next MODM_OPEN reads it again
 ; DX:AX from bank_load
 fix_drv_enable:
+        call    fix_read_settings
         callf   bank_load, ..@FIX_S1A, 0xFFFF
         mov     word [fix_bsrc],0
         mov     word [fix_bstate],BS_NONE
         mov     byte [fix_bkey],0
-        retf
+        ; BetterSquareWave=0: ESS's bank (resource 1235) instead of the one
+        ; bank_load put in (1234)
+        test    word [fix_opts],OPT_SQUARE
+        jnz     .done
+        push    ax
+        push    dx
+        call    fix_builtin
+        pop     dx
+        pop     ax
+.done:  retf
 
 ; MODM_OPEN, before ESS's code: load the bank file if it changed
 ; nothing is checked while a program has the device open, that open is
@@ -518,7 +529,8 @@ fix_install:
         pop     si
         ret
 
-; put the bank built into the driver back (resource 256, 1234)
+; put the bank built into the driver back: resource 256, 1234, or ESS's
+; bank, 1235, with BetterSquareWave=0
 ; CF if it can't
 fix_builtin:
         push    bp
@@ -529,7 +541,11 @@ fix_builtin:
                                         ; [bp-10] resource data
         push    word [hinstance]
         push    word 0
-        push    word 1234
+        mov     ax,BANK_ID
+        test    word [fix_opts],OPT_SQUARE
+        jnz     .id
+        mov     ax,BANK_ESS_ID
+.id:    push    ax
         push    word 0
         push    word 256
         kernel  FindResource

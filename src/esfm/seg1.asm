@@ -148,6 +148,7 @@ L1_00FF:
 all_notes_off:
 %if ESFM_FIX
         jmp near fix_all_off
+..@fix_ess_all_off:                     ; SilenceOnClose=0
 %endif
         push bp                                         ; 011C
         mov_ bp,sp                                      ; 011D
@@ -2774,8 +2775,14 @@ L1_1686:
 %if ESFM_FIX
         ; running status: a new message with the status alone.  ESS's
         ; code kept the data bytes of the last one and ORed the new ones in
+        test word [fix_opts],OPT_RUNNING
+        jz ..@fix_ess_running
         mov [bp-0x14],ax
         mov [bp-0x12],dx
+        jmp short ..@fix_running_set
+..@fix_ess_running:
+        or [bp-0x14],ax
+..@fix_running_set:
 %else
         or [bp-0x14],ax                                 ; 16C7
 %endif
@@ -3800,6 +3807,7 @@ R1_1ECB: dw 0xFFFF, 0x0000                              ; 1ECB KERNEL.LocalSize
 %if ESFM_FIX
 %include "esfmfix.asm"
 %include "esfmfile.asm"
+%include "esfmini.asm"
 %include "esfmped.asm"
 %include "esfmgm.asm"
 %endif

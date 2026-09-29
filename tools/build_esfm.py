@@ -13,7 +13,9 @@ usage: build_esfm.py [--stock] [--verify] [--bank FILE] [-o OUTPUT]
              driver/ESFM.DRV
   --bank     put another patch bank (raw, as in esfm_patch_banks/) in
              the driver instead of bnk_com_better_square_wave.bin (or,
-             with --stock, ESS's bnk_com.bin)
+             with --stock, ESS's bnk_com.bin). The fixed driver also
+             carries ESS's bnk_com.bin as resource 1235, for
+             BetterSquareWave=0 in SYSTEM.INI
 
 Needs NASM 2.14 or later and Python 3.
 """
@@ -36,6 +38,9 @@ BANK = (256, 1234)
 # the bank built into the fixed driver, the stock build keeps ESS's
 FIX_BANK = os.path.join(ROOT, "esfm_patch_banks",
                         "bnk_com_better_square_wave.bin")
+# and the fixed driver keeps ESS's as well, for BetterSquareWave=0
+ESS_BANK_ID = 1235
+ESS_BANK = os.path.join(ROOT, "esfm_patch_banks", "bnk_com.bin")
 
 
 def build(fix, output=None, workdir=None, bank=None, defines=None):
@@ -60,6 +65,15 @@ def build(fix, output=None, workdir=None, bank=None, defines=None):
             for r in t["entries"]:
                 if (t["type"], r["id"]) == BANK:
                     r["file"] = os.path.relpath(os.path.abspath(bank), SRC)
+    if fix:
+        # ESS's bank after the rest of the file, loaded only when asked for
+        for t in layout["resources"]:
+            if t["type"] == BANK[0]:
+                t["entries"].append({
+                    "id": ESS_BANK_ID, "flags": 0x1C30,
+                    "file": os.path.relpath(ESS_BANK, SRC)})
+        layout["order"].append({"item": "res:%d:%d" % (BANK[0], ESS_BANK_ID),
+                                "offset": 0})
     with open(binary, "rb") as f:
         data = nelink.link(f.read(), layout, SRC)
     if output:

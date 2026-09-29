@@ -183,9 +183,10 @@ file       the WAV file, FMREC001.WAV and up if left out
 * General MIDI: modulation and channel pressure (vibrato), fine and coarse tuning, the bend range in cents, master volume, GM, GS and XG resets, and controller 121 as GM wants it. See [docs/ESFM_GM.md](docs/ESFM_GM.md).
 * Running status in `midiOutLongMsg` buffers no longer mixes up notes. It goes on across buffers, and a clock or active sensing byte no longer breaks it.
 * A program always gets its `midiOutLongMsg` buffers back, also when the queue is full, when it closes the device while one waits, or when the device is suspended.
-* Its built-in patch bank is [`bnk_com_better_square_wave.bin`](esfm_patch_banks).
+* Its built-in patch bank is [`bnk_com_better_square_wave.bin`](esfm_patch_banks). It carries ESS's too.
 * It can play a patch bank straight from a file named in `SYSTEM.INI`. The file is read when a program opens the MIDI device, if its date or time changed. See [docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv).
 * See [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md) for the details.
+* Each change can be turned off in `SYSTEM.INI`, one key each under `[ESFM.DRV]`, read when Windows starts. With all of them at 0 it plays as ESS's driver, and `BetterSquareWave=0` plays ESS's bank. See [docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#63-esfmdrv).
 * Everything else is ESS's code. `python3 tools/build_esfm.py --stock --verify` rebuilds the original byte for byte, and `esfmpat` and essctl's banks work the same.
 * Install it from DOS, since Windows has the driver open: keep a copy of `C:\WINDOWS\SYSTEM\ESFM.DRV`, copy `build\ESFM.DRV` over it and restart Windows.
   * Step by step: [Installing and testing on Windows 98](#installing-and-testing-on-windows-98).
