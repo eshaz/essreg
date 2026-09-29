@@ -1,104 +1,81 @@
 # ESFM MIDI: hanging notes
 
-Notes sometimes hang on the ESFM synthesizer when the music gets busy, in MIDI files and in games.
-
-**Short version:**
-* `ESFM.DRV`, ESS's MIDI driver for the synthesizer, drops a MIDI message that comes in while it's still busy with the previous one.
-* A dropped note off leaves the note sounding.
-* [`build/ESFM.DRV`](../build) is the same driver with that fixed.
+Notes sometimes hang on the ESFM synthesizer when the music gets busy, in MIDI files as well as in games. The main cause is `ESFM.DRV`, ESS's MIDI driver for the synthesizer, which drops a MIDI message that arrives while it is still busy with the previous one. When the dropped message is a note off, the note keeps sounding. [`build/ESFM.DRV`](../build) is the same driver with that fixed.
 
 ## The driver stack
 
+These are the layers between a program and the synthesizer:
+
 | Layer | What it does here |
 |---|---|
-| Program | Media Player (MCI sequencer), a game: `midiOutShortMsg`, `midiOutLongMsg`, `midiStreamOut` |
-| `MMSYSTEM.DLL` | Passes the calls to the driver. Its timers and its stream player send MIDI data **from interrupts** |
-| `MIDIMAP.DRV` | The MIDI Mapper: passes each message on to the chosen device |
-| **`ESFM.DRV`** | `modMessage`: voices, patches, FM register writes. Its code is in a fixed segment, so it can be called at interrupt time |
-| `ES1869.VXD` | Gives FM to Windows when the MIDI device opens and takes it back at close (API 0101/0102/0103); DOS box contention. **Not involved while Windows plays** |
-| ES1869 | The ESFM synthesizer in native mode: 18 voices, registers written through FM_Base+1/+2/+3 |
+| Program | Media Player (through the MCI sequencer) or a game, which calls `midiOutShortMsg`, `midiOutLongMsg` or `midiStreamOut` |
+| `MMSYSTEM.DLL` | Passes the calls on to the driver. Its timers and its stream player send MIDI data from interrupts |
+| `MIDIMAP.DRV` | The MIDI Mapper, which passes each message on to the chosen device |
+| **`ESFM.DRV`** | `modMessage` handles the voices, the patches and the FM register writes. Its code is in a fixed segment, so it can be called at interrupt time |
+| `ES1869.VXD` | Gives FM to Windows when the MIDI device opens and takes it back when it closes (API 0101/0102/0103), and handles contention with DOS boxes. It isn't involved while Windows plays |
+| ES1869 | The ESFM synthesizer in native mode, with 18 voices. Its registers are written through FM_Base+1/+2/+3 |
 
-* The source of `ESFM.DRV` is in [`src/esfm`](../src/esfm), rebuilt from the ESS driver the same way as `ES1869.VXD`.
-* The addresses below are `segment:offset` in `ESFM.DRV`.
+The source of `ESFM.DRV` is in [`src/esfm`](../src/esfm). It was rebuilt from ESS's driver in the same way as the source of `ES1869.VXD`. The addresses below are `segment:offset` in `ESFM.DRV`.
 
 ## What goes wrong
 
 ### 1. Messages dropped while the driver is busy (the main cause)
 
-**The busy counter.**
-* `modMessage` (seg1:1442) guards MODM_DATA, MODM_LONGDATA and MODM_RESET with a single counter (DGROUP:0022; seg1:1506, 1554, 1729).
-* A message that comes in while another one is being handled gets `MIDIERR_NOTREADY`.
-* MMSYSTEM, the MIDI Mapper and the programs don't try again, so the message is gone.
+`modMessage` (seg1:1442) guards `MODM_DATA`, `MODM_LONGDATA` and `MODM_RESET` (seg1:1506, 1554 and 1729) with a single busy counter (DGROUP:0022). A message that comes in while another one is being handled gets `MIDIERR_NOTREADY`, and because MMSYSTEM, the MIDI Mapper and the programs don't try again, the message is lost.
 
-**How a second message gets in while the driver is busy:**
-* **From an interrupt.** MMSYSTEM's timers and its stream player send MIDI data at interrupt time, so they can land in the middle of a program's own `midiOutShortMsg`. Games often change volume or pan this way while their music plays.
-* **From a callback.** After a long message (SysEx), the driver calls the program back (MOM_DONE, seg1:1711) while it still holds the counter. Anything the program sends from that callback is refused.
+A second message can arrive while the driver is busy in two ways. The first is from an interrupt: MMSYSTEM's timers and its stream player send MIDI data at interrupt time, so a message from them can land in the middle of a program's own `midiOutShortMsg` call. Games often change the volume or pan with such calls while their music plays. The second is from a callback: after a long message (SysEx), the driver calls the program back with `MOM_DONE` (seg1:1711) while it still holds the counter, so anything the program sends from that callback is refused.
 
-**Why busy music makes it worse:**
-* A note on for a two-voice patch is about 70 FM register writes, well over a millisecond.
-* The more notes per second, the more often two messages overlap.
-
-A dropped note off leaves the voice keyed on until it's stolen for another note or the device is reset. That's the hanging note.
+Busy music makes this worse. A note on for a two-voice patch takes about 70 FM register writes, well over a millisecond, and the more notes play each second, the more often two messages overlap. A dropped note off leaves the voice keyed on until it is stolen for another note or the device is reset, and that is the hanging note.
 
 ### 2. Close or power suspend with the sustain pedal down
 
-* `all_notes_off` (seg1:011C) runs at close and at power suspend, and sends a note off to every voice.
-* While a channel's sustain pedal is down, a note off only marks the voice. So those voices keep sounding after the program has closed the device.
-* They stay on until the next program opens it.
+`all_notes_off` (seg1:011C) runs at close and at power suspend, and it sends a note off to every voice. While a channel's sustain pedal is down, however, a note off only marks the voice, so those voices keep sounding after the program has closed the device. They stay on until the next program opens it.
 
 ### 3. FM register writes split by an interrupt
 
-* A register write is three port writes: address low, address high, data (`fm_write`, seg1:0010).
-* Open, close, power suspend and resume write registers without taking the busy counter.
-* So a message from an interrupt can land between the address and the data, and the data goes to the wrong register.
-* In the emulator this wrote register 24Dh instead of 24Eh and left voices keyed on after the close.
+A register write takes three port writes: the low byte of the address, the high byte and the data (`fm_write`, seg1:0010). Open, close, power suspend and resume write registers without taking the busy counter, so a message from an interrupt can land between the address and the data, which then goes to the wrong register. In the emulator, this wrote register 24Dh instead of 24Eh and left voices keyed on after the close.
 
 ### 4. A sustain pedal left down (found on the hardware)
 
-* **What the dump showed.** `essctl /dump` during music on Windows 98: channel 6's pedal down, and 12 voices *held by pedal*, on in the chip. All 12 were keyed 650 to 720 note ons earlier, in one burst, and channel 6 played nothing after them. Nothing was queued or refused, so this isn't cause 1.
-* **ESS's pedal follows the MIDI spec.** Controller 64 at 64 or more puts it down, below 64 lets it up (`sustain`, seg1:0E46). A note off while it's down keeps the voice keyed on.
-* **Nothing else lets it up.** Only controller 64, controller 121, MODM_RESET, open and close reset the pedal.
-  * A program change only stores the program (seg1:13C0).
-  * The long-message parser skips every SysEx byte (seg1:15BF), so a GM, GS or XG reset does nothing.
-* **FM doesn't fade.** On a sample synth, a piano note held by a forgotten pedal decays. An ESFM patch with a sustaining envelope sounds until the pedal goes up.
-  * So a pedal left down from an earlier part holds every note of the channel after it, forever, and those notes use up voices.
+An `essctl /dump` taken during music on Windows 98 showed channel 6's pedal down and 12 voices *held by pedal*, all of them keyed on in the chip. The 12 voices had been keyed 650 to 720 note ons earlier, in one burst, and channel 6 had played nothing after them. Nothing had been queued or refused, so this wasn't cause 1.
+
+ESS's pedal follows the MIDI spec. Controller 64 at 64 or more puts it down, and a value below 64 lets it up (`sustain`, seg1:0E46). A note off while the pedal is down keeps the voice keyed on, and only controller 64, controller 121, `MODM_RESET`, open and close reset the pedal. A program change only stores the program (seg1:13C0), and a GM, GS or XG reset does nothing, because the long-message parser skips every SysEx byte (seg1:15BF).
+
+On a sample synth, a piano note held by a forgotten pedal decays, but FM doesn't fade: an ESFM patch with a sustaining envelope sounds until the pedal goes up. A pedal left down from an earlier part therefore holds every note the channel plays after it, forever, and those notes use up voices.
 
 ### 5. Running status in long messages
 
-* In a long message (`midiOutLongMsg`), ESS's parser keeps the bytes of the last message when running status starts the next one, and ORs the new data bytes into them (seg1:16C7).
-* So `80 3C 00 40 00` turns off note 3Ch, then note 7Ch instead of 40h, and note 40h hangs.
-* Short messages (`midiOutShortMsg`) with running status are fine, apart from 6.
+In a long message (`midiOutLongMsg`), when running status starts the next message, ESS's parser keeps the bytes of the last message and ORs the new data bytes into them (seg1:16C7). As a result, `80 3C 00 40 00` turns off note 3Ch and then note 7Ch instead of 40h, which leaves note 40h hanging. Short messages (`midiOutShortMsg`) in running status are fine, apart from cause 6.
 
 ### 6. Running status after a real-time byte, and between buffers
 
-* A real-time byte sent on its own with `midiOutShortMsg` (F8h clock, FEh active sensing) becomes ESS's running status (seg1:1524). The next message sent in running status is lost: `90 3C 7F`, `F8`, `3C 00` leaves note 3Ch on.
-* Each long message starts afresh (seg1:1452). A message cut between two buffers is lost, and running status doesn't go on in the next buffer.
+A real-time byte sent on its own with `midiOutShortMsg`, such as F8h (clock) or FEh (active sensing), becomes ESS's running status (seg1:1524), so the next message sent in running status is lost. Sending `90 3C 7F`, `F8` and then `3C 00` leaves note 3Ch on.
 
-### Checked and fine
+Each long message also starts afresh (seg1:1452), so a message cut between two buffers is lost, and running status doesn't carry on into the next buffer.
 
-* **Driver logic:** voice allocation, voice stealing, retriggering a note that's already playing, controller 64 itself, the controllers (including 120, 121 and 123-127), RPN pitch bend range, running status in short messages (apart from 6), the long-message parser apart from SysEx (see 4) and running status (see 5 and 6), and MODM_RESET, which silences everything.
-* **The chip:** [ESFMu](https://github.com/Kagamiin/ESFMu), the hardware-accurate ESFM emulator, releases a key off that comes during an envelope delay right away. The chip doesn't hold notes on its own.
-* **`ES1869.VXD`:** once Windows owns FM, the VxD doesn't trap Windows' accesses to the FM ports, so it isn't in the path of the notes. It still traps DOS boxes' accesses ([VXD_INTERNALS.md](VXD_INTERNALS.md#dos-boxes)).
-* **Not in the repository:** the Microsoft parts (`MMSYSTEM.DLL`, `MIDIMAP.DRV`, `MCISEQ.DRV`) are described here from their documented behaviour.
+### What was ruled out
+
+* In ESS's driver, these work as they should: voice allocation, voice stealing, retriggering a playing note, controller 64 itself and the other controllers (including 120, 121 and 123-127), the RPN for the pitch bend range, running status in short messages apart from cause 6, the long-message parser apart from SysEx (cause 4) and running status (causes 5 and 6), and `MODM_RESET`, which silences everything.
+* The chip doesn't hold notes on its own. In [ESFMu](https://github.com/Kagamiin/ESFMu), the hardware-accurate ESFM emulator, a key off that comes during an envelope delay releases the note right away.
+* `ES1869.VXD` isn't in the path of the notes, because once Windows owns FM, the VxD doesn't trap Windows' accesses to the FM ports. It still traps the accesses of DOS boxes ([VXD_INTERNALS.md](VXD_INTERNALS.md#dos-boxes)).
+
+The Microsoft parts (`MMSYSTEM.DLL`, `MIDIMAP.DRV` and `MCISEQ.DRV`) aren't in the repository, so this page describes them from their documented behavior.
 
 ## Proof
 
-[`tests/esfmemu.py`](../tests/esfmemu.py) runs the real `ESFM.DRV` code in a 16-bit CPU emulator:
-* it goes through DRVM_INIT, DRVM_ENABLE and MODM_OPEN like Windows does
-* a model of the FM chip records every register write
-* it can fire an "interrupt" (a nested `modMessage` call) after any FM write or any instruction
+[`tests/esfmemu.py`](../tests/esfmemu.py) runs the real `ESFM.DRV` code in a 16-bit CPU emulator. It takes the driver through `DRVM_INIT`, `DRVM_ENABLE` and `MODM_OPEN` as Windows does, and a model of the FM chip records every register write. The emulator can also fire an "interrupt", which is a nested `modMessage` call, after any FM write or any instruction.
 
 [`tests/test_esfmdrv.py`](../tests/test_esfmdrv.py) checks each case with ESS's driver and with the fixed one:
 
 | Case | ESS `ESFM.DRV` | `build/ESFM.DRV` |
 |---|---|---|
-| Note off from an interrupt during a note on | refused, the note hangs | played |
-| Note off sent from the MOM_DONE callback | refused, the note hangs | played |
-| Note on from an interrupt during MODM_CLOSE | wrong register written, voices on after the close | silent |
+| Note off from an interrupt during a note on | refused, so the note hangs | played |
+| Note off sent from the `MOM_DONE` callback | refused, so the note hangs | played |
+| Note on from an interrupt during `MODM_CLOSE` | the wrong register written, voices on after the close | silent |
 | Close with the sustain pedal down | voices on after the close | silent |
 | Power suspend with the pedal down | voices on | silent |
 | Note off fired at every 11th instruction of a note on (937 tries) | 914 hanging notes | 0 |
-| Pedal down, a chord let go, then a program change | notes held, pedal down | released, pedal up |
+| Pedal down, a chord let go, then a program change | notes held, pedal still down | notes released, pedal up |
 | Pedals down on two channels, then a GM, GM2, GS or XG reset | notes held | released |
 | Two notes, then `80 3C 00 40 00` in a long message | note 40h hangs | released |
 | A clock byte (F8h) between a note on and its note off in running status | the note hangs | released |
@@ -106,58 +83,42 @@ A dropped note off leaves the voice keyed on until it's stolen for another note 
 
 ## The fix: `build/ESFM.DRV`
 
-* Built with `python3 tools/build_esfm.py` from [`src/esfm`](../src/esfm).
-* `--stock --verify` builds ESS's driver instead and checks that it's identical byte for byte.
-* The changes are in [`src/esfm/esfmfix.asm`](../src/esfm/esfmfix.asm):
-  * **Queue instead of refusing.** A message that comes in while the driver is busy is queued (256 entries: the first tick of a GM file can hold over 100 messages).
-  * **Draining.** The call that's busy handles the queue, in order, before it returns. `MIDIERR_NOTREADY` only happens if the queue is full.
-  * **Long messages** wait in the queue marked as queued, and get their MOM_DONE when they're played. A program always gets its buffer back:
-    * refused because the queue is full, the buffer keeps the flags it had
-    * dropped by a close, it comes back with MOM_DONE before MOM_CLOSE
-    * refused by ESS's code when its turn comes (the device was suspended meanwhile), it comes back with MOM_DONE
-  * **Open, close and `chip_reset`** hold the driver too, so nothing can come in between the three port writes of a register. Queued messages of a program that has just closed the device are dropped.
-  * **Close and power suspend** key off every voice and lift every sustain pedal.
-  * **Counters.** A small block of counters at the end of the data segment, starting with `ESFMFIX`, for essctl.
-* **Sustain pedal.** [`src/esfm/esfmped.asm`](../src/esfm/esfmped.asm):
-  * A program change lets go of the channel's pedal first, as controller 64 with 0 would. The MIDI spec keeps it down, but a pedal still down when a channel changes instrument is left over from the part before, and on FM it holds notes forever.
-  * A GM, GM2, GS or XG reset in a long message sets every channel back to the GM defaults, the pedal up and the notes off, as GM synths do ([ESFM_GM.md](ESFM_GM.md#gm-gs-and-xg-resets)).
-* **Running status in long messages.** Each message starts afresh ([`src/esfm/seg1.asm`](../src/esfm/seg1.asm), at seg1:16C7), so no note gets mixed up with the one before.
-* **Running status between messages and buffers** ([`src/esfm/esfmgm.asm`](../src/esfm/esfmgm.asm)):
-  * A real-time byte leaves the running status alone, and a system common one (F0h-F7h) ends it, as the MIDI spec says.
-  * The long-message parser goes on in the next buffer where the last one stopped, so a message cut between buffers plays, and running status goes on.
-  * A short message's status is the running status of the next buffer too, as if all the bytes came one after the other. `midiOutReset` and opening the device start afresh.
-* **General MIDI.** [`src/esfm/esfmgm.asm`](../src/esfm/esfmgm.asm) adds what GM asks for and ESS's code doesn't do: modulation, channel pressure, tuning, the bend range in cents, master volume and controller 121 as RP-015. See [ESFM_GM.md](ESFM_GM.md).
-* **Bank file.** [`src/esfm/esfmfile.asm`](../src/esfm/esfmfile.asm) lets the driver play a patch bank straight from a file named in `SYSTEM.INI`. It reads the file when a program opens the device, if the file's date or time changed. See [ESFM_BANK.md](ESFM_BANK.md#bank-file-buildesfmdrv).
+`python3 tools/build_esfm.py` builds the fixed driver from [`src/esfm`](../src/esfm). With `--stock --verify`, it builds ESS's driver instead and checks that the result is identical to it byte for byte.
 
-* **Settings.** Each change can be turned off in `SYSTEM.INI`, one key each under `[ESFM.DRV]`, read at the first `DRV_ENABLE` ([`src/esfm/esfmini.asm`](../src/esfm/esfmini.asm)). `QueueWhileBusy=0` turns off the queue and the holding at open, close and chip reset. See [DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv).
+The main changes are in [`src/esfm/esfmfix.asm`](../src/esfm/esfmfix.asm). A message that comes in while the driver is busy goes into a queue instead of being refused. The queue has 256 entries, because the first tick of a GM file can hold over 100 messages. The call that is busy handles the queue, in order, before it returns, so `MIDIERR_NOTREADY` only happens when the queue is full.
 
-Everything else is ESS's code, unchanged:
-* The bank loader is untouched, so `esfmpat` and essctl's *Load bank* work the same with the fixed driver.
-* The built-in patch bank is [`esfm_patch_banks/bnk_com_better_square_wave.bin`](../esfm_patch_banks). `--stock` keeps ESS's `bnk_com.bin`, and `--bank FILE` builds the driver with another bank.
-* The fixed driver also carries ESS's `bnk_com.bin` (resource 1235). `BetterSquareWave=0` plays it instead.
+Long messages wait in the queue marked as queued, and they get their `MOM_DONE` when they are played. A program always gets its buffer back:
+* A buffer refused because the queue is full keeps the flags it had.
+* A buffer that a close drops comes back with `MOM_DONE` before `MOM_CLOSE`.
+* A buffer that ESS's code refuses when its turn comes, because the device was suspended in the meantime, comes back with `MOM_DONE`.
+
+Open, close and `chip_reset` hold the driver too, so nothing can come in between the three port writes of a register. Messages still queued for a program that has closed the device are dropped. Close and power suspend key off every voice and lift every sustain pedal. At the end of the data segment, a small block of counters that starts with `ESFMFIX` is there for essctl to read.
+
+In [`src/esfm/esfmped.asm`](../src/esfm/esfmped.asm), a program change first lets go of the channel's sustain pedal, as controller 64 with a value of 0 would. The MIDI spec leaves the pedal down through a program change, but a pedal that is still down when a channel changes instrument is left over from the part before, and on FM it holds notes forever. A GM, GM2, GS or XG reset in a long message sets every channel back to the GM defaults, with the pedal up and the notes off, as GM synths do ([ESFM_GM.md](ESFM_GM.md#gm-gs-and-xg-resets)).
+
+In long messages, each message starts afresh ([`src/esfm/seg1.asm`](../src/esfm/seg1.asm), at seg1:16C7), so no note gets mixed up with the one before it. [`src/esfm/esfmgm.asm`](../src/esfm/esfmgm.asm) handles running status between messages and between buffers. A real-time byte leaves the running status alone, and a system common byte (F0h-F7h) ends it, as the MIDI spec says. The long-message parser goes on in the next buffer where the last one stopped, so a message cut between two buffers plays and running status carries on. A short message's status also becomes the running status of the next buffer, as if all the bytes had come one after the other, while `midiOutReset` and opening the device start afresh.
+
+[`src/esfm/esfmgm.asm`](../src/esfm/esfmgm.asm) also adds what General MIDI asks for and ESS's code doesn't do: modulation, channel pressure, tuning, the bend range in cents, master volume, and controller 121 as RP-015 defines it. [ESFM_GM.md](ESFM_GM.md) describes these changes.
+
+[`src/esfm/esfmfile.asm`](../src/esfm/esfmfile.asm) lets the driver play a patch bank straight from a file named in `SYSTEM.INI`. The driver reads the file when a program opens the device, if the file's date or time has changed ([ESFM_BANK.md](ESFM_BANK.md#bank-file-buildesfmdrv)).
+
+Each change can be turned off in `SYSTEM.INI` with its own key under `[ESFM.DRV]`, which the driver reads at the first `DRV_ENABLE` ([`src/esfm/esfmini.asm`](../src/esfm/esfmini.asm)). `QueueWhileBusy=0` turns off the queue together with the holding at open, close and chip reset. [DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv) lists every key.
+
+Everything else is ESS's code, unchanged. Because the bank loader is untouched, `esfmpat` and essctl's *Load bank* work with the fixed driver as they do with ESS's. The fixed driver's built-in patch bank is [`esfm_patch_banks/bnk_com_better_square_wave.bin`](../esfm_patch_banks), while `--stock` keeps ESS's `bnk_com.bin` and `--bank FILE` builds the driver with another bank. The fixed driver also carries ESS's `bnk_com.bin` as resource 1235, and `BetterSquareWave=0` plays it instead.
 
 ### Installing
 
-`ESFM.DRV` is in use while Windows runs, so copy it from DOS:
+Windows keeps `ESFM.DRV` in use while it runs, so install the fixed driver from DOS:
 
-1. Start > Shut Down > *Restart the computer in MS-DOS mode*.
-2. `copy C:\WINDOWS\SYSTEM\ESFM.DRV C:\WINDOWS\SYSTEM\ESFM.ORG`
-3. `copy build\ESFM.DRV C:\WINDOWS\SYSTEM\ESFM.DRV`
+1. Choose Start > Shut Down > *Restart the computer in MS-DOS mode*.
+2. Run `copy C:\WINDOWS\SYSTEM\ESFM.DRV C:\WINDOWS\SYSTEM\ESFM.ORG` to keep ESS's driver.
+3. Run `copy build\ESFM.DRV C:\WINDOWS\SYSTEM\ESFM.DRV` to copy the fixed driver over it.
 4. Type `exit` to go back to Windows.
 
-To go back, copy `ESFM.ORG` over `ESFM.DRV` the same way.
+To go back to ESS's driver, copy `ESFM.ORG` over `ESFM.DRV` in the same way.
 
 ## Checking your machine
 
-**The *ESFM patch bank* page in essctl** shows the driver's 18 voices live: channel, note, and state (*playing*, *held by pedal*, *released*).
-* **Chip column.** While a program has the MIDI device open, the Chip column reads the key-on bit back from the synthesizer.
-* **Stuck notes.** A voice that's `on` in the chip while the driver has it as free is marked **STUCK**. A voice that keeps *playing* after the music has stopped is a hanging note too.
-* **With the fixed driver:** the page also counts the messages that came in while it was busy. ESS's driver would have dropped every one of them.
-* **In a file:** `essctl /dump file` writes the same table.
+essctl's *ESFM patch bank* page shows the driver's 18 voices live, with the channel, the note and the state of each: *playing*, *held by pedal* or *released*. While a program has the MIDI device open, the Chip column reads the key-on bit back from the synthesizer. A voice that is `on` in the chip while the driver has it as free is marked **STUCK**, and a voice that keeps *playing* after the music has stopped is a hanging note too. With the fixed driver, the page also counts the messages that came in while the driver was busy, every one of which ESS's driver would have dropped. `essctl /dump file` writes the same table to a file.
 
-**Stress test** (button on the same page):
-* **What it plays.** About 7 seconds of dense music through MMSYSTEM's stream player, which sends it at interrupt time like the MCI sequencer does. At the same time essctl sends volume and expression changes to the same device.
-* **What it checks.** Every note has its note off, so no voice should be left sounding at the end.
-* **Expected with ESS's driver:** some voices left sounding.
-* **Expected with `build/ESFM.DRV`:** none, and a count of the queued messages.
-* **Before you run it:** stop other MIDI playback, because only one program can have the ESFM device open.
+The *Stress test* button on the same page plays about 7 seconds of dense music through MMSYSTEM's stream player, which sends it at interrupt time as the MCI sequencer does. At the same time, essctl sends volume and expression changes to the same device. Every note has its note off, so no voice should be left sounding at the end. With ESS's driver, expect some voices to be left sounding. With `build/ESFM.DRV`, expect none, along with a count of the queued messages. Stop other MIDI playback before you run the test, because only one program can have the ESFM device open.
