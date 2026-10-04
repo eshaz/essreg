@@ -37,10 +37,9 @@
 
 #define ESSCTL_VERSION "1.0"
 
-// page_refresh reasons
-#define REFRESH_TIMER 0 // timer, only registers without read side effects
+// page_refresh reasons; neither reads a register with read side effects
+#define REFRESH_TIMER 0 // timer, rows change only where the chip did
 #define REFRESH_USER 1  // page shown, View > Refresh
-#define REFRESH_DSP 2   // also the controller registers (DSP channel)
 
 // kinds of pages
 #define PK_INFO 0   // device information

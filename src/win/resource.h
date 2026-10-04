@@ -23,7 +23,6 @@
 #define IDM_DUMP 202
 #define IDM_EXIT 203
 #define IDM_REFRESH 210
-#define IDM_READDSP 211
 #define IDM_AUTOREFRESH 212
 #define IDM_EXPERT 220
 #define IDM_FMDAC 221

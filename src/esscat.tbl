@@ -344,42 +344,42 @@ FLD(F_RMONOINVOL_L, R_MX6F, 4, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NO
 FLD(F_RMONOINVOL_R, R_MX6F, 0, 4, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_RECORD, FMT_NONE, "rec.monoinvol.r", "MONO_IN record volume R", "Right record mixer volume of the MONO_IN input; cleared by hardware reset but not by mixer reset (DS p.64)")
 
 REG(R_MX70, BK_MIXER, 0, 0x70, 0, "Audio 2 sample rate", 64)
-FLD(F_A2_RATE, R_MX70, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_RATE_70, "a2.rate", "Audio 2 sample rate", "Bit 7 picks the 768 kHz (1) or 793.8 kHz (0) clock; rate = clock / (128 - bits 6:0), e.g. F0h = 48 kHz, 6Eh = 44.1 kHz (DS p.64)")
+FLD(F_A2_RATE, R_MX70, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED, E_NONE, PG_DAC, FMT_RATE_70, "a2.rate", "Audio 2 sample rate", "Bit 7 picks the 768 kHz (1) or 793.8 kHz (0) clock; rate = clock / (128 - bits 6:0), e.g. F0h = 48 kHz, 6Eh = 44.1 kHz (DS p.64)")
 
 REG(R_MX71, BK_MIXER, 0, 0x71, 0, "Audio 2 mode", 64)
-FLD(F_A2_NEWA1, R_MX71, 5, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.new_a1", "New A1h rate mode", "1 = A1h behaves like 70h, giving accurate rates that divide 48 kHz; 0 = A1h behaves as in earlier AudioDrive chips (DS p.64)")
-FLD(F_A2_4X, R_MX71, 4, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.oversample4x", "Audio 2 4x oversampling", "1 = the Audio 2 DAC is in 4x oversampling mode, which always bypasses its switched-capacitor filter (DS p.64)")
-FLD(F_A2_SCF2BYP, R_MX71, 3, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.scf_bypass", "Audio 2 filter bypass", "1 = bypass the switched-capacitor filter of the Audio 2 DAC (DS p.64)")
-FLD(F_A2_SCF1BYP, R_MX71, 2, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a1.scf_bypass", "Audio 1 filter bypass", "1 = bypass the switched-capacitor filter of the Audio 1 CODEC, which is in the ADC's input path too (DS p.25, p.64)")
-FLD(F_A2_ASYNC, R_MX71, 1, 1, K_BOOL, T_EXPERT, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.async", "Audio 2 asynchronous", "1 = the Audio 2 DAC runs at its own rate (70h, 72h); 0 = it is slaved to the Audio 1 sample and filter rate (DS p.64)")
-FLD(F_A2_FMMIX, R_MX71, 0, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_AUDIO2, FMT_NONE, "a2.fm_mix", "Audio 2 mixed into FM", "1 = Audio 2 DMA is slaved to the FM synthesizer sample rate and digitally mixed into the FM output (DS p.64)")
+FLD(F_A2_NEWA1, R_MX71, 5, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_DAC, FMT_NONE, "a2.new_a1", "New A1h rate mode", "1 = A1h behaves like 70h, giving accurate rates that divide 48 kHz; 0 = A1h behaves as in earlier AudioDrive chips (DS p.64)")
+FLD(F_A2_4X, R_MX71, 4, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_DAC, FMT_NONE, "a2.oversample4x", "Audio 2 4x oversampling", "1 = the Audio 2 DAC is in 4x oversampling mode, which always bypasses its switched-capacitor filter (DS p.64)")
+FLD(F_A2_SCF2BYP, R_MX71, 3, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_DAC, FMT_NONE, "a2.scf_bypass", "Audio 2 filter bypass", "1 = bypass the switched-capacitor filter of the Audio 2 DAC (DS p.64)")
+FLD(F_A2_SCF1BYP, R_MX71, 2, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_DAC, FMT_NONE, "a1.scf_bypass", "Audio 1 filter bypass", "1 = bypass the switched-capacitor filter of the Audio 1 CODEC, which is in the ADC's input path too (DS p.25, p.64)")
+FLD(F_A2_ASYNC, R_MX71, 1, 1, K_BOOL, T_EXPERT, FF_DRVOWNED, E_NONE, PG_DAC, FMT_NONE, "a2.async", "Audio 2 asynchronous", "1 = the Audio 2 DAC runs at its own rate (70h, 72h); 0 = it is slaved to the Audio 1 sample and filter rate (DS p.64)")
+FLD(F_A2_FMMIX, R_MX71, 0, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_DAC, FMT_NONE, "a2.fm_mix", "Audio 2 mixed into FM", "1 = Audio 2 DMA is slaved to the FM synthesizer sample rate and digitally mixed into the FM output (DS p.64)")
 
 REG(R_MX72, BK_MIXER, 0, 0x72, 0, "Audio 2 filter clock rate", 64)
-FLD(F_A2_FILTER, R_MX72, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_FILTER, "a2.filter", "Audio 2 filter clock", "Filter clock divider of the Audio 2 switched-capacitor filter in asynchronous mode, programmed like A2h; reset to zero (DS p.64)")
+FLD(F_A2_FILTER, R_MX72, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED, E_NONE, PG_DAC, FMT_FILTER, "a2.filter", "Audio 2 filter clock", "Filter clock divider of the Audio 2 switched-capacitor filter in asynchronous mode, programmed like A2h; reset to zero (DS p.64)")
 
 REG(R_MX74, BK_MIXER, 0, 0x74, 0, "Audio 2 transfer count reload low", 64)
-FLD(F_A2_CNT_LO, R_MX74, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.count.lo", "Audio 2 count reload low", "Low byte of the two's complement Audio 2 DMA transfer count reload (DS p.64)")
+FLD(F_A2_CNT_LO, R_MX74, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED, E_NONE, PG_DAC, FMT_NONE, "a2.count.lo", "Audio 2 count reload low", "Low byte of the two's complement Audio 2 DMA transfer count reload (DS p.64)")
 
 REG(R_MX76, BK_MIXER, 0, 0x76, 0, "Audio 2 transfer count reload high", 64)
-FLD(F_A2_CNT_HI, R_MX76, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.count.hi", "Audio 2 count reload high", "High byte of the two's complement Audio 2 DMA transfer count reload (DS p.64)")
+FLD(F_A2_CNT_HI, R_MX76, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED, E_NONE, PG_DAC, FMT_NONE, "a2.count.hi", "Audio 2 count reload high", "High byte of the two's complement Audio 2 DMA transfer count reload (DS p.64)")
 
 /* Table 24 (DS p.58) names 78h bit 0 "Enable full-duplex mode", but the description (p.65) calls it "Enable FIFO to 2nd chan DAC" */
 /* the ES1868 data sheet says a hardware or software reset clears 78h; the ES1869's says that only of 7Ah (DS p.65) */
 REG(R_MX78, BK_MIXER, 0, 0x78, 0, "Audio 2 control 1", 64)
-FLD(F_A2_XFER, R_MX78, 6, 2, K_ENUM, T_EXPERT, FF_DRVOWNED, E_A2XFER, PG_AUDIO2, FMT_NONE, "a2.xfer", "Audio 2 DMA transfer type", "Single transfer (1 DACK per DRQ) or demand transfer with 2, 4 or 8 DACKs per DRQ (DS p.65)")
-FLD(F_A2_AUTOINIT, R_MX78, 4, 1, K_BOOL, T_EXPERT, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.autoinit", "Audio 2 auto-initialize", "1 = the counter reloads at zero and DMA continues; 0 = normal mode, DMA stops and bit 1 is cleared (DS p.65)")
-FLD(F_A2_DMAEN, R_MX78, 1, 1, K_BOOL, T_EXPERT, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.dma_enable", "Audio 2 DMA enable", "1 = Audio 2 DMA writes into the 32-word Audio 2 FIFO; cleared at terminal count unless auto-initialize (DS p.65)")
-FLD(F_A2_FIFOEN, R_MX78, 0, 1, K_BOOL, T_EXPERT, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.fifo_enable", "Audio 2 FIFO to DAC", "1 = data moves from the FIFO to the Audio 2 DAC (or to the DSP serial port or the FM mix) (DS p.65)")
+FLD(F_A2_XFER, R_MX78, 6, 2, K_ENUM, T_EXPERT, FF_DRVOWNED, E_A2XFER, PG_DAC, FMT_NONE, "a2.xfer", "Audio 2 DMA transfer type", "Single transfer (1 DACK per DRQ) or demand transfer with 2, 4 or 8 DACKs per DRQ (DS p.65)")
+FLD(F_A2_AUTOINIT, R_MX78, 4, 1, K_BOOL, T_EXPERT, FF_DRVOWNED, E_NONE, PG_DAC, FMT_NONE, "a2.autoinit", "Audio 2 auto-initialize", "1 = the counter reloads at zero and DMA continues; 0 = normal mode, DMA stops and bit 1 is cleared (DS p.65)")
+FLD(F_A2_DMAEN, R_MX78, 1, 1, K_BOOL, T_EXPERT, FF_DRVOWNED, E_NONE, PG_DAC, FMT_NONE, "a2.dma_enable", "Audio 2 DMA enable", "1 = Audio 2 DMA writes into the 32-word Audio 2 FIFO; cleared at terminal count unless auto-initialize (DS p.65)")
+FLD(F_A2_FIFOEN, R_MX78, 0, 1, K_BOOL, T_EXPERT, FF_DRVOWNED, E_NONE, PG_DAC, FMT_NONE, "a2.fifo_enable", "Audio 2 FIFO to DAC", "1 = data moves from the FIFO to the Audio 2 DAC (or to the DSP serial port or the FM mix) (DS p.65)")
 
 /* DS p.49 and p.53 say 7Ah bits 4:3 pick the playback or record mixer as the Mixer record source, but the 7Ah description (p.65) reserves bits 5:3 */
 /* 7Ah is reset to zero by hardware or software reset (DS p.65), so it's FF_VOLATILE */
 /* ES1869.DRV also writes 7Ah for every playback */
 REG(R_MX7A, BK_MIXER, 0, 0x7A, 0, "Audio 2 control 2", 65)
-FLD(F_A2_IRQ, R_MX7A, 7, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO2, FMT_NONE, "a2.irq", "Audio 2 IRQ latch", "Set when the DMA counter rolls over to zero or when 1 is written; write 0 to clear it (DS p.65)")
-FLD(F_A2_IRQMASK, R_MX7A, 6, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO2, FMT_NONE, "a2.irq_mask", "Audio 2 IRQ mask (1 = on)", "AND'ed with bit 7 to produce the Audio 2 interrupt request (DS p.65)")
-FLD(F_A2_SIGNED, R_MX7A, 2, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO2, FMT_NONE, "a2.signed", "Audio 2 signed data", "1 = data is signed two's complement, 0 = unsigned (DS p.65)")
-FLD(F_A2_STEREO, R_MX7A, 1, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO2, FMT_NONE, "a2.stereo", "Audio 2 stereo", "1 = stereo data, 0 = mono. With the DSP serial interface, stereo is for Interleave mode (DS p.52, p.65)")
-FLD(F_A2_16BIT, R_MX7A, 0, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO2, FMT_NONE, "a2.16bit", "Audio 2 16-bit", "1 = 16-bit samples, 0 = 8-bit samples (DS p.65)")
+FLD(F_A2_IRQ, R_MX7A, 7, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a2.irq", "Audio 2 IRQ latch", "Set when the DMA counter rolls over to zero or when 1 is written; write 0 to clear it (DS p.65)")
+FLD(F_A2_IRQMASK, R_MX7A, 6, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a2.irq_mask", "Audio 2 IRQ mask (1 = on)", "AND'ed with bit 7 to produce the Audio 2 interrupt request (DS p.65)")
+FLD(F_A2_SIGNED, R_MX7A, 2, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a2.signed", "Audio 2 signed data", "1 = data is signed two's complement, 0 = unsigned (DS p.65)")
+FLD(F_A2_STEREO, R_MX7A, 1, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a2.stereo", "Audio 2 stereo", "1 = stereo data, 0 = mono. With the DSP serial interface, stereo is for Interleave mode (DS p.52, p.65)")
+FLD(F_A2_16BIT, R_MX7A, 0, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a2.16bit", "Audio 2 16-bit", "1 = 16-bit samples, 0 = 8-bit samples (DS p.65)")
 
 /* DS p.51 says a software reset sets 7Ch to zero, but the 7Ch description (p.65) only names hardware reset, so no FF_VOLATILE */
 REG(R_MX7C, BK_MIXER, 0, 0x7C, 0, "Audio 2 DAC mixer volume", 65)
@@ -403,77 +403,77 @@ FLD(F_I2S_EN, R_MX7F, 0, 1, K_BOOL, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG
 /* a DSP software reset reinitializes them (FF_VOLATILE), except BAh and BBh (DS p.43, p.70) */
 
 REG(R_CT_A1, BK_CTRL, 0, 0xA1, RF_NEEDS_IDLE, "Extended mode sample rate generator", 67)
-FLD(F_A1_RATE, R_CT_A1, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_RATE_A1, "a1.rate", "Audio 1 sample rate", "Rate = 397.7 kHz / (128 - x) if bit 7 = 0, 795.5 kHz / (256 - x) if bit 7 = 1. Mixer 71h bit 5 makes it work like 70h: 768 or 793.8 kHz / (128 - bits 6:0) (DS p.64, p.67)")
+FLD(F_A1_RATE, R_CT_A1, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_RATE_A1, "a1.rate", "Audio 1 sample rate", "Rate = 397.7 kHz / (128 - x) if bit 7 = 0, 795.5 kHz / (256 - x) if bit 7 = 1. Mixer 71h bit 5 makes it work like 70h: 768 or 793.8 kHz / (128 - bits 6:0) (DS p.64, p.67)")
 
 REG(R_CT_A2, BK_CTRL, 0, 0xA2, RF_NEEDS_IDLE, "Filter divider", 68)
-FLD(F_A1_FILTER, R_CT_A2, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_FILTER, "a1.filter", "Audio 1 filter clock", "Filter clock = 7.16 MHz / (256 - x); the roll-off is clock/82 and belongs at 80-90% of half the sample rate (DS p.68)")
+FLD(F_A1_FILTER, R_CT_A2, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_FILTER, "a1.filter", "Audio 1 filter clock", "Filter clock = 7.16 MHz / (256 - x); the roll-off is clock/82 and belongs at 80-90% of half the sample rate (DS p.68)")
 
 REG(R_CT_A4, BK_CTRL, 0, 0xA4, RF_NEEDS_IDLE, "DMA transfer count reload low", 68)
-FLD(F_A1_CNT_LO, R_CT_A4, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.count.lo", "Audio 1 count reload low", "Low byte of the two's complement Audio 1 DMA transfer counter reload; reset value 00h (DS p.68)")
+FLD(F_A1_CNT_LO, R_CT_A4, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.count.lo", "Audio 1 count reload low", "Low byte of the two's complement Audio 1 DMA transfer counter reload; reset value 00h (DS p.68)")
 
 REG(R_CT_A5, BK_CTRL, 0, 0xA5, RF_NEEDS_IDLE, "DMA transfer count reload high", 68)
-FLD(F_A1_CNT_HI, R_CT_A5, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.count.hi", "Audio 1 count reload high", "High byte of the two's complement Audio 1 DMA transfer counter reload; reset value F8h (DS p.68)")
+FLD(F_A1_CNT_HI, R_CT_A5, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.count.hi", "Audio 1 count reload high", "High byte of the two's complement Audio 1 DMA transfer counter reload; reset value F8h (DS p.68)")
 
 /* A8h bit 4 must be written as 1 and bits 7:5 and 2 as 0, which a read-modify-write keeps (DS p.68) */
 REG(R_CT_A8, BK_CTRL, 0, 0xA8, RF_NEEDS_IDLE, "Analog control", 68)
 FLD(F_A1_RECMON, R_CT_A8, 3, 1, K_BOOL, T_CAUTION, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_RECORD, FMT_NONE, "rec.monitor", "Record monitor", "1 = enable record monitor, so AOUT_L/R stay live while the CODEC records (ADC direction); cleared by software reset (DS p.50, p.51, p.68)")
-FLD(F_A1_CHAN, R_CT_A8, 0, 2, K_ENUM, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_A1CHAN, PG_AUDIO1, FMT_NONE, "a1.channels", "Audio 1 stereo/mono", "Operation mode of the first DMA converters: 01 = stereo, 10 = mono; 00 and 11 are reserved (DS p.68)")
-FLD(F_A8_HIGH, R_CT_A8, 5, 3, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.analog.bits7_5", "A8h bits 7:5 (undocumented)", "Reserved in the data sheet (write 0), but ESS's driver writes 111b when it starts recording (F5h or F6h, docs/DRIVER_CONFIG.md)")
-FLD(F_A8_BIT2, R_CT_A8, 2, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.analog.bit2", "A8h bit 2 (undocumented)", "Reserved in the data sheet (write 0), but ESS's driver writes 1 when it starts recording (F5h or F6h, docs/DRIVER_CONFIG.md)")
+FLD(F_A1_CHAN, R_CT_A8, 0, 2, K_ENUM, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_A1CHAN, PG_DAC, FMT_NONE, "a1.channels", "Audio 1 stereo/mono", "Operation mode of the first DMA converters: 01 = stereo, 10 = mono; 00 and 11 are reserved (DS p.68)")
+FLD(F_A8_HIGH, R_CT_A8, 5, 3, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.analog.bits7_5", "A8h bits 7:5 (undocumented)", "Reserved in the data sheet (write 0), but ESS's driver writes 111b when it starts recording (F5h or F6h, docs/DRIVER_CONFIG.md)")
+FLD(F_A8_BIT2, R_CT_A8, 2, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.analog.bit2", "A8h bit 2 (undocumented)", "Reserved in the data sheet (write 0), but ESS's driver writes 1 when it starts recording (F5h or F6h, docs/DRIVER_CONFIG.md)")
 
 /* B1h and B2h bit 4 have "no function" (DS p.68-69), but the programming steps set it (p.49-50) */
 REG(R_CT_B1, BK_CTRL, 0, 0xB1, RF_NEEDS_IDLE, "Legacy audio interrupt control", 68)
-FLD(F_A1_GAMEIRQ, R_CT_B1, 7, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.irq.game", "Game compatible IRQ", "Reserved for Compatibility mode; leave zero for Extended mode (DS p.68)")
-FLD(F_A1_IRQDMA, R_CT_B1, 6, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.irq.dma", "IRQ on DMA counter overflow", "1 = interrupt on each overflow of the DMA counter in Extended mode DMA (DS p.68)")
-FLD(F_A1_IRQFIFO, R_CT_B1, 5, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.irq.fifo", "IRQ on FIFO half-empty edge", "1 = interrupt on FIFO half-empty transitions during Extended mode block I/O to or from the FIFO (DS p.68)")
-FLD(F_A1_IRQSEL, R_CT_B1, 0, 4, K_ENUM, T_RO, 0, E_A1IRQ, PG_AUDIO1, FMT_NONE, "a1.irq.selected", "Audio 1 IRQ (decoded)", "Read-only decode of the interrupt number selected for the Audio 1 interrupt (DS p.69)")
+FLD(F_A1_GAMEIRQ, R_CT_B1, 7, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.irq.game", "Game compatible IRQ", "Reserved for Compatibility mode; leave zero for Extended mode (DS p.68)")
+FLD(F_A1_IRQDMA, R_CT_B1, 6, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.irq.dma", "IRQ on DMA counter overflow", "1 = interrupt on each overflow of the DMA counter in Extended mode DMA (DS p.68)")
+FLD(F_A1_IRQFIFO, R_CT_B1, 5, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.irq.fifo", "IRQ on FIFO half-empty edge", "1 = interrupt on FIFO half-empty transitions during Extended mode block I/O to or from the FIFO (DS p.68)")
+FLD(F_A1_IRQSEL, R_CT_B1, 0, 4, K_ENUM, T_RO, 0, E_A1IRQ, PG_DAC, FMT_NONE, "a1.irq.selected", "Audio 1 IRQ (decoded)", "Read-only decode of the interrupt number selected for the Audio 1 interrupt (DS p.69)")
 
 REG(R_CT_B2, BK_CTRL, 0, 0xB2, RF_NEEDS_IDLE, "DRQ control", 69)
-FLD(F_A1_GAMEDRQ, R_CT_B2, 7, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.drq.game", "Game compatible DRQ", "Reserved for Compatibility mode; leave zero for Extended mode (DS p.69)")
-FLD(F_A1_DRQEXT, R_CT_B2, 6, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.drq.ext", "DRQ for Extended mode DMA", "1 = enable DRQ outputs and DACKB inputs for Extended mode DMA; 0 = block I/O to or from the FIFO (DS p.69)")
-FLD(F_A1_DRQGAME, R_CT_B2, 5, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.drq.game_dma", "DRQ for game compatible DMA", "Reserved for Compatibility mode; leave zero for Extended mode. With bits 5 and 6 low the Audio 1 DRQ is always low (DS p.69)")
-FLD(F_A1_DRQSEL, R_CT_B2, 0, 4, K_ENUM, T_RO, 0, E_A1DRQ, PG_AUDIO1, FMT_NONE, "a1.drq.selected", "Audio 1 DMA (decoded)", "Read-only decode of the DMA channel selected for the first audio DMA channel (DS p.69)")
+FLD(F_A1_GAMEDRQ, R_CT_B2, 7, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.drq.game", "Game compatible DRQ", "Reserved for Compatibility mode; leave zero for Extended mode (DS p.69)")
+FLD(F_A1_DRQEXT, R_CT_B2, 6, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.drq.ext", "DRQ for Extended mode DMA", "1 = enable DRQ outputs and DACKB inputs for Extended mode DMA; 0 = block I/O to or from the FIFO (DS p.69)")
+FLD(F_A1_DRQGAME, R_CT_B2, 5, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.drq.game_dma", "DRQ for game compatible DMA", "Reserved for Compatibility mode; leave zero for Extended mode. With bits 5 and 6 low the Audio 1 DRQ is always low (DS p.69)")
+FLD(F_A1_DRQSEL, R_CT_B2, 0, 4, K_ENUM, T_RO, 0, E_A1DRQ, PG_DAC, FMT_NONE, "a1.drq.selected", "Audio 1 DMA (decoded)", "Read-only decode of the DMA channel selected for the first audio DMA channel (DS p.69)")
 
 /* DS p.67 and p.69 put the RIGHT record level in B4h bits 7:4 and LEFT in 3:0, unlike the mixer registers */
 /* ES1869.DRV writes B4h the same way (5:297A) */
 REG(R_CT_B4, BK_CTRL, 0, 0xB4, RF_NEEDS_IDLE, "Record level", 69)
-FLD(F_RECLEV_R, R_CT_B4, 4, 4, K_UINT, T_CAUTION, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_RECORD, FMT_NONE, "rec.level.r", "Record level R", "Right record level: microphone 0 to +22.5 dB, other sources -6 to +16.5 dB, in 1.5 dB steps (DS p.69)")
-FLD(F_RECLEV_L, R_CT_B4, 0, 4, K_UINT, T_CAUTION, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_RECORD, FMT_NONE, "rec.level.l", "Record level L", "Left record level: microphone 0 to +22.5 dB, other sources -6 to +16.5 dB, in 1.5 dB steps (DS p.69)")
+FLD(F_RECLEV_R, R_CT_B4, 4, 4, K_UINT, T_CAUTION, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "rec.level.r", "Record level R", "Right record level: microphone 0 to +22.5 dB, other sources -6 to +16.5 dB, in 1.5 dB steps (DS p.69)")
+FLD(F_RECLEV_L, R_CT_B4, 0, 4, K_UINT, T_CAUTION, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "rec.level.l", "Record level L", "Left record level: microphone 0 to +22.5 dB, other sources -6 to +16.5 dB, in 1.5 dB steps (DS p.69)")
 
 REG(R_CT_B5, BK_CTRL, 0, 0xB5, RF_NEEDS_IDLE, "DAC direct access holding low", 69)
-FLD(F_A1_HOLD_LO, R_CT_B5, 0, 8, K_HEX, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.hold.lo", "DAC holding register low", "Low byte of the DAC direct access holding register, which stores 16-bit data for the 8-bit bus (DS p.69)")
+FLD(F_A1_HOLD_LO, R_CT_B5, 0, 8, K_HEX, T_EXPERT, FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.hold.lo", "DAC holding register low", "Low byte of the DAC direct access holding register, which stores 16-bit data for the 8-bit bus (DS p.69)")
 
 REG(R_CT_B6, BK_CTRL, 0, 0xB6, RF_NEEDS_IDLE, "DAC direct access holding high", 69)
-FLD(F_A1_HOLD_HI, R_CT_B6, 0, 8, K_HEX, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.hold.hi", "DAC holding register high", "High byte of the DAC direct access holding register, which stores 16-bit data for the 8-bit bus (DS p.69)")
+FLD(F_A1_HOLD_HI, R_CT_B6, 0, 8, K_HEX, T_EXPERT, FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.hold.hi", "DAC holding register high", "High byte of the DAC direct access holding register, which stores 16-bit data for the 8-bit bus (DS p.69)")
 
 /* Table 25 (DS p.67) shows B7h bit 0 as a fixed 1 and bit 5 as "Data type select", but the catalog follows the descriptions (p.69-70) */
 /* B7h bit 4 must be written as 1 and bit 1 as 0 (DS p.70) */
 REG(R_CT_B7, BK_CTRL, 0, 0xB7, RF_NEEDS_IDLE, "Audio 1 control 1", 69)
-FLD(F_A1_FIFOCODEC, R_CT_B7, 7, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.fifo.codec", "FIFO to/from CODEC", "1 = connect the first DMA FIFO to the DAC or ADC, allowing transfers between the FIFO and the analog circuitry (DS p.69)")
-FLD(F_A1_FIFOMONO, R_CT_B7, 6, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.fifo.not_stereo", "Opposite of bit 3", "Reserved function; must be set to the opposite of bit 3: high for mono, low for stereo (DS p.70)")
-FLD(F_A1_FIFOSIGNED, R_CT_B7, 5, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.fifo.signed", "FIFO signed", "1 = first DMA FIFO in two's complement (signed) mode, 0 = unsigned (offset 8000h) (DS p.70)")
-FLD(F_A1_FIFOSTEREO, R_CT_B7, 3, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.fifo.stereo", "FIFO stereo", "1 = first DMA FIFO in stereo mode, 0 = mono; bit 6 must be the opposite (DS p.70)")
-FLD(F_A1_FIFO16, R_CT_B7, 2, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.fifo.16bit", "FIFO 16-bit", "1 = first DMA FIFO in 16-bit mode, 0 = 8-bit mode (DS p.70)")
-FLD(F_A1_LOAD, R_CT_B7, 0, 1, K_ACTION, T_EXPERT, FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.dac_load", "Load DAC from holding register", "Write 1 to copy the DAC direct access holding register to the DAC on the next sample rate clock; the bit then clears (DS p.70)")
+FLD(F_A1_FIFOCODEC, R_CT_B7, 7, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.fifo.codec", "FIFO to/from CODEC", "1 = connect the first DMA FIFO to the DAC or ADC, allowing transfers between the FIFO and the analog circuitry (DS p.69)")
+FLD(F_A1_FIFOMONO, R_CT_B7, 6, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.fifo.not_stereo", "Opposite of bit 3", "Reserved function; must be set to the opposite of bit 3: high for mono, low for stereo (DS p.70)")
+FLD(F_A1_FIFOSIGNED, R_CT_B7, 5, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.fifo.signed", "FIFO signed", "1 = first DMA FIFO in two's complement (signed) mode, 0 = unsigned (offset 8000h) (DS p.70)")
+FLD(F_A1_FIFOSTEREO, R_CT_B7, 3, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.fifo.stereo", "FIFO stereo", "1 = first DMA FIFO in stereo mode, 0 = mono; bit 6 must be the opposite (DS p.70)")
+FLD(F_A1_FIFO16, R_CT_B7, 2, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.fifo.16bit", "FIFO 16-bit", "1 = first DMA FIFO in 16-bit mode, 0 = 8-bit mode (DS p.70)")
+FLD(F_A1_LOAD, R_CT_B7, 0, 1, K_ACTION, T_EXPERT, FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.dac_load", "Load DAC from holding register", "Write 1 to copy the DAC direct access holding register to the DAC on the next sample rate clock; the bit then clears (DS p.70)")
 
 REG(R_CT_B8, BK_CTRL, 0, 0xB8, RF_NEEDS_IDLE, "Audio 1 control 2", 70)
-FLD(F_A1_CODECADC, R_CT_B8, 3, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.codec_adc", "CODEC in ADC mode", "1 = first DMA converter in ADC mode, 0 = DAC mode (DS p.70)")
-FLD(F_A1_AUTOINIT, R_CT_B8, 2, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.autoinit", "Audio 1 auto-initialize", "1 = auto-initialize DMA mode, 0 = normal DMA mode (DS p.70)")
-FLD(F_A1_DMAREAD, R_CT_B8, 1, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.dma_read", "Audio 1 DMA read", "1 = first DMA is a read (ADC operation), 0 = a write (DAC operation) (DS p.70)")
-FLD(F_A1_DMAEN, R_CT_B8, 0, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_AUDIO1, FMT_NONE, "a1.dma_enable", "Audio 1 DMA enable", "First DMA active-low reset: 1 = DMA is allowed to proceed, 0 = stops it (DS p.70)")
+FLD(F_A1_CODECADC, R_CT_B8, 3, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.codec_adc", "CODEC in ADC mode", "1 = first DMA converter in ADC mode, 0 = DAC mode (DS p.70)")
+FLD(F_A1_AUTOINIT, R_CT_B8, 2, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.autoinit", "Audio 1 auto-initialize", "1 = auto-initialize DMA mode, 0 = normal DMA mode (DS p.70)")
+FLD(F_A1_DMAREAD, R_CT_B8, 1, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.dma_read", "Audio 1 DMA read", "1 = first DMA is a read (ADC operation), 0 = a write (DAC operation) (DS p.70)")
+FLD(F_A1_DMAEN, R_CT_B8, 0, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.dma_enable", "Audio 1 DMA enable", "First DMA active-low reset: 1 = DMA is allowed to proceed, 0 = stops it (DS p.70)")
 
 /* the programming steps (DS p.48, p.50) give B9h 00 = single, 01 = demand 2, 11 = demand 4, but the catalog follows the register description (p.70) */
 /* B9h: p.70 gives 01 single, 10 demand 2, 11 demand 4 and 00 reserved; the programming steps give 00 single, 01 demand 2, 11 demand 4 (p.48, p.50). ESS's driver writes 02h for demand transfers (docs/DRIVER_CONFIG.md) */
 REG(R_CT_B9, BK_CTRL, 0, 0xB9, RF_NEEDS_IDLE, "Audio 1 transfer type", 70)
-FLD(F_A1_XFER, R_CT_B9, 0, 2, K_ENUM, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_A1XFER, PG_AUDIO1, FMT_NONE, "a1.xfer", "Audio 1 DMA transfer type", "DMA transfer type of the first DMA: single, or demand with 2 or 4 bytes per request; 00 is reserved (DS p.70)")
+FLD(F_A1_XFER, R_CT_B9, 0, 2, K_ENUM, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_A1XFER, PG_DAC, FMT_NONE, "a1.xfer", "Audio 1 DMA transfer type", "DMA transfer type of the first DMA: single, or demand with 2 or 4 bytes per request; 00 is reserved (DS p.70)")
 
 /* BAh and BBh are only reset by hardware reset, not by software reset (DS p.70) */
 REG(R_CT_BA, BK_CTRL, 0, 0xBA, RF_NEEDS_IDLE, "Left channel ADC offset adjust", 70)
 FLD(F_WAKE_NODELAY, R_CT_BA, 5, 1, K_BOOL, T_SAFE, FF_PERSIST, E_NONE, PG_POWER, FMT_NONE, "pwr.wake_nodelay", "No mute delay on analog wake", "1 = no 100 ms mute of AOUT_L/R when the analog section wakes from power-down. A hardware reset clears it, so AOUT is always muted after one (DS p.70)")
-FLD(F_ADCOFF_L, R_CT_BA, 0, 5, K_SMAG, T_SAFE, FF_PERSIST, E_NONE, PG_POWER, FMT_ADCOFF, "adc.off_l", "ADC offset L", "Constant added to the left ADC output: 64 x bits 3:0, or -64 x (bits 3:0 + 1) when sign bit 4 is set (DS p.71)")
+FLD(F_ADCOFF_L, R_CT_BA, 0, 5, K_SMAG, T_SAFE, FF_PERSIST, E_NONE, PG_DAC, FMT_ADCOFF, "adc.off_l", "ADC offset L", "Constant added to the left ADC output: 64 x bits 3:0, or -64 x (bits 3:0 + 1) when sign bit 4 is set (DS p.71)")
 
 REG(R_CT_BB, BK_CTRL, 0, 0xBB, RF_NEEDS_IDLE, "Right channel ADC offset adjust", 70)
-FLD(F_ADCOFF_R, R_CT_BB, 0, 5, K_SMAG, T_SAFE, FF_PERSIST, E_NONE, PG_POWER, FMT_ADCOFF, "adc.off_r", "ADC offset R", "Constant added to the right ADC output: 64 x bits 3:0, or -64 x (bits 3:0 + 1) when sign bit 4 is set (DS p.71)")
+FLD(F_ADCOFF_R, R_CT_BB, 0, 5, K_SMAG, T_SAFE, FF_PERSIST, E_NONE, PG_DAC, FMT_ADCOFF, "adc.off_r", "ADC offset R", "Constant added to the right ADC output: 64 x bits 3:0, or -64 x (bits 3:0 + 1) when sign bit 4 is set (DS p.71)")
 
 /* BDh sets self-timed power-down; the data sheet only describes writing it (DS p.77) */
 REG(R_CT_BD, BK_CTRL, 0, 0xBD, RF_NEEDS_IDLE | RF_WRITEONLY, "Self-timed power-down", 77)

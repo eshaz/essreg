@@ -138,7 +138,7 @@ this extra treble. The rebuilt drivers play every sample rate this way,
 although the SCF alone (bits 4 and 3 clear) would remove those images.
 
 To try each setting, change *Audio 2 4x oversampling* and *Audio 2 filter
-bypass* on essctl's *Audio 2 channel* page while music plays. You hear the
+bypass* on essctl's *DACs and ADC* page while music plays. You hear the
 change at once. The driver puts its own setting back at the next wave open
 and playback start, and when Windows starts or resumes.
 

@@ -17,10 +17,13 @@
  * The text field takes decimal for levels and signed values
  * and hex for raw values. It's written on Enter or when it
  * loses the focus.
- * Controller registers go through the DSP command channel and
- * are only read on request.
+ * Controller registers go through the DSP command channel, and
+ * they're read with the rest: when the page shows, on F5, and on
+ * the timer where it runs.
  * The timer only updates rows whose register changed: each
  * update repaints controls, and a page has hundreds.
+ * A page may order its rows in sections under headings
+ * (dac_rows); its fields that the order leaves out come last.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -52,7 +55,7 @@
 #define NOT_READ (-100) // register not read (yet)
 
 struct row {
-  int field;
+  int field; // -1 for a heading
   HWND lab, ctl, val, tag;
   HWND edit;  // the slider's text field
   int raw;    // register value, NOT_READ or a negative error
@@ -63,12 +66,73 @@ static struct row rows[MAX_ROWS];
 static int nrows, top, nvis, y0;
 static int cur_pg;
 static int drag_row = -1;
-static HWND read_btn;
+
+// the DACs and ADC page: "=" starts a section, the rest are field keys
+static const char *const dac_rows[] = {
+    "=Audio 1: the first DAC, or the ADC when it records",
+    "a1.codec_adc",
+    "a1.rate",
+    "a2.new_a1",
+    "a1.filter",
+    "a1.scf_bypass",
+    "a1.channels",
+    "a1.fifo.16bit",
+    "a1.fifo.signed",
+    "a1.fifo.stereo",
+    "a1.fifo.not_stereo",
+    "a1.fifo.codec",
+    "a1.dma_enable",
+    "a1.dma_read",
+    "a1.autoinit",
+    "a1.xfer",
+    "a1.count.lo",
+    "a1.count.hi",
+    "a1.irq.dma",
+    "a1.irq.fifo",
+    "a1.irq.game",
+    "a1.irq.selected",
+    "a1.drq.ext",
+    "a1.drq.game_dma",
+    "a1.drq.game",
+    "a1.drq.selected",
+    "a1.hold.lo",
+    "a1.hold.hi",
+    "a1.dac_load",
+    "a1.analog.bits7_5",
+    "a1.analog.bit2",
+    "=The ADC: its input level and offset",
+    "rec.level.l",
+    "rec.level.r",
+    "adc.off_l",
+    "adc.off_r",
+    "=Audio 2: the second DAC",
+    "a2.rate",
+    "a2.filter",
+    "a2.oversample4x",
+    "a2.scf_bypass",
+    "a2.async",
+    "a2.16bit",
+    "a2.signed",
+    "a2.stereo",
+    "a2.dma_enable",
+    "a2.fifo_enable",
+    "a2.autoinit",
+    "a2.xfer",
+    "a2.count.lo",
+    "a2.count.hi",
+    "a2.irq",
+    "a2.irq_mask",
+    "a2.fm_mix",
+    0};
+
+static const char *const *page_rows(int pg) {
+  return pg == PG_DAC ? dac_rows : 0;
+}
 
 static int row_of(HWND ctl) {
   int id = GetDlgCtrlID(ctl);
   int r = (id - IDC_ROW) / ROW_IDS;
-  return id >= IDC_ROW && r < nrows ? r : -1;
+  return id >= IDC_ROW && r < nrows && rows[r].field >= 0 ? r : -1;
 }
 
 // a slider and a text field
@@ -98,10 +162,17 @@ static void layout(void) {
   page_freeze(1);
   for (i = 0; i < nrows; i++) {
     struct row *r = &rows[i];
-    const struct ess_field *f = &ess_fields[r->field];
+    const struct ess_field *f;
     int show = i >= top && i < top + nvis;
     int y = y0 + (i - top) * RH;
 
+    if (r->field < 0) {
+      // a heading across the page, and a rule under it
+      page_move(r->lab, X_LABEL, y + 1, X_TAG + W_TAG, 9, show);
+      page_move(r->val, X_LABEL, y + 11, X_TAG + W_TAG, 1, show);
+      continue;
+    }
+    f = &ess_fields[r->field];
     page_move(r->lab, X_LABEL, y + 2, W_LABEL, 9, show);
     switch (f->kind) {
     case K_ENUM:
@@ -243,31 +314,41 @@ static void create_row(int i, int field) {
                         9, id + 3);
 }
 
+static void create_heading(int i, const char *text) {
+  struct row *r = &rows[i];
+  int id = IDC_ROW + ROW_IDS * i;
+
+  memset(r, 0, sizeof(*r));
+  r->field = -1;
+  r->lab = page_control("STATIC", text, SS_LEFTNOWORDWRAP | SS_NOPREFIX, 0, 0,
+                        X_TAG + W_TAG, 9, id);
+  r->val =
+      page_control("STATIC", "", SS_BLACKRECT, 0, 0, X_TAG + W_TAG, 1, id + 2);
+}
+
 void fields_create(int pg) {
-  int i, dsp = 0;
+  static u8 placed[F_COUNT];
+  const char *const *order = page_rows(pg);
+  int i, f;
 
   cur_pg = pg;
   nrows = top = 0;
   drag_row = -1;
-  read_btn = 0;
-  for (i = 0; i < F_COUNT; i++)
-    if (ess_fields[i].page == pg &&
-        (ess_regs[ess_fields[i].reg].flags & RF_NEEDS_IDLE))
-      dsp = 1;
   y0 = 0;
-  if (dsp) {
-    read_btn = page_control("BUTTON", "Read controller registers",
-                            WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0, 110,
-                            13, IDC_PG_READ);
-    page_control("STATIC",
-                 "These go through the DSP command channel and are read "
-                 "only on request.",
-                 WS_VISIBLE | SS_LEFT | SS_NOPREFIX, 114, 0, area_w - 124, 16,
-                 IDC_PG_TEXT);
-    y0 = 18;
+  memset(placed, 0, sizeof(placed));
+  for (i = 0; order && order[i] && nrows < MAX_ROWS; i++) {
+    if (order[i][0] == '=') {
+      create_heading(nrows++, order[i] + 1);
+      continue;
+    }
+    f = cat_find_key(order[i]);
+    if (f >= 0 && ess_fields[f].page == pg && !placed[f]) {
+      placed[f] = 1;
+      create_row(nrows++, f);
+    }
   }
   for (i = 0; i < F_COUNT && nrows < MAX_ROWS; i++)
-    if (ess_fields[i].page == pg)
+    if (ess_fields[i].page == pg && !placed[i])
       create_row(nrows++, i);
   nvis = (area_h - y0) / RH;
   layout();
@@ -297,12 +378,16 @@ static const char *short_error(int err) {
 
 static void show_row(int i) {
   struct row *r = &rows[i];
-  const struct ess_field *f = &ess_fields[r->field];
-  const struct ess_reg *reg = &ess_regs[f->reg];
+  const struct ess_field *f;
+  const struct ess_reg *reg;
   char text[48];
   u8 v;
   int j, n;
 
+  if (r->field < 0)
+    return; // a heading
+  f = &ess_fields[r->field];
+  reg = &ess_regs[f->reg];
   if (r->raw == NOT_READ) {
     if (reg->flags & RF_WRITEONLY)
       strcpy(text, "(write only)");
@@ -350,16 +435,17 @@ static void set_reg(int reg, int raw, int force) {
   int i;
 
   for (i = 0; i < nrows; i++)
-    if (ess_fields[rows[i].field].reg == reg && (force || rows[i].raw != raw)) {
+    if (rows[i].field >= 0 && ess_fields[rows[i].field].reg == reg &&
+        (force || rows[i].raw != raw)) {
       rows[i].raw = raw;
       show_row(i);
     }
 }
 
+// the page's registers, the controller registers among them
 void fields_refresh(int how) {
   static u8 done[R_COUNT];
-  int i, err, reg;
-  int dsp = how >= 2;
+  int i, err, reg, redecode = 0;
   u8 flags;
 
   if (!nrows)
@@ -367,9 +453,14 @@ void fields_refresh(int how) {
   memset(done, 0, sizeof(done));
   err = winio_begin();
   // how to decode the Audio 1 rate: mixer 71h bit 5
-  if (err == 0 && dsp && (reg = ess_read(R_MX71)) >= 0)
+  if (err == 0 && (reg = ess_read(R_MX71)) >= 0 &&
+      cat_a1_like_70 != ((reg >> 5) & 1)) {
     cat_a1_like_70 = (reg >> 5) & 1;
+    redecode = 1;
+  }
   for (i = 0; i < nrows; i++) {
+    if (rows[i].field < 0)
+      continue;
     reg = ess_fields[rows[i].field].reg;
     if (done[reg])
       continue;
@@ -377,9 +468,8 @@ void fields_refresh(int how) {
     flags = ess_regs[reg].flags;
     if (flags & (RF_READ_SIDEFX | RF_WRITEONLY))
       continue;
-    if ((flags & RF_NEEDS_IDLE) && !dsp)
-      continue;
-    set_reg(reg, err < 0 ? err : ess_read(reg), how != REFRESH_TIMER);
+    set_reg(reg, err < 0 ? err : ess_read(reg),
+            how != REFRESH_TIMER || (redecode && reg == R_CT_A1));
   }
   winio_end();
   // with no device the rows say so, otherwise the status line says why
@@ -388,10 +478,14 @@ void fields_refresh(int how) {
 }
 
 static void help_for(int i) {
-  const struct ess_field *f = &ess_fields[rows[i].field];
-  const struct ess_reg *r = &ess_regs[f->reg];
+  const struct ess_field *f;
+  const struct ess_reg *r;
   char text[400];
 
+  if (rows[i].field < 0)
+    return; // a heading
+  f = &ess_fields[rows[i].field];
+  r = &ess_regs[f->reg];
   sprintf(text, "%s (%s %02Xh", f->label, ess_bank_names[r->bank], r->addr);
   if (f->width == 1)
     sprintf(text + strlen(text), " bit %u", f->shift);
@@ -484,10 +578,6 @@ void fields_command(int id, int code, HWND ctl) {
   const struct ess_field *f;
   HWND focus;
 
-  if (id == IDC_PG_READ) {
-    fields_refresh(2);
-    return;
-  }
   if (id == IDOK) {
     // Enter in a text field
     focus = GetFocus();
@@ -637,7 +727,7 @@ void fields_click(int y) {
   int i = (y - y0) / RH + top;
 
   if (y >= y0 && i < nrows)
-    help_for(i);
+    help_for(i); // nothing for a heading
 }
 
 void fields_focus(HWND ctl) {

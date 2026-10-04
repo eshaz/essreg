@@ -234,9 +234,6 @@ static void on_command(HWND dlg, int id, int code, HWND ctl) {
     page_refresh(REFRESH_USER);
     update_owner_status();
     return;
-  case IDM_READDSP:
-    page_refresh(REFRESH_DSP);
-    return;
   case IDM_AUTOREFRESH:
     auto_refresh = !auto_refresh;
     CheckMenuItem(GetMenu(dlg), IDM_AUTOREFRESH,

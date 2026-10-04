@@ -81,7 +81,8 @@ static void test_tables(void) {
     // they only calibrate
     if (f->kind == K_PULSE)
       CHECK_EQ(f->tier, T_EXPERT);
-    // registers reached through the DSP are never read by a timer
+    // registers reached through the DSP are marked, for profiles to write
+    // them after the plain ones
     if (ess_regs[f->reg].bank == BK_CTRL)
       CHECK(ess_regs[f->reg].flags & RF_NEEDS_IDLE);
     // PnP resources are never changed below Expert mode

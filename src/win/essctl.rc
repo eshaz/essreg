@@ -29,7 +29,6 @@ BEGIN
     POPUP "&View"
     BEGIN
         MENUITEM "&Refresh\tF5", IDM_REFRESH
-        MENUITEM "Read &controller registers\tCtrl+R", IDM_READDSP
         MENUITEM "&Auto refresh", IDM_AUTOREFRESH
     END
     POPUP "&Options"
@@ -53,7 +52,6 @@ BEGIN
     VK_F5, IDM_REFRESH, VIRTKEY
     "^O", IDM_LOAD
     "^S", IDM_SAVE
-    "^R", IDM_READDSP
 END
 
 /* the page area (IDC_PAGEAREA) is a hidden placeholder, page controls are

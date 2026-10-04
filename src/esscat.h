@@ -85,9 +85,8 @@ enum ess_page {
   PG_RECORD,  // record source and record mixer
   PG_EFFECTS, // 3-D, microphone, MONO_IN/OUT, I2S
   PG_SERIAL,  // serial / telegaming / ES689 interface
-  PG_AUDIO2,  // second audio channel
-  PG_AUDIO1,  // first audio channel controller registers
-  PG_POWER,   // ADC offset, power management, GPO
+  PG_DAC,     // both audio channels: the two DACs, and the ADC
+  PG_POWER,   // power management, GPO
   PG_STATUS,  // status and interrupt registers
   PG_PNP,     // Plug and Play configuration
   PG_LEGACY,  // Sound Blaster compatible mixer registers

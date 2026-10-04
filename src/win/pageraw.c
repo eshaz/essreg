@@ -183,13 +183,12 @@ void raw_refresh(int how) {
   int i, err;
   u8 flags;
 
+  (void)how; // the timer reads what F5 and Read do
   err = winio_begin();
   for (i = 0; i < nlines; i++) {
     flags = ess_regs[line_reg[i]].flags;
     if (flags & (RF_READ_SIDEFX | RF_WRITEONLY))
       line_raw[i] = -1;
-    else if ((flags & RF_NEEDS_IDLE) && how < 2)
-      continue; // DSP channel only on the Read button
     else
       line_raw[i] = err < 0 ? err : ess_read(line_reg[i]);
   }
@@ -215,7 +214,7 @@ void raw_command(int id, int code, HWND ctl) {
     select_view((int)SendMessage(bank_cb, CB_GETCURSEL, 0, 0));
     raw_refresh(1);
   } else if (id == IDC_PG_READ && code == BN_CLICKED) {
-    raw_refresh(2);
+    raw_refresh(REFRESH_USER);
   } else if (id == IDC_PG_EDITREG && code == BN_CLICKED) {
     edit_selected();
   } else if (id == IDC_PG_LIST && code == LBN_DBLCLK) {

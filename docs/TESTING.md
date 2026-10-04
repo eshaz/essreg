@@ -193,10 +193,13 @@ and stop at the first surprise. Each step says what you should see.
 2. Turn on the microphone monitor in the Windows mixer, then speak into the
    microphone and toggle *Mic +26 dB preamp*. The microphone is much louder
    with the preamp on.
-3. On the *ADC offset & power* page, click *Read controller registers*, set
-   *ADC offset L* to +3 and read the registers again. Then start and stop a
-   WAV playback, read them once more, and check whether the value survives.
-   According to the data sheet, BAh and BBh survive a DSP reset.
+3. Open the *DACs and ADC* page. It has three sections, each under a
+   heading: Audio 1, the ADC, and Audio 2. Every value shows as soon as the
+   page opens, the controller registers too, and there is no button to read
+   them.
+   * Set *ADC offset L* to +3. Then start and stop a WAV playback, press F5,
+     and check whether the value survives. According to the data sheet, BAh
+     and BBh survive a DSP reset.
 4. Test the profiles.
    1. Choose File > *Save profile* and save to `C:\ESS\MY.INI`.
    2. Change a few values, then choose File > *Load profile*. The values
@@ -336,7 +339,7 @@ See
 [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter).
 
 1. With ESS's `ES1869.DRV`, play music at 44.1 kHz in Winamp with the
-   waveOut output, open essctl on the *Audio 2 channel* page and press F5.
+   waveOut output, open essctl on the *DACs and ADC* page and press F5.
    *Audio 2 4x oversampling* is on.
    * While the music plays, switch the oversampling off and *Audio 2 filter
      bypass* on, then back again. Note what changes.
@@ -384,8 +387,10 @@ need `build\ES1869.DRV` installed.
 2. Play music in Winamp on the first device, and a WAV file in Media Player
    with *Audio 1* as the preferred device. Both play, each at its own pitch,
    and neither skips.
-   * On essctl's *Audio 1 controller* page, F5 shows the DAC direction in
-     B8h, and bit 0 set while Media Player plays.
+   * On essctl's *DACs and ADC* page, the Audio 1 section shows the DAC
+     direction in B8h: *CODEC in ADC mode* and *Audio 1 DMA read* are off.
+     *Audio 1 DMA enable*, B8h bit 0, turns on within a second of Media
+     Player's start, with no key pressed.
    * essctl's *Device information* page says "Audio 1: plays the Audio 1
      device" and "Audio 2: plays the first device". After both stop, both
      channels are "free".
@@ -454,8 +459,8 @@ python3 tools/dualwav.py same music.wav music4.wav
    the same level, a few steps below the top.
 2. Play `same1k.wav` in Media Player. If Media Player refuses the format,
    make *Audio 1* the preferred playback device. You hear one tone, louder
-   than a stereo 1 kHz file. On essctl's *Audio 2 channel* page, F5 shows
-   71h bit 1 clear, and 78h shows the DMA and FIFO bits.
+   than a stereo 1 kHz file. On essctl's *DACs and ADC* page, F5 shows 71h
+   bit 1 clear, and 78h shows the DMA and FIFO bits.
 3. Play `null1k.wav`. It is much quieter than `same1k.wav`. Make it again
    with other `--delay2` and `--gain2` values to find a quieter one, and
    note the best values.

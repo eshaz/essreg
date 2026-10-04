@@ -9,9 +9,16 @@ AudioDrive ES1869 sound card chipset.
 essctl is a control panel for the ES1869 under Windows 95 and 98, written as
 a 16-bit Windows program. It shows every register of the chip, 147 registers
 with 299 settings, on these pages: *Output mixer*, *Master volume*,
-*Record*, *3-D, mic, MONO, I2S*, *Serial / telegaming*, *Audio 2 channel*,
-*Audio 1 controller*, *ADC offset & power*, *Status & interrupts*, *Plug and
-Play*, *SB compatible mixer*, *Raw registers* and *ESFM patch bank*.
+*Record*, *3-D, mic, MONO, I2S*, *Serial / telegaming*, *DACs and ADC*,
+*Power & GPO*, *Status & interrupts*, *Plug and Play*, *SB compatible
+mixer*, *Raw registers* and *ESFM patch bank*.
+
+The *DACs and ADC* page controls both audio channels in one window, in three
+sections: Audio 1, the first DAC, which is the ADC when it records, then the
+ADC's record level and offset, then Audio 2, the second DAC. The registers
+of Audio 1 and the ADC are controller registers, which go through the DSP,
+and essctl reads them like the others: when a page opens, when you press F5,
+and every second while View > *Auto refresh* is on.
 
 Each setting shows its value decoded, with sample rates in hertz, ADC
 offsets in samples and choices by name, and the help line gives the
@@ -450,7 +457,7 @@ plays through `ES1869.VXD`. The [extended
 one](#es1869vxd-with-a-register-interface-and-better-dos-boxes) plays it in
 the same mode, and ESS's turns the 4x oversampling on. To try each setting
 live, use *Audio 2 4x oversampling* and *Audio 2 filter bypass* on essctl's
-*Audio 2 channel* page. The driver puts its own setting back the next time a
+*DACs and ADC* page. The driver puts its own setting back the next time a
 program opens the wave device and plays, and when Windows starts or resumes.
 
 The driver is rebuilt from the source in [`src/es1869`](src/es1869), and
