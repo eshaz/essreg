@@ -575,6 +575,14 @@ bank. essinst installs only the drivers that are in its own folder, so to
 install one of them alone, put essinst and that driver in a folder of their
 own.
 
+The rebuilt `ES1869.DRV` names the wave devices after their DACs, and
+Windows keeps its preferred playback and recording devices by name. essinst
+gives them the new names in the registry, for you and for new users, so that
+Windows still finds them, and `/restore` gives them ESS's names back. If an
+earlier essinst installed the drivers, run the new one once: it puts the new
+`ES1869.DRV` in place and renames the preferred devices. When only the names
+are left to do, it does that without a restart.
+
 These switches change what it does:
 * `/restore` puts ESS's drivers back from the `.ORG` copies in the same way.
 * `/norestart` leaves the restart to you. The drivers go in place when

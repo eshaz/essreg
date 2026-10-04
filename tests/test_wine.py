@@ -647,6 +647,63 @@ class WineTest(unittest.TestCase):
             self.assertEqual(read(self.find(system, name)), ess)
             self.assertEqual(read(self.find(system, base + ".ORG")), ess)
 
+    MAPPER = r"Software\Microsoft\Multimedia\Sound Mapper"
+
+    def preferred(self, root, value):
+        out = self.reg("query", root + "\\" + self.MAPPER, "/v", value)
+        for row in out.splitlines():
+            parts = row.split(None, 2)
+            if len(parts) == 3 and parts[0] == value and parts[1] == "REG_SZ":
+                return parts[2].strip()
+        return None
+
+    def prefer(self, root, value, name):
+        self.reg("add", root + "\\" + self.MAPPER, "/v", value, "/d", name,
+                 "/f")
+
+    def test_essinst_preferred_devices(self):
+        # Windows keeps its preferred devices by name, and the rebuilt
+        # ES1869.DRV names device 0 after its DAC
+        self.essinst_setup()
+        for root in ("HKCU", r"HKU\.DEFAULT"):
+            self.addCleanup(self.reg, "delete", root + "\\" + self.MAPPER,
+                            "/f")
+            self.prefer(root, "Playback", "ESS AudioDrive Playback (220)")
+            self.prefer(root, "Record", "ESS AudioDrive Record (220)")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        for root in ("HKCU", r"HKU\.DEFAULT"):
+            self.assertEqual(self.preferred(root, "Playback"),
+                             "ESS AudioDrive Audio 2 (220)")
+            self.assertEqual(self.preferred(root, "Record"),
+                             "ESS AudioDrive Record (220)")
+        log = self.essinst_log()
+        self.assertIn("The preferred playback device, ESS AudioDrive "
+                      "Playback (220), becomes ESS AudioDrive Audio 2 (220).",
+                      log)
+        self.assertIn("The preferred playback device is ESS AudioDrive "
+                      "Audio 2 (220).", log)
+        self.restart()
+
+        # installed by an essinst that left the names: they alone change,
+        # and Windows doesn't restart
+        self.prefer("HKCU", "Playback", "ESS AudioDrive Playback (220)")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        self.assertIn("Naming the preferred devices:", self.essinst_log())
+        self.assertEqual(self.preferred("HKCU", "Playback"),
+                         "ESS AudioDrive Audio 2 (220)")
+        self.assertEqual(self.wininit(), {})
+
+        # ESS's names back with ESS's drivers, also for the new devices
+        self.prefer("HKCU", "Playback", "ESS AudioDrive Audio 1 (220)")
+        self.prefer("HKCU", "Record", "ESS AudioDrive FM Digital (220)")
+        self.wine("INST\\essinst.exe", "/y", "/restore", "/norestart")
+        self.assertEqual(len(self.wininit()), 3)
+        for root in ("HKCU", r"HKU\.DEFAULT"):
+            self.assertEqual(self.preferred(root, "Playback"),
+                             "ESS AudioDrive Playback (220)")
+            self.assertEqual(self.preferred(root, "Record"),
+                             "ESS AudioDrive Record (220)")
+
     def test_essinst_other_driver(self):
         # another ESFM.DRV in place: nothing is written at all
         self.essinst_setup()

@@ -85,4 +85,19 @@ int di_install(const char *srcdir, const char *sysdir, int stage,
 int di_restore(const char *sysdir, int stage, const struct di_ops *ops,
                char *why);
 
+// how the wave devices are named (di_device_name)
+#define DI_NAMES_ESS 0   // ESS's: Playback and Record
+#define DI_NAME_AUDIO1 1 // Audio1Device: device 0 is Audio 2, device 1 Audio 1
+#define DI_NAME_FMREC 2  // FMRecordDevice: wave-in device 1 is FM Digital
+
+// 1 if ES1869.DRV in sysdir is a rebuilt driver, which names the devices
+// by DAC, once the install from srcdir (or the restore, srcdir 0) is done
+int di_rebuilt_after(const char *srcdir, const char *sysdir);
+
+// Windows keeps its preferred playback and recording devices by name (the
+// Sound Mapper's Playback and Record values): the name that the device
+// called name has with the drivers that names (DI_NAME_*) describes. 1 with
+// it in out (32 bytes), or 0 if name stays as it is
+int di_device_name(const char *name, int names, char *out);
+
 #endif /* DRVINST_H */

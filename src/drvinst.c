@@ -394,6 +394,61 @@ int di_install(const char *srcdir, const char *sysdir, int stage,
   return n;
 }
 
+int di_rebuilt_after(const char *srcdir, const char *sysdir) {
+  struct di_info have, other;
+  char path[DI_PATH];
+
+  di_path(path, sysdir, di_files[1].name);
+  di_scan(path, 1, &have);
+  if (srcdir) {
+    // di_install puts a rebuilt driver there, or leaves the one there
+    di_path(path, srcdir, di_files[1].name);
+    di_scan(path, 1, &other);
+    return other.kind == DI_REBUILT ||
+           (other.kind == DI_MISSING && have.kind == DI_REBUILT);
+  }
+  // di_restore takes a rebuilt driver back if ESS's is kept
+  di_path(path, sysdir, di_files[1].backup);
+  di_scan(path, 1, &other);
+  return have.kind == DI_REBUILT && !ess(&other);
+}
+
+// the device names of ESS's driver and of the rebuilt one: a prefix, then
+// Audio_Base in hex and ")"
+#define PFX_PLAY "ESS AudioDrive Playback ("
+#define PFX_A2 "ESS AudioDrive Audio 2 ("
+#define PFX_A1 "ESS AudioDrive Audio 1 ("
+#define PFX_REC "ESS AudioDrive Record ("
+#define PFX_FM "ESS AudioDrive FM Digital ("
+
+int di_device_name(const char *name, int names, char *out) {
+  // a device's name with the names flag set (on 1) or clear (on 0); a
+  // device that's gone takes the name of the one that plays in its place
+  static const struct {
+    const char *from, *to;
+    int flag, on;
+  } map[] = {
+      {PFX_PLAY, PFX_A2, DI_NAME_AUDIO1, 1},
+      {PFX_A2, PFX_PLAY, DI_NAME_AUDIO1, 0},
+      {PFX_A1, PFX_PLAY, DI_NAME_AUDIO1, 0},
+      {PFX_FM, PFX_REC, DI_NAME_FMREC, 0},
+  };
+  unsigned i, n;
+
+  for (i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+    n = (unsigned)strlen(map[i].from);
+    if (strncmp(name, map[i].from, n) ||
+        ((names & map[i].flag) != 0) != map[i].on)
+      continue;
+    if (strlen(map[i].to) + strlen(name + n) > 31)
+      return 0;
+    strcpy(out, map[i].to);
+    strcat(out, name + n);
+    return 1;
+  }
+  return 0;
+}
+
 int di_restore(const char *sysdir, int stage, const struct di_ops *ops,
                char *why) {
   struct di_info have[DI_FILES], org[DI_FILES];

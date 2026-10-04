@@ -363,7 +363,11 @@ need `build\ES1869.DRV` installed.
 1. Open Control Panel > *Multimedia* > *Audio*. The playback list has "ESS
    AudioDrive Audio 2 (220)" and "ESS AudioDrive Audio 1 (220)", and the
    recording list has "ESS AudioDrive Record (220)" and "ESS AudioDrive FM
-   Digital (220)".
+   Digital (220)". The preferred playback device is "ESS AudioDrive Audio 2
+   (220)" when it was "ESS AudioDrive Playback (220)" before the install.
+   * With it preferred, the speaker button next to the playback list opens
+     the Volume Control with ESS's mixer, and so does the volume icon on the
+     taskbar.
 2. Play music in Winamp on the first device, and a WAV file in Media Player
    with *Audio 1* as the preferred device. Both play, each at its own pitch,
    and neither skips.

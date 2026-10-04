@@ -714,8 +714,9 @@ recording device. Each key below is followed by its default and by what the
 key does at 1, and the sentence that begins "With 0" says what happens at 0:
 * **Audio1Device** (default 1). The driver adds a second wave output device,
   "ESS AudioDrive Audio 1", which plays through the Audio 1 DAC, and names
-  device 0 after its DAC, "ESS AudioDrive Audio 2". With 0, there is one
-  device, "ESS AudioDrive Playback", as with ESS's driver.
+  device 0 after its DAC, "ESS AudioDrive Audio 2", also as the target of
+  the mixer's Wave line, by which Windows finds the mixer of device 0. With
+  0, there is one device, "ESS AudioDrive Playback", as with ESS's driver.
 * **SharedWaveOut** (default 1). A program that opens device 0 while another
   plays there gets the Audio 1 DAC. With 0, the program gets
   `MMSYSERR_ALLOCATED`, as with ESS's driver.

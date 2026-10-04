@@ -692,6 +692,34 @@ caps_rename:
         pop     bp
         ret
 
+; es_mix_wod_caps(dev, lpCaps), far pascal, in place of ESS's wave-out
+; GETDEVCAPS (6:13FE) where the mixer names the target of its Wave line, at
+; the first DRVM_ENABLE (5:041A): ESS's answer, renamed as device 0's
+; (.caps0).  Windows finds a wave device's mixer by that name (mixerGetID
+; asks with MIXER_GETLINEINFOF_TARGETTYPE), so it has to be device 0's
+es_mix_wod_caps:
+        push    bp
+        mov     bp,sp
+        push    si
+        push    word [bp+0Ah]           ; dev
+        push    word [bp+8]             ; lpCaps, the MDEVICECAPSEX
+        push    word [bp+6]
+        push    cs
+        call    L6_13FE                 ; AX: what its copy left there
+        push    ax
+        test    byte [es_opts],OPT_A1_DEVICE
+        jz      .done
+        mov     si,[bp+0Ah]
+        call    a1_capable
+        jc      .done
+        les     bx,[bp+6]
+        mov     ax,a2_name
+        call    caps_rename
+.done:  pop     ax
+        pop     si
+        pop     bp
+        retf    6
+
 ; WODM_GETVOLUME, WODM_SETVOLUME of device 1: mixer 14h, the Audio 1
 ; play volume, 4 bits a side
 a1_volume:

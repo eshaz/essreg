@@ -397,7 +397,11 @@ L5_039A:
         lea cx,[bp-0x12]                                ; 0415
         push ss                                         ; 0418
         push cx                                         ; 0419
+%if ES1869_FIX
+        callf es_mix_wod_caps, R5_041D, R5_0464 ; essreg: device 0's name
+%else
         callf L6_13FE, R5_041D, R5_0464                 ; 041A far seg6
+%endif
         les bx,[bp-0xa]                                 ; 041F
         push ds                                         ; 0422
         lea di,[bx+0x128]                               ; 0423

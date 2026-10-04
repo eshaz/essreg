@@ -101,9 +101,16 @@ while Audio 2 plays the first. Two keys in the `[ES1869.DRV]` section of
   names ESS's device 0 after its DAC, "ESS AudioDrive Audio 2 (220)" instead
   of "ESS AudioDrive Playback (220)". Programs choose the second device like
   any other wave device, and the Multimedia control panel lists both.
-  Windows remembers the preferred playback device by its name, so after the
-  change it may take device 0 as the preferred device again, which is the
-  same DAC as before.
+  Windows keeps the preferred playback device by its name, so `essinst.exe`
+  gives the preferred device the new name when it installs the driver, and
+  ESS's name back with `/restore`. Windows also finds the mixer of a wave
+  device by the device's name, for the Volume Control and the volume control
+  on the taskbar. ESS's mixer takes the name of device 0 for its Wave line
+  when the driver starts, so the driver gives it the new name there as well
+  (`es_mix_wod_caps`). The mixer has no line for device 1, so Windows finds
+  no mixer for it, and the Wave slider sets the volume of the Audio 2 DAC
+  (mixer 7Ch). A program sets the volume of device 1 with its own volume
+  control, and essctl with *Audio 1 (wave) volume* (mixer 14h).
 * `SharedWaveOut=1` lets device 0 share. A program that opens device 0 while
   another program is playing there gets Audio 1 instead of
   `MMSYSERR_ALLOCATED`. Programs that go through the wave mapper get the

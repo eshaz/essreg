@@ -78,10 +78,12 @@ TIME_MS, TIME_SAMPLES, TIME_BYTES = 1, 2, 4
 STUB_ARGS = {
     ("KERNEL", 5): 4,       # LocalAlloc(flags, size)
     ("KERNEL", 7): 2,       # LocalFree(h)
+    ("KERNEL", 15): 6,      # GlobalAlloc(flags, size)
     ("KERNEL", 127): 14,    # GetPrivateProfileInt(app, key, def, file)
     ("KERNEL", 353): 10,    # lstrcpyn(dst, src, n)
     ("USER", 176): 10,      # LoadString(hInst, id, buf, n)
     ("USER", 420): 0,       # wsprintf, cdecl
+    ("USER", 471): 8,       # lstrcmpi(a, b)
     ("MMSYSTEM", 31): 22,   # DriverCallback
     ("MMSYSTEM", 607): 0,   # timeGetTime
 }
@@ -562,6 +564,10 @@ class DrvEmu:
             return self._ret(pop, ax=at)
         if key == ("KERNEL", 7):
             return self._ret(pop, ax=0)
+        if key == ("KERNEL", 15):       # the mixer's state block (5:00E8)
+            size = self._args(2)[0]
+            self.wr(MIXSTATE_PARA * 16, bytes(size))
+            return self._ret(pop, ax=MIXSTATE_PARA)
         if key == ("USER", 176):        # LoadString(hInst, id, lpBuf, n)
             n, boff, bseg, sid = self._args(4)[:4]
             s = self.string(sid).encode("latin-1")[:max(n - 1, 0)]
@@ -573,6 +579,11 @@ class DrvEmu:
             out = fmt.replace("%X", "%X" % w[4]).encode("latin-1")
             self.wr(w[1] * 16 + w[0], out + b"\0")
             return self._ret(0, ax=len(out))
+        if key == ("USER", 471):        # lstrcmpi(a, b)
+            boff, bseg, aoff, aseg = self._args(4)
+            a = self.cstr(aseg, aoff).lower()
+            b = self.cstr(bseg, boff).lower()
+            return self._ret(pop, ax=(a > b) - (a < b))
         if key == ("KERNEL", 353):      # lstrcpyn(dst, src, n)
             n, soff, sseg, doff, dseg = self._args(5)
             s = self.cstr(sseg, soff).encode("latin-1")[:max(n - 1, 0)]
@@ -606,6 +617,29 @@ class DrvEmu:
         for _i in range(sid & 15):
             pos += 1 + data[pos]
         return data[pos + 1:pos + 1 + data[pos]].decode("latin-1")
+
+    # --- the mixer ----------------------------------------------------------
+
+    def mixer_init(self):
+        """the mixer's state block and lines, as the first DRVM_ENABLE sets
+        them up (5:00D6), after ESS's configuration and SYSTEM.INI"""
+        return self.call((SEG_PARA[5], 0x00D6), (DEV_OFF,))
+
+    def mxd(self, dev_id, msg, user=0, dw1=0, dw2=0):
+        """mxdMessage, the export (ordinal 6)"""
+        seg, off, _f = self.ne.entries[6]
+        return self.call((SEG_PARA[seg], off), (
+            dev_id, msg, user >> 16, user & 0xFFFF, dw1 >> 16, dw1 & 0xFFFF,
+            dw2 >> 16, dw2 & 0xFFFF))
+
+    def mixer_instance(self):
+        """an instance as MXDM_OPEN makes it, in DGROUP: its device at
+        +10h"""
+        at = (self.heap + 1) & ~1
+        self.heap = at + 0x20
+        self.wr(DGROUP * 16 + at, bytes(0x20))
+        self.w16(DGROUP, at + 0x10, DEV_OFF)
+        return at
 
     # --- the wave devices ---------------------------------------------------
 

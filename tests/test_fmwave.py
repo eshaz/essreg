@@ -27,6 +27,9 @@ if HAVE_UNICORN:
                         WIDM_ADDBUFFER, WIDM_START, WIDM_STOP, WIDM_RESET,
                         WIM_OPEN, WODM_GETDEVCAPS, DEVNODE)
 
+MXDM_GETLINEINFO, MIXER_GETLINEINFOF_TARGETTYPE = 5, 4
+TARGET_WAVEOUT, TARGET_WAVEIN = 1, 2
+MIXERR_INVALLINE = 1024
 FM_STATE = 0x132 + 0x54
 FMF_OPEN, FMF_ROUTED = 1, 2
 DEV_FLAGS, DEV_FM_DAC = 0x2A, 0x117
@@ -252,6 +255,76 @@ class Device0NameTest(A1Case):
         e = self.emu()
         e.set_dev8(0x06, 5)
         self.assertEqual(self.caps(e), ess)
+
+
+class MixerTargetTest(A1Case):
+    """Windows finds the mixer of a wave device by the device's caps:
+    mixerGetID asks each mixer for the line whose target has them
+    (MIXER_GETLINEINFOF_TARGETTYPE), and ESS's mixer compares the names,
+    which it takes at the first DRVM_ENABLE"""
+
+    def caps(self, e, dev, wave_in=False):
+        """wMid, wPid, vDriverVersion and szPname of a device"""
+        buf = e.alloc(b"\0" * 0x30)
+        ex = e.alloc(struct.pack("<II", 0x30, buf))
+        call = e.wid if wave_in else e.wod
+        msg = WIDM_GETDEVCAPS if wave_in else WODM_GETDEVCAPS
+        self.assertEqual(call(dev, msg, 0, ex, DEVNODE), 0)
+        return e.rd(e.far_lin(buf), 38)
+
+    def line_for(self, e, ttype, caps):
+        """the answer and the short name of the line whose target has caps"""
+        line = e.alloc(struct.pack("<I", 0xA6).ljust(0x78, b"\0") +
+                       struct.pack("<II", ttype, 0) + caps)
+        r = e.mxd(0, MXDM_GETLINEINFO, e.mixer_instance(), line,
+                  MIXER_GETLINEINFOF_TARGETTYPE)
+        return r, e.rd(e.far_lin(line) + 0x28, 16).split(b"\0")[0]
+
+    def enabled(self, **kw):
+        e = self.emu(**kw)
+        e.mixer_init()
+        return e
+
+    def test_wave_line_names_device_0(self):
+        for kw in ({"stock": True}, {},
+                   {"opts": OPT_A1_SHARED | OPT_DUAL | OPT_FM_RECORD}):
+            with self.subTest(**kw):
+                e = self.enabled(**kw)
+                self.assertEqual(
+                    self.line_for(e, TARGET_WAVEOUT, self.caps(e, 0)),
+                    (0, b"Wave"))
+
+    def test_audio_1_on_a_16_bit_channel(self):
+        # device 0 keeps ESS's name there, and so does the line
+        e = self.emu()
+        e.set_dev8(0x06, 5)
+        e.mixer_init()
+        caps = self.caps(e, 0)
+        self.assertIn(b"ESS AudioDrive Playback (220)", caps)
+        self.assertEqual(self.line_for(e, TARGET_WAVEOUT, caps), (0, b"Wave"))
+
+    def test_ess_name_gone(self):
+        ess = self.caps(self.enabled(stock=True), 0)
+        self.assertEqual(self.line_for(self.enabled(), TARGET_WAVEOUT, ess)[0],
+                         MIXERR_INVALLINE)
+
+    def test_record_line(self):
+        for stock in (True, False):
+            e = self.enabled(stock=stock)
+            self.assertEqual(
+                self.line_for(e, TARGET_WAVEIN, self.caps(e, 0, True)),
+                (0, b"Rec"))
+
+    def test_no_line_for_the_new_devices(self):
+        # ESS's mixer has none for Audio 1 or the FM recording, so Windows
+        # finds no mixer for them (docs/AUDIO1.md)
+        e = self.enabled()
+        self.assertEqual(
+            self.line_for(e, TARGET_WAVEOUT, self.caps(e, 1))[0],
+            MIXERR_INVALLINE)
+        self.assertEqual(
+            self.line_for(e, TARGET_WAVEIN, self.caps(e, 1, True))[0],
+            MIXERR_INVALLINE)
 
 
 if __name__ == "__main__":

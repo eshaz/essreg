@@ -408,6 +408,7 @@ HOOKS = [
     (3, 0x4D1C, 0x4D1D),    # APM resume: es_wid_resume, and the player
     (3, 0x4E21, 0x4E22),    # the last disable's record stop: a1_disable
     (3, 0x4FD9, 0x4FDA),    # the MPU-401 release's 7Fh: es_fm_dac
+    (5, 0x041B, 0x041C),    # the mixer's Wave target: es_mix_wod_caps
     (5, 0x206E, 0x206F),    # the FM driver's close's 7Fh: es_fm_dac
     (6, 0x2D79, 0x2D7A),    # playback start's D3h through a1_d3_gate
     (6, 0x2DE7, 0x2DE8),    # playback start: 71h read through a2_mode_read

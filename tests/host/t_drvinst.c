@@ -355,6 +355,60 @@ static void test_vxd_kept_by_hand(void) {
   CHECK(same_file(a, b));
 }
 
+static void test_device_names(void) {
+  int all = DI_NAME_AUDIO1 | DI_NAME_FMREC;
+  char out[32];
+
+  // the rebuilt driver's names, and ESS's back
+  CHECK(di_device_name("ESS AudioDrive Playback (220)", all, out));
+  CHECK(!strcmp(out, "ESS AudioDrive Audio 2 (220)"));
+  CHECK(di_device_name("ESS AudioDrive Audio 2 (240)", DI_NAMES_ESS, out));
+  CHECK(!strcmp(out, "ESS AudioDrive Playback (240)"));
+  // the new devices are gone with ESS's driver: the one that plays or
+  // records in their place
+  CHECK(di_device_name("ESS AudioDrive Audio 1 (220)", DI_NAMES_ESS, out));
+  CHECK(!strcmp(out, "ESS AudioDrive Playback (220)"));
+  CHECK(di_device_name("ESS AudioDrive FM Digital (220)", DI_NAMES_ESS, out));
+  CHECK(!strcmp(out, "ESS AudioDrive Record (220)"));
+  // Audio1Device=0: device 0 has ESS's name
+  CHECK(di_device_name("ESS AudioDrive Audio 2 (220)", DI_NAME_FMREC, out));
+  CHECK(!strcmp(out, "ESS AudioDrive Playback (220)"));
+  // names the devices have with those drivers, and other devices
+  CHECK(!di_device_name("ESS AudioDrive Playback (220)", DI_NAME_FMREC, out));
+  CHECK(!di_device_name("ESS AudioDrive Audio 2 (220)", all, out));
+  CHECK(!di_device_name("ESS AudioDrive Audio 1 (220)", DI_NAME_AUDIO1, out));
+  CHECK(!di_device_name("ESS AudioDrive Record (220)", all, out));
+  CHECK(!di_device_name("ESS AudioDrive Record (220)", DI_NAMES_ESS, out));
+  CHECK(!di_device_name("ESS AudioDrive FM Digital (220)", DI_NAME_FMREC, out));
+  CHECK(!di_device_name("Sound Blaster Playback", all, out));
+  CHECK(!di_device_name("", all, out));
+}
+
+static void test_rebuilt_after(void) {
+  char a[DI_PATH], why[DI_WHY];
+
+  // ESS's drivers installed: an install puts the rebuilt ES1869.DRV in
+  // place, unless only ESFM.DRV is next to the installer
+  setup();
+  CHECK(di_rebuilt_after(src, sys));
+  CHECK(!di_rebuilt_after(0, sys));
+  in_dir(a, src, "ES1869.DRV");
+  remove(a);
+  CHECK(!di_rebuilt_after(src, sys));
+  // the rebuilt drivers installed: they stay, and a restore takes
+  // ES1869.DRV back while ESS's is kept
+  setup();
+  CHECK_EQ(di_install(src, sys, 1, &ops, why), 3);
+  restart();
+  in_dir(a, src, "ES1869.DRV");
+  remove(a);
+  CHECK(di_rebuilt_after(src, sys));
+  CHECK(!di_rebuilt_after(0, sys));
+  in_dir(a, sys, "ES1869.ORG");
+  remove(a);
+  CHECK(di_rebuilt_after(0, sys));
+}
+
 int main(int argc, char **argv) {
   if (argc < 3) {
     printf("usage: t_drvinst ROOT WORKDIR\n");
@@ -371,6 +425,8 @@ int main(int argc, char **argv) {
   test_wininit_fails();
   test_some_drivers();
   test_vxd_kept_by_hand();
+  test_device_names();
+  test_rebuilt_after();
   CHECK(logged > 0);
   return CHECK_DONE("t_drvinst");
 }
