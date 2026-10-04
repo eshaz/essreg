@@ -240,8 +240,9 @@ it instead.
 
 ### Installing
 
-Windows keeps `ESFM.DRV` in use while it runs, so install the fixed driver
-from DOS:
+[`essinst.exe`](../README.md#essinstexe) installs the fixed driver and
+restarts Windows. Windows keeps `ESFM.DRV` in use while it runs, so to
+install it by hand, do it from DOS:
 
 1. Choose Start > Shut Down > *Restart the computer in MS-DOS mode*.
 2. Run `copy C:\WINDOWS\SYSTEM\ESFM.DRV C:\WINDOWS\SYSTEM\ESFM.ORG` to keep

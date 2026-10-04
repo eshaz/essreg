@@ -4,6 +4,7 @@ project : esfmpat.exe .SYMBOLIC
 project : essctl.exe .SYMBOLIC
 project : ess3d.exe .SYMBOLIC
 project : esfmrec.exe .SYMBOLIC
+project : essinst.exe .SYMBOLIC
 
 !include essreg.mk1
 !include 1869opl3.mk1
@@ -12,3 +13,4 @@ project : esfmrec.exe .SYMBOLIC
 !include essctl.mk1
 !include ess3d.mk1
 !include esfmrec.mk1
+!include essinst.mk1

@@ -336,11 +336,10 @@ for byte. Each change can be turned off with its own key under
 `[ES1869.VXD]` in `SYSTEM.INI`, which the driver reads when Windows starts
 ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings)).
 
-To install it, keep a copy of `C:\WINDOWS\SYSTEM\ES1869.VXD`, copy
-`build\ES1869.VXD` over it and restart Windows.
+[`essinst.exe`](#essinstexe) installs it and restarts Windows.
 [docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#installing-the-extended-driver)
-gives the steps, and how to go back if something goes wrong. The rebuilt
-driver no longer carries ESS's DirectX certification mark.
+gives the steps by hand, and how to go back if something goes wrong. The
+rebuilt driver no longer carries ESS's DirectX certification mark.
 
 ## [`ESFM.DRV`](build) without hanging notes
 
@@ -378,9 +377,10 @@ driver does, and `BetterSquareWave=0` plays ESS's bank
 is ESS's code: `python3 tools/build_esfm.py --stock --verify` rebuilds the
 original byte for byte, and `esfmpat` and essctl's banks work as before.
 
-Install it from DOS, because Windows has the driver open: keep a copy of
-`C:\WINDOWS\SYSTEM\ESFM.DRV`, copy `build\ESFM.DRV` over it and restart
-Windows. [Installing and testing on Windows
+[`essinst.exe`](#essinstexe) installs it and restarts Windows. By hand,
+install it from DOS, because Windows has the driver open: keep a copy of
+`C:\WINDOWS\SYSTEM\ESFM.DRV` as `ESFM.ORG`, copy `build\ESFM.DRV` over it
+and restart Windows. [Installing and testing on Windows
 98](#installing-and-testing-on-windows-98) goes through it step by step.
 
 ## [`ES1869.DRV`](build) with four wave devices and unfiltered playback
@@ -442,7 +442,8 @@ ESS's code, each kept at the same length, and code added after ESS's, which
 stays at its addresses. The driver replaces ESS's 4.04.00.1319 only, so
 check the version as for [`ESFM.DRV`](#before-you-start).
 
-Install it from MS-DOS mode, because Windows has the driver open (Start >
+[`essinst.exe`](#essinstexe) installs it and restarts Windows. By hand,
+install it from MS-DOS mode, because Windows has the driver open (Start >
 *Shut Down* > *Restart in MS-DOS mode*), with the file copied to
 `C:\ESSREG`:
 
@@ -549,15 +550,50 @@ Usage: esfmpat "c:\path\to\esfm.drv" "c:\path\to\patch.bin"
        esfmpat "c:\path\to\esfm.drv"   (show its patch bank)
 ```
 
+## [`essinst.exe`](build)
+
+essinst installs the rebuilt drivers and restarts Windows. Copy it to the
+Windows 95 or 98 machine together with `build\ES1869.VXD`,
+`build\ES1869.DRV` and `build\ESFM.DRV`, with the four files in one folder,
+and run it. It lists what it will do and asks once. When you press OK, it
+restarts Windows, and the rebuilt drivers are in place when Windows is back.
+
+Windows has the drivers open while it runs, so essinst doesn't replace them
+itself. It copies each new driver next to the old one in
+`C:\WINDOWS\SYSTEM`, as `ES1869VX.NEW`, `ES1869.NEW` and `ESFM.NEW`, and
+lists them in the `[rename]` section of `C:\WINDOWS\WININIT.INI`. Windows
+moves them into place while it restarts, before it loads any driver, which
+is how Windows' own setup replaces files that are in use. Nothing is listed
+until every file is written and checked, so an error changes nothing.
+
+essinst first checks the installed drivers, and it changes nothing when one
+of them is neither ESS's driver 4.04.00.1319, which the rebuilt drivers are
+made from, nor an earlier rebuilt driver. It keeps ESS's drivers as
+`ES1869VX.ORG`, `ES1869.ORG` and `ESFM.ORG` in the same folder. A driver
+that esfmpat gave another bank counts as ESS's, and it is kept with its
+bank. essinst installs only the drivers that are in its own folder, so to
+install one of them alone, put essinst and that driver in a folder of their
+own.
+
+These switches change what it does:
+* `/restore` puts ESS's drivers back from the `.ORG` copies in the same way.
+* `/norestart` leaves the restart to you. The drivers go in place when
+  Windows next restarts.
+* `/y` asks nothing and shows no message, for a batch file.
+
+Each run writes what essinst found and did to `C:\WINDOWS\ESSINST.LOG`. If
+Windows doesn't start properly with a rebuilt driver, start it in Safe Mode,
+which loads no sound driver, and run `essinst /restore`. To get there, hold
+Ctrl while the computer starts (on Windows 95, press F8 at "Starting Windows
+95") and choose *Safe mode*. [Going back](#going-back) also gives the
+commands for the command prompt.
+
 ## Installing and testing on Windows 98
 
-`build\ESFM.DRV` is made from ESS's ES1869 AudioDrive driver 4.04.00.1319 in
-[`driver`](driver), which ESS made for Windows 95 and 98. These steps
-install it and essctl on a Windows 98 machine, and test the hanging-note
-fix, the bank file and General MIDI. The rebuilt `ES1869.VXD` isn't needed
-for them, and
-[docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#installing-the-extended-driver)
-describes how to install it too.
+The rebuilt drivers are made from ESS's ES1869 AudioDrive driver
+4.04.00.1319 in [`driver`](driver), which ESS made for Windows 95 and 98.
+These steps install them and essctl on a Windows 98 machine with essinst,
+and test the hanging-note fix of `ESFM.DRV`, its bank file and General MIDI.
 
 ### Before you start
 
@@ -565,11 +601,13 @@ Check the version of ESS's driver: in Explorer, right-click
 `C:\WINDOWS\SYSTEM\ESFM.DRV` and choose *Properties* > *Version*. It should
 say 4.04.00.1319. With another version, first install ESS's driver from the
 [`driver`](driver) folder, through *Device Manager* > the ES1869 >
-*Properties* > *Driver* > *Update Driver*.
+*Properties* > *Driver* > *Update Driver*. essinst checks the version too,
+and changes nothing if it is another one.
 
 Copy these files to `C:\ESSREG` on the Windows 98 machine, from a floppy, a
 CD or a network share:
-* `build\ESFM.DRV`
+* `build\essinst.exe`, `build\ES1869.VXD`, `build\ES1869.DRV` and
+  `build\ESFM.DRV`
 * `build\essctl.exe`
 * `build\GMCHECK.MID`
 * `esfm_patch_banks\bnk_com.bin` and `esfm_patch_banks\bnk_NT4.bin`
@@ -579,18 +617,11 @@ names.
 
 ### Installing
 
-`ESFM.DRV` is in use while Windows runs, so replace it from MS-DOS mode.
-
-1. Choose Start > *Shut Down* > *Restart in MS-DOS mode*.
-2. Keep ESS's driver as `ESFM.ORG`, and copy the fixed one over it:
-   ```
-   copy C:\WINDOWS\SYSTEM\ESFM.DRV C:\WINDOWS\SYSTEM\ESFM.ORG
-   copy C:\ESSREG\ESFM.DRV C:\WINDOWS\SYSTEM\ESFM.DRV
-   ```
-3. Type `exit` to go back to Windows.
-4. Open Control Panel > *Multimedia* > *MIDI*. *Single instrument* should be
+1. Run `C:\ESSREG\essinst.exe`. It lists the three drivers as ESS's, each
+   kept as an `.ORG` file. Press OK, and Windows restarts.
+2. Open Control Panel > *Multimedia* > *MIDI*. *Single instrument* should be
    *ESFM Synthesis*, followed by the FM port.
-5. Start `C:\ESSREG\essctl.exe` and open the *ESFM patch bank* page. It
+3. Start `C:\ESSREG\essctl.exe` and open the *ESFM patch bank* page. It
    should say `Fixed driver`.
 
 ### Using a bank file
@@ -654,14 +685,19 @@ G3.
 
 ### Going back
 
-1. Choose Start > *Shut Down* > *Restart in MS-DOS mode*.
-2. Run `copy C:\WINDOWS\SYSTEM\ESFM.ORG C:\WINDOWS\SYSTEM\ESFM.DRV`.
-3. Type `exit`.
+Run `C:\ESSREG\essinst.exe /restore` and press OK. Windows restarts with
+ESS's drivers. ESS's drivers don't read the `[ES1869.VXD]`, `[ES1869.DRV]`
+and `[ESFM.DRV]` sections, so the sections can stay.
 
-ESS's driver doesn't read the `[ESFM.DRV]` section, so the section can stay.
 If Windows doesn't start, hold Ctrl while the computer starts and choose
-*Command prompt only* in the Startup Menu. Then do step 2, remove the
-`[ESFM.DRV]` section with `edit C:\WINDOWS\SYSTEM.INI`, and restart.
+*Command prompt only* in the Startup Menu. Put ESS's drivers back, remove
+the three sections with `edit C:\WINDOWS\SYSTEM.INI`, and restart:
+
+```
+copy C:\WINDOWS\SYSTEM\ES1869VX.ORG C:\WINDOWS\SYSTEM\ES1869.VXD
+copy C:\WINDOWS\SYSTEM\ES1869.ORG C:\WINDOWS\SYSTEM\ES1869.DRV
+copy C:\WINDOWS\SYSTEM\ESFM.ORG C:\WINDOWS\SYSTEM\ESFM.DRV
+```
 
 ## Documentation
 * [docs/REGISTERS.md](docs/REGISTERS.md): every register and setting of the
@@ -705,8 +741,8 @@ If Windows doesn't start, hold Ctrl while the computer starts and choose
 ### Building
 * Clone this repo and copy it your build environment.
 * Run [`build.bat`](build.bat) to build the executables: `essreg.exe`,
-  `1869opl3.com`, `esfmpat.exe`, `essctl.exe`, `ess3d.exe` and
-  `esfmrec.exe`.
+  `1869opl3.com`, `esfmpat.exe`, `essctl.exe`, `ess3d.exe`, `esfmrec.exe`
+  and `essinst.exe`.
 * Run `python3 tools/build_vxd.py` to build `build/ES1869.VXD`,
   `python3 tools/build_esfm.py` to build `build/ESFM.DRV`, and
   `python3 tools/build_es1869drv.py` to build `build/ES1869.DRV`.
@@ -718,7 +754,7 @@ If Windows doesn't start, hold Ctrl while the computer starts and choose
 ### Testing
 * This code has been tested using a real ES1869 soundcard on I/O port 0x220.
   It probably won't work with any other ESS sound chips.
-* For essctl, ess3d, esfmrec and the rebuilt drivers,
+* For essctl, ess3d, esfmrec, essinst and the rebuilt drivers,
   [docs/TESTING.md](docs/TESTING.md) has a checklist for real hardware.
 * `python3 tests/run_tests.py` runs the automated tests against a simulated
   ES1869.

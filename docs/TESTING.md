@@ -241,14 +241,34 @@ and stop at the first surprise. Each step says what you should see.
    Audio_Base+Ch). Check that the Audio 1 sample rate it reports matches the
    one essreg reports in its default mode, without `x=1`.
 
+### E0. Installing with essinst
+
+See the [README](../README.md#essinstexe). Start with ESS's drivers.
+
+1. Copy `build\essinst.exe`, `build\ES1869.VXD`, `build\ES1869.DRV` and
+   `build\ESFM.DRV` to one folder, such as `C:\ESSREG`, and run
+   `essinst.exe`. It lists each driver as "ESS's driver, kept as" its `.ORG`
+   file. Press OK.
+2. Windows restarts. Afterwards, `C:\WINDOWS\SYSTEM` holds `ES1869VX.ORG`,
+   `ES1869.ORG` and `ESFM.ORG`, and essctl's *Device information* page names
+   the rebuilt drivers. `C:\WINDOWS\ESSINST.LOG` lists each step.
+3. Run essinst again. It says that the rebuilt drivers are installed
+   already.
+4. Run `essinst /restore` and press OK. After the restart, essctl names
+   ESS's drivers again, as the next sections expect.
+5. Note anything that differs, such as a message during the restart.
+
+To install one driver alone in the next sections, put `essinst.exe` and that
+driver in a folder of their own.
+
 ### E. The extended driver
 
-1. Install `build\ES1869.VXD` as described in
-   [VXD_INTERNALS.md](VXD_INTERNALS.md#installing-the-extended-driver) and
+1. Install `build\ES1869.VXD` with essinst, or by hand as described in
+   [VXD_INTERNALS.md](VXD_INTERNALS.md#installing-the-extended-driver), and
    restart Windows.
 2. Try Windows sounds, MIDI, a DirectSound game and a DOS game in a window.
    They all work as before.
-3. Start essctl. Its title bar says "VxD register API 1.11", and the owners
+3. Start essctl. Its title bar says "VxD register API 1.12", and the owners
    line at the bottom right shows who owns the DSP, FM and the MPU.
 4. While a DOS game plays, change *Audio 2 volume* or *Master volume* in
    essctl. The change applies at once, and the game keeps its sound. This is
@@ -258,9 +278,9 @@ and stop at the first surprise. Each step says what you should see.
 6. Test long playback. With essctl, ess3d's tray icon and all DOS boxes
    closed, play a stream or a long MP3 in Winamp for 10 minutes, once with
    the DirectSound output and once with waveOut, and listen for skips.
-   * If it skips, put ESS's driver back from `ES1869.ORG`, restart Windows
-     and play the same stream. Skips with both drivers come from the card's
-     DMA, as described in
+   * If it skips, put ESS's driver back with `essinst /restore`, restart
+     Windows and play the same stream. Skips with both drivers come from the
+     card's DMA, as described in
      [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#finding-out-on-the-card). Skips
      that happen only with the extended driver come from this repository, so
      note which output skipped and how often.
@@ -488,7 +508,7 @@ See [ESFM_MIDI.md](ESFM_MIDI.md).
 2. Play the MIDI files or games that hang notes, with the ESFM page open. A
    voice marked STUCK, or one that keeps "playing" after the music stops, is
    a hanging note.
-3. Install `build\ESFM.DRV` from DOS, as described in
+3. Install `build\ESFM.DRV` with essinst, or from DOS as described in
    [ESFM_MIDI.md](ESFM_MIDI.md#installing), and restart Windows.
 4. The page now says "Fixed driver". Run the stress test again. No voice is
    left sounding, and the "queued while busy" count shows how many messages

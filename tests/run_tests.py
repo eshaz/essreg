@@ -12,8 +12,9 @@ usage: python3 tests/run_tests.py
 - C tests (tests/host/t_*.c), built with gcc against the simulated ES1869:
   esshw protocols, the VxD API wrappers, the register catalog, profiles,
   ess3d's commands, ESFM patch banks and driver patching, esfmrec's WAV
-  header and resampler, essreg's newer register functions, and an
-  old-versus-new port trace of its original ones
+  header and resampler, essinst's checks and staging of the drivers,
+  essreg's newer register functions, and an old-versus-new port trace of
+  its original ones
 - with Open Watcom in $OW2: the 16-bit VxD call thunk in a CPU emulator
 """
 
@@ -54,6 +55,8 @@ def c_tests(tmp):
 
     esfm_work = os.path.join(tmp, "esfm")
     os.makedirs(esfm_work)
+    inst_work = os.path.join(tmp, "inst")
+    os.makedirs(inst_work)
     tests = [("t_esshw", src("esshw.c", "simhw.c"), []),
              ("t_vxdapi", src("vxdapi.c", "esshw.c"), []),
              ("t_esscat", src("esscat.c", "essio.c", "esshw.c", "simhw.c"),
@@ -69,7 +72,8 @@ def c_tests(tmp):
              ("t_fmrec", src("fmrec.c"), []),
              ("t_wavestat", src("wavestat.c"),
               [os.path.join(ROOT, "driver", "ES1869.DRV"),
-               os.path.join(ROOT, "build", "ES1869.DRV")])]
+               os.path.join(ROOT, "build", "ES1869.DRV")]),
+             ("t_drvinst", src("drvinst.c"), [ROOT, inst_work])]
     for name, sources, args in tests:
         exe = os.path.join(tmp, name)
         cc(exe, [os.path.join(HOST, name + ".c")] + sources, libs=["-lm"])

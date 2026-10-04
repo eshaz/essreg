@@ -364,16 +364,20 @@ the ESS drivers, adds the register API, and does better for DOS programs
 certification mark (`Cert DX2`), so DirectX setup may then report the driver
 as uncertified.
 
+[`essinst.exe`](../README.md#essinstexe) installs it, together with the
+other rebuilt drivers that are next to it, and restarts Windows. To install
+it by hand:
+
 1. Keep a copy of ESS's driver: copy `C:\WINDOWS\SYSTEM\ES1869.VXD` to
-   `ES1869.ORG` in the same directory.
+   `ES1869VX.ORG` in the same directory, the name essinst uses too.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
 3. Restart Windows. essctl's *Device information* page now shows "Register
-   API: version 1.11".
+   API: version 1.12".
 
-If Windows doesn't start or sound stops working, restart, press F8 at
-"Starting Windows 95", choose *Command prompt only*, and put ESS's driver
-back:
+If sound stops working, run `essinst /restore`. If Windows doesn't start,
+restart, press F8 at "Starting Windows 95", choose *Command prompt only*,
+and put ESS's driver back:
 
 ```
-copy C:\WINDOWS\SYSTEM\ES1869.ORG C:\WINDOWS\SYSTEM\ES1869.VXD
+copy C:\WINDOWS\SYSTEM\ES1869VX.ORG C:\WINDOWS\SYSTEM\ES1869.VXD
 ```

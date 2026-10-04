@@ -37,6 +37,11 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   samples, and the next start repairs it and removes the marker
 - esfmrec on a full disk (a file size limit): it stops, and the WAV file
   holds what was written; /split= goes on in NAME_2.WAV without a gap
+- essinst: with ESS's drivers in the Windows SYSTEM folder, /y
+  /norestart keeps them as .ORG files, stages the rebuilt ones as .NEW
+  files and lists them in WININIT.INI; a restart carried out by hand puts
+  them in place, and /restore stages ESS's again. Another driver in place
+  changes nothing
 
 Win16 wants 8.3 path names, so the work directory is reached through a
 short symbolic link in /tmp.
@@ -83,6 +88,9 @@ class WineTest(unittest.TestCase):
         shutil.copy(os.path.join(ROOT, "out", "ow2", "essctl.exe"), work)
         shutil.copy(os.path.join(ROOT, "out", "ow2", "ess3d.exe"), work)
         shutil.copy(os.path.join(ROOT, "out", "ow2", "esfmrec.exe"), work)
+        os.makedirs(os.path.join(work, "INST"))
+        shutil.copy(os.path.join(ROOT, "out", "ow2", "essinst.exe"),
+                    os.path.join(work, "INST"))
         shutil.copy(os.path.join(ROOT, "driver", "ESFM.DRV"), work)
         env = dict(os.environ, WATCOM=OW2, INCLUDE=os.path.join(OW2, "h"),
                    PATH=os.path.join(OW2, "binl64") + ":" + os.environ["PATH"])
@@ -525,6 +533,133 @@ class WineTest(unittest.TestCase):
         left = struct.unpack("<%dh" % (len(pcm) // 2), pcm)[0::2]
         rising = sum(a < 0 <= b for a, b in zip(left, left[1:]))
         self.assertLessEqual(abs(rising - 3000), 1)
+
+    # --- essinst ---------------------------------------------------------
+
+    DRIVERS = (("ES1869.VXD", "ES1869VX"), ("ES1869.DRV", "ES1869"),
+               ("ESFM.DRV", "ESFM"))
+
+    def windows(self, *names):
+        return os.path.join(self.env["WINEPREFIX"], "drive_c", "windows",
+                            *names)
+
+    @staticmethod
+    def find(folder, name):
+        """the file called name in folder, in any case, or None"""
+        for f in os.listdir(folder):
+            if f.lower() == name.lower():
+                return os.path.join(folder, f)
+        return None
+
+    def essinst_setup(self):
+        """ESS's drivers in the SYSTEM folder, the rebuilt ones next to
+        essinst.exe, and nothing left of an earlier run. Wine shows itself
+        to 16-bit programs as Windows NT, where essinst refuses to run, so
+        it shows winevdm.exe, which runs them, Windows 98 for the test"""
+        key = r"HKCU\Software\Wine\AppDefaults\winevdm.exe"
+        self.reg("add", key, "/v", "Version", "/d", "win98", "/f")
+        self.addCleanup(self.reg, "delete", key, "/f")
+        system = self.windows("system")
+        for name, base in self.DRIVERS:
+            shutil.copy(os.path.join(ROOT, "build", name),
+                        self.path(os.path.join("INST", name)))
+            for left in (name, base + ".ORG", base + ".NEW", base + ".$$$"):
+                found = self.find(system, left)
+                if found:
+                    os.remove(found)
+            shutil.copy(os.path.join(ROOT, "driver", name),
+                        os.path.join(system, name))
+        for left in ("WININIT.INI", "ESSINST.LOG"):
+            found = self.find(self.windows(), left)
+            if found:
+                os.remove(found)
+
+    def wininit(self):
+        """WININIT.INI's [rename] entries, {destination: source}, lowercase"""
+        found = self.find(self.windows(), "WININIT.INI")
+        if not found:
+            return {}
+        out, section = {}, None
+        for row in read(found).decode("latin-1").splitlines():
+            row = row.strip()
+            if row.startswith("["):
+                section = row.lower()
+            elif "=" in row and section == "[rename]":
+                dest, src = row.split("=", 1)
+                out[dest.lower()] = src.lower()
+        return out
+
+    def restart(self):
+        """what Windows does with WININIT.INI when it starts"""
+        for dest, src in self.wininit().items():
+            names = [self.windows("system", p.rsplit("\\", 1)[1])
+                     for p in (dest, src)]
+            dest, src = [self.find(os.path.dirname(n), os.path.basename(n))
+                         or n for n in names]
+            if os.path.exists(dest):
+                os.remove(dest)
+            os.rename(src, dest)
+        os.remove(self.find(self.windows(), "WININIT.INI"))
+
+    def essinst_log(self):
+        return read(self.find(self.windows(), "ESSINST.LOG")).decode()
+
+    def test_essinst(self):
+        self.essinst_setup()
+        system = self.windows("system")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        log = self.essinst_log()
+        for name, base in self.DRIVERS:
+            self.assertIn("%s: ESS's driver, kept as %s.ORG." % (name, base),
+                          log)
+            ess = read(os.path.join(ROOT, "driver", name))
+            new = read(os.path.join(ROOT, "build", name))
+            self.assertEqual(read(self.find(system, base + ".ORG")), ess)
+            self.assertEqual(read(self.find(system, base + ".NEW")), new)
+            self.assertEqual(read(self.find(system, name)), ess)
+            self.assertIsNone(self.find(system, base + ".$$$"))
+        self.assertIn("Done: the drivers go in place at the next restart.",
+                      log)
+        renames = self.wininit()
+        self.assertEqual(len(renames), 3)
+        for name, base in self.DRIVERS:
+            dest = [d for d in renames if d.endswith("\\" + name.lower())]
+            self.assertEqual(len(dest), 1)
+            self.assertTrue(renames[dest[0]].endswith(
+                "\\%s.new" % base.lower()))
+            self.assertTrue(dest[0].startswith("c:\\windows\\system\\"))
+
+        # the restart puts them in place, and then there's nothing to do
+        self.restart()
+        for name, base in self.DRIVERS:
+            self.assertEqual(read(self.find(system, name)),
+                             read(os.path.join(ROOT, "build", name)))
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        self.assertEqual(self.essinst_log().count("installed already."), 3)
+        self.assertEqual(self.wininit(), {})
+
+        # /restore stages ESS's drivers again, from the copies
+        self.wine("INST\\essinst.exe", "/y", "/restore", "/norestart")
+        self.assertEqual(len(self.wininit()), 3)
+        self.restart()
+        for name, base in self.DRIVERS:
+            ess = read(os.path.join(ROOT, "driver", name))
+            self.assertEqual(read(self.find(system, name)), ess)
+            self.assertEqual(read(self.find(system, base + ".ORG")), ess)
+
+    def test_essinst_other_driver(self):
+        # another ESFM.DRV in place: nothing is written at all
+        self.essinst_setup()
+        system = self.windows("system")
+        with open(self.find(system, "ESFM.DRV"), "wb") as f:
+            f.write(b"MZ another driver")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        log = self.essinst_log()
+        self.assertIn("ESFM.DRV isn't ESS's driver 4.04.00.1319", log)
+        self.assertEqual(self.wininit(), {})
+        for name, base in self.DRIVERS:
+            self.assertIsNone(self.find(system, base + ".ORG"))
+            self.assertIsNone(self.find(system, base + ".NEW"))
 
 
 if __name__ == "__main__":
