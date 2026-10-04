@@ -94,6 +94,7 @@ The Class column tells how safe a function is to call:
 | 040A | essext  | register       | Write a PnP register                   |
 | 040B | essext  | info           | Read mixer registers 00h-7Fh           |
 | 040C | essext  | info           | Owner and status information           |
+| 040D | essext  | ownership      | Take the DSP from a DOS box to record  |
 
 `ES1869.DRV` uses group 0, including 0006, 0007, 0009 and 000B, and group 2.
 `ESFM.DRV` uses group 1, and `ESSMPU.DRV` uses group 3.
@@ -254,7 +255,9 @@ access MIDI port...".
 
 The rebuilt driver answers the FM ports differently. A VM that can't have FM
 gets a virtual FM chip, and Windows gets FM from a port access only until a
-DOS program wants it ([VXD_INTERNALS.md](VXD_INTERNALS.md#dos-boxes)).
+DOS program wants it ([VXD_INTERNALS.md](VXD_INTERNALS.md#dos-boxes)). A DOS
+program that gave up the DSP for a recording (040D) gets a virtual Sound
+Blaster on the DSP's ports in the same way.
 
 With ESS's driver, a register tool has to work within these rules, so essctl
 brackets each batch of port accesses:
@@ -293,9 +296,9 @@ in another VM, or the driver's own interrupt code.
 
 The functions have these inputs and outputs:
 
-* **0400** takes nothing and returns AX = 0112h (version 1.12), BX = the
-  feature bits (07FFh), CX = the SYSTEM.INI settings and DX = the number of
-  functions (13).
+* **0400** takes nothing and returns AX = 0113h (version 1.13), BX = the
+  feature bits (0FFFh), CX = the SYSTEM.INI settings and DX = the number of
+  functions (14).
 * **0401** takes BL = a mixer register and returns AL = its value.
 * **0402** takes BL = a mixer register and BH = the value.
 * **0403** takes BL = a controller register (A0h-BFh) and returns AL = its
@@ -315,6 +318,15 @@ The functions have these inputs and outputs:
 * **040C** takes nothing and returns AL = the DSP owner, AH = the FM owner,
   BL = the MPU-401 owner (0 none, 1 the caller's VM, 2 another VM), BH =
   Audio_Base+Ch and DX = the ADI flags.
+* **040D** takes nothing, and comes from Windows right before it opens
+  ES1869.DRV's wave input to record the FM. A DOS program takes the DSP with
+  its first Sound Blaster access and keeps it until it ends, which would
+  keep the recording out. So when a DOS box owns the DSP, the VxD releases
+  it from that box, and the program goes on with a virtual Sound Blaster.
+  The function also succeeds when nobody or Windows owns the DSP, and then
+  changes nothing. It fails with INUSE while `RecordTakesDSP=0`, and when a
+  DOS box calls it. ES1869.DRV's FM recording device and esfmrec call it,
+  and essctl never does.
 
 The controller registers (0403, 0404) are reached through the DSP's command
 channel. Both functions first wait until the DSP is idle, for up to 2000h
@@ -368,12 +380,16 @@ the write also changes the value that Windows gets back afterwards.
 | 8   | DOS mixer, clear with `DosMixerRestore=0`                  |
 | 9   | CX holds the settings below (version 1.11)                 |
 | 10  | Audio 1 filter, clear with `Audio1Filter=1` (version 1.12) |
+| 11  | the DSP for a recording, clear with `RecordTakesDSP=0`     |
 
 DOS FM stands for the virtual FM chip and the rest of [DOS
 boxes](VXD_INTERNALS.md#dos-boxes). DOS mixer means that Windows' mixer is
 saved and put back around a DOS program. Audio 1 filter means that the VxD
 keeps the Audio 1 CODEC's filter bypassed, for DOS programs and for
-DirectSound.
+DirectSound. The DSP for a recording means that 040D takes the DSP from a
+DOS program
+([VXD_INTERNALS.md](VXD_INTERNALS.md#a-recording-takes-the-dsp)), since
+version 1.13.
 
 CX holds the settings that the VxD read from SYSTEM.INI when it started
 ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings)).
@@ -388,6 +404,7 @@ A set bit means that the change is on:
 | 4   | `DosFMAudible`                    | 1       |
 | 5   | `DosMixerRestore`                 | 1       |
 | 6   | `ResetDosFM`                      | 1       |
+| 7   | `RecordTakesDSP` (version 1.13)   | 1       |
 | 8   | `[ES1869.DRV] Audio2Oversampling` | 0       |
 | 9   | `[ES1869.DRV] Audio2Filter`       | 0       |
 | 10  | `[ES1869.DRV] Audio1Filter`       | 0       |

@@ -62,6 +62,7 @@ enum esshw_backend { ESSHW_DIRECT, ESSHW_VXDEXT, ESSHW_SIM };
 #define ESSX_PNP_WRITE 0x040A
 #define ESSX_MIXER_BLOCK 0x040B
 #define ESSX_OWNERS 0x040C
+#define ESSX_TAKE_DSP 0x040D
 
 // call the VxD API, returns 0 or an ESSHW_E* code with AL in *result
 typedef int (*esshw_ext_fn)(u16 fn, u8 bl, u8 bh, u8 al, u8 *result);

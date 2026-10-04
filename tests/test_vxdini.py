@@ -34,11 +34,12 @@ KEYS = {                            # key: its bit in ESSREG_Opts
     (VXD, "DosFMAudible"): 0x0010,
     (VXD, "DosMixerRestore"): 0x0020,
     (VXD, "ResetDosFM"): 0x0040,
+    (VXD, "RecordTakesDSP"): 0x0080,
     (DRV, "Audio2Oversampling"): 0x0100,
     (DRV, "Audio2Filter"): 0x0200,
     (DRV, "Audio1Filter"): 0x0400,
 }
-DEFAULT, READ = 0x007F, 0x8000
+DEFAULT, READ = 0x00FF, 0x8000
 # every change off: ESS's driver
 ESS = {key: "0" for key in KEYS}
 ESS.update({(DRV, "Audio2Oversampling"): "1", (DRV, "Audio2Filter"): "1",
@@ -59,7 +60,8 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         m = self.machine()
         names = ("OPT_API", "OPT_VFM", "OPT_TAKES_FM", "OPT_KEEPS_FM",
                  "OPT_FM_AUDIBLE", "OPT_DOS_MIXER", "OPT_RESET_FM",
-                 "OPT_A2_4X", "OPT_A2_FILTER", "OPT_A1_FILTER")
+                 "OPT_REC_TAKES", "OPT_A2_4X", "OPT_A2_FILTER",
+                 "OPT_A1_FILTER")
         self.assertEqual([m.syms[n] for n in names], list(KEYS.values()))
         self.assertEqual(m.syms["OPT_READ"], READ)
 
@@ -130,14 +132,15 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         m.start({})
         out, cf = m.api(VM_SYS, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0112)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x07FF)
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0113)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x0FFF)
         self.assertEqual(out["ECX"] & 0xFFFF, DEFAULT | READ)
         m = self.machine()
         m.start({(VXD, "VirtualFM"): "0", (VXD, "DosMixerRestore"): "0",
+                 (VXD, "RecordTakesDSP"): "0",
                  (DRV, "Audio2Filter"): "1", (DRV, "Audio1Filter"): "1"})
         out, cf = m.api(VM_SYS, 0x0400)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x07FF & ~0x0580)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x0FFF & ~0x0D80)
         self.assertEqual(out["ECX"] & 0xFFFF, 0x005D | 0x0600 | READ)
 
 

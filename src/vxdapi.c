@@ -255,6 +255,13 @@ int vxd_ext_mixer_block(u8 ESS_FAR *buf) {
   return vxd_call(ESSX_MIXER_BLOCK, &r);
 }
 
+int vxd_ext_take_dsp(void) {
+  vxd_regs r;
+
+  regs_init(&r);
+  return vxd_call(ESSX_TAKE_DSP, &r);
+}
+
 int vxd_ext_owners(struct vxd_owners *o) {
   vxd_regs r;
   int err;

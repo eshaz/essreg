@@ -268,7 +268,7 @@ driver in a folder of their own.
    restart Windows.
 2. Try Windows sounds, MIDI, a DirectSound game and a DOS game in a window.
    They all work as before.
-3. Start essctl. Its title bar says "VxD register API 1.12", and the owners
+3. Start essctl. Its title bar says "VxD register API 1.13", and the owners
    line at the bottom right shows who owns the DSP, FM and the MPU.
 4. While a DOS game plays, change *Audio 2 volume* or *Master volume* in
    essctl. The change applies at once, and the game keeps its sound. This is
@@ -317,7 +317,8 @@ Sound Blaster sound, and a second game that uses the Sound Blaster too.
    program ends.
 7. Start a recording in esfmrec and play the FM game. The recording has the
    game's music, because esfmrec keeps 7Fh bit 4 on, and the driver changes
-   only 7Fh bit 0 and 36h.
+   only 7Fh bit 0 and 36h. With the Sound Blaster game, start esfmrec while
+   the game runs, as in [section I](#i-esfmrec).
 8. Note anything that differs, and in which game.
 
 ### E3. The Audio 2 DAC
@@ -681,9 +682,19 @@ Copy `build\esfmrec.exe` to `C:\ESSREG`.
      doesn't change, because the samples are digital.
    * Open Sound Recorder and record. It says the device is in use.
 3. Play a DOS game with FM (AdLib) music in a window. Its music is recorded.
-4. Try a DOS game with Sound Blaster sound.
-   * Start the game and its sound, then start esfmrec. esfmrec says that a
-     DOS program is playing Sound Blaster sound.
+4. Try a DOS game with FM music and Sound Blaster sound in a window, with
+   the extended `ES1869.VXD` from section E.
+   * Start the game and its sound, then start esfmrec. The recording starts
+     and has the game's FM music. The game runs on, and its Sound Blaster
+     sound goes silent meanwhile.
+   * Stop esfmrec. The game's next sound effect plays. A sound that plays
+     all the time, such as the sound of an engine, stays silent until the
+     game stops it or you quit the game, which you should note.
+   * Do the same with the *ESS AudioDrive FM Digital* device of
+     `build\ES1869.DRV`, in Sound Recorder or another recording program. It
+     also records while the game has the Sound Blaster.
+   * With `RecordTakesDSP=0` in `[ES1869.VXD]`, or with ESS's VxD, esfmrec
+     says that a DOS program has the Sound Blaster until it ends.
    * Quit the game, start esfmrec, and then start the game. The game gets no
      digital sound, or a message that the device is in use, and its FM music
      is recorded.

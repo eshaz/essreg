@@ -5516,7 +5516,7 @@ L5_35ED:
         or al,0x12                                      ; 35FF
         mov ah,0x71                                     ; 3601
 %if ESSREG_EXT
-        call ESSREG_A2_Mode                     ; essreg: no 4x, no filter
+        call ESSREG_A2_Mode                     ; essreg: no 4x, no filters
 %else
         call L1_09A8                                    ; 3603
 %endif

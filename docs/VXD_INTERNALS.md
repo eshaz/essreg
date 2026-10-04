@@ -225,6 +225,78 @@ again in case the program reset the mixer: on Audio 1's channel the Audio 1
 filter's bypass, in either direction, and on Audio 2's channel the Audio 2
 mode ([AUDIO1.md](AUDIO1.md#the-filter-of-the-audio-1-codec)).
 
+### A recording takes the DSP
+
+A DOS program takes the DSP with its first access to a Sound Blaster port,
+which is usually its sound card detection, and its VM keeps the DSP until
+the program ends. ES1869.DRV's wave input needs the DSP too, because it
+records through Audio 1. So with ESS's driver, a DOS game that plays only FM
+music keeps every recording out, including the recordings of its own music.
+
+`RecordTakesDSP` lets a recording of the FM take the DSP from the game.
+ES1869.DRV's FM recording device and esfmrec call function 040D right before
+they open the wave input. When a DOS VM owns the DSP, `ESSREG_VSB_Start`
+reads what the VM's Audio 1 channel does (`VDMAD_Get_Virt_State`) and
+releases the DSP from the VM through ESS's `Release_Resources`, with the
+reset, the trapping and the mixer registers that a release brings. If the VM
+owns FM, it then gets the music DAC back, because ESS's release gives it to
+I2S. The VM gets a virtual Sound Blaster, and the recording opens as usual.
+A call from a DOS VM, and every call while `RecordTakesDSP=0`, fails with
+INUSE, and ES1869.DRV's open then refuses as before.
+
+The virtual Sound Blaster replaces ESS's `DSP_Port_Trap` for that VM
+(`ESSREG_DSP_Trap`), and every other VM still gets ESS's handler. It answers
+the way the chip does:
+* Writing 1 and then 0 to the reset port puts AAh in the read data.
+* It takes the DSP commands of the Sound Blaster and the Sound Blaster Pro:
+  the time constant (40h), the rate (41h, 42h), the block size (48h), the
+  single-cycle, auto-initialize and ADPCM transfers, pause, continue and
+  exit (D0h, D4h, DAh, D9h), the speaker (D1h, D3h, D8h), E0h, E4h, E8h and
+  F2h, which interrupts.
+* E1h and E7h return the chip's own version and identification, which the
+  VxD asks the chip for before the VM's first access.
+* In ESS's Extended mode (C6h, C7h), the controller registers A0h-BFh keep
+  what the program wrote and C0h reads them back. B8h bit 0 starts or stops
+  a transfer of the count in A4h/A5h, at the rate of A1h, for the channels
+  of A8h and the sample size of B7h.
+* The mixer registers 00h-3Fh start as the chip had them for the program,
+  keep what the program writes, and a write to 00h clears them. The chip
+  keeps Windows' mixer.
+* Audio_Base+Ch always takes a byte, and reading Audio_Base+Eh acknowledges
+  the interrupt.
+
+The transfers are silent but keep their timing. A block lasts as long as the
+chip would take for its bytes at the programmed rate, and a VMM global
+time-out (`Set_Global_Time_Out`) ends it, in units of 1/1024 ms so that the
+blocks don't drift. At the end of a block, the VM gets the audio interrupt
+through VPICD (`VPICD_Set_Int_Request`), unless an Extended mode transfer
+runs without B1h bit 6, and an auto-initialize transfer starts its next
+block. ESS's end-of-interrupt handler (o1:0734) would end a physical
+interrupt that the chip never raised, so `ESSREG_EOI` only clears the
+request for the virtual Sound Blaster's VM. A transfer that runs when the
+recording starts goes on as blocks of half its buffer at 21.7 kHz, because
+the reset clears the rate it set, until the program starts its next
+transfer.
+
+The program gets the real DSP back when it resets the DSP while nobody has
+it, or when Windows lets go of the DSP (0003, `ESSREG_VSB_Back`) while its
+virtual Sound Blaster is idle in Sound Blaster mode. The VxD then acquires
+the DSP for the VM, writes the program's stereo bit (mixer 0Eh) to the chip,
+and sends the speaker state, the time constant and the block size that the
+program set. The levels stay Windows', as after any DOS program.
+`ESSREG_DMA1` and `ESSREG_DMA2` kept the program's DMA programming off the
+chip meanwhile, so an event in the program's VM (`Schedule_VM_Event`), which
+runs before the program does, calls ESS's DMA handler for Audio 1's channel,
+as VDMAD does when a VM programs a channel. A program whose transfer still
+runs keeps the virtual Sound Blaster until it stops the transfer, resets the
+DSP or ends.
+
+A device has one virtual Sound Blaster at a time, so the next recording that
+takes the DSP from another program ends the first program's. The virtual
+Sound Blaster ends with its program, with its VM, with the device or with
+the VxD, and no time-out or event outlives it. The program's FM is not
+affected by any of this: it goes on to the chip, and so into the recording.
+
 ## Hardware volume
 
 The volume buttons change the master volume in the chip (mixer 60h/62h).
@@ -300,11 +372,14 @@ under `%if ESSREG_EXT` and each keeping its length:
 * the dispatcher's group bound (`cmp ah,4` becomes `cmp ah,5`), and the
   address of its group table, which now points to a copy with a fifth entry
   whose groups 0, 1 and 3 wrap 0002, 0003, 0102, 0103 and 0302
-* the ten FM trap handlers in PDAT, which are now `ESSREG_FM_Trap`
+* the ten FM trap handlers in PDAT, which are now `ESSREG_FM_Trap`, and the
+  26 DSP trap handlers, which are now `ESSREG_DSP_Trap`
+* the end-of-interrupt handler of the audio IRQ in PDAT (0368), which is now
+  `ESSREG_EOI`
 * the calls in `Acquire_Resources` and `Release_Resources` of the FM reset
   (o5:1229), `FM_Enable_Local_Trapping` (o5:10B1), `Save_DOS_Mixer`
   (o5:1279) and `Restore_DOS_Mixer` (o5:110B)
-* the size of the ADI (E9h becomes 110h, o4:0235) and of the per-VM node
+* the size of the ADI (E9h becomes 1A0h, o4:0235) and of the per-VM node
   (2Eh becomes 34h: o4:00AB, o5:100D, o7:0042)
 * the control dispatcher's jumps for VM_Not_Executeable,
   Sys_Dynamic_Device_Exit and Sys_Dynamic_Device_Init, which now reads the
@@ -366,7 +441,7 @@ it by hand:
    `ES1869VX.ORG` in the same directory, the name essinst uses too.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
 3. Restart Windows. essctl's *Device information* page now shows "Register
-   API: version 1.12".
+   API: version 1.13".
 
 If sound stops working, run `essinst /restore`. If Windows doesn't start,
 restart, press F8 at "Starting Windows 95", choose *Command prompt only*,

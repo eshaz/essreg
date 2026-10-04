@@ -89,12 +89,12 @@ class ExtensionTest(VxDBuilds, unittest.TestCase):
         m, _hw = self.emu()
         out, cf = self.api(m, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0112)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x07FF)
-        self.assertEqual(out["EDX"] & 0xFFFF, 13)
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0113)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x0FFF)
+        self.assertEqual(out["EDX"] & 0xFFFF, 14)
         out, cf = self.api(m, 0x0000)            # stock functions still work
         self.assertEqual((cf, out["EAX"] & 0xFFFF), (False, 0x0404))
-        _out, cf = self.api(m, 0x040D)           # past the end of group 4
+        _out, cf = self.api(m, 0x040E)           # past the end of group 4
         self.assertTrue(cf)
         _out, cf = self.api(m, 0x0500)           # no group 5
         self.assertTrue(cf)
@@ -347,12 +347,17 @@ HOOKS = [
     (5, 0x127A, 0x127D),    # Acquire_Resources, DSP: ESSREG_DSP_Save
     (5, 0x1362, 0x1362),    # the API's groups: 0-4
     (5, 0x136D, 0x1370),    # and their table
-    (5, 0x198D, 0x1990),    # a VM takes the DSP, 71h: ESSREG_A2_Acquire
+    (5, 0x198D, 0x1990),    # a VM takes the DSP, 71h: ESSREG_A2_Mode
     (5, 0x3604, 0x3607),    # the VxD's Audio 2 start, 71h: ESSREG_A2_Mode
     (7, 0x0043, 0x0043),    # the per-VM node's size
+    (6, 0x0368, 0x036B),    # the audio IRQ's EOI: ESSREG_EOI
 ] + [(6, off, off + 3) for off in (     # the FM ports' trap handler
     0x02D6, 0x02DC, 0x02E2, 0x02E8, 0x0306, 0x030C,
-    0x0338, 0x033E, 0x0344, 0x034A)]
+    0x0338, 0x033E, 0x0344, 0x034A)] + [
+    (6, off, off + 3) for off in (      # the DSP ports' trap handler
+        [0x0274 + 6 * i for i in range(16)] +
+        [0x02EE, 0x02F4, 0x02FA, 0x0300, 0x0312, 0x0318, 0x031E, 0x0324,
+         0x032A, 0x0330])]
 
 
 def image(le):

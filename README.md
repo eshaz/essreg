@@ -268,10 +268,15 @@ esfmrec is made for long sessions on Windows 98:
 
 Audio 1 is also the channel that Sound Blaster digital sound plays through,
 so a DOS game's Sound Blaster sound and a recording can't run at the same
-time, although the game's FM music records. While esfmrec records, the game
-gets no digital sound, and Windows may say that the device is in use. While
-the game plays digital sound, esfmrec can't start. Only one program can
-record at a time.
+time, although the game's FM music records. A DOS game takes the Sound
+Blaster with its first access, usually when it looks for the card, and keeps
+it until it ends. With the extended
+[`ES1869.VXD`](#es1869vxd-with-a-register-interface-and-better-dos-boxes),
+esfmrec takes it from the game, so a recording can start at any time. The
+game runs on with a silent Sound Blaster, and gets the real one back after
+the recording. With ESS's VxD, esfmrec can't start until the game ends.
+While esfmrec records, a game that starts gets no digital sound, and Windows
+may say that the device is in use. Only one program can record at a time.
 
 ```
 esfmrec [options] [file]
@@ -320,6 +325,11 @@ DOS game expects it
 * FM that a DOS game left behind is reset the next time Windows plays a
   sound or a level changes, so no note keeps sounding. After a DOS game,
   moving a slider in the tray's volume control resets the card.
+* A recording of the FM, by esfmrec or by the *ESS AudioDrive FM Digital*
+  device, can start while a DOS game has the Sound Blaster. The game goes on
+  with a virtual Sound Blaster, which answers as the chip does and keeps the
+  timing of the game's sound and its interrupts, but plays nothing. The
+  game's FM music goes on to the chip, and so into the recording.
 
 The Sound Blaster part and the MPU-401 still belong to one program at a
 time, as with ESS's driver. A DOS game that starts while Windows plays a

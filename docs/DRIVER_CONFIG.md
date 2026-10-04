@@ -667,6 +667,7 @@ DosKeepsFM=0
 DosFMAudible=0
 DosMixerRestore=0
 ResetDosFM=0
+RecordTakesDSP=0
 
 [ES1869.DRV]
 Audio1Device=0
@@ -684,9 +685,9 @@ changes. Each key below is followed by its default and by what the key does
 at 1, and the sentence that begins "With 0" says what happens at 0, as in
 ESS's driver:
 * **RegisterAPI** (default 1). The VxD offers the register API, functions
-  0400-040C ([VXD_API.md](VXD_API.md)), which essctl, `ess3d` and `esfmrec`
-  use. With 0, group 4 fails with CF set, and the programs go through the
-  ports as they do with ESS's driver
+  0400-040D ([VXD_API.md](VXD_API.md)), which essctl, `ess3d`, `esfmrec` and
+  ES1869.DRV's FM recording device use. With 0, group 4 fails with CF set,
+  and the programs go through the ports as they do with ESS's driver
   ([VXD_API.md](VXD_API.md#ownership-and-port-trapping)).
 * **VirtualFM** (default 1). A DOS program that can't have the FM chip gets
   a virtual one, so its FM detection succeeds. With 0, every FM read returns
@@ -705,6 +706,12 @@ ESS's driver:
 * **ResetDosFM** (default 1). Windows' next sound, level change or MIDI open
   resets what a DOS program left on the FM chip. With 0, notes that a DOS
   program left keep sounding.
+* **RecordTakesDSP** (default 1). A recording of the FM, through esfmrec or
+  ES1869.DRV's FM recording device, takes the DSP from a DOS program, which
+  goes on with a silent virtual Sound Blaster
+  ([VXD_INTERNALS.md](VXD_INTERNALS.md#a-recording-takes-the-dsp)). With 0,
+  a DOS program keeps the DSP from its first Sound Blaster access until it
+  ends, and the recording is refused until then.
 
 ### 6.2 [ES1869.DRV]
 

@@ -8,8 +8,12 @@ global D6_035C, D6_037C
 
 %if ESSREG_EXT
 %define FM_TRAP ESSREG_FM_Trap                 ; essreg: DOS FM
+%define DSP_TRAP ESSREG_DSP_Trap               ; essreg: the virtual Sound Blaster
+%define AUDIO_EOI ESSREG_EOI                   ; essreg: and its interrupts
 %else
 %define FM_TRAP FM_Port_Trap
+%define DSP_TRAP DSP_Port_Trap
+%define AUDIO_EOI L1_0734
 %endif
 
 ; 9 x {value name, "Config"} read at init
@@ -146,37 +150,37 @@ D6_0269:
         db 0x00, 0x00                                   ; 026E
 D6_0270:
         db 0x10, 0x00, 0x00, 0x00                       ; 0270
-        dd DSP_Port_Trap                                ; 0274
+        dd DSP_TRAP                                     ; 0274
         db 0x01, 0x00                                   ; 0278
-        dd DSP_Port_Trap                                ; 027A
+        dd DSP_TRAP                                     ; 027A
         db 0x02, 0x00                                   ; 027E
-        dd DSP_Port_Trap                                ; 0280
+        dd DSP_TRAP                                     ; 0280
         db 0x03, 0x00                                   ; 0284
-        dd DSP_Port_Trap                                ; 0286
+        dd DSP_TRAP                                     ; 0286
         db 0x04, 0x00                                   ; 028A
-        dd DSP_Port_Trap                                ; 028C
+        dd DSP_TRAP                                     ; 028C
         db 0x05, 0x00                                   ; 0290
-        dd DSP_Port_Trap                                ; 0292
+        dd DSP_TRAP                                     ; 0292
         db 0x06, 0x00                                   ; 0296
-        dd DSP_Port_Trap                                ; 0298
+        dd DSP_TRAP                                     ; 0298
         db 0x07, 0x00                                   ; 029C
-        dd DSP_Port_Trap                                ; 029E
+        dd DSP_TRAP                                     ; 029E
         db 0x08, 0x00                                   ; 02A2
-        dd DSP_Port_Trap                                ; 02A4
+        dd DSP_TRAP                                     ; 02A4
         db 0x09, 0x00                                   ; 02A8
-        dd DSP_Port_Trap                                ; 02AA
+        dd DSP_TRAP                                     ; 02AA
         db 0x0a, 0x00                                   ; 02AE
-        dd DSP_Port_Trap                                ; 02B0
+        dd DSP_TRAP                                     ; 02B0
         db 0x0b, 0x00                                   ; 02B4
-        dd DSP_Port_Trap                                ; 02B6
+        dd DSP_TRAP                                     ; 02B6
         db 0x0c, 0x00                                   ; 02BA
-        dd DSP_Port_Trap                                ; 02BC
+        dd DSP_TRAP                                     ; 02BC
         db 0x0d, 0x00                                   ; 02C0
-        dd DSP_Port_Trap                                ; 02C2
+        dd DSP_TRAP                                     ; 02C2
         db 0x0e, 0x00                                   ; 02C6
-        dd DSP_Port_Trap                                ; 02C8
+        dd DSP_TRAP                                     ; 02C8
         db 0x0f, 0x00                                   ; 02CC
-        dd DSP_Port_Trap                                ; 02CE
+        dd DSP_TRAP                                     ; 02CE
 D6_02D2:
         db 0x10, 0x00, 0x00, 0x00                       ; 02D2
         dd FM_TRAP                                      ; 02D6
@@ -187,29 +191,29 @@ D6_02D2:
         db 0x03, 0x00                                   ; 02E6
         dd FM_TRAP                                      ; 02E8
         db 0x04, 0x00                                   ; 02EC
-        dd DSP_Port_Trap                                ; 02EE
+        dd DSP_TRAP                                     ; 02EE
         db 0x05, 0x00                                   ; 02F2
-        dd DSP_Port_Trap                                ; 02F4
+        dd DSP_TRAP                                     ; 02F4
         db 0x06, 0x00                                   ; 02F8
-        dd DSP_Port_Trap                                ; 02FA
+        dd DSP_TRAP                                     ; 02FA
         db 0x07, 0x00                                   ; 02FE
-        dd DSP_Port_Trap                                ; 0300
+        dd DSP_TRAP                                     ; 0300
         db 0x08, 0x00                                   ; 0304
         dd FM_TRAP                                      ; 0306
         db 0x09, 0x00                                   ; 030A
         dd FM_TRAP                                      ; 030C
         db 0x0a, 0x00                                   ; 0310
-        dd DSP_Port_Trap                                ; 0312
+        dd DSP_TRAP                                     ; 0312
         db 0x0b, 0x00                                   ; 0316
-        dd DSP_Port_Trap                                ; 0318
+        dd DSP_TRAP                                     ; 0318
         db 0x0c, 0x00                                   ; 031C
-        dd DSP_Port_Trap                                ; 031E
+        dd DSP_TRAP                                     ; 031E
         db 0x0d, 0x00                                   ; 0322
-        dd DSP_Port_Trap                                ; 0324
+        dd DSP_TRAP                                     ; 0324
         db 0x0e, 0x00                                   ; 0328
-        dd DSP_Port_Trap                                ; 032A
+        dd DSP_TRAP                                     ; 032A
         db 0x0f, 0x00                                   ; 032E
-        dd DSP_Port_Trap                                ; 0330
+        dd DSP_TRAP                                     ; 0330
 D6_0334:
         db 0x04, 0x00, 0x00, 0x00                       ; 0334
         dd FM_TRAP                                      ; 0338
@@ -228,7 +232,7 @@ D6_035C:
         db 0x00, 0x00, 0x04, 0x00                       ; 035C
         dd D1_054C                                      ; 0360
         db 0x00, 0x00, 0x00, 0x00                       ; 0364
-        dd L1_0734                                      ; 0368
+        dd AUDIO_EOI                                    ; 0368
         dd L1_07C4                                      ; 036C
         db 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 ; 0370
 D6_037C:

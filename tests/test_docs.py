@@ -59,7 +59,7 @@ class DocsTest(unittest.TestCase):
                             r"\n\w+ equ|\n\w+:"))
         codes = {"%02X%02X" % (g, i)
                  for g, funcs in enumerate(groups) for i in range(len(funcs))}
-        self.assertEqual([len(g) for g in groups], [12, 4, 2, 4, 13])
+        self.assertEqual([len(g) for g in groups], [12, 4, 2, 4, 14])
 
         doc = open(os.path.join(ROOT, "docs", "VXD_API.md")).read()
         section = doc.split("## Functions", 1)[1].split("\n### ", 1)[0]

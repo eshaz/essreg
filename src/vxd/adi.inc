@@ -26,6 +26,8 @@ ADI_FMOwner             equ 0x3D    ; dword: VM handle that owns the FM synthesi
 ADI_FMLastOwner         equ 0x41
 ADI_MPUOwner            equ 0x45    ; dword: VM handle that owns the MPU-401
 ADI_MPULastOwner        equ 0x49
+ADI_IRQHandle           equ 0x31    ; dword: VPICD handle of the audio IRQ
+ADI_DMA1Handle          equ 0x4D    ; dword: VDMAD handle of Audio 1's channel
 ADI_DevNode             equ 0x55    ; dword: CONFIGMG devnode
 ADI_DMA2Handle          equ 0x7A    ; dword: VDMAD handle of Audio 2's channel
 

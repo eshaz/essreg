@@ -20,6 +20,13 @@
 ; DC drift removal (DEV_FLAGS bit 0) is off from the open to the close,
 ; since it would take the first block's average off every sample.
 ;
+; A DOS program that took the DSP with its first Sound Blaster access
+; would keep the recording out until it ends.  So the open first asks the
+; extended ES1869.VXD to take the DSP from it (040D, RecordTakesDSP): the
+; program goes on with a virtual Sound Blaster, and its FM records.  ESS's
+; VxD answers with the carry set, and ESS's open then finds the DSP busy,
+; as before.
+;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
 ; Licensed under GPL Version 3.0
@@ -167,6 +174,7 @@ es_wid_message:
         mov     ax,MMSYSERR_ALLOCATED
         test    byte [si+FM_STATE],FMF_OPEN
         jnz     .ret
+        call    fm_take_dsp
         call    fm_open
 .ret:   xor     dx,dx
 .done:  pop     di
@@ -187,6 +195,16 @@ fm_ess:
         push    word [bp+6]
         push    cs
         call    L6_0FF2
+        ret
+
+; VxD function 040D: a DOS program gives up the DSP for the recording;
+; its answer doesn't matter, ESS's open finds out; SI = dev
+fm_take_dsp:
+        push    si
+        mov     ecx,[si+DEV_DEVNODE]
+        mov     dx,040Dh
+        call    far [0x10]              ; ES1869.VXD's entry point
+        pop     si
         ret
 
 ; fm_route(dev, CL); SI = dev

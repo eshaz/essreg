@@ -61,8 +61,12 @@ INT_RDTSC = 0x99           # rdtsc is patched to this interrupt
 SVC_GET_CUR_VM = 0x00010001
 SVC_GET_SYS_VM = 0x00010003
 SVC_TEST_SYS_VM = 0x00010004
+SVC_SCHEDULE_VM_EVENT = 0x0001000F
+SVC_CANCEL_VM_EVENT = 0x00010013
 SVC_MAP_FLAT = 0x0001001C
 SVC_GET_NEXT_VM = 0x0001003B
+SVC_SET_GLOBAL_TIME_OUT = 0x0001003C
+SVC_CANCEL_TIME_OUT = 0x0001003E
 SVC_GET_SYSTEM_TIME = 0x0001003F
 SVC_HEAP_ALLOCATE = 0x0001004F
 SVC_HEAP_FREE = 0x00010051
@@ -80,8 +84,11 @@ SVC_SHELL_MESSAGE = 0x00170004
 SVC_VDMAD_GET_PHYS_COUNT = 0x0004001C
 SVC_VDMAD_GET_VIRT_STATE = 0x00040004
 SVC_VDMAD_DEFAULT_HANDLER = 0x00040012
+SVC_VPICD_SET_INT = 0x00030002
+SVC_VPICD_CLEAR_INT = 0x00030003
+SVC_VPICD_PHYS_EOI = 0x00030004
 NOOP_SERVICES = {
-    0x00030002, 0x00030003, 0x00030004, 0x00030008, 0x00030009,  # VPICD
+    0x00030008, 0x00030009,                                      # VPICD
     0x00040013, 0x00040014,                                      # VDMAD
     0x0017000E,                         # SHELL_CallAtAppyTime
 }
@@ -325,6 +332,10 @@ class FakeES1869:
             self.ext_mode = True
         elif v == 0xC7:
             self.ext_mode = False
+        elif v == 0xE7:
+            self.out += [0x68, 0x89]        # ESS, ES1869
+        elif v == 0xE1:
+            self.out += [0x03, 0x01]
         elif v == 0xC0 or 0xA0 <= v <= 0xBF:
             self.pending.append(v)
 
@@ -372,6 +383,11 @@ class VxDEmu:
         # not set, and the calls passed on to VDMAD_Default_Handler
         self.virt_mode = {}
         self.dma_default = []           # (DMA handle, VM)
+        self.timeouts = {}              # handle: (due ms, callback, data)
+        self.next_timeout = 1
+        self.vm_events = {}             # handle: (VM, callback, data)
+        self.next_event = 1
+        self.vpicd = []                 # ("set"/"clear"/"eoi", IRQ, VM)
         self.has_tsc = True
         # SYSTEM.INI: {(section, key): value}, as VMM finds it while
         # Windows starts (VMM_GetSystemInitState below 40000000h)
@@ -510,6 +526,30 @@ class VxDEmu:
             uc.reg_write(UC_X86_REG_EBX, VMS[(VMS.index(ebx) + 1) % len(VMS)])
         elif svc == SVC_GET_SYSTEM_TIME:
             uc.reg_write(UC_X86_REG_EAX, self.clock.us // 1000)
+        elif svc == SVC_SET_GLOBAL_TIME_OUT:
+            handle = self.next_timeout
+            self.next_timeout += 1
+            self.timeouts[handle] = (
+                self.clock.us // 1000 + uc.reg_read(UC_X86_REG_EAX),
+                uc.reg_read(UC_X86_REG_ESI), uc.reg_read(UC_X86_REG_EDX))
+            uc.reg_write(UC_X86_REG_ESI, handle)
+        elif svc == SVC_CANCEL_TIME_OUT:
+            self.timeouts.pop(uc.reg_read(UC_X86_REG_ESI), None)
+        elif svc == SVC_SCHEDULE_VM_EVENT:
+            handle = 0x4000 + self.next_event
+            self.next_event += 1
+            self.vm_events[handle] = (ebx, uc.reg_read(UC_X86_REG_ESI),
+                                      uc.reg_read(UC_X86_REG_EDX))
+            uc.reg_write(UC_X86_REG_ESI, handle)
+        elif svc == SVC_CANCEL_VM_EVENT:
+            event = self.vm_events.pop(uc.reg_read(UC_X86_REG_ESI), None)
+            if event is not None and event[0] != ebx:
+                raise RuntimeError("Cancel_VM_Event for another VM")
+        elif svc in (SVC_VPICD_SET_INT, SVC_VPICD_CLEAR_INT,
+                     SVC_VPICD_PHYS_EOI):
+            what = {SVC_VPICD_SET_INT: "set", SVC_VPICD_CLEAR_INT: "clear",
+                    SVC_VPICD_PHYS_EOI: "eoi"}[svc]
+            self.vpicd.append((what, uc.reg_read(UC_X86_REG_EAX), ebx))
         elif svc == SVC_GET_SYSTEM_INIT_STATE:
             uc.reg_write(UC_X86_REG_EAX, self.init_state)
             uc.reg_write(UC_X86_REG_ECX, 0)
@@ -705,8 +745,19 @@ class Machine:
                                                               0x30))
 
     # -- what the VMs do --
+    def run_events(self, vm):
+        """the VM runs again: VMM first calls the events scheduled for it,
+        in order"""
+        e = self.emu
+        for handle in sorted(h for h, ev in e.vm_events.items()
+                             if ev[0] == vm):
+            _vm, callback, data = e.vm_events.pop(handle)
+            e.current_vm = vm
+            e.run(callback, {"EBX": vm, "EDX": data, "EBP": CLIENT})
+
     def io(self, vm, port, value=None):
         """a byte IN (value None) or OUT by a VM"""
+        self.run_events(vm)
         self.hw.clock.advance(1)
         if (vm, port) in self.emu.trap_off:
             if value is None:
@@ -743,6 +794,7 @@ class Machine:
         VDMAD_Get_Virt_State gives it (01h masked, 08h from memory, 04h to
         memory)"""
         e = self.emu
+        self.run_events(vm)
         handle = DMA1 if channel == 1 else DMA2
         e.write32(ADI + ADI_DMA1, DMA1)
         e.write32(ADI + ADI_DMA2, DMA2)
@@ -756,6 +808,31 @@ class Machine:
         client.update(regs)
         out = self.emu.call(self.syms["AUDDRV_API_Proc"], client, vm)
         return out, bool(out["EFlags"] & 1)
+
+    def advance(self, ms):
+        """ms of time pass: the time-outs that come due run, in order"""
+        e = self.emu
+        end = self.hw.clock.us + ms * 1000
+        while True:
+            due = sorted((t[0], h) for h, t in e.timeouts.items()
+                         if t[0] <= end // 1000)
+            if not due:
+                break
+            when, handle = due[0]
+            _w, callback, data = e.timeouts.pop(handle)
+            if when * 1000 > self.hw.clock.us:
+                self.hw.clock.us = when * 1000
+            e.current_vm = VM_SYS
+            e.run(callback, {"EDX": data, "EBX": VM_SYS,
+                             "ECX": self.hw.clock.us // 1000 - when})
+        self.hw.clock.us = max(self.hw.clock.us, end)
+
+    def eoi(self, vm):
+        """the VM ends the audio IRQ at its virtual PIC: VPICD calls the
+        IRQ's VID_EOI_Proc"""
+        self.emu.current_vm = vm
+        proc = self.emu.read32(self.syms["D6_035C"] + 0x0C)
+        self.emu.run(proc, {"EAX": 0x7001, "EBX": vm})
 
     def program_end(self, vm):
         """DOSMGR_End_V86_App: a program in the VM ended"""

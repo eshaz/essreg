@@ -72,6 +72,7 @@ int VXD_CALL vxd_raw_call(void ESS_FAR *entry, vxd_regs ESS_FAR *r);
 #define VXD_F_DOS_MIXER 0x0100 // Windows' mixer back (DosMixerRestore=1)
 #define VXD_F_SETTINGS 0x0200  // CX holds the settings (version 1.11)
 #define VXD_F_DOS_A1 0x0400    // Audio 1's filter bypassed (1.12)
+#define VXD_F_REC_DSP 0x0800   // a recording takes the DSP (1.13)
 
 // the SYSTEM.INI settings the VxD runs with (0400, CX), 1 = on
 #define VXD_S_API 0x0001        // [ES1869.VXD] RegisterAPI
@@ -81,6 +82,7 @@ int VXD_CALL vxd_raw_call(void ESS_FAR *entry, vxd_regs ESS_FAR *r);
 #define VXD_S_FM_AUDIBLE 0x0010 // DosFMAudible
 #define VXD_S_DOS_MIXER 0x0020  // DosMixerRestore
 #define VXD_S_RESET_FM 0x0040   // ResetDosFM
+#define VXD_S_REC_TAKES 0x0080  // RecordTakesDSP (version 1.13)
 #define VXD_S_A2_4X 0x0100      // [ES1869.DRV] Audio2Oversampling
 #define VXD_S_A2_FILTER 0x0200  // Audio2Filter
 #define VXD_S_A1_FILTER 0x0400  // Audio1Filter (version 1.12)
@@ -154,5 +156,8 @@ void vxd_dsp_end(void);
 int vxd_ext_call(u16 fn, u8 bl, u8 bh, u8 al, u8 *result);
 int vxd_ext_mixer_block(u8 ESS_FAR *buf); // 040B, 128 bytes
 int vxd_ext_owners(struct vxd_owners *o); // 040C
+// 040D, before a recording: a DOS box that has the DSP gives it up and
+// goes on with a virtual Sound Blaster; ESSHW_EINUSE if it keeps it
+int vxd_ext_take_dsp(void);
 
 #endif /* VXDAPI_H */

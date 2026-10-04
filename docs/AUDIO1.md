@@ -344,6 +344,15 @@ records, the driver does three more things:
   because it would subtract the first block's average from every sample, and
   it puts the setting back when the device closes.
 
+A DOS program takes the DSP, and so Audio 1, with its first Sound Blaster
+access, and keeps it until it ends. So before ESS's open, the device asks
+the extended ES1869.VXD to take the DSP from such a program (function 040D,
+`RecordTakesDSP`), and the program goes on with a silent virtual Sound
+Blaster while its FM music records
+([VXD_INTERNALS.md](VXD_INTERNALS.md#a-recording-takes-the-dsp)). ESS's VxD
+doesn't have the function, and ESS's open then refuses with
+`MMSYSERR_ALLOCATED`, as before.
+
 An APM resume resets the mixer, so the driver sets 7Fh again once ESS's
 recording has resumed, and the last disable puts 7Fh back as the recording
 found it. The code is in

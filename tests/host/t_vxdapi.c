@@ -55,7 +55,7 @@ static void fake_reset(int ext) {
   memset(&fake, 0, sizeof(fake));
   fake.present = 1;
   fake.ext = ext;
-  put32(fake.adi, 0x12345678);             // overwritten size field
+  put32(fake.adi, 0x12345678); // overwritten size field
   fake.adi[ADI_AUDIO_BASE] = 0x20;
   fake.adi[ADI_AUDIO_BASE + 1] = 0x02;
   put32(fake.adi + ADI_DEVNODE, DEVNODE);
@@ -113,6 +113,14 @@ int vxd_raw_call(void *entry, vxd_regs *r) {
       r->eax = 0x0201; // DSP: caller's VM, FM: another VM
       r->ebx = 0x8000; // MPU: none, status 80h
       r->edx = ADI_F_MPU_SHARED;
+      return 0;
+    case 0x040D: // a DOS box gives up the DSP, unless the fake says no
+      owner = get32(fake.adi + ADI_DSP_OWNER);
+      if (owner && owner != SYS_VM) {
+        if (fake.ext == 2)
+          return fail(r, 2);
+        put32(fake.adi + ADI_DSP_OWNER, 0);
+      }
       return 0;
     }
     return 0;
@@ -244,6 +252,11 @@ static void test_open_ext(void) {
   CHECK_EQ(o.fm, VXD_OWNER_OTHER);
   CHECK_EQ(o.mpu, VXD_OWNER_NONE);
   CHECK_EQ(o.status, 0x80);
+  // a recording takes a DOS box's DSP, and the DSP is then Windows'
+  put32(fake.adi + ADI_DSP_OWNER, 0x0C002000UL);
+  CHECK_EQ(vxd_ext_take_dsp(), 0);
+  CHECK_EQ(get32(fake.adi + ADI_DSP_OWNER), 0);
+  CHECK_EQ(fake.last_bl, 0);
   // group 4 calls never acquire anything
   CHECK_EQ(count_calls(0x0002), 0);
   CHECK_EQ(count_calls(0x0003), 0);
@@ -265,6 +278,10 @@ static void test_open_settings(void) {
   CHECK(!(vxd.ext_settings & VXD_S_VIRTUAL_FM));
   CHECK(!(vxd.ext_settings & VXD_S_DOS_MIXER));
   CHECK(!(vxd.ext_settings & VXD_S_A2_4X));
+  // with RecordTakesDSP=0, a DOS box keeps the DSP
+  put32(fake.adi + ADI_DSP_OWNER, DOS_VM);
+  CHECK_EQ(vxd_ext_take_dsp(), ESSHW_EINUSE);
+  CHECK_EQ(get32(fake.adi + ADI_DSP_OWNER), DOS_VM);
   // the stock driver: nothing
   fake_reset(0);
   CHECK_EQ(vxd_open(), 0);
@@ -321,9 +338,8 @@ static void test_dsp_bracket(void) {
 // run after all other tests: no wrapper ever called a function with lasting
 // side effects on the driver
 static void test_never_called(void) {
-  static const u16 forbidden[] = {0x0006, 0x0007, 0x0009, 0x000B,
-                                  0x0200, 0x0201, 0x0102, 0x0103,
-                                  0x0302, 0x0303};
+  static const u16 forbidden[] = {0x0006, 0x0007, 0x0009, 0x000B, 0x0200,
+                                  0x0201, 0x0102, 0x0103, 0x0302, 0x0303};
   unsigned i;
   int j, n;
 

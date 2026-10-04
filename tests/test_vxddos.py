@@ -551,5 +551,356 @@ class DosDacTest(VxDBuilds, unittest.TestCase):
                 self.assertEqual(m.emu.services.count(0x00040004), 0)
 
 
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class RecordingTakesDSPTest(VxDBuilds, unittest.TestCase):
+    """A recording in Windows takes the DSP from a DOS program (040D), which
+    goes on with a virtual Sound Blaster: it answers as the chip does and
+    times its transfers and interrupts without sound, while the chip, its
+    channel and the physical interrupt are the recording's (ESSREG_VSB_*)"""
+
+    def game(self, ext=True, ini=None):
+        """a DOS game that found the Sound Blaster and plays FM"""
+        m = self.machine(ext)
+        if ini is not None:
+            m.start(ini)
+        m.outb(VM_DOS, 0x226, 1)
+        m.outb(VM_DOS, 0x226, 0)
+        self.assertEqual(m.inb(VM_DOS, 0x22A), 0xAA)
+        self.assertTrue(adlib(m, VM_DOS))
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), VM_DOS)
+        self.assertEqual(m.adi32(ADI_FM_OWNER), VM_DOS)
+        return m
+
+    def take(self, m, vm=VM_SYS):
+        out, cf = m.api(vm, 0x040D)
+        self.mark = len(m.emu.vpicd)    # ESS's release clears its request
+        return (cf, out["EAX"] & 0xFFFF) if cf else (cf, 0)
+
+    def vsb(self, m):
+        return m.adi32(m.syms["EX_VSB_VM"])
+
+    def cmd(self, m, *data):
+        for b in data:
+            m.outb(VM_DOS, 0x22C, b)
+
+    def read(self, m):
+        self.assertTrue(m.inb(VM_DOS, 0x22E) & 0x80)
+        return m.inb(VM_DOS, 0x22A)
+
+    def events(self, m, what="set"):
+        """the audio IRQ's VPICD calls since the take"""
+        return [vm for w, irq, vm in m.emu.vpicd[self.mark:]
+                if w == what and irq == 0x7001]
+
+    def test_the_recording_starts(self):
+        m = self.game()
+        _out, cf = m.api(VM_SYS, 0x0002, EBX=1, EAX=WIN_AUDIO)
+        self.assertTrue(cf)                     # as ESS's driver refuses it
+        self.assertEqual(self.take(m), (False, 0))
+        self.assertEqual(self.vsb(m), VM_DOS)
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), 0)
+        _out, cf = m.api(VM_SYS, 0x0002, EBX=1, EAX=WIN_AUDIO)
+        self.assertFalse(cf)
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), VM_SYS)
+        # the game's FM goes on to the chip, to be recorded
+        note(m, VM_DOS)
+        self.assertTrue(m.hw.fm.key_on(0, 0))
+        self.assertEqual(m.adi32(ADI_FM_OWNER), VM_DOS)
+
+    def test_settings_and_callers(self):
+        m = self.game(ini={("ES1869.VXD", "RecordTakesDSP"): "0"})
+        self.assertEqual(self.take(m), (True, 2))
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), VM_DOS)
+        self.assertEqual(self.vsb(m), 0)
+        m = self.game()
+        self.assertEqual(self.take(m, VM_DOS2), (True, 2))   # Windows only
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), VM_DOS)
+        # nothing to take: free, or Windows' already
+        m = self.machine()
+        self.assertEqual(self.take(m), (False, 0))
+        m.api(VM_SYS, 0x0002, EBX=1, EAX=WIN_AUDIO)
+        self.assertEqual(self.take(m), (False, 0))
+        self.assertEqual(self.vsb(m), 0)
+        _out, cf = self.machine(False).api(VM_SYS, 0x040D)
+        self.assertTrue(cf)                     # ESS's driver hasn't 040D
+
+    def test_answers_as_the_chip(self):
+        m = self.game()
+        self.take(m)
+        m.api(VM_SYS, 0x0002, EBX=1, EAX=WIN_AUDIO)
+        n = len(m.hw.log)
+        m.outb(VM_DOS, 0x226, 1)
+        m.outb(VM_DOS, 0x226, 0)
+        self.assertEqual(self.read(m), 0xAA)
+        self.cmd(m, 0xE1)
+        self.assertEqual((self.read(m), self.read(m)), (0x03, 0x01))
+        self.cmd(m, 0xE7)                       # the chip's own answer
+        self.assertEqual((self.read(m), self.read(m)), (0x68, 0x89))
+        self.cmd(m, 0xE0, 0x5A)
+        self.assertEqual(self.read(m), 0xA5)
+        self.cmd(m, 0xE4, 0x3C, 0xE8)
+        self.assertEqual(self.read(m), 0x3C)
+        self.cmd(m, 0xD1, 0xD8)
+        self.assertEqual(self.read(m), 0xFF)
+        self.cmd(m, 0xD3, 0xD8)
+        self.assertEqual(self.read(m), 0x00)
+        self.cmd(m, 0x20)
+        self.assertEqual(self.read(m), 0x80)
+        self.assertEqual(m.inb(VM_DOS, 0x22C) & 0x80, 0)    # ready
+        self.assertFalse(m.inb(VM_DOS, 0x22E) & 0x80)
+        self.cmd(m, 0xC6, 0xA1, 0xF0, 0xC0, 0xA1)            # Extended mode
+        self.assertEqual(self.read(m), 0xF0)
+        # its mixer is its own: a reset of it leaves Windows' alone
+        mixer = list(m.hw.mixer)
+        m.outb(VM_DOS, 0x224, 0x22)
+        m.outb(VM_DOS, 0x225, 0xEE)
+        self.assertEqual(m.inb(VM_DOS, 0x225), 0xEE)
+        m.outb(VM_DOS, 0x224, 0x00)
+        m.outb(VM_DOS, 0x225, 0x00)
+        m.outb(VM_DOS, 0x224, 0x22)
+        self.assertEqual(m.inb(VM_DOS, 0x225), 0x00)
+        self.assertEqual(m.hw.mixer, mixer)
+        # and the chip saw none of it
+        self.assertEqual(m.hw.log[n:], [])
+        self.assertEqual(m.emu.messages, [])
+
+    def test_a_transfer_interrupts_when_it_would_end(self):
+        m = self.game()
+        self.take(m)
+        self.cmd(m, 0x40, 0xD2)                 # 1000000 / 46: 21739 B/s
+        n = 2174                                # 100 ms
+        self.cmd(m, 0x14, (n - 1) & 0xFF, (n - 1) >> 8)
+        m.advance(99)
+        self.assertEqual(self.events(m), [])
+        m.advance(2)
+        self.assertEqual(self.events(m), [VM_DOS])
+        m.inb(VM_DOS, 0x22E)                    # the handler acknowledges
+        self.assertEqual(self.events(m, "clear"), [VM_DOS])
+        m.eoi(VM_DOS)                           # and ends it: no physical EOI
+        self.assertEqual(self.events(m, "eoi"), [])
+        m.advance(500)
+        self.assertEqual(self.events(m), [VM_DOS])          # once
+        # Windows' interrupts still end physically
+        m.eoi(VM_SYS)
+        self.assertEqual(self.events(m, "eoi"), [VM_SYS])
+
+    def test_auto_initialize_pause_and_stop(self):
+        m = self.game()
+        self.take(m)
+        self.cmd(m, 0x40, 0xD2, 0x48, 0xFF, 0x03, 0x1C)     # 1024 B: 47.1 ms
+        m.advance(200)
+        self.assertEqual(len(self.events(m)), 4)
+        self.cmd(m, 0xD0)                       # paused 47.1 * 5 - 200 short
+        self.assertEqual(m.emu.timeouts, {})
+        m.advance(1000)
+        self.assertEqual(len(self.events(m)), 4)
+        self.cmd(m, 0xD4)
+        m.advance(37)
+        self.assertEqual(len(self.events(m)), 5)
+        self.cmd(m, 0xDA)                       # the block that runs, then no more
+        m.advance(48)
+        self.assertEqual(len(self.events(m)), 6)
+        m.advance(1000)
+        self.assertEqual(len(self.events(m)), 6)
+        self.assertEqual(m.emu.timeouts, {})
+
+    def test_extended_mode_transfer(self):
+        m = self.game()
+        self.take(m)
+        # 795500 / 16 = 49718 Hz, stereo, 16-bit: 198872 B/s; 19887 B is
+        # 100 ms, as a two's complement count
+        count = 0x10000 - 19887
+        self.cmd(m, 0xC6, 0xA1, 0xF0, 0xA8, 0x01, 0xB7, 0x04,
+                 0xA4, count & 0xFF, 0xA5, count >> 8, 0xB1, 0x50,
+                 0xB8, 0x05)                    # DMA on, auto-initialize
+        m.advance(305)
+        self.assertEqual(len(self.events(m)), 3)
+        self.cmd(m, 0xB8, 0x00)
+        m.advance(500)
+        self.assertEqual(len(self.events(m)), 3)
+        # without B1h bit 6, no interrupt
+        self.cmd(m, 0xB1, 0x10, 0xB8, 0x01)
+        m.advance(500)
+        self.assertEqual(len(self.events(m)), 3)
+
+    def test_the_channel_stays_the_recordings(self):
+        m = self.game()
+        self.take(m)
+        m.dma(VM_DOS, 1, 0x58)                  # the game's transfer
+        self.assertEqual(m.emu.dma_default, [])
+        m.dma(VM_SYS, 1, 0x54)                  # the recording's
+        self.assertEqual(m.emu.dma_default, [(DMA1, VM_SYS)])
+
+    def test_a_running_transfer_goes_on(self):
+        m = self.game()
+        m.emu.write32(ADI + 0x4D, DMA1)
+        m.emu.virt_mode[DMA1] = 0x58            # unmasked: it plays
+        self.take(m)
+        m.advance(100)                          # 2048 B at 21739 B/s: 94 ms
+        self.assertEqual(self.events(m), [VM_DOS])
+
+    def test_the_real_dsp_back_once_windows_lets_go(self):
+        m = self.game()
+        self.take(m)
+        m.api(VM_SYS, 0x0002, EBX=1, EAX=WIN_AUDIO)         # the recording
+        self.cmd(m, 0xD1, 0x40, 0xA5, 0x48, 0x34, 0x12)
+        n = len(m.hw.log)
+        m.api(VM_SYS, 0x0003, EBX=1, EAX=WIN_AUDIO)         # ends
+        self.assertEqual(self.vsb(m), 0)
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), VM_DOS)
+        self.assertIn((VM_DOS, 0x22C), m.emu.trap_off)      # its ports again
+        dsp = [v for op, p, v in m.hw.log[n:] if op == "out" and p == 0x22C]
+        self.assertEqual(dsp[-6:], [0xD1, 0x40, 0xA5, 0x48, 0x34, 0x12])
+
+    def test_or_at_its_reset_once_it_plays_no_more(self):
+        m = self.game()
+        self.take(m)
+        m.api(VM_SYS, 0x0002, EBX=1, EAX=WIN_AUDIO)
+        self.cmd(m, 0x48, 0xFF, 0x07, 0x1C)     # auto-initialize runs
+        m.outb(VM_DOS, 0x226, 1)                # a reset while Windows has
+        m.outb(VM_DOS, 0x226, 0)                # the DSP: the virtual one
+        self.assertEqual(self.read(m), 0xAA)
+        self.assertEqual(self.vsb(m), VM_DOS)
+        self.cmd(m, 0x1C)
+        m.api(VM_SYS, 0x0003, EBX=1, EAX=WIN_AUDIO)
+        self.assertEqual(self.vsb(m), VM_DOS)   # it plays: still virtual
+        m.outb(VM_DOS, 0x226, 1)
+        m.outb(VM_DOS, 0x226, 0)
+        self.assertEqual(self.vsb(m), 0)
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), VM_DOS)
+        self.assertEqual(m.emu.timeouts, {})
+        self.assertEqual(m.inb(VM_DOS, 0x22A), 0xAA)        # the chip's
+
+    def test_ends_with_the_program_or_the_vm(self):
+        for end in ("program", "vm"):
+            with self.subTest(end=end):
+                m = self.game()
+                self.take(m)
+                self.cmd(m, 0x48, 0xFF, 0x07, 0x1C)
+                m.advance(100)
+                self.assertTrue(m.emu.timeouts)
+                if end == "program":
+                    m.program_end(VM_DOS)
+                else:
+                    m.vm_close(VM_DOS)
+                self.assertEqual(self.vsb(m), 0)
+                self.assertEqual(m.emu.timeouts, {})
+                self.assertIn(VM_DOS, self.events(m, "clear"))
+
+    def test_fm_keeps_the_music_dac_while_recorded(self):
+        # FM first, so the game gives FM the music DAC (7Fh bit 0 clear),
+        # then the Sound Blaster; the recording sets bit 4, and at the
+        # game's end I2S doesn't get the DAC back while it records
+        for recording in (False, True):
+            with self.subTest(recording=recording):
+                m = self.machine()
+                self.assertTrue(adlib(m, VM_DOS))
+                m.outb(VM_DOS, 0x226, 1)
+                m.outb(VM_DOS, 0x226, 0)
+                self.take(m)
+                self.assertEqual(m.hw.mixer[0x7F] & 1, 0)   # the game's FM
+                m.api(VM_SYS, 0x0002, EBX=1, EAX=WIN_AUDIO)
+                if recording:
+                    m.hw.mixer[0x7F] |= 0x10
+                m.program_end(VM_DOS)
+                self.assertEqual(m.hw.mixer[0x7F] & 1, 0 if recording else 1)
+
+    def test_its_channel_follows_once_it_is_back(self):
+        # the game programs its channel while the recording has it: none of
+        # it reaches the chip until the game has the DSP back, and then an
+        # event in its VM gives the channel to VDMAD before the game runs on
+        m = self.game()
+        self.take(m)
+        m.api(VM_SYS, 0x0002, EBX=1, EAX=WIN_AUDIO)
+        m.dma(VM_DOS, 1, 0x58)                  # auto-initialize, unmasked
+        m.dma(VM_DOS, 2, 0x58)                  # and Audio 2's: Windows'
+        self.assertEqual(m.emu.dma_default, [])
+        m.api(VM_SYS, 0x0003, EBX=1, EAX=WIN_AUDIO)
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), VM_DOS)
+        self.assertEqual([ev[0] for ev in m.emu.vm_events.values()],
+                         [VM_DOS])
+        self.assertEqual(m.emu.dma_default, [])
+        m.inb(VM_DOS, 0x22E)                    # the game runs on
+        self.assertEqual(m.emu.dma_default, [(DMA1, VM_DOS)])
+        self.assertEqual(m.emu.vm_events, {})
+        self.assertEqual(m.adi32(m.syms["EX_VSB_Event"]), 0)
+
+    def test_or_once_it_resets_the_dsp(self):
+        m = self.game()
+        self.take(m)
+        m.dma(VM_DOS, 1, 0x58)
+        m.outb(VM_DOS, 0x226, 1)                # nobody has the DSP: the
+        m.outb(VM_DOS, 0x226, 0)                # real one, with its channel
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), VM_DOS)
+        self.assertEqual(m.inb(VM_DOS, 0x22A), 0xAA)
+        self.assertEqual(m.emu.dma_default, [(DMA1, VM_DOS)])
+
+    def test_no_channel_once_windows_took_the_dsp_again(self):
+        m = self.game()
+        self.take(m)
+        m.dma(VM_DOS, 1, 0x58)
+        m.api(VM_SYS, 0x0003, EBX=1, EAX=WIN_AUDIO)  # back to the game
+        self.take(m)                            # and the next recording
+        self.assertEqual(m.emu.vm_events, {})   # cancelled
+        m.api(VM_SYS, 0x0002, EBX=1, EAX=WIN_AUDIO)
+        m.inb(VM_DOS, 0x22E)
+        self.assertEqual(m.emu.dma_default, [])
+
+    def test_the_stereo_bit_comes_back(self):
+        # the game's mixer as the chip had it: read back from the virtual
+        # Sound Blaster, and its stereo bit on the chip again with the DSP;
+        # the levels are Windows' meanwhile and after
+        m = self.game()
+        for reg, value in ((0x0E, 0x02), (0x22, 0xEE)):
+            m.outb(VM_DOS, 0x224, reg)
+            m.outb(VM_DOS, 0x225, value)
+        self.take(m)
+        self.assertEqual(m.hw.mixer[0x0E], 0x00)    # Windows' mixer back
+        m.outb(VM_DOS, 0x224, 0x0E)
+        self.assertEqual(m.inb(VM_DOS, 0x225), 0x02)
+        m.api(VM_SYS, 0x0003, EBX=1, EAX=WIN_AUDIO)
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), VM_DOS)
+        self.assertEqual(m.hw.mixer[0x0E], 0x02)
+        m.program_end(VM_DOS)
+        self.assertEqual(m.hw.mixer[0x0E], 0x00)
+
+    def test_removing_the_device_ends_it(self):
+        # no time-out or event may outlive the ADI
+        for back in (False, True):
+            with self.subTest(back=back):
+                m = self.game()
+                self.take(m)
+                self.cmd(m, 0x48, 0xFF, 0x07, 0x1C)
+                if back:
+                    self.cmd(m, 0xDA)
+                    m.advance(200)
+                    m.inb(VM_DOS, 0x22E)        # the last block's interrupt
+                    m.api(VM_SYS, 0x0003, EBX=1, EAX=WIN_AUDIO)
+                    self.assertTrue(m.emu.vm_events)
+                else:
+                    self.assertTrue(m.emu.timeouts)
+                for vm in (VM_SYS, VM_DOS, VM_DOS2):
+                    m.emu.run(m.syms["ESSREG_Node_Remove"],
+                              {"EBX": vm, "EDI": ADI})
+                self.assertEqual(self.vsb(m), 0)
+                self.assertEqual(m.emu.timeouts, {})
+                self.assertEqual(m.emu.vm_events, {})
+
+    def test_a_second_game_ends_the_first_ones(self):
+        # one virtual Sound Blaster a device: the first game's transfer runs
+        # on when the recording stops, the second game takes the free DSP,
+        # and the next recording takes it from the second
+        m = self.game()
+        self.take(m)
+        self.cmd(m, 0x48, 0xFF, 0x07, 0x1C)
+        m.outb(VM_DOS2, 0x226, 1)
+        m.outb(VM_DOS2, 0x226, 0)
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), VM_DOS2)
+        self.assertEqual(self.take(m), (False, 0))
+        self.assertEqual(self.vsb(m), VM_DOS2)
+        self.assertEqual(m.emu.timeouts, {})
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

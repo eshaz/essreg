@@ -36,14 +36,20 @@ static HWND edit;
 
 #define ADD (p + strlen(p))
 
-// the VxD's changes that SYSTEM.INI can turn off
+// the VxD's changes that SYSTEM.INI can turn off, and the version that has
+// each
 static const struct {
   u16 bit;
   const char *key;
+  u16 version;
 } vxd_keys[] = {
-    {VXD_S_VIRTUAL_FM, "VirtualFM"},      {VXD_S_TAKES_FM, "DosTakesFM"},
-    {VXD_S_KEEPS_FM, "DosKeepsFM"},       {VXD_S_FM_AUDIBLE, "DosFMAudible"},
-    {VXD_S_DOS_MIXER, "DosMixerRestore"}, {VXD_S_RESET_FM, "ResetDosFM"},
+    {VXD_S_VIRTUAL_FM, "VirtualFM", 0x0111},
+    {VXD_S_TAKES_FM, "DosTakesFM", 0x0111},
+    {VXD_S_KEEPS_FM, "DosKeepsFM", 0x0111},
+    {VXD_S_FM_AUDIBLE, "DosFMAudible", 0x0111},
+    {VXD_S_DOS_MIXER, "DosMixerRestore", 0x0111},
+    {VXD_S_RESET_FM, "ResetDosFM", 0x0111},
+    {VXD_S_REC_TAKES, "RecordTakesDSP", 0x0113},
 };
 
 static void settings_text(char *p) {
@@ -54,7 +60,7 @@ static void settings_text(char *p) {
                            : "VxD settings:\tthe defaults (loaded after "
                              "Windows started)");
   for (i = 0; i < (int)(sizeof(vxd_keys) / sizeof(vxd_keys[0])); i++)
-    if (!(s & vxd_keys[i].bit)) {
+    if (vxd.ext_version >= vxd_keys[i].version && !(s & vxd_keys[i].bit)) {
       strcat(p, off++ ? ", " : ", off: ");
       strcat(p, vxd_keys[i].key);
     }

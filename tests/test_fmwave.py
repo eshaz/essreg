@@ -115,6 +115,41 @@ class FMRecordTest(A1Case):
         self.assertEqual(e.dev8(FM_STATE), 0)
         self.assertEqual(e.dev8(DEV_FLAGS) & 1, 1)
 
+    def test_takes_the_dsp_first(self):
+        # a DOS program's DSP for the recording (VxD 040D, with the
+        # devnode) before ESS's open acquires it
+        e = self.emu()
+        e.vxd_calls.clear()
+        self.assertEqual(e.open_in()[0], 0)
+        self.assertEqual(e.dsp_taken, [DEVNODE])
+        fns = [dx for dx, _bx in e.vxd_calls]
+        self.assertEqual(fns[0], 0x040D)
+        self.assertIn(0x0002, fns)
+
+    def test_no_take_without_an_open(self):
+        # a query, a format refused, an open device, ESS's device 0
+        e = self.emu()
+        e.open_in(flags=WAVE_FORMAT_QUERY)
+        e.open_in(rate=44100)
+        self.assertEqual(e.dsp_taken, [])
+        r, user = e.open_in()
+        self.assertEqual(r, 0)
+        self.assertEqual(e.open_in()[0], MMSYSERR_ALLOCATED)
+        self.assertEqual(e.dsp_taken, [DEVNODE])
+        self.assertEqual(e.wid(1, WIDM_CLOSE, user), 0)
+        self.assertEqual(e.open_in(dev_id=0, rate=22050)[0], 0)
+        self.assertEqual(e.dsp_taken, [DEVNODE])
+
+    def test_dsp_kept(self):
+        # ESS's VxD, or RecordTakesDSP=0: the DOS program keeps the DSP,
+        # and ESS's open refuses as before
+        e = self.emu()
+        e.vxd_fail.update((0x040D, 0x0002))
+        e.set_dev8(DEV_FLAGS, e.dev8(DEV_FLAGS) | 1)
+        self.assertEqual(e.open_in()[0], MMSYSERR_ALLOCATED)
+        self.assertEqual(e.dev8(FM_STATE), 0)
+        self.assertEqual(e.dev8(DEV_FLAGS) & 1, 1)
+
     def test_recording_routes_the_fm(self):
         e = self.emu()
         user = self.recording(e, mix7f=0x01)

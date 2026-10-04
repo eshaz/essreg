@@ -31,6 +31,7 @@ import sys
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_16, UC_HOOK_INTR,
                      UC_HOOK_INSN)
 from unicorn.x86_const import (UC_X86_REG_AX, UC_X86_REG_BX, UC_X86_REG_DX,
+                               UC_X86_REG_ECX,
                                UC_X86_REG_SP, UC_X86_REG_IP, UC_X86_REG_CS,
                                UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_SS,
                                UC_X86_REG_EFLAGS, UC_X86_INS_IN,
@@ -248,6 +249,7 @@ class DrvEmu:
         self.callbacks = []     # (msg, dwInstance, dw1)
         self.vxd_calls = []     # (DX, BX)
         self.vxd_fail = set()   # functions that answer with the carry set
+        self.dsp_taken = []     # ECX of each call to 040D
         self.heap = HEAP_OFF
         self.app = APP_PARA * 16
         self.clock = 0
@@ -606,6 +608,9 @@ class DrvEmu:
         elif dx == 0x0004:
             ch = A1_DMA if bx == 0 else self.a2_dma
             ax = self.chip.dma_count(ch)
+        elif dx == 0x040D:
+            # a DOS program gave up the DSP
+            self.dsp_taken.append(uc.reg_read(UC_X86_REG_ECX))
         elif dx not in (0x0002, 0x0003):
             raise EmuError("VxD function %04x" % dx)
         uc.reg_write(UC_X86_REG_EFLAGS, flags)

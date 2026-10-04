@@ -8,9 +8,12 @@
 Get_Cur_VM_Handle                        equ 0x00010001
 Get_Sys_VM_Handle                        equ 0x00010003
 Test_Sys_VM_Handle                       equ 0x00010004
+Schedule_VM_Event                        equ 0x0001000F
+Cancel_VM_Event                          equ 0x00010013
 Map_Flat                                 equ 0x0001001C
 Get_Next_VM_Handle                       equ 0x0001003B
 Set_Global_Time_Out                      equ 0x0001003C
+Cancel_Time_Out                          equ 0x0001003E
 Get_System_Time                          equ 0x0001003F
 Simulate_Far_Call                        equ 0x00010048
 Simulate_Push                            equ 0x0001004D

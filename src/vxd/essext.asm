@@ -27,6 +27,8 @@
 ;   040C  owner information    -> AL/AH = DSP/FM owner, BL = MPU owner
 ;                                 (0 none, 1 caller's VM, 2 another VM),
 ;                                 BH = Audio_Base+Ch status, DX = ADI flags
+;   040D  take the DSP for a recording: a DOS program gives it up and gets a
+;         virtual Sound Blaster (Windows only)
 ;
 ; Notes:
 ;
@@ -54,6 +56,8 @@
 ;   - Windows' mixer is saved when a DOS VM takes the audio device, and put
 ;     back when it lets go.  When Windows next plays a sound or changes the
 ;     mixer (0002, 0102, 0302), FM left by a DOS program is reset.
+;   - a recording in Windows takes the DSP from a DOS program (040D), which
+;     goes on with a silent virtual Sound Blaster, its FM still recorded
 ;
 ; Settings (docs/DRIVER_CONFIG.md): each change can be turned off in
 ; SYSTEM.INI, [ES1869.VXD] and the Audio 2 mode in [ES1869.DRV], read once
@@ -64,14 +68,15 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0112
-ESSREG_FEATURES         equ 0x07FF      ; mixer, controller, ports, config,
+ESSREG_VERSION          equ 0x0113
+ESSREG_FEATURES         equ 0x0FFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
-                                        ; DOS Audio 1 filter
+                                        ; Audio 1 filter, recording takes DSP
 FEATURE_DOS_FM          equ 0x0080      ; cleared while VirtualFM=0
 FEATURE_DOS_MIXER       equ 0x0100      ; cleared while DosMixerRestore=0
 FEATURE_DOS_A1          equ 0x0400      ; cleared while Audio1Filter=1
+FEATURE_REC_DSP         equ 0x0800      ; cleared while RecordTakesDSP=0
 
 ; settings (ESSREG_Opts), 1 = the change is on
 OPT_API                 equ 0x0001      ; RegisterAPI: group 4
@@ -81,11 +86,12 @@ OPT_KEEPS_FM            equ 0x0008      ; DosKeepsFM: no reset for a returning V
 OPT_FM_AUDIBLE          equ 0x0010      ; DosFMAudible: music DAC and FM volume
 OPT_DOS_MIXER           equ 0x0020      ; DosMixerRestore: Windows' mixer back
 OPT_RESET_FM            equ 0x0040      ; ResetDosFM: FM reset when Windows is back
+OPT_REC_TAKES           equ 0x0080      ; RecordTakesDSP: a recording takes the DSP
 OPT_A2_4X               equ 0x0100      ; Audio2Oversampling: ESS's 4x
 OPT_A2_FILTER           equ 0x0200      ; Audio2Filter: the filter in use
 OPT_A1_FILTER           equ 0x0400      ; Audio1Filter: the filter in use
 OPT_READ                equ 0x8000      ; SYSTEM.INI was read
-OPT_DEFAULT             equ 0x007F
+OPT_DEFAULT             equ 0x00FF
 
 SYSSTATE_VXDINITCOMPLETED equ 0x40000000 ; VMM_GetSystemInitState: the profile
                                         ; services are gone from here on
@@ -502,8 +508,11 @@ ESSREG_API_Info:
         jnz     .a1
         and     ax,~FEATURE_DOS_MIXER & 0xFFFF
 .a1:    test    byte [ESSREG_Opts+1],OPT_A1_FILTER >> 8
-        jz      .out
+        jz      .rec
         and     ax,~FEATURE_DOS_A1 & 0xFFFF
+.rec:   test    byte [ESSREG_Opts],OPT_REC_TAKES
+        jnz     .out
+        and     ax,~FEATURE_REC_DSP & 0xFFFF
 .out:   mov     [ebp+Client_EBX],ax
         mov     ax,[ESSREG_Opts]
         mov     [ebp+Client_ECX],ax
@@ -828,9 +837,16 @@ ESSREG_A2_Mode:
 ; EAX = DMA handle, EBX = VM, EDI = the ADI or 0: when a DOS program
 ; starts a transfer on Audio 1's channel, in either direction, the CODEC's
 ; filter is bypassed again (71h bit 2), in case the program reset the
-; mixer after it took the DSP. Then VDMAD's handler, as ESS's code calls it
+; mixer after it took the DSP. Then VDMAD's handler, as ESS's code calls it.
+; A program with a virtual Sound Blaster doesn't get the channel
 ESSREG_DMA1:
-        test    byte [ESSREG_Opts+1],OPT_A1_FILTER >> 8
+        or      edi,edi
+        jz      .dos
+        cmp     [edi+EX_VSB_VM],ebx
+        jne     .dos
+        ret                             ; a virtual Sound Blaster's: the
+                                        ; channel stays the recording's
+.dos:   test    byte [ESSREG_Opts+1],OPT_A1_FILTER >> 8
         jnz     .default
         pushad
         call    ESSREG_DMA_DOS
@@ -849,8 +865,18 @@ ESSREG_DMA1:
 ; in place of VDMAD_Default_Handler as Audio 2's DMA handler (L1_0870),
 ; EAX = DMA handle, EBX = VM: a DOS program's transfer on Audio 2's channel
 ; gets the DAC's mode from SYSTEM.INI in 71h again, in case the program
-; reset the mixer after it took the DSP. ESS's setting leaves 71h
+; reset the mixer after it took the DSP. ESS's setting leaves 71h. A
+; program with a virtual Sound Blaster doesn't get the channel either
 ESSREG_DMA2:
+        push    edi
+        call    ESSREG_DMA2_ADI
+        or      edi,edi
+        jz      .mode
+        cmp     [edi+EX_VSB_VM],ebx
+        jne     .mode
+        pop     edi
+        ret                             ; the channel stays Windows'
+.mode:  pop     edi
         test    byte [ESSREG_Opts+1],OPT_A2_4X >> 8
         jz      .mine
         test    byte [ESSREG_Opts+1],OPT_A2_FILTER >> 8
@@ -968,13 +994,15 @@ ESSREG_API_0103:
 
 ; 0003 from Windows: ES1869.DRV releases the DSP after changing the mixer.
 ; Right after a MIDI close, that's the change above: a DOS FM owner gets
-; the music DAC and an FM volume again.
+; the music DAC and an FM volume again. And a DOS program with a virtual
+; Sound Blaster may get the real DSP back (ESSREG_VSB_Back).
 ESSREG_API_0003:
         VxDCall Test_Sys_VM_Handle
         jne     .stock
         call    API_0003_Release
         pushfd
         call    ESSREG_After_Close
+        call    ESSREG_VSB_Back_All
         popfd
         ret
 .stock: jmp     API_0003_Release
@@ -1349,7 +1377,7 @@ ESSREG_FM_Audible:
 
 ; in place of FM_Enable_Local_Trapping in ESS's Release_Resources, EBX =
 ; the owner, EDI = ADI: puts back what ESSREG_FM_Audible changed, unless
-; something else changed it since
+; something else changed it since, or the FM is being recorded (7Fh bit 4)
 ESSREG_FM_Released:
         and     byte [edi+EX_Flags],~EXF_FM_SOFT
         test    byte [edi+EX_D1],D1_DAC | D1_VOL
@@ -1369,7 +1397,7 @@ ESSREG_FM_Released:
         jz      .d1
         mov     ah,0x7F
         call    ESSREG_Mix_Read
-        test    al,1
+        test    al,0x11
         jnz     .d1
         or      al,1
         call    ESSREG_Mix_Write
@@ -1876,14 +1904,15 @@ ESSREG_VFM_Forget:
         pop     eax
         ret
 
-; a program ended in VM EBX (DOSMGR_End_V86_App): its virtual chips let
-; go of the notes and timers it left, so they don't sound when the chip
-; comes to the VM. In place of the jump to the next hook at the end of
-; ESS's hook (L1_04B8), so ESS's code keeps its size: every register and
-; flag goes on as it came
+; a program ended in VM EBX (DOSMGR_End_V86_App): its virtual Sound
+; Blaster ends, and its virtual chips let go of the notes and timers it
+; left, so they don't sound when the chip comes to the VM. In place of the
+; jump to the next hook at the end of ESS's hook (L1_04B8), so ESS's code
+; keeps its size: every register and flag goes on as it came
 ESSREG_App_End:
         pushfd
         pushad
+        call    ESSREG_VSB_End_VM
         mov     esi,[ADI_List]
         or      esi,esi
         jz      .done
@@ -1961,21 +1990,27 @@ ESSREG_VFM_Free:
         ret
 
 ; in place of ESS's removal of VM EBX's node when the device in EDI goes:
-; its virtual chip goes first
+; the device's virtual Sound Blaster, with its time-out, and the event for a
+; program's channel go first, then the VM's virtual chip
 ESSREG_Node_Remove:
+        call    ESSREG_VSB_End
+        call    ESSREG_VSB_Unschedule
         call    ESSREG_VFM_Drop
         jmp     L4_00CB
 
 ; in place of ESS's VM_Not_Executeable handler: the dying VM's virtual
-; chips go first
+; Sound Blaster and virtual chips go first
 ESSREG_VM_Not_Executeable:
+        call    ESSREG_VSB_End_VM
         call    ESSREG_VFM_Free
         jmp     AUDDRV_VM_Not_Executeable
 
-; in place of ESS's Sys_Dynamic_Device_Exit: every VM's virtual chips go
-; first
+; in place of ESS's Sys_Dynamic_Device_Exit: every virtual Sound Blaster
+; and every VM's virtual chips go first
 ESSREG_Dynamic_Exit:
         pushad
+        xor     ebx,ebx                 ; no time-out may outlive the VxD
+        call    ESSREG_VSB_End_VM
         VxDCall Get_Sys_VM_Handle
         mov     edx,ebx
 .vm:    call    ESSREG_VFM_Free
@@ -1984,6 +2019,970 @@ ESSREG_Dynamic_Exit:
         jne     .vm
         popad
         jmp     AUDDRV_Dynamic_Exit
+
+; --- a recording takes the DSP from a DOS program ------------------------------
+
+; 040D from Windows before an FM recording opens ES1869.DRV's wave input
+; (esfmrec, and ES1869.DRV's FM recording device): a DOS program that has
+; the DSP, which it takes with its first Sound Blaster access, gives it up
+; for the recording. It gets a virtual Sound Blaster in its place, which
+; answers as the chip does and times its transfers and interrupts without
+; sound, until it resets the DSP once nobody has it, or ends. Its FM goes on
+; to the chip. CF set with INUSE while RecordTakesDSP=0, or for a DOS VM's
+; call
+ESSREG_API_TakeDSP:
+        call    ESSREG_Get_ADI
+        jc      .done
+        VxDCall Test_Sys_VM_Handle
+        jne     .inuse
+        mov     eax,[edi+ADI_DSPOwner]
+        or      eax,eax
+        jz      .ok
+        cmp     eax,ebx
+        je      .ok
+        test    byte [ESSREG_Opts],OPT_REC_TAKES
+        jz      .inuse
+        call    ESSREG_VSB_Start
+.ok:    clc
+.done:  ret
+.inuse: mov     ax,ESSREG_E_INUSE
+        jmp     ESSREG_Fail
+
+; the DOS VM in EAX gives up the DSP, EDI = ADI: an older virtual Sound
+; Blaster of the device ends, then what the VM's channel does and its mixer
+; as the chip has it, ESS's release (a DSP reset, its ports trapped again,
+; Windows' mixer back, and maybe I2S the music DAC, which its FM gets back),
+; the chip's answers to E7h and E1h, and the virtual Sound Blaster
+ESSREG_VSB_Start:
+        pushad
+        mov     ebx,eax
+        call    ESSREG_VSB_End
+        call    ESSREG_VSB_Unschedule
+        push    edi
+        lea     edi,[edi+EX_VSB_VM]
+        mov     ecx,(EX_VSB_Event - EX_VSB_VM) / 4
+        xor     eax,eax
+        cld
+        rep     stosd
+        pop     edi
+        call    ESSREG_VSB_Mix_Save
+        mov     eax,[edi+ADI_DMA1Handle]
+        push    edi
+        VxDCall VDMAD_Get_Virt_State    ; ECX = count, DL = mode
+        pop     edi
+        push    ecx
+        push    edx
+        mov     eax,1
+        call    Release_Resources       ; EBX = the VM, EDI = ADI
+        cmp     [edi+ADI_FMOwner],ebx
+        jne     .vsb
+        call    ESSREG_FM_Audible
+.vsb:   mov     [edi+EX_VSB_VM],ebx
+        mov     byte [edi+EX_VSB_TC],0xD2       ; 22 kHz, as after a reset
+        mov     word [edi+EX_VSB_Size],0x07FF
+        mov     dword [edi+EX_VSB_Id],0x01038968 ; 68h 89h, 03h 01h
+        call    ESSREG_VSB_Ask
+        pop     edx
+        pop     ecx
+        ; a transfer that runs goes on as blocks of half its buffer, at the
+        ; time constant's 21.7 kHz: what the program set is gone with the
+        ; reset, until it starts its next transfer
+        test    dl,DMA_MASKED
+        jnz     .done
+        or      byte [edi+EX_VSB_Flags],VSB_SPEAKER
+        inc     ecx
+        shr     ecx,1
+        jnz     .half
+        mov     ecx,0x800
+.half:  mov     ax,(VSB_AUTO << 8) | 1
+        call    ESSREG_VSB_Go
+.done:  popad
+        ret
+
+; the chip's answers to E7h (its identification) and E1h (its version)
+; into EX_VSB_Id and EX_VSB_Ver, EDI = ADI, while nobody has the DSP
+ESSREG_VSB_Ask:
+        pushad
+        movzx   edx,word [edi+ADI_AudioBase]
+        add     edx,byte 0x0C
+        pushfd
+        cli
+        call    ESSREG_DSP_Drain
+        lea     esi,[edi+EX_VSB_Id]
+        mov     bl,0xE7
+.cmd:   mov     al,bl
+        mov     ecx,ESSREG_POLL_BYTE
+        call    ESSREG_DSP_Put
+        jc      .out
+        mov     ecx,ESSREG_POLL_REST
+        call    ESSREG_DSP_Get
+        jc      .out
+        mov     ah,al
+        mov     ecx,ESSREG_POLL_REST
+        call    ESSREG_DSP_Get
+        jc      .out
+        xchg    al,ah
+        mov     [esi],ax
+        add     esi,byte 2
+        cmp     bl,0xE1
+        je      .out
+        mov     bl,0xE1
+        jmp     .cmd
+.out:   popfd
+        popad
+        ret
+
+; I/O trap of Audio_Base+4h-Fh, in place of ESS's DSP_Port_Trap: the DOS VM
+; that gave up the DSP for a recording gets the virtual Sound Blaster
+; ESI = ADI, EBX = VM, EDX = port, ECX = type, EAX = data written
+ESSREG_DSP_Trap:
+        cmp     [esi+EX_VSB_VM],ebx
+        jne     DSP_Port_Trap
+        cmp     ecx,byte 4              ; Byte_Input 0, Byte_Output 4
+        jbe     .byte
+        VxDJmp  Simulate_IO             ; words and strings come back as bytes
+.byte:  push    edi
+        push    ecx
+        push    edx
+        mov     edi,esi
+        push    ecx
+        movzx   ecx,word [edi+ADI_AudioBase]
+        sub     edx,ecx                 ; the port's offset
+        pop     ecx
+        jecxz   .in
+        call    ESSREG_VSB_Out
+        jmp     short .ret
+.in:    call    ESSREG_VSB_In
+        movzx   eax,al
+.ret:   pop     edx
+        pop     ecx
+        pop     edi
+        ret
+
+; AL written to Audio_Base+EDX of the virtual Sound Blaster, EDI = ADI
+ESSREG_VSB_Out:
+        cmp     dl,0x0C
+        je      ESSREG_VSB_Write
+        cmp     dl,0x06
+        je      ESSREG_VSB_Reset
+        cmp     dl,0x04
+        je      .index
+        cmp     dl,0x05
+        jne     .done
+        movzx   edx,byte [edi+EX_VSB_Index]
+        or      edx,edx
+        jz      .clear                  ; a write to 00h resets the mixer
+        cmp     dl,0x40
+        jae     .done
+        mov     [edi+EX_VSB_Mix+edx],al
+        ret
+.clear: push    edi
+        push    ecx
+        lea     edi,[edi+EX_VSB_Mix]
+        mov     ecx,64 / 4
+        xor     eax,eax
+        cld
+        rep     stosd
+        pop     ecx
+        pop     edi
+        ret
+.index: mov     [edi+EX_VSB_Index],al
+.done:  ret
+
+; AL read from Audio_Base+EDX of the virtual Sound Blaster, EDI = ADI
+ESSREG_VSB_In:
+        cmp     dl,0x0A
+        je      .data
+        cmp     dl,0x0E
+        je      .status
+        cmp     dl,0x0C
+        je      .ready
+        cmp     dl,0x04
+        je      .index
+        cmp     dl,0x05
+        je      .mixer
+        mov     al,0xFF
+        ret
+.ready: xor     al,al                   ; it takes a command at once
+        ret
+.index: mov     al,[edi+EX_VSB_Index]
+        ret
+.mixer: movzx   edx,byte [edi+EX_VSB_Index]
+        xor     al,al
+        cmp     dl,0x40
+        jae     .ret
+        mov     al,[edi+EX_VSB_Mix+edx]
+.ret:   ret
+        ; reading the status acknowledges the interrupt, as on the chip
+.status:
+        call    ESSREG_VSB_Ack
+        mov     al,0x7F
+        cmp     byte [edi+EX_VSB_Count],0
+        je      .ret
+        mov     al,0xFF                 ; a byte to read
+        ret
+.data:  mov     al,[edi+EX_VSB_Last]
+        cmp     byte [edi+EX_VSB_Count],0
+        je      .ret
+        mov     al,[edi+EX_VSB_Queue]
+        mov     [edi+EX_VSB_Last],al
+        push    eax
+        mov     eax,[edi+EX_VSB_Queue]
+        shr     eax,8
+        mov     [edi+EX_VSB_Queue],eax
+        pop     eax
+        dec     byte [edi+EX_VSB_Count]
+        ret
+
+; AL into the read queue, EDI = ADI; a full queue loses its oldest byte
+ESSREG_VSB_Put:
+        push    ecx
+        movzx   ecx,byte [edi+EX_VSB_Count]
+        cmp     ecx,4
+        jb      .room
+        push    eax
+        mov     eax,[edi+EX_VSB_Queue]
+        shr     eax,8
+        mov     [edi+EX_VSB_Queue],eax
+        pop     eax
+        dec     ecx
+        dec     byte [edi+EX_VSB_Count]
+.room:  mov     [edi+EX_VSB_Queue+ecx],al
+        inc     byte [edi+EX_VSB_Count]
+        pop     ecx
+        ret
+
+; AL written to the reset port, EDI = ADI: 1 then 0 resets the virtual
+; Sound Blaster, or, once nobody has the DSP, ends it, and the program gets
+; the real DSP back with the same reset, its stereo bit and its channel
+ESSREG_VSB_Reset:
+        test    al,1
+        jz      .low
+        or      byte [edi+EX_VSB_Flags],VSB_RESET
+        ret
+.low:   test    byte [edi+EX_VSB_Flags],VSB_RESET
+        jz      .done
+        cmp     dword [edi+ADI_DSPOwner],byte 0
+        je      .real
+        call    ESSREG_VSB_Stop
+        call    ESSREG_VSB_Ack
+        mov     byte [edi+EX_VSB_Flags],0
+        mov     byte [edi+EX_VSB_Need],0
+        mov     byte [edi+EX_VSB_Count],0
+        mov     word [edi+EX_VSB_Rate],0
+        mov     al,0xAA
+        jmp     ESSREG_VSB_Put
+.real:  pushad
+        mov     ebx,[edi+EX_VSB_VM]
+        call    ESSREG_VSB_End
+        push    ebx
+        mov     eax,1
+        call    Acquire_Resources       ; its ports untrapped, the DSP reset
+        pop     ebx
+        jc      .out
+        call    ESSREG_VSB_Mix_Put
+        call    ESSREG_VSB_Channel
+        movzx   edx,word [edi+ADI_AudioBase]
+        add     edx,byte 6
+        mov     al,1
+        out     dx,al
+        in      al,dx                   ; 3 us high
+        in      al,dx
+        in      al,dx
+        in      al,dx
+        xor     al,al
+        out     dx,al
+.out:   popad
+.done:  ret
+
+; the virtual Sound Blaster gone, EDI = ADI: its transfer stopped and its
+; interrupt request taken back
+ESSREG_VSB_End:
+        cmp     dword [edi+EX_VSB_VM],byte 0
+        je      .done
+        call    ESSREG_VSB_Stop
+        call    ESSREG_VSB_Ack
+        mov     dword [edi+EX_VSB_VM],0
+.done:  ret
+
+; the real DSP back to the program once nobody has it and its virtual Sound
+; Blaster is idle in Sound Blaster mode, EDI = ADI: after ESS's acquire,
+; its stereo bit and its channel, and the speaker, the time constant and
+; the block size it set
+ESSREG_VSB_Back:
+        cmp     dword [edi+EX_VSB_VM],byte 0
+        je      .done
+        cmp     dword [edi+ADI_DSPOwner],byte 0
+        jne     .done
+        test    byte [edi+EX_VSB_Flags],VSB_RUN | VSB_PAUSE | VSB_EXT | VSB_IRQ
+        jnz     .done
+        cmp     byte [edi+EX_VSB_Need],0
+        jne     .done                   ; in the middle of a command
+        pushad
+        mov     ebx,[edi+EX_VSB_VM]
+        mov     cl,[edi+EX_VSB_Flags]
+        mov     ch,[edi+EX_VSB_TC]
+        movzx   esi,word [edi+EX_VSB_Size]
+        push    esi
+        push    ecx
+        push    ebx
+        call    ESSREG_VSB_End
+        mov     eax,1
+        call    Acquire_Resources       ; its ports untrapped, the DSP reset
+        pop     ebx
+        pop     ecx
+        pop     esi
+        jc      .out
+        call    ESSREG_VSB_Mix_Put
+        call    ESSREG_VSB_Channel
+        movzx   edx,word [edi+ADI_AudioBase]
+        add     edx,byte 0x0C
+        pushfd
+        cli
+        test    cl,VSB_SPEAKER
+        jz      .tc
+        mov     al,0xD1
+        call    ESSREG_VSB_Send
+        jc      .sent
+.tc:    mov     al,0x40
+        call    ESSREG_VSB_Send
+        jc      .sent
+        mov     al,ch
+        call    ESSREG_VSB_Send
+        jc      .sent
+        mov     al,0x48
+        call    ESSREG_VSB_Send
+        jc      .sent
+        mov     eax,esi
+        call    ESSREG_VSB_Send
+        jc      .sent
+        mov     eax,esi
+        mov     al,ah
+        call    ESSREG_VSB_Send
+.sent:  popfd
+.out:   popad
+.done:  ret
+
+; AL to the DSP, EDX = Audio_Base+Ch; CF set if it stays busy
+ESSREG_VSB_Send:
+        push    ecx
+        mov     ecx,ESSREG_POLL_REST
+        call    ESSREG_DSP_Put
+        pop     ecx
+        ret
+
+; ESSREG_VSB_Back for every device, after Windows let go of the DSP
+ESSREG_VSB_Back_All:
+        pushad
+        mov     esi,[ADI_List]
+        or      esi,esi
+        jz      .done
+        pushfd
+        cli
+        VxDCall List_Get_First
+        popfd
+        or      eax,eax
+        jz      .done
+.next:  mov     edi,[eax]
+        call    ESSREG_VSB_Back
+        pushfd
+        cli
+        VxDCall List_Get_Next
+        popfd
+        or      eax,eax
+        jnz     .next
+.done:  popad
+        ret
+
+; the virtual Sound Blaster of VM EBX, and an event for its channel, end on
+; every device (its program ended, or the VM did); EBX = 0 ends them all
+ESSREG_VSB_End_VM:
+        pushad
+        mov     esi,[ADI_List]
+        or      esi,esi
+        jz      .done
+        pushfd
+        cli
+        VxDCall List_Get_First
+        popfd
+        or      eax,eax
+        jz      .done
+.next:  mov     edi,[eax]
+        or      ebx,ebx
+        jz      .end
+        cmp     [edi+EX_VSB_Event_VM],ebx
+        jne     .vsb
+        call    ESSREG_VSB_Unschedule
+.vsb:   cmp     [edi+EX_VSB_VM],ebx
+        jne     .skip
+        call    ESSREG_VSB_End
+        jmp     short .skip
+.end:   call    ESSREG_VSB_End
+        call    ESSREG_VSB_Unschedule
+.skip:  pushfd
+        cli
+        VxDCall List_Get_Next
+        popfd
+        or      eax,eax
+        jnz     .next
+.done:  popad
+        ret
+
+; the program's mixer registers 00h-3Fh as the chip has them, into the
+; virtual Sound Blaster's copy, EDI = ADI
+ESSREG_VSB_Mix_Save:
+        pushad
+        movzx   edx,word [edi+ADI_AudioBase]
+        xor     ecx,ecx
+.reg:   mov     ah,cl
+        call    ESSREG_Mix_Read
+        mov     [edi+EX_VSB_Mix+ecx],al
+        inc     ecx
+        cmp     cl,0x40
+        jb      .reg
+        popad
+        ret
+
+; the program's stereo bit and output filter (0Eh) from the virtual Sound
+; Blaster's copy back to the chip, EDI = ADI. The levels stay Windows', as
+; after any DOS program
+ESSREG_VSB_Mix_Put:
+        push    eax
+        push    edx
+        movzx   edx,word [edi+ADI_AudioBase]
+        mov     ah,0x0E
+        mov     al,[edi+EX_VSB_Mix+0x0E]
+        call    ESSREG_Mix_Write
+        pop     edx
+        pop     eax
+        ret
+
+; once the program has the real DSP back, EBX = its VM, EDI = ADI: an event
+; in its VM, which runs before the program does, gives Audio 1's channel
+; the state the program set meanwhile, which ESSREG_DMA1 kept off the chip
+ESSREG_VSB_Channel:
+        pushad
+        call    ESSREG_VSB_Unschedule
+        mov     edx,edi                 ; its reference data: the ADI
+        mov     esi,ESSREG_VSB_Event
+        VxDCall Schedule_VM_Event       ; ESI = its handle
+        mov     [edi+EX_VSB_Event_VM],ebx
+        mov     [edi+EX_VSB_Event],esi
+        popad
+        ret
+
+; the event of ESSREG_VSB_Channel, EBX = the program's VM, EDX = ADI: ESS's
+; DMA handler, as VDMAD calls it when a VM programs the channel, while the
+; VM still has the DSP
+ESSREG_VSB_Event:
+        pushad
+        mov     edi,edx
+        mov     dword [edi+EX_VSB_Event],0
+        cmp     [edi+ADI_DSPOwner],ebx
+        jne     .done
+        mov     eax,[edi+ADI_DMA1Handle]
+        or      eax,eax
+        jz      .done
+        call    L1_0518
+.done:  popad
+        ret
+
+; the event of ESSREG_VSB_Channel cancelled, if it hasn't run, EDI = ADI
+ESSREG_VSB_Unschedule:
+        pushad
+        xor     esi,esi
+        xchg    esi,[edi+EX_VSB_Event]
+        or      esi,esi
+        jz      .done
+        mov     ebx,[edi+EX_VSB_Event_VM]
+        VxDCall Cancel_VM_Event
+.done:  popad
+        ret
+
+; a byte AL to the virtual Sound Blaster's command port, EDI = ADI: a
+; command, or the operand it waits for
+ESSREG_VSB_Write:
+        cmp     byte [edi+EX_VSB_Need],0
+        jne     .operand
+        mov     [edi+EX_VSB_Cmd],al
+        mov     byte [edi+EX_VSB_Got],0
+        mov     word [edi+EX_VSB_Ops],0
+        call    ESSREG_VSB_Operands
+        mov     [edi+EX_VSB_Need],cl
+        or      cl,cl
+        jz      ESSREG_VSB_Command
+        ret
+.operand:
+        movzx   ecx,byte [edi+EX_VSB_Got]
+        and     ecx,1
+        mov     [edi+EX_VSB_Ops+ecx],al
+        inc     byte [edi+EX_VSB_Got]
+        dec     byte [edi+EX_VSB_Need]
+        jz      ESSREG_VSB_Command
+        ret
+
+; CL = the operands of command AL, EDI = ADI: the Sound Blaster's commands,
+; and in Extended mode the controller registers (A0h-BFh) and C0h
+ESSREG_VSB_Operands:
+        mov     cl,2
+        cmp     al,0x14                 ; 8-bit, ADPCM and silence transfers
+        je      .done
+        cmp     al,0x15
+        je      .done
+        cmp     al,0x16
+        je      .done
+        cmp     al,0x17
+        je      .done
+        cmp     al,0x24
+        je      .done
+        cmp     al,0x25
+        je      .done
+        cmp     al,0x41                 ; rate
+        je      .done
+        cmp     al,0x42
+        je      .done
+        cmp     al,0x48                 ; block size
+        je      .done
+        cmp     al,0x80
+        je      .done
+        cmp     al,0x74
+        jb      .one
+        cmp     al,0x77
+        jbe     .done
+.one:   mov     cl,1
+        cmp     al,0x10                 ; direct DAC
+        je      .done
+        cmp     al,0x38                 ; MIDI out
+        je      .done
+        cmp     al,0x40                 ; time constant
+        je      .done
+        cmp     al,0xE0
+        je      .done
+        cmp     al,0xE4
+        je      .done
+        test    byte [edi+EX_VSB_Flags],VSB_EXT
+        jz      .none
+        cmp     al,0xC0                 ; Extended mode: read a register
+        je      .done
+        cmp     al,0xA0                 ; and write one
+        jb      .none
+        cmp     al,0xBF
+        jbe     .done
+.none:  mov     cl,0
+.done:  ret
+
+; the command in EX_VSB_Cmd with its operands, EDI = ADI
+ESSREG_VSB_Command:
+        movzx   eax,byte [edi+EX_VSB_Cmd]
+        movzx   edx,word [edi+EX_VSB_Ops]
+        cmp     al,0x40
+        je      .tc
+        cmp     al,0x41
+        je      .rate
+        cmp     al,0x42
+        je      .rate
+        cmp     al,0x48
+        je      .size
+        cmp     al,0x14
+        je      .pcm
+        cmp     al,0x24
+        je      .pcm
+        cmp     al,0x80
+        je      .pcm
+        cmp     al,0x16
+        je      .adpcm2
+        cmp     al,0x17
+        je      .adpcm2
+        cmp     al,0x74
+        je      .adpcm4
+        cmp     al,0x75
+        je      .adpcm4
+        cmp     al,0x76
+        je      .adpcm3
+        cmp     al,0x77
+        je      .adpcm3
+        cmp     al,0x1C
+        je      .auto
+        cmp     al,0x2C
+        je      .auto
+        cmp     al,0x1F
+        je      .auto2
+        cmp     al,0x7D
+        je      .auto4
+        cmp     al,0x7F
+        je      .auto3
+        cmp     al,0x90
+        je      .auto
+        cmp     al,0x98
+        je      .auto
+        cmp     al,0x91
+        je      .block
+        cmp     al,0x99
+        je      .block
+        cmp     al,0xD0
+        je      ESSREG_VSB_Pause
+        cmp     al,0xD4
+        je      ESSREG_VSB_Continue
+        cmp     al,0xDA
+        je      .noauto
+        cmp     al,0xD9
+        je      .noauto
+        cmp     al,0xD1
+        je      .spkon
+        cmp     al,0xD3
+        je      .spkoff
+        cmp     al,0xD8
+        je      .spk
+        cmp     al,0x20
+        je      .adc
+        cmp     al,0xE0
+        je      .ident
+        cmp     al,0xE1
+        je      .version
+        cmp     al,0xE4
+        je      .test
+        cmp     al,0xE8
+        je      .testrd
+        cmp     al,0xE7
+        je      .ess
+        cmp     al,0xF2
+        je      ESSREG_VSB_IRQ
+        cmp     al,0xC6
+        je      .exton
+        cmp     al,0xC7
+        je      .extoff
+        test    byte [edi+EX_VSB_Flags],VSB_EXT
+        jz      .done
+        cmp     al,0xC0
+        je      .regrd
+        cmp     al,0xA0
+        jb      .done
+        cmp     al,0xBF
+        ja      .done
+        mov     [edi+EX_VSB_Ess+eax-0xA0],dl
+        cmp     al,0xB8
+        je      ESSREG_VSB_Ext
+.done:  ret
+.tc:    mov     [edi+EX_VSB_TC],dl
+        mov     word [edi+EX_VSB_Rate],0
+        ret
+.rate:  xchg    dl,dh                   ; high byte first
+        mov     [edi+EX_VSB_Rate],dx
+        ret
+.size:  mov     [edi+EX_VSB_Size],dx
+        ret
+.pcm:   mov     ax,1
+        jmp     short .single
+.adpcm2:
+        mov     ax,4
+        jmp     short .single
+.adpcm4:
+        mov     ax,2
+        jmp     short .single
+.adpcm3:
+        mov     ax,3
+.single:
+        lea     ecx,[edx+1]
+        jmp     ESSREG_VSB_Go
+.auto:  mov     ax,(VSB_AUTO << 8) | 1
+        jmp     short .autogo
+.auto2: mov     ax,(VSB_AUTO << 8) | 4
+        jmp     short .autogo
+.auto4: mov     ax,(VSB_AUTO << 8) | 2
+        jmp     short .autogo
+.auto3: mov     ax,(VSB_AUTO << 8) | 3
+.autogo:
+        movzx   ecx,word [edi+EX_VSB_Size]
+        inc     ecx
+        jmp     ESSREG_VSB_Go
+.block: movzx   ecx,word [edi+EX_VSB_Size]
+        inc     ecx
+        mov     ax,1
+        jmp     ESSREG_VSB_Go
+.noauto:
+        and     byte [edi+EX_VSB_Flags],~VSB_AUTO & 0xFF
+        ret
+.spkon: or      byte [edi+EX_VSB_Flags],VSB_SPEAKER
+        ret
+.spkoff:
+        and     byte [edi+EX_VSB_Flags],~VSB_SPEAKER & 0xFF
+        ret
+.spk:   mov     al,0
+        test    byte [edi+EX_VSB_Flags],VSB_SPEAKER
+        jz      .put
+        mov     al,0xFF
+.put:   jmp     ESSREG_VSB_Put
+.adc:   mov     al,0x80                 ; silence
+        jmp     .put
+.ident: mov     al,dl
+        not     al
+        jmp     .put
+.version:
+        mov     al,[edi+EX_VSB_Ver]
+        call    ESSREG_VSB_Put
+        mov     al,[edi+EX_VSB_Ver+1]
+        jmp     .put
+.ess:   mov     al,[edi+EX_VSB_Id]
+        call    ESSREG_VSB_Put
+        mov     al,[edi+EX_VSB_Id+1]
+        jmp     .put
+.test:  mov     [edi+EX_VSB_Test],dl
+        ret
+.testrd:
+        mov     al,[edi+EX_VSB_Test]
+        jmp     .put
+.exton: or      byte [edi+EX_VSB_Flags],VSB_EXT
+        ret
+.extoff:
+        and     byte [edi+EX_VSB_Flags],~VSB_EXT & 0xFF
+        ret
+.regrd: mov     al,0
+        movzx   edx,dl
+        cmp     dl,0xA0
+        jb      .put
+        cmp     dl,0xBF
+        ja      .put
+        mov     al,[edi+EX_VSB_Ess+edx-0xA0]
+        jmp     .put
+
+; B8h written in Extended mode, EDI = ADI: bit 0 starts or stops the
+; transfer of the count in A4h/A5h (two's complement), auto-initializing
+; with bit 2, and interrupting at its end with B1h bit 6
+ESSREG_VSB_Ext:
+        test    byte [edi+EX_VSB_Ess+0x18],1
+        jz      ESSREG_VSB_Stop
+        movzx   ecx,word [edi+EX_VSB_Ess+4]     ; A4h, A5h
+        neg     ecx
+        and     ecx,0xFFFF
+        jnz     .count
+        mov     ecx,0x10000
+.count: xor     ah,ah
+        test    byte [edi+EX_VSB_Ess+0x18],4
+        jz      .once
+        mov     ah,VSB_AUTO
+.once:  test    byte [edi+EX_VSB_Ess+0x11],0x40 ; B1h bit 6
+        jnz     .irq
+        or      ah,VSB_NOIRQ
+.irq:   mov     al,1
+        jmp     ESSREG_VSB_Go
+
+; a transfer of ECX bytes starts, AL samples a byte (ADPCM 2-4, else 1),
+; AH = VSB_AUTO and VSB_NOIRQ, EDI = ADI: its block lasts as long as the
+; chip would take
+ESSREG_VSB_Go:
+        pushad
+        call    ESSREG_VSB_Stop
+        and     byte [edi+EX_VSB_Flags],~VSB_NOIRQ & 0xFF
+        movzx   ebx,al
+        imul    ecx,ebx                 ; samples (bytes, for PCM)
+        mov     bl,ah
+        call    ESSREG_VSB_Rate         ; EAX = bytes a second
+        xchg    eax,ecx
+        mov     edx,1024000             ; 1/1024 ms in a second
+        mul     edx
+        cmp     edx,ecx
+        jae     .long
+        div     ecx
+        jmp     short .len
+.long:  mov     eax,0x7FFFFFFF
+.len:   cmp     eax,1024
+        jae     .ok
+        mov     eax,1024                ; 1 ms at least
+.ok:    mov     [edi+EX_VSB_Block],eax
+        or      bl,VSB_RUN
+        or      [edi+EX_VSB_Flags],bl
+        VxDCall Get_System_Time
+        shl     eax,10
+        add     eax,[edi+EX_VSB_Block]
+        mov     [edi+EX_VSB_Due],eax
+        call    ESSREG_VSB_Arm
+        popad
+        ret
+
+; EAX = the bytes a second of the transfer, EDI = ADI: Extended mode's
+; rate (A1h, as the chip clocks it), channels (A8h) and sample size (B7h
+; bit 2), else the rate of 41h, else the time constant
+ESSREG_VSB_Rate:
+        push    ecx
+        push    edx
+        test    byte [edi+EX_VSB_Flags],VSB_EXT
+        jz      .sb
+        movzx   ecx,byte [edi+EX_VSB_Ess+1]     ; A1h
+        mov     eax,397700
+        test    cl,0x80
+        jz      .low
+        mov     eax,795500
+        neg     ecx
+        add     ecx,256
+        jmp     short .div
+.low:   neg     ecx
+        add     ecx,128
+.div:   xor     edx,edx
+        div     ecx                     ; samples a second
+        test    byte [edi+EX_VSB_Ess+8],1       ; A8h: 01 stereo
+        jz      .mono
+        shl     eax,1
+.mono:  test    byte [edi+EX_VSB_Ess+0x17],4    ; B7h bit 2: 16-bit
+        jz      .done
+        shl     eax,1
+        jmp     short .done
+.sb:    movzx   eax,word [edi+EX_VSB_Rate]
+        or      eax,eax
+        jnz     .done
+        movzx   ecx,byte [edi+EX_VSB_TC]
+        neg     ecx
+        add     ecx,256
+        mov     eax,1000000
+        xor     edx,edx
+        div     ecx
+.done:  or      eax,eax
+        jnz     .out
+        mov     eax,22050
+.out:   pop     edx
+        pop     ecx
+        ret
+
+; the time-out at EX_VSB_Due, EDI = ADI
+ESSREG_VSB_Arm:
+        pushad
+        VxDCall Get_System_Time
+        shl     eax,10
+        mov     ecx,[edi+EX_VSB_Due]
+        sub     ecx,eax                 ; 1/1024 ms from now
+        jns     .later
+        xor     ecx,ecx
+.later: add     ecx,1023
+        shr     ecx,10                  ; ms, rounded up
+        jnz     .ms
+        inc     ecx
+.ms:    mov     eax,ecx
+        mov     edx,edi                 ; its reference data: the ADI
+        mov     esi,ESSREG_VSB_Tick
+        VxDCall Set_Global_Time_Out     ; ESI = its handle
+        mov     [edi+EX_VSB_Timer],esi
+        popad
+        ret
+
+; the transfer stopped and its time-out cancelled, EDI = ADI
+ESSREG_VSB_Stop:
+        push    esi
+        xor     esi,esi
+        xchg    esi,[edi+EX_VSB_Timer]
+        or      esi,esi
+        jz      .none
+        VxDCall Cancel_Time_Out
+.none:  and     byte [edi+EX_VSB_Flags],~(VSB_RUN | VSB_AUTO | VSB_PAUSE) & 0xFF
+        pop     esi
+        ret
+
+; D0h, EDI = ADI: the transfer waits with what's left of its block
+ESSREG_VSB_Pause:
+        test    byte [edi+EX_VSB_Flags],VSB_RUN
+        jz      .done
+        test    byte [edi+EX_VSB_Flags],VSB_PAUSE
+        jnz     .done
+        push    eax
+        push    esi
+        xor     esi,esi
+        xchg    esi,[edi+EX_VSB_Timer]
+        or      esi,esi
+        jz      .left
+        VxDCall Cancel_Time_Out
+.left:  VxDCall Get_System_Time
+        shl     eax,10
+        neg     eax
+        add     eax,[edi+EX_VSB_Due]
+        jns     .keep
+        xor     eax,eax
+.keep:  mov     [edi+EX_VSB_Due],eax
+        or      byte [edi+EX_VSB_Flags],VSB_PAUSE
+        pop     esi
+        pop     eax
+.done:  ret
+
+; D4h, EDI = ADI: the transfer goes on
+ESSREG_VSB_Continue:
+        test    byte [edi+EX_VSB_Flags],VSB_PAUSE
+        jz      .done
+        and     byte [edi+EX_VSB_Flags],~VSB_PAUSE & 0xFF
+        push    eax
+        VxDCall Get_System_Time
+        shl     eax,10
+        add     [edi+EX_VSB_Due],eax
+        pop     eax
+        call    ESSREG_VSB_Arm
+.done:  ret
+
+; the end of a block (Set_Global_Time_Out), EDX = ADI: the program's
+; interrupt, then the next block, or once idle maybe the real DSP back
+ESSREG_VSB_Tick:
+        pushad
+        mov     edi,edx
+        mov     dword [edi+EX_VSB_Timer],0
+        cmp     dword [edi+EX_VSB_VM],byte 0
+        je      .done
+        test    byte [edi+EX_VSB_Flags],VSB_RUN
+        jz      .done
+        test    byte [edi+EX_VSB_Flags],VSB_NOIRQ
+        jnz     .next
+        call    ESSREG_VSB_IRQ
+.next:  test    byte [edi+EX_VSB_Flags],VSB_AUTO
+        jz      .end
+        mov     eax,[edi+EX_VSB_Block]
+        add     [edi+EX_VSB_Due],eax
+        call    ESSREG_VSB_Arm
+        jmp     short .done
+.end:   and     byte [edi+EX_VSB_Flags],~VSB_RUN & 0xFF
+.done:  popad
+        ret
+
+; the program's interrupt request, EDI = ADI
+ESSREG_VSB_IRQ:
+        pushad
+        or      byte [edi+EX_VSB_Flags],VSB_IRQ
+        mov     eax,[edi+ADI_IRQHandle]
+        mov     ebx,[edi+EX_VSB_VM]
+        VxDCall VPICD_Set_Int_Request
+        popad
+        ret
+
+; the request taken back, EDI = ADI: the program read the status, or its
+; virtual Sound Blaster ends
+ESSREG_VSB_Ack:
+        test    byte [edi+EX_VSB_Flags],VSB_IRQ
+        jz      .done
+        and     byte [edi+EX_VSB_Flags],~VSB_IRQ & 0xFF
+        pushad
+        mov     eax,[edi+ADI_IRQHandle]
+        mov     ebx,[edi+EX_VSB_VM]
+        VxDCall VPICD_Clear_Int_Request
+        popad
+.done:  ret
+
+; in place of ESS's VID_EOI_Proc (L1_0734), EAX = IRQ handle, EBX = VM: an
+; interrupt of the virtual Sound Blaster has no physical one to end
+ESSREG_EOI:
+        push    edi
+        push    eax
+        push    ecx
+        push    edx
+        push    byte 1                  ; key type 1: the IRQ handle
+        push    eax
+        call    _AUDDRV_Get_pADI_From_XXX
+        add     esp,byte 8
+        pop     edx
+        pop     ecx
+        pop     eax
+        or      edi,edi
+        jz      .ess
+        cmp     [edi+EX_VSB_VM],ebx
+        jne     .ess
+        pop     edi
+        VxDCall VPICD_Clear_Int_Request
+        clc
+        ret
+.ess:   pop     edi
+        jmp     L1_0734
 
 ; --- settings ------------------------------------------------------------------
 
@@ -2198,6 +3197,7 @@ ESSREG_Group4_Funcs:
         dd ESSREG_API_PnPWrite          ; 040A
         dd ESSREG_API_MixerBlock        ; 040B
         dd ESSREG_API_Owners            ; 040C
+        dd ESSREG_API_TakeDSP           ; 040D
 ESSREG_FUNC_COUNT equ ($ - ESSREG_Group4_Funcs) / 4
 
 ; ESS's groups 0, 1 and 3 with the acquire functions wrapped
@@ -2244,6 +3244,7 @@ ESSREG_Settings:
         dd ESSREG_Key_Audible, ESSREG_Sec_VxD, OPT_FM_AUDIBLE
         dd ESSREG_Key_Mixer, ESSREG_Sec_VxD, OPT_DOS_MIXER
         dd ESSREG_Key_Reset, ESSREG_Sec_VxD, OPT_RESET_FM
+        dd ESSREG_Key_Record, ESSREG_Sec_VxD, OPT_REC_TAKES
         ; the Audio 2 mode, the same for DirectSound as for ES1869.DRV
         dd ESSREG_Key_4X, ESSREG_Sec_Drv, OPT_A2_4X
         dd ESSREG_Key_Filter, ESSREG_Sec_Drv, OPT_A2_FILTER
@@ -2259,6 +3260,7 @@ ESSREG_Key_Keeps:       db "DosKeepsFM", 0
 ESSREG_Key_Audible:     db "DosFMAudible", 0
 ESSREG_Key_Mixer:       db "DosMixerRestore", 0
 ESSREG_Key_Reset:       db "ResetDosFM", 0
+ESSREG_Key_Record:      db "RecordTakesDSP", 0
 ESSREG_Key_4X:          db "Audio2Oversampling", 0
 ESSREG_Key_Filter:      db "Audio2Filter", 0
 ESSREG_Key_A1Filter:    db "Audio1Filter", 0

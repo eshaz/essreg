@@ -32,10 +32,12 @@
  * for the next open, so esfmrec opens the device twice, and puts the
  * setting back at the end (docs/DRIVER_CONFIG.md).
  *
- * Audio 1 is also the channel Sound Blaster digital sound plays through.
- * A DOS program's FM music records along, but its Sound Blaster sound
- * and a recording can't run at the same time: whichever starts first
- * has the channel.
+ * Audio 1 is also the channel Sound Blaster digital sound plays through,
+ * and a DOS program takes it with its first Sound Blaster access, until it
+ * ends. So before each open, esfmrec asks the extended ES1869.VXD for it
+ * (function 040D, RecordTakesDSP): the program goes on with a virtual
+ * Sound Blaster, timed but silent, and its FM music records along. ESS's
+ * VxD keeps the channel with the program.
  *
  * Windows 98 can hang, crash or lose power in the middle of a recording:
  * - every 5 s the WAV header gets the length so far and the file is
@@ -392,6 +394,13 @@ static UINT dcdrift(int get, DWORD *v) {
   return err;
 }
 
+// Audio 1 from a DOS program that has it, for the open after this; the
+// open finds out whether the VxD gave it
+static void take_dsp(void) {
+  if (winio_path == WIO_VXDEXT)
+    vxd_ext_take_dsp();
+}
+
 // notify: blocks come back as MM_WIM_DATA to the window
 static UINT open_input(int dev, int notify) {
   PCMWAVEFORMAT fmt;
@@ -740,14 +749,21 @@ static int rec_open(void) {
       problem("ESS's wave input (ES1869.DRV) isn't installed");
       return -1;
     }
+    take_dsp();
     err = open_input(dev, 1);
     if (err) {
       if (err == MMSYSERR_ALLOCATED && other)
         strcpy(text, "esfmrec is already recording in another window");
+      else if (err == MMSYSERR_ALLOCATED && dsp_in_dos() &&
+               vxd.ext_version >= 0x0113)
+        strcpy(text, "A DOS program has the Sound Blaster until it ends, "
+                     "and the FM is recorded through the same channel. "
+                     "RecordTakesDSP=1 in [ES1869.VXD] lets esfmrec take "
+                     "it");
       else if (err == MMSYSERR_ALLOCATED && dsp_in_dos())
-        strcpy(text, "A DOS program is playing Sound Blaster sound. The "
-                     "FM is recorded through the same channel, so esfmrec "
-                     "can start once it stops");
+        strcpy(text, "A DOS program has the Sound Blaster until it ends, "
+                     "and the FM is recorded through the same channel. "
+                     "The rebuilt ES1869.VXD lets esfmrec take it");
       else if (err == MMSYSERR_ALLOCATED)
         strcpy(text, "Another program is recording");
       else
@@ -777,6 +793,8 @@ static int rec_open(void) {
     rec.dc_changed = dcdrift(0, &off) == 0;
     waveInClose(rec.hwi);
     rec.dev_open = 0;
+    // the close may have given a DOS program its Sound Blaster back
+    take_dsp();
     err = open_input(dev, 1);
     if (err) {
       if (rec.dc_changed && dc_put(rec.dcdrift) == 0)
