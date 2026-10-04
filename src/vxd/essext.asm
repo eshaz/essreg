@@ -58,6 +58,9 @@
 ;     mixer (0002, 0102, 0302), FM left by a DOS program is reset.
 ;   - a recording in Windows takes the DSP from a DOS program (040D), which
 ;     goes on with a silent virtual Sound Blaster, its FM still recorded
+;   - a real-mode program's FM plays on a clock that follows its timer
+;     ticks, a few milliseconds late but evenly, whatever bursts Windows
+;     hands the ticks over in (DosFMDelay)
 ;
 ; Settings (docs/DRIVER_CONFIG.md): each change can be turned off in
 ; SYSTEM.INI, [ES1869.VXD] and the Audio 2 mode in [ES1869.DRV], read once
@@ -69,14 +72,16 @@
 ; Licensed under GPL Version 3.0
 
 ESSREG_VERSION          equ 0x0113
-ESSREG_FEATURES         equ 0x0FFF      ; mixer, controller, ports, config,
+ESSREG_FEATURES         equ 0x1FFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
-                                        ; Audio 1 filter, recording takes DSP
+                                        ; Audio 1 filter, recording takes DSP,
+                                        ; DOS FM on its clock
 FEATURE_DOS_FM          equ 0x0080      ; cleared while VirtualFM=0
 FEATURE_DOS_MIXER       equ 0x0100      ; cleared while DosMixerRestore=0
 FEATURE_DOS_A1          equ 0x0400      ; cleared while Audio1Filter=1
 FEATURE_REC_DSP         equ 0x0800      ; cleared while RecordTakesDSP=0
+FEATURE_FM_TIMED        equ 0x1000      ; cleared while DosFMDelay=0
 
 ; settings (ESSREG_Opts), 1 = the change is on
 OPT_API                 equ 0x0001      ; RegisterAPI: group 4
@@ -90,8 +95,16 @@ OPT_REC_TAKES           equ 0x0080      ; RecordTakesDSP: a recording takes the 
 OPT_A2_4X               equ 0x0100      ; Audio2Oversampling: ESS's 4x
 OPT_A2_FILTER           equ 0x0200      ; Audio2Filter: the filter in use
 OPT_A1_FILTER           equ 0x0400      ; Audio1Filter: the filter in use
+OPT_FM_TIMED            equ 0x0800      ; DosFMDelay: DOS FM on its clock
 OPT_READ                equ 0x8000      ; SYSTEM.INI was read
-OPT_DEFAULT             equ 0x00FF
+OPT_DEFAULT             equ 0x08FF
+
+FMQ_DELAY               equ 30          ; DosFMDelay's default (ms)
+FMQ_DELAY_MAX           equ 250         ; and the most it takes
+FMQ_WINDOW              equ 32          ; ticks the clock looks at at once
+FMQ_LATE                equ 4000        ; a data write this long (us) after a
+                                        ; tick, and half a tick, is late
+VMSTAT_PM_APP           equ 0x40        ; CB_VM_Status: a protected mode program
 
 SYSSTATE_VXDINITCOMPLETED equ 0x40000000 ; VMM_GetSystemInitState: the profile
                                         ; services are gone from here on
@@ -511,8 +524,11 @@ ESSREG_API_Info:
         jz      .rec
         and     ax,~FEATURE_DOS_A1 & 0xFFFF
 .rec:   test    byte [ESSREG_Opts],OPT_REC_TAKES
-        jnz     .out
+        jnz     .timed
         and     ax,~FEATURE_REC_DSP & 0xFFFF
+.timed: test    byte [ESSREG_Opts+1],OPT_FM_TIMED >> 8
+        jnz     .out
+        and     ax,~FEATURE_FM_TIMED & 0xFFFF
 .out:   mov     [ebp+Client_EBX],ax
         mov     ax,[ESSREG_Opts]
         mov     [ebp+Client_ECX],ax
@@ -1253,8 +1269,9 @@ SNAP_7F                 equ 27          ; and of 7Fh; 30 registers fit in the
 ; I/O trap of the FM ports (Audio_Base+0-3, +8, +9 and the FM alias), in
 ; place of ESS's FM_Port_Trap: EBX = VM, ESI = ADI, EDX = port, ECX = type,
 ; EAX = data written; returns EAX = data read
-; the caller's own chip goes to the hardware; a free chip is taken first;
-; otherwise the access goes to the VM's virtual chip
+; the caller's own chip goes to the hardware, or to the queue that plays a
+; DOS program's FM on its own clock; a free chip is taken first; otherwise
+; the access goes to the VM's virtual chip
 ; VirtualFM=0: ESS's trap, FFh and a message while another VM has FM
 ESSREG_FM_Trap:
         test    byte [ESSREG_Opts],OPT_VFM
@@ -1287,14 +1304,21 @@ ESSREG_FM_Trap:
         jne     .virtual
 .take:  call    ESSREG_FM_Take
         jc      .virtual
+        call    ESSREG_FMQ_Start
 .real:  pop     eax
         pop     edx
         pop     ecx
+        cmp     [edi+EX_FMQ_VM],ebx
+        je      .queue
         jecxz   .in
         out     dx,al
         jmp     .ret
 .in:    in      al,dx
 .ret:   pop     esi
+        pop     edi
+        ret
+.queue: call    ESSREG_FMQ_IO
+        pop     esi
         pop     edi
         ret
 .virtual:
@@ -1376,10 +1400,17 @@ ESSREG_FM_Audible:
         ret
 
 ; in place of FM_Enable_Local_Trapping in ESS's Release_Resources, EBX =
-; the owner, EDI = ADI: puts back what ESSREG_FM_Audible changed, unless
-; something else changed it since, or the FM is being recorded (7Fh bit 4)
+; the owner, EDI = ADI: what its queue holds goes to the chip, then what
+; ESSREG_FM_Audible changed goes back, unless something else changed it
+; since, or the FM is being recorded (7Fh bit 4)
 ESSREG_FM_Released:
-        and     byte [edi+EX_Flags],~EXF_FM_SOFT
+        cmp     [edi+EX_FMQ_VM],ebx
+        jne     .soft
+        push    eax
+        mov     al,1
+        call    ESSREG_FMQ_End
+        pop     eax
+.soft:  and     byte [edi+EX_Flags],~EXF_FM_SOFT
         test    byte [edi+EX_D1],D1_DAC | D1_VOL
         jz      .done
         push    eax
@@ -1905,14 +1936,16 @@ ESSREG_VFM_Forget:
         ret
 
 ; a program ended in VM EBX (DOSMGR_End_V86_App): its virtual Sound
-; Blaster ends, and its virtual chips let go of the notes and timers it
-; left, so they don't sound when the chip comes to the VM. In place of the
-; jump to the next hook at the end of ESS's hook (L1_04B8), so ESS's code
-; keeps its size: every register and flag goes on as it came
+; Blaster and its FM queue end, and its virtual chips let go of the notes
+; and timers it left, so they don't sound when the chip comes to the VM. In
+; place of the jump to the next hook at the end of ESS's hook (L1_04B8), so
+; ESS's code keeps its size: every register and flag goes on as it came
 ESSREG_App_End:
         pushfd
         pushad
         call    ESSREG_VSB_End_VM
+        mov     al,1
+        call    ESSREG_FMQ_End_VM
         mov     esi,[ADI_List]
         or      esi,esi
         jz      .done
@@ -1990,27 +2023,39 @@ ESSREG_VFM_Free:
         ret
 
 ; in place of ESS's removal of VM EBX's node when the device in EDI goes:
-; the device's virtual Sound Blaster, with its time-out, and the event for a
-; program's channel go first, then the VM's virtual chip
+; the device's virtual Sound Blaster and FM queue, with their time-outs, and
+; the event for a program's channel go first, then the VM's virtual chip
 ESSREG_Node_Remove:
         call    ESSREG_VSB_End
         call    ESSREG_VSB_Unschedule
+        push    eax
+        mov     al,0
+        call    ESSREG_FMQ_End
+        pop     eax
+        mov     dword [edi+EX_FMQ_Direct],0
         call    ESSREG_VFM_Drop
         jmp     L4_00CB
 
 ; in place of ESS's VM_Not_Executeable handler: the dying VM's virtual
-; Sound Blaster and virtual chips go first
+; Sound Blaster, FM queue and virtual chips go first
 ESSREG_VM_Not_Executeable:
         call    ESSREG_VSB_End_VM
+        push    eax
+        mov     al,1
+        call    ESSREG_FMQ_End_VM
+        pop     eax
         call    ESSREG_VFM_Free
         jmp     AUDDRV_VM_Not_Executeable
 
-; in place of ESS's Sys_Dynamic_Device_Exit: every virtual Sound Blaster
-; and every VM's virtual chips go first
+; in place of ESS's Sys_Dynamic_Device_Exit: every virtual Sound Blaster,
+; FM queue and VM's virtual chips go first, and the hook of interrupt 8
 ESSREG_Dynamic_Exit:
         pushad
         xor     ebx,ebx                 ; no time-out may outlive the VxD
         call    ESSREG_VSB_End_VM
+        mov     al,0
+        call    ESSREG_FMQ_End_VM
+        call    ESSREG_FMQ_Unhook
         VxDCall Get_Sys_VM_Handle
         mov     edx,ebx
 .vm:    call    ESSREG_VFM_Free
@@ -2984,12 +3029,524 @@ ESSREG_EOI:
 .ess:   pop     edi
         jmp     L1_0734
 
+; --- a DOS program's FM on its own clock ---------------------------------------
+
+; Windows hands a DOS box the timer ticks it missed in a burst once it runs
+; again, and the FM music that a program plays from its timer interrupt
+; comes in the same bursts, so its tempo wavers. With DosFMDelay=n, the FM
+; writes of a real-mode program that owns the chip go to its virtual chip,
+; which answers its reads, and to a queue, each with the time of the
+; program's last tick on a clock that follows its ticks but runs evenly
+; (ESSREG_FMQ_Tick). A time-out plays each write to the chip n ms after that
+; time, in the program's order. The ticks come from interrupt 8 as VMM
+; reflects it into the VM (Hook_V86_Int_Chain), so a program in protected
+; mode, whose ticks don't pass there, and one whose writes don't follow its
+; ticks, play directly, as with ESS's driver
+
+; the VM in EBX took the FM chip, EDI = ADI: a real-mode DOS program's FM
+; plays from a queue from now on, unless its writes were found off its
+; ticks before. Its FM ports trap again, and VTD gives the time-outs 1 ms
+; timer interrupts
+ESSREG_FMQ_Start:
+        test    byte [ESSREG_Opts+1],OPT_FM_TIMED >> 8
+        jz      .out
+        cmp     byte [ESSREG_FMQ_Hooked],0
+        je      .out
+        VxDCall Test_Sys_VM_Handle
+        je      .out
+        test    byte [ebx],VMSTAT_PM_APP        ; CB_VM_Status
+        jnz     .out
+        cmp     [edi+EX_FMQ_Direct],ebx
+        je      .out
+        cmp     dword [edi+EX_FMQ_VM],byte 0
+        jne     .out
+        pushad
+        call    ESSREG_VFM_Get                  ; for its reads
+        or      esi,esi
+        jz      .done
+        push    byte 1                          ; HEAPZEROINIT
+        push    dword FMQ_SIZE
+        VxDCall _HeapAllocate
+        add     esp,byte 8
+        or      eax,eax
+        jz      .done
+        mov     esi,eax
+        mov     [edi+EX_FMQ_Blk],esi
+        mov     [edi+EX_FMQ_VM],ebx
+        inc     dword [ESSREG_FMQ_Streams]
+        call    ESSREG_Clock
+        mov     [esi+FMQ_V],eax                 ; the real time, until a tick
+        mov     [esi+FMQ_Last],eax
+        mov     eax,[ESSREG_FMQ_Delay]
+        mov     [esi+FMQ_Min],eax
+        call    FM_Enable_Local_Trapping
+        mov     eax,1
+        VxDCall VTD_Begin_Min_Int_Period
+        jc      .done
+        or      byte [esi+FMQ_Flags],FMQF_MININT
+.done:  popad
+.out:   ret
+
+; a trapped access by the VM whose FM plays from the queue, EBX = VM,
+; EDI = ADI, EDX = port, ECX = type, EAX = data written; returns AL = data
+; read: its virtual chip answers the reads and keeps the registers, and the
+; writes go to the queue as well
+ESSREG_FMQ_IO:
+        or      ecx,ecx
+        jz      ESSREG_VFM_IO
+        push    eax
+        push    edx
+        call    ESSREG_VFM_IO
+        pop     edx
+        pop     eax
+        jmp     ESSREG_FMQ_Put
+
+; the write of AL to FM port EDX, for the program's last tick, EDI = ADI:
+; due the delay after the tick's time on the clock. A data write long after
+; the last tick counts against the program: with a quarter of 64 late, it
+; plays directly from then on
+ESSREG_FMQ_Put:
+        pushad
+        mov     esi,[edi+EX_FMQ_Blk]
+        or      esi,esi
+        jz      .done
+        and     edx,byte 3
+        mov     dh,al                           ; DL = the port's offset,
+        call    ESSREG_Clock                    ; DH = the value
+        mov     ecx,eax                         ; ECX = now
+        xor     ebp,ebp                         ; EBP = 1: off its ticks
+        test    dl,1
+        jz      .queue                          ; an address
+        test    byte [esi+FMQ_Flags],FMQF_LAST
+        jz      .late                           ; no tick yet at all
+        mov     eax,[esi+FMQ_T]
+        shr     eax,9                           ; half a tick (us)
+        cmp     eax,FMQ_LATE
+        jae     .limit
+        mov     eax,FMQ_LATE
+.limit: mov     ebx,ecx
+        sub     ebx,[esi+FMQ_Last]
+        cmp     ebx,eax
+        jbe     .count
+.late:  inc     byte [esi+FMQ_Late]
+.count: inc     byte [esi+FMQ_Writes]
+        cmp     byte [esi+FMQ_Writes],64
+        jb      .queue
+        mov     al,[esi+FMQ_Late]
+        mov     byte [esi+FMQ_Writes],0
+        mov     byte [esi+FMQ_Late],0
+        cmp     al,16
+        jb      .queue
+        inc     ebp
+.queue: pushfd
+        cli
+        cmp     dword [esi+FMQ_Count],FMQ_LEN
+        jb      .room
+        call    ESSREG_FMQ_Out                  ; the oldest now, for room
+.room:  mov     eax,[esi+FMQ_Head]
+        add     eax,[esi+FMQ_Count]
+        and     eax,FMQ_LEN - 1
+        lea     eax,[esi+FMQ_Queue+eax*8]
+        mov     ebx,[esi+FMQ_V]
+        add     ebx,[ESSREG_FMQ_Delay]
+        mov     [eax],ebx
+        mov     [eax+4],dx
+        inc     dword [esi+FMQ_Count]
+        popfd
+        or      ebp,ebp
+        jnz     .direct
+        cmp     dword [esi+FMQ_Timer],byte 0
+        jne     .done
+        call    ESSREG_FMQ_Drain                ; what's due, and the time-out
+.done:  popad
+        ret
+.direct:
+        mov     ebx,[edi+EX_FMQ_VM]
+        call    ESSREG_FMQ_Direct
+        popad
+        ret
+
+; the oldest entry to the chip, ESI = block, EDI = ADI, interrupts off:
+; its port write, then ESS's 6 status reads (L1_0A68)
+ESSREG_FMQ_Out:
+        push    eax
+        push    ecx
+        push    edx
+        mov     eax,[esi+FMQ_Head]
+        lea     ecx,[esi+FMQ_Queue+eax*8]
+        inc     eax
+        and     eax,FMQ_LEN - 1
+        mov     [esi+FMQ_Head],eax
+        dec     dword [esi+FMQ_Count]
+        movzx   edx,word [edi+ADI_FMBase]
+        movzx   eax,byte [ecx+4]
+        add     edx,eax
+        mov     al,[ecx+5]
+        out     dx,al
+        movzx   edx,word [edi+ADI_FMBase]
+        call    L1_0A68
+        pop     edx
+        pop     ecx
+        pop     eax
+        ret
+
+; what's due to the chip, in order, ESI = block, EDI = ADI; then the
+; time-out of the next entry
+ESSREG_FMQ_Drain:
+        pushad
+        call    ESSREG_Clock
+        mov     ecx,eax                         ; ECX = now
+.next:  pushfd
+        cli
+        cmp     dword [esi+FMQ_Count],byte 0
+        je      .empty
+        mov     eax,[esi+FMQ_Head]
+        mov     eax,[esi+FMQ_Queue+eax*8]
+        sub     eax,ecx                         ; us until it's due
+        jg      .later
+        call    ESSREG_FMQ_Out
+        popfd
+        jmp     .next
+.later: popfd
+        add     eax,999
+        mov     ebx,1000
+        xor     edx,edx
+        div     ebx                             ; ms, rounded up
+        mov     edx,edi                         ; its reference data: the ADI
+        push    esi
+        mov     esi,ESSREG_FMQ_Due
+        VxDCall Set_Global_Time_Out             ; ESI = its handle
+        mov     eax,esi
+        pop     esi
+        mov     [esi+FMQ_Timer],eax
+        jmp     .done
+.empty: popfd
+.done:  popad
+        ret
+
+; the time-out of the next entry (Set_Global_Time_Out), EDX = ADI
+ESSREG_FMQ_Due:
+        pushad
+        mov     edi,edx
+        mov     esi,[edi+EX_FMQ_Blk]
+        or      esi,esi
+        jz      .done
+        mov     dword [esi+FMQ_Timer],0
+        call    ESSREG_FMQ_Drain
+.done:  popad
+        ret
+
+; the program's FM stops playing from the queue, EDI = ADI: what's queued
+; goes to the chip now, in its order (AL = 1), or is dropped (AL = 0: the
+; device or the VxD goes away). Its virtual chip, which the chip now
+; matches, has nothing to give back at the next take, as after direct play.
+; The block goes, and VTD's 1 ms interrupts
+ESSREG_FMQ_End:
+        pushad
+        mov     esi,[edi+EX_FMQ_Blk]
+        or      esi,esi
+        jz      .done
+        push    eax
+        push    esi
+        mov     ebx,[edi+EX_FMQ_VM]
+        call    ESSREG_VFM_Find
+        jz      .vfm
+        mov     esi,eax
+        call    ESSREG_VFM_Forget
+.vfm:   pop     esi
+        pop     eax
+        mov     bl,al
+        push    esi
+        xor     eax,eax
+        xchg    eax,[esi+FMQ_Timer]
+        or      eax,eax
+        jz      .flush
+        mov     esi,eax
+        VxDCall Cancel_Time_Out
+.flush: pop     esi
+        or      bl,bl
+        jz      .free
+        pushfd
+        cli
+.out:   cmp     dword [esi+FMQ_Count],byte 0
+        je      .sent
+        call    ESSREG_FMQ_Out
+        jmp     .out
+.sent:  popfd
+.free:  test    byte [esi+FMQ_Flags],FMQF_MININT
+        jz      .heap
+        mov     eax,1
+        VxDCall VTD_End_Min_Int_Period
+.heap:  xor     eax,eax
+        mov     [edi+EX_FMQ_Blk],eax
+        mov     [edi+EX_FMQ_VM],eax
+        dec     dword [ESSREG_FMQ_Streams]
+        push    eax                             ; flags
+        push    esi
+        VxDCall _HeapFree
+        add     esp,byte 8
+.done:  popad
+        ret
+
+; the program's writes don't follow its ticks, EBX = VM, EDI = ADI: what's
+; queued goes to the chip, and the program plays directly until it ends
+ESSREG_FMQ_Direct:
+        push    eax
+        mov     al,1
+        call    ESSREG_FMQ_End
+        mov     [edi+EX_FMQ_Direct],ebx
+        call    FM_Disable_Local_Trapping
+        pop     eax
+        ret
+
+; the queue of VM EBX's program ends on every device, and so does its
+; direct play (its program or its VM ended); EBX = 0: every queue. AL = 1
+; sends what's queued to the chip, 0 drops it
+ESSREG_FMQ_End_VM:
+        pushad
+        mov     dl,al
+        mov     esi,[ADI_List]
+        or      esi,esi
+        jz      .done
+        pushfd
+        cli
+        VxDCall List_Get_First
+        popfd
+        or      eax,eax
+        jz      .done
+.next:  mov     edi,[eax]
+        or      ebx,ebx
+        jz      .end
+        cmp     [edi+EX_FMQ_Direct],ebx
+        jne     .queue
+        mov     dword [edi+EX_FMQ_Direct],0
+.queue: cmp     [edi+EX_FMQ_VM],ebx
+        jne     .skip
+.end:   push    eax
+        mov     al,dl
+        call    ESSREG_FMQ_End
+        pop     eax
+        or      ebx,ebx
+        jnz     .skip
+        mov     dword [edi+EX_FMQ_Direct],0
+.skip:  pushfd
+        cli
+        VxDCall List_Get_Next
+        popfd
+        or      eax,eax
+        jnz     .next
+.done:  popad
+        ret
+
+; Hook_V86_Int_Chain for interrupt 8, EBX = VM: a tick of a program whose
+; FM plays from a queue. CF set passes the interrupt on
+ESSREG_FMQ_Int8:
+        cmp     dword [ESSREG_FMQ_Streams],byte 0
+        je      .out
+        pushad
+        mov     esi,[ADI_List]
+        or      esi,esi
+        jz      .done
+        pushfd
+        cli
+        VxDCall List_Get_First
+        popfd
+        or      eax,eax
+        jz      .done
+.next:  mov     edi,[eax]
+        cmp     [edi+EX_FMQ_VM],ebx
+        jne     .skip
+        call    ESSREG_FMQ_Tick
+.skip:  pushfd
+        cli
+        VxDCall List_Get_Next
+        popfd
+        or      eax,eax
+        jnz     .next
+.done:  popad
+.out:   stc
+        ret
+
+; a tick of the program, EDI = ADI. Until the clock locks, it collects 16
+; intervals; then each tick moves the clock on by a tick, kept between the
+; real time less the delay and the real time. After each window of 32
+; ticks, the least lag of the window, that of a tick on time, pulls the
+; clock to the ticks over the next window, and the baseline since the lock
+; gives the tick. A window held back or ahead most of the time means that
+; the program changed its rate, and the clock locks again
+ESSREG_FMQ_Tick:
+        pushad
+        mov     esi,[edi+EX_FMQ_Blk]
+        call    ESSREG_Clock
+        mov     ecx,eax                         ; ECX = now
+        mov     edx,eax
+        xchg    edx,[esi+FMQ_Last]
+        neg     edx
+        add     edx,ecx                         ; EDX = the interval
+        test    byte [esi+FMQ_Flags],FMQF_LAST
+        jnz     .ival
+        or      byte [esi+FMQ_Flags],FMQF_LAST
+        jmp     .pass
+.ival:  movzx   eax,byte [esi+FMQ_IPos]
+        mov     [esi+FMQ_Ivals+eax*4],edx
+        inc     eax
+        and     al,15
+        mov     [esi+FMQ_IPos],al
+        test    byte [esi+FMQ_Flags],FMQF_LOCKED
+        jnz     .locked
+        inc     byte [esi+FMQ_NIval]
+        cmp     byte [esi+FMQ_NIval],16
+        jb      .pass
+        call    ESSREG_FMQ_Lock
+        jmp     .done
+.pass:  mov     [esi+FMQ_V],ecx                 ; the real time, until it locks
+        jmp     .done
+.locked:
+        inc     dword [esi+FMQ_Ticks]
+        movzx   eax,byte [esi+FMQ_Frac]
+        add     eax,[esi+FMQ_T]
+        mov     [esi+FMQ_Frac],al
+        shr     eax,8
+        add     eax,[esi+FMQ_Slew]
+        add     eax,[esi+FMQ_V]                 ; EAX = the clock's next tick
+        mov     edx,ecx
+        sub     edx,eax                         ; EDX = how far it lags
+        jns     .behind
+        mov     eax,ecx                         ; not ahead of the real time
+        xor     edx,edx
+        inc     byte [esi+FMQ_High]
+        jmp     .set
+.behind:
+        cmp     edx,[ESSREG_FMQ_Delay]
+        jbe     .set
+        mov     edx,[ESSREG_FMQ_Delay]          ; nor behind it by the delay
+        mov     eax,ecx
+        sub     eax,edx
+        inc     byte [esi+FMQ_Low]
+.set:   mov     [esi+FMQ_V],eax
+        cmp     edx,[esi+FMQ_Min]
+        jae     .win
+        mov     [esi+FMQ_Min],edx
+.win:   inc     byte [esi+FMQ_Win]
+        cmp     byte [esi+FMQ_Win],FMQ_WINDOW
+        jb      .done
+        cmp     byte [esi+FMQ_Low],FMQ_WINDOW / 2
+        jae     .again
+        cmp     byte [esi+FMQ_High],FMQ_WINDOW * 7 / 8
+        jae     .again
+        mov     eax,[esi+FMQ_Min]
+        shr     eax,5                           ; over the next window
+        mov     [esi+FMQ_Slew],eax
+        mov     ebx,[esi+FMQ_Ticks]
+        sub     ebx,[esi+FMQ_BaseK]
+        cmp     ebx,FMQ_WINDOW * 2
+        jb      .next
+        mov     eax,[esi+FMQ_V]
+        add     eax,[esi+FMQ_Min]
+        sub     eax,[esi+FMQ_BaseV]             ; us over EBX ticks
+        mov     edx,256
+        mul     edx
+        cmp     edx,ebx
+        jae     .base                           ; it wouldn't divide
+        div     ebx
+        mov     [esi+FMQ_T],eax
+        cmp     ebx,0x10000
+        jb      .next
+.base:  mov     eax,[esi+FMQ_V]                 ; a new baseline from here
+        mov     [esi+FMQ_BaseV],eax
+        mov     eax,[esi+FMQ_Ticks]
+        mov     [esi+FMQ_BaseK],eax
+.next:  xor     eax,eax
+        mov     [esi+FMQ_Win],al
+        mov     [esi+FMQ_Low],al
+        mov     [esi+FMQ_High],al
+        mov     eax,[ESSREG_FMQ_Delay]
+        mov     [esi+FMQ_Min],eax
+        jmp     .done
+.again: and     byte [esi+FMQ_Flags],~FMQF_LOCKED
+        mov     byte [esi+FMQ_NIval],0
+        mov     [esi+FMQ_V],ecx
+.done:  popad
+        ret
+
+; the clock locks, ESI = block, ECX = now: a tick is the 12th shortest of
+; the last 16 intervals, the usual one between ticks on time, whatever
+; bursts came among them
+ESSREG_FMQ_Lock:
+        pushad
+        sub     esp,16 * 4
+        xor     ebx,ebx
+.sort:  mov     eax,[esi+FMQ_Ivals+ebx*4]
+        mov     edx,ebx
+.shift: or      edx,edx
+        jz      .put
+        cmp     [esp+edx*4-4],eax
+        jbe     .put
+        mov     edi,[esp+edx*4-4]
+        mov     [esp+edx*4],edi
+        dec     edx
+        jmp     .shift
+.put:   mov     [esp+edx*4],eax
+        inc     ebx
+        cmp     ebx,16
+        jb      .sort
+        mov     eax,[esp+11 * 4]
+        add     esp,16 * 4
+        shl     eax,8
+        mov     [esi+FMQ_T],eax
+        mov     [esi+FMQ_V],ecx
+        mov     [esi+FMQ_BaseV],ecx
+        xor     eax,eax
+        mov     [esi+FMQ_Ticks],eax
+        mov     [esi+FMQ_BaseK],eax
+        mov     [esi+FMQ_Slew],eax
+        mov     [esi+FMQ_Frac],al
+        mov     [esi+FMQ_Win],al
+        mov     [esi+FMQ_Low],al
+        mov     [esi+FMQ_High],al
+        mov     eax,[ESSREG_FMQ_Delay]
+        mov     [esi+FMQ_Min],eax
+        or      byte [esi+FMQ_Flags],FMQF_LOCKED
+        popad
+        ret
+
+; interrupt 8's V86 hook, while DosFMDelay isn't 0
+ESSREG_FMQ_Hook:
+        test    byte [ESSREG_Opts+1],OPT_FM_TIMED >> 8
+        jz      .out
+        pushad
+        mov     eax,8
+        mov     esi,ESSREG_FMQ_Int8
+        VxDCall Hook_V86_Int_Chain
+        jc      .done
+        mov     byte [ESSREG_FMQ_Hooked],1
+.done:  popad
+.out:   ret
+
+; and out again, before the VxD goes
+ESSREG_FMQ_Unhook:
+        cmp     byte [ESSREG_FMQ_Hooked],0
+        je      .out
+        pushad
+        mov     eax,8
+        mov     esi,ESSREG_FMQ_Int8
+        VxDCall Unhook_V86_Int_Chain
+        mov     byte [ESSREG_FMQ_Hooked],0
+        popad
+.out:   ret
+
 ; --- settings ------------------------------------------------------------------
 
-; in place of ESS's Sys_Dynamic_Device_Init: SYSTEM.INI first
+; in place of ESS's Sys_Dynamic_Device_Init: SYSTEM.INI first, and the
+; hook of interrupt 8, out again if ESS's init fails and the VxD goes
 ESSREG_Dynamic_Init:
         call    ESSREG_Read_Settings
-        jmp     AUDDRV_Dynamic_Init
+        call    ESSREG_FMQ_Hook
+        call    AUDDRV_Dynamic_Init
+        jnc     .ok
+        call    ESSREG_FMQ_Unhook
+        stc
+.ok:    ret
 
 ; ESSREG_Opts from SYSTEM.INI (ESSREG_Settings), once when the VxD starts.
 ; VMM reads SYSTEM.INI only while Windows starts: a VxD loaded later (a
@@ -3010,7 +3567,15 @@ ESSREG_Read_Settings:
         VxDCall Get_Profile_String
         jc      .skip                   ; not there: the default
         call    ESSREG_Profile_Int
-        mov     ecx,[ebx+8]             ; its bit
+        cmp     dword [ebx],ESSREG_Key_Delay
+        jne     .bit
+        mov     ecx,eax                 ; DosFMDelay is the delay in ms too
+        cmp     ecx,FMQ_DELAY_MAX
+        jbe     .ms
+        mov     ecx,FMQ_DELAY_MAX
+.ms:    imul    ecx,ecx,1000
+        mov     [ESSREG_FMQ_Delay],ecx
+.bit:   mov     ecx,[ebx+8]             ; its bit
         or      eax,eax
         jz      .off
         or      [ESSREG_Opts],cx
@@ -3180,6 +3745,9 @@ ESSREG_TSC_MHz:         dd 0            ; TSC counts per us
 ESSREG_TSC_Last:        dd 0            ; the clock's last value
 ESSREG_TSC_State:       db TSC_UNKNOWN
 ESSREG_Opts:            dw OPT_DEFAULT  ; OPT_*: the changes that are on
+ESSREG_FMQ_Delay:       dd FMQ_DELAY * 1000     ; DosFMDelay (us)
+ESSREG_FMQ_Streams:     dd 0            ; FM queues that play
+ESSREG_FMQ_Hooked:      db 0            ; interrupt 8's V86 hook is in
 
 section PDAT
 
@@ -3245,6 +3813,7 @@ ESSREG_Settings:
         dd ESSREG_Key_Mixer, ESSREG_Sec_VxD, OPT_DOS_MIXER
         dd ESSREG_Key_Reset, ESSREG_Sec_VxD, OPT_RESET_FM
         dd ESSREG_Key_Record, ESSREG_Sec_VxD, OPT_REC_TAKES
+        dd ESSREG_Key_Delay, ESSREG_Sec_VxD, OPT_FM_TIMED
         ; the Audio 2 mode, the same for DirectSound as for ES1869.DRV
         dd ESSREG_Key_4X, ESSREG_Sec_Drv, OPT_A2_4X
         dd ESSREG_Key_Filter, ESSREG_Sec_Drv, OPT_A2_FILTER
@@ -3261,6 +3830,7 @@ ESSREG_Key_Audible:     db "DosFMAudible", 0
 ESSREG_Key_Mixer:       db "DosMixerRestore", 0
 ESSREG_Key_Reset:       db "ResetDosFM", 0
 ESSREG_Key_Record:      db "RecordTakesDSP", 0
+ESSREG_Key_Delay:       db "DosFMDelay", 0
 ESSREG_Key_4X:          db "Audio2Oversampling", 0
 ESSREG_Key_Filter:      db "Audio2Filter", 0
 ESSREG_Key_A1Filter:    db "Audio1Filter", 0

@@ -90,7 +90,7 @@ class ExtensionTest(VxDBuilds, unittest.TestCase):
         out, cf = self.api(m, 0x0400)
         self.assertFalse(cf)
         self.assertEqual(out["EAX"] & 0xFFFF, 0x0113)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x0FFF)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x1FFF)
         self.assertEqual(out["EDX"] & 0xFFFF, 14)
         out, cf = self.api(m, 0x0000)            # stock functions still work
         self.assertEqual((cf, out["EAX"] & 0xFFFF), (False, 0x0404))

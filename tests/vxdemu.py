@@ -68,6 +68,10 @@ SVC_GET_NEXT_VM = 0x0001003B
 SVC_SET_GLOBAL_TIME_OUT = 0x0001003C
 SVC_CANCEL_TIME_OUT = 0x0001003E
 SVC_GET_SYSTEM_TIME = 0x0001003F
+SVC_HOOK_V86_INT_CHAIN = 0x00010041
+SVC_UNHOOK_V86_INT_CHAIN = 0x00010118
+SVC_VTD_BEGIN_MIN_INT_PERIOD = 0x00050003
+SVC_VTD_END_MIN_INT_PERIOD = 0x00050004
 SVC_HEAP_ALLOCATE = 0x0001004F
 SVC_HEAP_FREE = 0x00010051
 SVC_SIMULATE_IO = 0x00010094
@@ -127,6 +131,7 @@ class FakeFM:
         self.status = 0
         self.start = [0, 0]
         self.writes = []            # (mode, register, value)
+        self.times = []             # and when each came (us)
 
     def _timers(self):
         for i, (bit, unit, mask, flag) in enumerate(
@@ -147,6 +152,7 @@ class FakeFM:
 
     def _emu(self, reg, v):
         self.writes.append(("emu", reg, v))
+        self.times.append(self.clock.us)
         bank, r = reg >> 8, reg & 0xFF
         if r in (2, 3):
             self.t[r - 2] = v
@@ -159,6 +165,7 @@ class FakeFM:
 
     def _nat(self, reg, v):
         self.writes.append(("nat", reg, v))
+        self.times.append(self.clock.us)
         if reg in (0x402, 0x403):
             self.t[reg - 0x402] = v
         elif reg == 0x404:
@@ -387,6 +394,8 @@ class VxDEmu:
         self.next_timeout = 1
         self.vm_events = {}             # handle: (VM, callback, data)
         self.next_event = 1
+        self.v86_hooks = {}             # interrupt: [hook procedures]
+        self.min_int = []               # VTD_Begin_Min_Int_Period's periods
         self.vpicd = []                 # ("set"/"clear"/"eoi", IRQ, VM)
         self.has_tsc = True
         # SYSTEM.INI: {(section, key): value}, as VMM finds it while
@@ -545,6 +554,26 @@ class VxDEmu:
             event = self.vm_events.pop(uc.reg_read(UC_X86_REG_ESI), None)
             if event is not None and event[0] != ebx:
                 raise RuntimeError("Cancel_VM_Event for another VM")
+        elif svc == SVC_HOOK_V86_INT_CHAIN:
+            self.v86_hooks.setdefault(uc.reg_read(UC_X86_REG_EAX), []).insert(
+                0, uc.reg_read(UC_X86_REG_ESI))
+            self._set_cf(False)
+        elif svc == SVC_UNHOOK_V86_INT_CHAIN:
+            hooks = self.v86_hooks.get(uc.reg_read(UC_X86_REG_EAX), [])
+            proc = uc.reg_read(UC_X86_REG_ESI)
+            if proc not in hooks:
+                raise RuntimeError("Unhook_V86_Int_Chain of a hook not in")
+            hooks.remove(proc)
+            self._set_cf(False)
+        elif svc == SVC_VTD_BEGIN_MIN_INT_PERIOD:
+            self.min_int.append(uc.reg_read(UC_X86_REG_EAX))
+            self._set_cf(False)
+        elif svc == SVC_VTD_END_MIN_INT_PERIOD:
+            period = uc.reg_read(UC_X86_REG_EAX)
+            if period not in self.min_int:
+                raise RuntimeError("VTD_End_Min_Int_Period without a begin")
+            self.min_int.remove(period)
+            self._set_cf(False)
         elif svc in (SVC_VPICD_SET_INT, SVC_VPICD_CLEAR_INT,
                      SVC_VPICD_PHYS_EOI):
             what = {SVC_VPICD_SET_INT: "set", SVC_VPICD_CLEAR_INT: "clear",
@@ -811,8 +840,12 @@ class Machine:
 
     def advance(self, ms):
         """ms of time pass: the time-outs that come due run, in order"""
+        self.advance_to(self.hw.clock.us + ms * 1000)
+
+    def advance_to(self, end):
+        """time goes on to end (us): the time-outs that come due by then
+        run, in order, each at its millisecond"""
         e = self.emu
-        end = self.hw.clock.us + ms * 1000
         while True:
             due = sorted((t[0], h) for h, t in e.timeouts.items()
                          if t[0] <= end // 1000)
@@ -826,6 +859,17 @@ class Machine:
             e.run(callback, {"EDX": data, "EBX": VM_SYS,
                              "ECX": self.hw.clock.us // 1000 - when})
         self.hw.clock.us = max(self.hw.clock.us, end)
+
+    def tick(self, vm):
+        """VMM reflects a timer interrupt (8) into the VM in V86 mode: the
+        hooks of interrupt 8 run first; True if they passed it on"""
+        self.run_events(vm)
+        for proc in list(self.emu.v86_hooks.get(8, [])):
+            self.emu.current_vm = vm
+            out = self.emu.run(proc, {"EAX": 8, "EBX": vm, "EBP": CLIENT})
+            if not out["EFlags"] & 1:
+                return False
+        return True
 
     def eoi(self, vm):
         """the VM ends the audio IRQ at its virtual PIC: VPICD calls the

@@ -319,7 +319,16 @@ Sound Blaster sound, and a second game that uses the Sound Blaster too.
    game's music, because esfmrec keeps 7Fh bit 4 on, and the driver changes
    only 7Fh bit 0 and 36h. With the Sound Blaster game, start esfmrec while
    the game runs, as in [section I](#i-esfmrec).
-8. Note anything that differs, and in which game.
+8. Test the FM's tempo. Play the FM game in a window, with music that has a
+   steady beat, and make Windows busy meanwhile: record with esfmrec, copy a
+   large folder, or drag a window around.
+   * The music keeps its tempo, and its notes keep their places. A short
+     delay, 30 ms, is all that differs from the game's picture.
+   * With `DosFMDelay=0` in `[ES1869.VXD]` and Windows restarted, the same
+     test makes the music stop and hurry, which is what the setting fixes.
+   * A game with DOS/4GW plays as with `DosFMDelay=0`. Note whether its
+     tempo wavers.
+9. Note anything that differs, and in which game.
 
 ### E3. The Audio 2 DAC
 

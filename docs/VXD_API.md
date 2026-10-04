@@ -381,6 +381,7 @@ the write also changes the value that Windows gets back afterwards.
 | 9   | CX holds the settings below (version 1.11)                 |
 | 10  | Audio 1 filter, clear with `Audio1Filter=1` (version 1.12) |
 | 11  | the DSP for a recording, clear with `RecordTakesDSP=0`     |
+| 12  | DOS FM on its own clock, clear with `DosFMDelay=0`         |
 
 DOS FM stands for the virtual FM chip and the rest of [DOS
 boxes](VXD_INTERNALS.md#dos-boxes). DOS mixer means that Windows' mixer is
@@ -388,8 +389,11 @@ saved and put back around a DOS program. Audio 1 filter means that the VxD
 keeps the Audio 1 CODEC's filter bypassed, for DOS programs and for
 DirectSound. The DSP for a recording means that 040D takes the DSP from a
 DOS program
-([VXD_INTERNALS.md](VXD_INTERNALS.md#a-recording-takes-the-dsp)), since
-version 1.13.
+([VXD_INTERNALS.md](VXD_INTERNALS.md#a-recording-takes-the-dsp)), and DOS FM
+on its own clock means that a DOS program's FM plays evenly on the clock of
+its timer ticks
+([VXD_INTERNALS.md](VXD_INTERNALS.md#a-dos-programs-fm-on-its-own-clock)),
+both since version 1.13.
 
 CX holds the settings that the VxD read from SYSTEM.INI when it started
 ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings)).
@@ -408,6 +412,7 @@ A set bit means that the change is on:
 | 8   | `[ES1869.DRV] Audio2Oversampling` | 0       |
 | 9   | `[ES1869.DRV] Audio2Filter`       | 0       |
 | 10  | `[ES1869.DRV] Audio1Filter`       | 0       |
+| 11  | `DosFMDelay` isn't 0 (1.13)       | 30      |
 | 15  | SYSTEM.INI was read               |         |
 
 Bit 0 is always set here, because with `RegisterAPI=0`, 0400 fails. When bit

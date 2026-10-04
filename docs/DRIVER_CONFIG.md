@@ -655,6 +655,7 @@ tells you which applies: "VxD settings: from SYSTEM.INI" or "the defaults".
 When the section or a key is missing, the default applies. A value is read
 the way `GetPrivateProfileInt` reads it, as its leading digits, or 0 if
 there are none. Write `1` or `0`, because `yes` and `on` read as 0.
+`DosFMDelay` takes a number of milliseconds, where `0` is off as well.
 
 For example, these settings give ESS's DOS box behavior, ESS's wave devices
 and ESS's modes of both DACs, while keeping the register API:
@@ -668,6 +669,7 @@ DosFMAudible=0
 DosMixerRestore=0
 ResetDosFM=0
 RecordTakesDSP=0
+DosFMDelay=0
 
 [ES1869.DRV]
 Audio1Device=0
@@ -712,6 +714,13 @@ ESS's driver:
   ([VXD_INTERNALS.md](VXD_INTERNALS.md#a-recording-takes-the-dsp)). With 0,
   a DOS program keeps the DSP from its first Sound Blaster access until it
   ends, and the recording is refused until then.
+* **DosFMDelay** (default 30). The FM of a real-mode DOS program plays on a
+  clock that follows its timer ticks, this many milliseconds late (at most
+  250), so that it keeps its tempo when Windows hands the program its ticks
+  in bursts
+  ([VXD_INTERNALS.md](VXD_INTERNALS.md#a-dos-programs-fm-on-its-own-clock)).
+  With 0, the program writes to the chip directly, and its music comes in
+  the bursts of its ticks.
 
 ### 6.2 [ES1869.DRV]
 

@@ -297,6 +297,65 @@ Sound Blaster ends with its program, with its VM, with the device or with
 the VxD, and no time-out or event outlives it. The program's FM is not
 affected by any of this: it goes on to the chip, and so into the recording.
 
+### A DOS program's FM on its own clock
+
+A DOS program plays its FM music from its timer interrupt: it programs the
+timer to a rate such as 70, 140 or 700 Hz and writes the FM registers of
+each step of the music at a tick. Windows gives a DOS box its ticks only
+while the box runs. When Windows itself is busy, for example with a
+recording or a disk, the box can wait 20 ms or more, and then it gets the
+ticks it missed one right after the other. Its FM writes come in the same
+bursts, so the music stops and then hurries, and its tempo wavers.
+
+`DosFMDelay` plays the FM writes of a real-mode program on a clock that
+follows the program's ticks, so they reach the chip as evenly as the program
+meant them, in their order, a fixed delay later. The default delay is 30 ms,
+which covers the usual waits, and `DosFMDelay` takes it in milliseconds, up
+to 250.
+
+The ticks come from interrupt 8, the timer's, which VMM reflects into the
+VM. A hook on it (`Hook_V86_Int_Chain`, `ESSREG_FMQ_Int8`) sees each tick
+that the program gets, also those of a burst. VPICD watches the hooks that
+VxDs set, and it delivers a hooked interrupt through VMM's `Simulate_Int`,
+which calls them, instead of its own faster path.
+
+When a real-mode program takes the FM chip, `ESSREG_FMQ_Start` traps its FM
+ports again. From then on, its virtual chip answers its reads, the status
+port with its timers included, and keeps its registers, while each port
+write also goes into a queue (`ESSREG_FMQ_Put`). The write gets the time of
+the program's last tick on the clock, plus the delay, and a time-out plays
+it to the chip when it's due (`ESSREG_FMQ_Drain`), with ESS's 6 status reads
+after each port write. VTD gives the VxD 1 ms timer interrupts meanwhile
+(`VTD_Begin_Min_Int_Period`), so the time-outs come within a millisecond.
+
+The clock (`ESSREG_FMQ_Tick`) starts from the first 16 intervals between
+ticks. It takes the 12th shortest as a tick, which is the usual interval
+between ticks that came on time, whatever bursts came among them. From then
+on, each tick moves the clock on by a tick, but never past the real time and
+never further behind it than the delay. After each window of 32 ticks, the
+smallest lag of the window, which a tick that came on time has, pulls the
+clock to the ticks over the next window. The average since the clock locked
+corrects the tick. When most ticks of a window run into one of the limits,
+the program changed its rate, and the clock starts again from 16 intervals.
+In the emulator, the writes of a burst after 20 ms without ticks reach the
+chip within a millisecond of their places.
+
+Some programs can't play from the queue, and play directly, as with ESS's
+driver:
+* A program in protected mode (`VMSTAT_PM_APP`), such as a DOS/4GW game,
+  gets its ticks in protected mode, where the hook doesn't see them.
+* A program whose music doesn't follow interrupt 8, such as one that uses
+  the RTC or polls a timer, writes long after its last tick. When a quarter
+  of 64 data writes come at least 4 ms and half a tick after the last tick,
+  the queue goes to the chip at once and the program plays directly until it
+  ends (`ESSREG_FMQ_Direct`).
+
+When the program lets go of the chip, by ending or with its VM, the queue
+goes to the chip at once (`ESSREG_FMQ_End`). When the device or the VxD goes
+away, the queue is dropped, and the VxD unhooks interrupt 8. Each FM access
+of a program that plays from the queue goes through the VxD, which costs
+some processor time, as it does for a program with a virtual chip.
+
 ## Hardware volume
 
 The volume buttons change the master volume in the chip (mixer 60h/62h).
@@ -379,7 +438,7 @@ under `%if ESSREG_EXT` and each keeping its length:
 * the calls in `Acquire_Resources` and `Release_Resources` of the FM reset
   (o5:1229), `FM_Enable_Local_Trapping` (o5:10B1), `Save_DOS_Mixer`
   (o5:1279) and `Restore_DOS_Mixer` (o5:110B)
-* the size of the ADI (E9h becomes 1A0h, o4:0235) and of the per-VM node
+* the size of the ADI (E9h becomes 1ACh, o4:0235) and of the per-VM node
   (2Eh becomes 34h: o4:00AB, o5:100D, o7:0042)
 * the control dispatcher's jumps for VM_Not_Executeable,
   Sys_Dynamic_Device_Exit and Sys_Dynamic_Device_Init, which now reads the

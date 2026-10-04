@@ -50,6 +50,7 @@ static const struct {
     {VXD_S_DOS_MIXER, "DosMixerRestore", 0x0111},
     {VXD_S_RESET_FM, "ResetDosFM", 0x0111},
     {VXD_S_REC_TAKES, "RecordTakesDSP", 0x0113},
+    {VXD_S_FM_TIMED, "DosFMDelay", 0x0113},
 };
 
 static void settings_text(char *p) {

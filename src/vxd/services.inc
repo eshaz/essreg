@@ -15,6 +15,7 @@ Get_Next_VM_Handle                       equ 0x0001003B
 Set_Global_Time_Out                      equ 0x0001003C
 Cancel_Time_Out                          equ 0x0001003E
 Get_System_Time                          equ 0x0001003F
+Hook_V86_Int_Chain                       equ 0x00010041
 Simulate_Far_Call                        equ 0x00010048
 Simulate_Push                            equ 0x0001004D
 _HeapAllocate                            equ 0x0001004F
@@ -46,6 +47,7 @@ _Allocate_Device_CB_Area                 equ 0x000100A7
 Get_Profile_String                       equ 0x000100B3
 VMM_GetSystemInitState                   equ 0x00010111
 VMM_Service_0116                         equ 0x00010116
+Unhook_V86_Int_Chain                     equ 0x00010118
 VMM_Service_011C                         equ 0x0001011C
 VMM_Service_0174                         equ 0x00010174
 VMM_Service_017B                         equ 0x0001017B
@@ -74,6 +76,8 @@ VDMAD_Phys_Mask_Channel                  equ 0x00040018
 VDMAD_Phys_Unmask_Channel                equ 0x00040019
 VDMAD_Unvirtualize_Channel               equ 0x0004001A
 VDMAD_Get_Phys_Count                     equ 0x0004001C
+VTD_Begin_Min_Int_Period                 equ 0x00050003
+VTD_End_Min_Int_Period                   equ 0x00050004
 SHELL_Message                            equ 0x00170004
 SHELL_CallAtAppyTime                     equ 0x0017000E
 VXDLDR_LoadDevice                        equ 0x00270001

@@ -325,6 +325,11 @@ DOS game expects it
 * FM that a DOS game left behind is reset the next time Windows plays a
   sound or a level changes, so no note keeps sounding. After a DOS game,
   moving a slider in the tray's volume control resets the card.
+* A DOS game's FM music keeps its tempo. Windows hands a DOS box its timer
+  ticks in bursts when Windows itself is busy, and the music came in the
+  same bursts. The driver now plays a real-mode game's FM on a clock that
+  follows its ticks, 30 ms late but evenly, in the game's order. A protected
+  mode game, such as one with DOS/4GW, plays as before.
 * A recording of the FM, by esfmrec or by the *ESS AudioDrive FM Digital*
   device, can start while a DOS game has the Sound Blaster. The game goes on
   with a virtual Sound Blaster, which answers as the chip does and keeps the

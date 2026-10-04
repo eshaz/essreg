@@ -902,5 +902,202 @@ class RecordingTakesDSPTest(VxDBuilds, unittest.TestCase):
         self.assertEqual(m.adi32(ADI_DSP_OWNER), 0)
 
 
+VMSTAT_PM_APP = 0x40
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class TimedFMTest(VxDBuilds, unittest.TestCase):
+    """A real-mode DOS program's FM plays from a queue on a clock that
+    follows its timer ticks (DosFMDelay, ESSREG_FMQ_*): the chip gets its
+    writes in order, a delay after their ticks, and evenly, whatever bursts
+    Windows hands the ticks over in"""
+
+    DELAY = 30000
+
+    def game(self, ini=None):
+        """the VxD started, its clock calibrated, and a DOS game that took
+        the FM chip with a write, its FM playing from the queue"""
+        m = self.machine()
+        self.assertTrue(m.start(ini or {}))
+        m.emu.run(m.syms["ESSREG_Clock"], {})
+        m.advance(1100)
+        m.emu.run(m.syms["ESSREG_Clock"], {})     # calibrated from here
+        self.write(m, 0x20, 0x01)
+        self.assertEqual(m.adi32(ADI_FM_OWNER), VM_DOS)
+        return m
+
+    def write(self, m, reg, value, vm=VM_DOS):
+        m.outb(vm, 0x388, reg)
+        m.outb(vm, 0x389, value)
+
+    def timed(self, m):
+        return m.adi32(m.syms["EX_FMQ_VM"]) == VM_DOS
+
+    def chip(self, m, reg):
+        """(value, when) of each write of emulation register reg"""
+        return [(v, t) for (mode, r, v), t in zip(m.hw.fm.writes,
+                                                  m.hw.fm.times)
+                if mode == "emu" and r == reg]
+
+    def play(self, m, period, n, gaps=(), start=None):
+        """n ticks every period us, each followed by a write of register
+        A0h with the tick's number; the VM doesn't run during each gap
+        (start, end), and the ticks it missed come in a burst at its end.
+        Returns the ticks' times"""
+        t0 = m.hw.clock.us + 1000 if start is None else start
+        times = []
+        for k in range(n):
+            t = t0 + int(k * period)
+            when = t
+            for a, b in gaps:
+                if a <= t < b:
+                    when = b
+            m.advance_to(max(when, m.hw.clock.us))
+            self.assertTrue(m.tick(VM_DOS))
+            self.write(m, 0xA0, k & 0xFF)
+            times.append(t)
+        return times
+
+    def test_writes_come_a_delay_after_their_tick(self):
+        m = self.game()
+        self.assertTrue(self.timed(m))
+        self.assertNotIn((VM_DOS, 0x388), m.emu.trap_off)
+        self.assertEqual(m.emu.min_int, [1])        # 1 ms time-outs
+        times = self.play(m, 1428.6, 64)
+        # the writes of the last 30 ms wait in the queue
+        due = sum(1 for t in times if t + self.DELAY <= m.hw.clock.us)
+        self.assertLessEqual(abs(len(self.chip(m, 0xA0)) - due), 1)
+        self.assertLess(due, 50)
+        m.advance(50)
+        got = self.chip(m, 0xA0)
+        self.assertEqual([v for v, t in got], list(range(64)))
+        for (v, t), tick in zip(got, times):
+            self.assertLessEqual(abs(t - (tick + self.DELAY)), 1500)
+
+    def test_a_burst_plays_evenly(self):
+        # 700 Hz; the VM doesn't run for 20 ms, then gets the 14 ticks it
+        # missed back to back: each write still plays a delay after its own
+        # tick, where the raw ticks came up to 20 ms late
+        m = self.game()
+        t0 = m.hw.clock.us + 1000
+        gap = (t0 + 120000, t0 + 140000)
+        times = self.play(m, 1428.6, 160, gaps=[gap], start=t0)
+        m.advance(60)
+        got = self.chip(m, 0xA0)
+        self.assertEqual([v for v, t in got], [k & 0xFF for k in range(160)])
+        late = [t - (tick + self.DELAY) for (v, t), tick in
+                zip(got[60:], times[60:])]
+        self.assertLessEqual(max(abs(x) for x in late), 1500, late)
+        burst = [k for k, tick in enumerate(times) if gap[0] <= tick < gap[1]]
+        self.assertGreater(len(burst), 10)
+
+    def test_a_slower_tick_and_a_rate_change(self):
+        # 140 Hz, then the game sets 700 Hz: the clock locks again on the
+        # new rate, and from then on the writes are even again
+        m = self.game()
+        times = self.play(m, 7142.9, 64)
+        times += self.play(m, 1428.6, 200, start=times[-1] + 1429)
+        m.advance(60)
+        got = self.chip(m, 0xA0)
+        self.assertEqual(len(got), 264)
+        late = [t - (tick + self.DELAY) for (v, t), tick in
+                zip(got[150:], times[150:])]
+        self.assertLessEqual(max(abs(x) for x in late), 1500, late)
+
+    def test_reads_come_from_its_virtual_chip(self):
+        m = self.game()
+        writes = list(m.hw.fm.writes)
+        self.assertTrue(adlib(m, VM_DOS))           # its timers, on time
+        m.advance(50)
+        self.assertGreater(len(m.hw.fm.writes), len(writes))
+
+    def test_the_end_of_the_program_plays_what_is_queued(self):
+        m = self.game()
+        self.play(m, 1428.6, 20)
+        m.advance(2)
+        before = len(self.chip(m, 0xA0))
+        self.assertLess(before, 20)
+        m.program_end(VM_DOS)
+        got = self.chip(m, 0xA0)
+        self.assertEqual([v for v, t in got], list(range(20)))
+        self.assertFalse(self.timed(m))
+        self.assertEqual(m.emu.timeouts, {})
+        self.assertEqual(m.emu.min_int, [])
+        self.assertEqual(m.adi32(m.syms["EX_FMQ_Blk"]), 0)
+
+    def test_a_protected_mode_program_plays_directly(self):
+        m = self.machine()
+        self.assertTrue(m.start({}))
+        m.emu.write32(VM_DOS, VMSTAT_PM_APP)        # CB_VM_Status
+        self.write(m, 0x20, 0x01)
+        self.assertEqual(m.adi32(ADI_FM_OWNER), VM_DOS)
+        self.assertFalse(self.timed(m))
+        self.assertIn((VM_DOS, 0x388), m.emu.trap_off)
+        self.write(m, 0xA0, 0x55)
+        self.assertEqual(self.chip(m, 0xA0), [(0x55, m.hw.clock.us)])
+
+    def test_writes_off_its_ticks_play_directly(self):
+        # no tick ever comes: the program's music isn't on interrupt 8, so
+        # after 64 writes it plays directly, what was queued first
+        m = self.game()
+        for k in range(70):
+            self.write(m, 0xA0, k)
+            m.hw.clock.advance(3000)
+        self.assertFalse(self.timed(m))
+        self.assertEqual(m.adi32(m.syms["EX_FMQ_Direct"]), VM_DOS)
+        self.assertIn((VM_DOS, 0x388), m.emu.trap_off)
+        self.assertEqual([v for v, t in self.chip(m, 0xA0)], list(range(70)))
+        self.assertEqual(m.emu.timeouts, {})
+        # until the program ends: the next one plays from a queue again
+        m.program_end(VM_DOS)
+        self.assertEqual(m.adi32(m.syms["EX_FMQ_Direct"]), 0)
+        self.write(m, 0x20, 0x01)
+        self.assertTrue(self.timed(m))
+
+    def test_a_full_queue_loses_nothing(self):
+        m = self.game()
+        self.play(m, 1428.6, 1)
+        for k in range(600):                        # 1200 port writes
+            self.write(m, 0xA1, k & 0xFF)
+        m.advance(50)
+        self.assertEqual([v for v, t in self.chip(m, 0xA1)],
+                         [k & 0xFF for k in range(600)])
+
+    def test_delay_setting(self):
+        for value, delay in (("100", 100000), ("999", 250000)):
+            with self.subTest(value=value):
+                m = self.game({("ES1869.VXD", "DosFMDelay"): value})
+                times = self.play(m, 1428.6, 20)
+                m.advance(300)
+                got = self.chip(m, 0xA0)
+                self.assertLessEqual(abs(got[0][1] - (times[0] + delay)),
+                                     1500)
+
+    def test_off_is_direct(self):
+        m = self.machine()
+        self.assertTrue(m.start({("ES1869.VXD", "DosFMDelay"): "0"}))
+        self.assertEqual(m.emu.v86_hooks.get(8, []), [])
+        self.write(m, 0x20, 0x01)
+        self.assertFalse(self.timed(m))
+        self.assertIn((VM_DOS, 0x388), m.emu.trap_off)
+        self.assertEqual(m.emu.min_int, [])
+
+    def test_the_device_or_the_vxd_goes(self):
+        m = self.game()
+        self.play(m, 1428.6, 10)
+        for vm in (VM_SYS, VM_DOS, VM_DOS2):
+            m.emu.run(m.syms["ESSREG_Node_Remove"], {"EBX": vm, "EDI": ADI})
+        self.assertFalse(self.timed(m))
+        self.assertEqual(m.emu.timeouts, {})
+        self.assertEqual(m.emu.min_int, [])
+        m = self.game()
+        self.play(m, 1428.6, 10)
+        m.emu.uc.mem_write(m.syms["AUDDRV_Dynamic_Exit"], b"\xF8\xC3")
+        m.emu.run(m.syms["ESSREG_Dynamic_Exit"], {"EBX": VM_SYS})
+        self.assertEqual(m.emu.v86_hooks.get(8, []), [])
+        self.assertEqual(m.emu.timeouts, {})
+        self.assertFalse(self.timed(m))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -73,6 +73,7 @@ int VXD_CALL vxd_raw_call(void ESS_FAR *entry, vxd_regs ESS_FAR *r);
 #define VXD_F_SETTINGS 0x0200  // CX holds the settings (version 1.11)
 #define VXD_F_DOS_A1 0x0400    // Audio 1's filter bypassed (1.12)
 #define VXD_F_REC_DSP 0x0800   // a recording takes the DSP (1.13)
+#define VXD_F_FM_TIMED 0x1000  // DOS FM on its own clock (1.13)
 
 // the SYSTEM.INI settings the VxD runs with (0400, CX), 1 = on
 #define VXD_S_API 0x0001        // [ES1869.VXD] RegisterAPI
@@ -86,6 +87,7 @@ int VXD_CALL vxd_raw_call(void ESS_FAR *entry, vxd_regs ESS_FAR *r);
 #define VXD_S_A2_4X 0x0100      // [ES1869.DRV] Audio2Oversampling
 #define VXD_S_A2_FILTER 0x0200  // Audio2Filter
 #define VXD_S_A1_FILTER 0x0400  // Audio1Filter (version 1.12)
+#define VXD_S_FM_TIMED 0x0800   // [ES1869.VXD] DosFMDelay isn't 0 (1.13)
 #define VXD_S_READ 0x8000       // read from SYSTEM.INI, else the defaults
 
 // owner classes reported by function 040C
