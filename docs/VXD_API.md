@@ -293,8 +293,8 @@ in another VM, or the driver's own interrupt code.
 
 The functions have these inputs and outputs:
 
-* **0400** takes nothing and returns AX = 0111h (version 1.11), BX = the
-  feature bits (03FFh), CX = the SYSTEM.INI settings and DX = the number of
+* **0400** takes nothing and returns AX = 0112h (version 1.12), BX = the
+  feature bits (07FFh), CX = the SYSTEM.INI settings and DX = the number of
   functions (13).
 * **0401** takes BL = a mixer register and returns AL = its value.
 * **0402** takes BL = a mixer register and BH = the value.
@@ -355,22 +355,24 @@ the write also changes the value that Windows gets back afterwards.
 
 0400 returns these feature bits in BX:
 
-| Bit | Function                                   |
-|-----|--------------------------------------------|
-| 0   | mixer                                      |
-| 1   | controller                                 |
-| 2   | ports                                      |
-| 3   | configuration ports                        |
-| 4   | PnP                                        |
-| 5   | mixer block                                |
-| 6   | owner information                          |
-| 7   | DOS FM, clear with `VirtualFM=0`           |
-| 8   | DOS mixer, clear with `DosMixerRestore=0`  |
-| 9   | CX holds the settings below (version 1.11) |
+| Bit | Function                                                       |
+|-----|----------------------------------------------------------------|
+| 0   | mixer                                                          |
+| 1   | controller                                                     |
+| 2   | ports                                                          |
+| 3   | configuration ports                                            |
+| 4   | PnP                                                            |
+| 5   | mixer block                                                    |
+| 6   | owner information                                              |
+| 7   | DOS FM, clear with `VirtualFM=0`                               |
+| 8   | DOS mixer, clear with `DosMixerRestore=0`                      |
+| 9   | CX holds the settings below (version 1.11)                     |
+| 10  | DOS Audio 1 filter, clear with `Audio1Filter=1` (version 1.12) |
 
 DOS FM stands for the virtual FM chip and the rest of [DOS
 boxes](VXD_INTERNALS.md#dos-boxes). DOS mixer means that Windows' mixer is
-saved and put back around a DOS program.
+saved and put back around a DOS program. DOS Audio 1 filter means that a DOS
+program plays through the Audio 1 DAC with its filter bypassed.
 
 CX holds the settings that the VxD read from SYSTEM.INI when it started
 ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings)).
@@ -387,6 +389,7 @@ A set bit means that the change is on:
 | 6   | `ResetDosFM`                      | 1       |
 | 8   | `[ES1869.DRV] Audio2Oversampling` | 0       |
 | 9   | `[ES1869.DRV] Audio2Filter`       | 0       |
+| 10  | `[ES1869.DRV] Audio1Filter`       | 0       |
 | 15  | SYSTEM.INI was read               |         |
 
 Bit 0 is always set here, because with `RegisterAPI=0`, 0400 fails. When bit

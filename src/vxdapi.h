@@ -71,6 +71,7 @@ int VXD_CALL vxd_raw_call(void ESS_FAR *entry, vxd_regs ESS_FAR *r);
 #define VXD_F_DOS_FM 0x0080    // the virtual FM chip (VirtualFM=1)
 #define VXD_F_DOS_MIXER 0x0100 // Windows' mixer back (DosMixerRestore=1)
 #define VXD_F_SETTINGS 0x0200  // CX holds the settings (version 1.11)
+#define VXD_F_DOS_A1 0x0400    // Audio 1's filter bypassed for DOS (1.12)
 
 // the SYSTEM.INI settings the VxD runs with (0400, CX), 1 = on
 #define VXD_S_API 0x0001        // [ES1869.VXD] RegisterAPI
@@ -82,6 +83,7 @@ int VXD_CALL vxd_raw_call(void ESS_FAR *entry, vxd_regs ESS_FAR *r);
 #define VXD_S_RESET_FM 0x0040   // ResetDosFM
 #define VXD_S_A2_4X 0x0100      // [ES1869.DRV] Audio2Oversampling
 #define VXD_S_A2_FILTER 0x0200  // Audio2Filter
+#define VXD_S_A1_FILTER 0x0400  // Audio1Filter (version 1.12)
 #define VXD_S_READ 0x8000       // read from SYSTEM.INI, else the defaults
 
 // owner classes reported by function 040C

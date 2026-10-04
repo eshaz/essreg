@@ -80,6 +80,16 @@ the samples interpolated 4x, without the SCF. `build/ES1869.DRV` and the
 extended `ES1869.VXD` clear bit 4 and set bits 3 and 1 instead, so the DAC
 plays the samples as they are, also without the SCF.
 
+The rebuilt drivers write the mode in two more places, where ESS's drivers
+leave 71h alone, so that the chip holds it at all times:
+* ES1869.DRV writes it right after the mixer reset of every start and resume
+  (3:4897), so the mode is there before the first sound plays.
+* ES1869.VXD writes it again each time a DOS program starts a DMA transfer
+  on Audio 2's channel (its DMA handler, o1:0870), in case the program reset
+  the mixer after it took the DSP.
+
+Neither write happens with ESS's mode, that is, with both keys below at 1.
+
 The writes leave the other bits as they were, such as bit 5 for 48 kHz
 recording. Linux's `es18xx` driver turns the oversampling on too (71h =
 32h).
@@ -130,7 +140,12 @@ although the SCF alone (bits 4 and 3 clear) would remove those images.
 To try each setting, change *Audio 2 4x oversampling* and *Audio 2 filter
 bypass* on essctl's *Audio 2 channel* page while music plays. You hear the
 change at once. The driver puts its own setting back at the next wave open
-and at the next playback start.
+and playback start, and when Windows starts or resumes.
+
+The Audio 1 DAC has a switched-capacitor filter of its own, 71h bit 2, which
+is also the ADC's filter when Audio 1 records. The rebuilt drivers bypass it
+while the Audio 1 DAC plays and keep it in use for recording
+([AUDIO1.md](AUDIO1.md#the-filter-of-the-audio-1-codec)).
 
 ### Measuring the DAC on the card
 

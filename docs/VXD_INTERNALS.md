@@ -206,13 +206,28 @@ lets go, it writes all of them back after ESS's 11. A change made meanwhile
 through the register interface, by essctl or ess3d, counts as Windows'.
 Mixer register 71h comes back with the driver's Audio 2 mode, by default no
 4x oversampling and the filter bypassed, because ESS's code sets that mode
-before the save (o5:198C).
+before the save (o5:198C). The Audio 1 filter bypass that the DOS program
+got there is left out of the saved value.
 
 `ResetDosFM` resets FM when Windows next uses the card. When Windows
 acquires through the API, to play a sound or change a level (0002), open
 MIDI (0102) or open the MPU-401 (0302), FM that a DOS program left is reset,
 so notes still sounding stop and the next DOS program starts from a clean
 chip.
+
+A DOS program also gets the DACs in the mode that Windows' sound has. The
+VxD reads `Audio2Oversampling`, `Audio2Filter` and `Audio1Filter` from the
+`[ES1869.DRV]` section, as ES1869.DRV does. When a DOS VM takes the DSP, 71h
+gets the Audio 2 DAC's mode, and with `Audio1Filter=0` the Audio 1 DAC's
+filter is bypassed as well, because DOS programs play through the Audio 1
+DAC. The DMA handlers then follow the program's transfers, which VDMAD
+reports to them without any extra port trapping (`VDMAD_Get_Virt_State`). On
+Audio 1's channel, a transfer from memory keeps the filter bypassed, and a
+transfer to memory, a recording, puts it back in use, because the same
+filter keeps high frequencies out of the ADC. On Audio 2's channel, a
+transfer writes the Audio 2 mode again, in case the program reset the mixer.
+When Windows takes the DSP back, the Audio 1 filter is in use again
+([AUDIO1.md](AUDIO1.md#the-filter-of-the-audio-1-codec)).
 
 ## Hardware volume
 
@@ -303,9 +318,14 @@ under `%if ESSREG_EXT` and each keeping its length:
   `ESSREG_App_End`
 * the two writes of mixer 71h, the Audio 2 mode, when a VM takes the DSP
   (o5:198C) and at the VxD's own Audio 2 start (o5:3603), which now go
-  through `ESSREG_A2_Mode` and by default turn 4x oversampling off and
-  bypass the filter
-  ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter))
+  through `ESSREG_A2_Acquire` and `ESSREG_A2_Mode` and by default turn 4x
+  oversampling off and bypass the filter
+  ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter)).
+  A DOS program that takes the DSP also gets the Audio 1 DAC's filter
+  bypassed there.
+* the last jump of the two DMA handlers, for Audio 1's channel (o1:0546) and
+  Audio 2's (o1:0870), which now goes to `VDMAD_Default_Handler` through
+  `ESSREG_DMA1` and `ESSREG_DMA2`
 
 Everything else is appended, so ESS's code stays at its addresses, and
 Windows' sound, DirectSound and the interrupt handlers run the same bytes as

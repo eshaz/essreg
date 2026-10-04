@@ -78,6 +78,8 @@ SVC_GET_PROFILE_STRING = 0x000100B3
 SVC_GET_SYSTEM_INIT_STATE = 0x00010111
 SVC_SHELL_MESSAGE = 0x00170004
 SVC_VDMAD_GET_PHYS_COUNT = 0x0004001C
+SVC_VDMAD_GET_VIRT_STATE = 0x00040004
+SVC_VDMAD_DEFAULT_HANDLER = 0x00040012
 NOOP_SERVICES = {
     0x00030002, 0x00030003, 0x00030004, 0x00030008, 0x00030009,  # VPICD
     0x00040013, 0x00040014,                                      # VDMAD
@@ -366,6 +368,10 @@ class VxDEmu:
         self.trap_off = set()      # (vm, port) with trapping disabled
         self.messages = []
         self.dma_count = 0x2B10         # VDMAD_Get_Phys_Count's next answer
+        # VDMAD_Get_Virt_State's mode (DL) for each DMA handle, masked if
+        # not set, and the calls passed on to VDMAD_Default_Handler
+        self.virt_mode = {}
+        self.dma_default = []           # (DMA handle, VM)
         self.has_tsc = True
         # SYSTEM.INI: {(section, key): value}, as VMM finds it while
         # Windows starts (VMM_GetSystemInitState below 40000000h)
@@ -535,6 +541,13 @@ class VxDEmu:
             # a transfer that plays: the count goes down on every look
             self.dma_count = (self.dma_count - 0x123) & 0xFFFF
             uc.reg_write(UC_X86_REG_ECX, self.dma_count)
+        elif svc == SVC_VDMAD_GET_VIRT_STATE:
+            mode = self.virt_mode.get(uc.reg_read(UC_X86_REG_EAX), 0x01)
+            uc.reg_write(UC_X86_REG_ESI, BUFFER)
+            uc.reg_write(UC_X86_REG_ECX, 0x1000)
+            uc.reg_write(UC_X86_REG_EDX, mode)
+        elif svc == SVC_VDMAD_DEFAULT_HANDLER:
+            self.dma_default.append((uc.reg_read(UC_X86_REG_EAX), ebx))
         elif svc in NOOP_SERVICES:
             pass
         else:
@@ -623,6 +636,8 @@ def load_syms(elf, le):
 
 # ADI fields (src/vxd/adi.inc)
 ADI_FLAGS, ADI_AUDIO, ADI_FM, ADI_ALIAS, ADI_MPU = 0x04, 0x06, 0x08, 0x0A, 0x0C
+ADI_DMA1, ADI_DMA2 = 0x4D, 0x7A         # the DMA channels' VDMAD handles
+DMA1, DMA2 = 0x7100, 0x7101             # and their values here
 ADI_DSP_OWNER, ADI_DSP_LAST = 0x35, 0x39
 ADI_FM_OWNER, ADI_FM_LAST = 0x3D, 0x41
 ADI_MPU_OWNER = 0x45
@@ -721,6 +736,20 @@ class Machine:
         self.outb(vm, base + 1, value)
         for _ in range(35):
             self.inb(vm, base)
+
+    def dma(self, vm, channel, mode):
+        """a VM's DMA programming of Audio 1's (channel 1) or Audio 2's
+        channel (2) as VDMAD reports it to the driver's handler: mode as
+        VDMAD_Get_Virt_State gives it (01h masked, 08h from memory, 04h to
+        memory)"""
+        e = self.emu
+        handle = DMA1 if channel == 1 else DMA2
+        e.write32(ADI + ADI_DMA1, DMA1)
+        e.write32(ADI + ADI_DMA2, DMA2)
+        e.virt_mode[handle] = mode
+        e.current_vm = vm
+        e.run(self.syms["L1_0518" if channel == 1 else "L1_0870"],
+              {"EAX": handle, "EBX": vm})
 
     def api(self, vm, fn, **regs):
         client = {"EDX": fn, "ECX": DEVNODE}

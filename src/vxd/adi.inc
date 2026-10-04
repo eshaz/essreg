@@ -27,5 +27,6 @@ ADI_FMLastOwner         equ 0x41
 ADI_MPUOwner            equ 0x45    ; dword: VM handle that owns the MPU-401
 ADI_MPULastOwner        equ 0x49
 ADI_DevNode             equ 0x55    ; dword: CONFIGMG devnode
+ADI_DMA2Handle          equ 0x7A    ; dword: VDMAD handle of Audio 2's channel
 
 %endif

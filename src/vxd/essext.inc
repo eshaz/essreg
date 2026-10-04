@@ -26,6 +26,7 @@ EXF_FM_RESET            equ 0x04        ; the last FM acquisition reset the chip
 EXF_DOS_FM              equ 0x08        ; a DOS VM had FM since Windows reset it
 EXF_MIDI_CLOSED         equ 0x10        ; Windows' MIDI gave FM back (0103):
                                         ; ES1869.DRV gives I2S the music DAC next
+EXF_A1_BYPASS           equ 0x20        ; a DOS program's Audio 1 filter bypassed
 
 D1_DAC                  equ 0x01        ; 7Fh bit 0 cleared: FM has the music DAC
 D1_VOL                  equ 0x02        ; 36h set from 00h to ESSREG_FM_VOLUME

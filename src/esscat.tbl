@@ -349,8 +349,8 @@ FLD(F_A2_RATE, R_MX70, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED, E_NONE, PG_AUDIO2, FM
 REG(R_MX71, BK_MIXER, 0, 0x71, 0, "Audio 2 mode", 64)
 FLD(F_A2_NEWA1, R_MX71, 5, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.new_a1", "New A1h rate mode", "1 = A1h behaves like 70h, giving accurate rates that divide 48 kHz; 0 = A1h behaves as in earlier AudioDrive chips (DS p.64)")
 FLD(F_A2_4X, R_MX71, 4, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.oversample4x", "Audio 2 4x oversampling", "1 = the Audio 2 DAC is in 4x oversampling mode, which always bypasses its switched-capacitor filter (DS p.64)")
-FLD(F_A2_SCF2BYP, R_MX71, 3, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_AUDIO2, FMT_NONE, "a2.scf_bypass", "Audio 2 filter bypass", "1 = bypass the switched-capacitor filter of the Audio 2 DAC (DS p.64)")
-FLD(F_A2_SCF1BYP, R_MX71, 2, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_AUDIO2, FMT_NONE, "a1.scf_bypass", "Audio 1 filter bypass", "1 = bypass the switched-capacitor filter of the Audio 1 CODEC (DS p.64)")
+FLD(F_A2_SCF2BYP, R_MX71, 3, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.scf_bypass", "Audio 2 filter bypass", "1 = bypass the switched-capacitor filter of the Audio 2 DAC (DS p.64)")
+FLD(F_A2_SCF1BYP, R_MX71, 2, 1, K_BOOL, T_CAUTION, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a1.scf_bypass", "Audio 1 filter bypass", "1 = bypass the switched-capacitor filter of the Audio 1 CODEC, which is in the ADC's input path too (DS p.25, p.64)")
 FLD(F_A2_ASYNC, R_MX71, 1, 1, K_BOOL, T_EXPERT, FF_DRVOWNED, E_NONE, PG_AUDIO2, FMT_NONE, "a2.async", "Audio 2 asynchronous", "1 = the Audio 2 DAC runs at its own rate (70h, 72h); 0 = it is slaved to the Audio 1 sample and filter rate (DS p.64)")
 FLD(F_A2_FMMIX, R_MX71, 0, 1, K_BOOL, T_CAUTION, 0, E_NONE, PG_AUDIO2, FMT_NONE, "a2.fm_mix", "Audio 2 mixed into FM", "1 = Audio 2 DMA is slaved to the FM synthesizer sample rate and digitally mixed into the FM output (DS p.64)")
 

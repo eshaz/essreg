@@ -64,12 +64,14 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0111
-ESSREG_FEATURES         equ 0x03FF      ; mixer, controller, ports, config,
+ESSREG_VERSION          equ 0x0112
+ESSREG_FEATURES         equ 0x07FF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
-                                        ; DOS FM, DOS mixer restore, settings
+                                        ; DOS FM, DOS mixer restore, settings,
+                                        ; DOS Audio 1 filter
 FEATURE_DOS_FM          equ 0x0080      ; cleared while VirtualFM=0
 FEATURE_DOS_MIXER       equ 0x0100      ; cleared while DosMixerRestore=0
+FEATURE_DOS_A1          equ 0x0400      ; cleared while Audio1Filter=1
 
 ; settings (ESSREG_Opts), 1 = the change is on
 OPT_API                 equ 0x0001      ; RegisterAPI: group 4
@@ -81,6 +83,7 @@ OPT_DOS_MIXER           equ 0x0020      ; DosMixerRestore: Windows' mixer back
 OPT_RESET_FM            equ 0x0040      ; ResetDosFM: FM reset when Windows is back
 OPT_A2_4X               equ 0x0100      ; Audio2Oversampling: ESS's 4x
 OPT_A2_FILTER           equ 0x0200      ; Audio2Filter: the filter in use
+OPT_A1_FILTER           equ 0x0400      ; Audio1Filter: the filter in use
 OPT_READ                equ 0x8000      ; SYSTEM.INI was read
 OPT_DEFAULT             equ 0x007F
 
@@ -108,6 +111,12 @@ ESSREG_FM_VOLUME        equ 0xFF        ; 36h for a DOS FM owner, as 1869opl3
 ; Audio 2 mode (mixer 71h)
 ESSREG_A2_4X            equ 0x10        ; 4x oversampling (and no filter)
 ESSREG_A2_SCF_BYPASS    equ 0x08        ; the switched-capacitor filter bypassed
+ESSREG_A1_SCF_BYPASS    equ 0x04        ; Audio 1's filter bypassed
+
+; VDMAD_Get_Virt_State's mode (DL)
+DMA_MASKED              equ 0x01        ; the channel is masked
+DMA_TO_MEMORY           equ 0x04        ; a write transfer: device to memory
+DMA_FROM_MEMORY         equ 0x08        ; a read transfer: memory to device
 
 ; virtual FM chip, one per VM and device, allocated zeroed on first use
 VFM_Flags               equ 0x000       ; byte: VFM_*
@@ -140,7 +149,8 @@ TSC_READY               equ 3
 
 global ESSREG_Rdtsc, ESSREG_Snap_Regs, ESSREG_Opts
 global OPT_API, OPT_VFM, OPT_TAKES_FM, OPT_KEEPS_FM, OPT_FM_AUDIBLE
-global OPT_DOS_MIXER, OPT_RESET_FM, OPT_A2_4X, OPT_A2_FILTER, OPT_READ
+global OPT_DOS_MIXER, OPT_RESET_FM, OPT_A2_4X, OPT_A2_FILTER, OPT_A1_FILTER
+global OPT_READ
 global VFM_Flags, VFM_Latch, VFM_Status, VFM_Ctl, VFM_T1, VFM_T2
 global VFM_EmuMask, VFM_NatMask, VFM_Emu, VFM_Nat, VFM_SIZE
 global EX_Flags, EX_D1, EX_Snap, NODE_VFM
@@ -489,8 +499,11 @@ ESSREG_API_Info:
         jnz     .mixer
         and     ax,~FEATURE_DOS_FM & 0xFFFF
 .mixer: test    byte [ESSREG_Opts],OPT_DOS_MIXER
-        jnz     .out
+        jnz     .a1
         and     ax,~FEATURE_DOS_MIXER & 0xFFFF
+.a1:    test    byte [ESSREG_Opts+1],OPT_A1_FILTER >> 8
+        jz      .out
+        and     ax,~FEATURE_DOS_A1 & 0xFFFF
 .out:   mov     [ebp+Client_EBX],ax
         mov     ax,[ESSREG_Opts]
         mov     [ebp+Client_ECX],ax
@@ -776,14 +789,14 @@ ESSREG_API_Owners:
         clc
 .done:  ret
 
-; --- the Audio 2 DAC ---------------------------------------------------------
+; --- the DACs ----------------------------------------------------------------
 
-; in place of ESS's write of mixer 71h, AL = its value (bits 4 and 1: 4x
-; oversampling, asynchronous), AH = 71h, EDX = Audio_Base: by default the
+; AL = mixer 71h with the Audio 2 DAC's mode from SYSTEM.INI: by default the
 ; DAC plays the samples as they are, not oversampled and the filter
 ; bypassed, as build/ES1869.DRV has it (docs/AUDIO_PIPELINE.md)
-; Audio2Oversampling=1 keeps ESS's 4x, Audio2Filter=1 the filter
-ESSREG_A2_Mode:
+; Audio2Oversampling=1 sets bit 4 (4x), and with Audio2Filter=1 too, bit 3
+; stays as it was: ESS's value
+ESSREG_A2_Bits:
         test    byte [ESSREG_Opts+1],OPT_A2_4X >> 8
         jnz     .over
         and     al,~ESSREG_A2_4X & 0xFF
@@ -791,13 +804,141 @@ ESSREG_A2_Mode:
         jnz     .filter
 .bypass:
         or      al,ESSREG_A2_SCF_BYPASS
-        jmp     L1_09A8
+        ret
 .filter:
         and     al,~ESSREG_A2_SCF_BYPASS & 0xFF
-        jmp     L1_09A8
-.over:  test    byte [ESSREG_Opts+1],OPT_A2_FILTER >> 8
+        ret
+.over:  or      al,ESSREG_A2_4X
+        test    byte [ESSREG_Opts+1],OPT_A2_FILTER >> 8
         jz      .bypass
-        jmp     L1_09A8                 ; ESS's value
+        ret
+
+; in place of ESS's write of mixer 71h at the VxD's own Audio 2 start
+; (5:3603), AL = its value (bits 4 and 1: 4x oversampling, asynchronous),
+; AH = 71h, EDX = Audio_Base: the Audio 2 DAC's mode from SYSTEM.INI
+ESSREG_A2_Mode:
+        call    ESSREG_A2_Bits
+        jmp     L1_09A8
+
+; in place of ESS's write of mixer 71h where a VM takes the DSP (5:198C),
+; the same, and a DOS program (EBX, the ADI in EDI) gets the Audio 1 DAC's
+; filter bypassed (bit 2), as ES1869.DRV's player has it; ESSREG_DMA1 puts
+; the filter back if it records. Windows and Audio1Filter=1 leave bit 2,
+; and EXF_A1_BYPASS says that the bit is the DOS program's, not Windows'
+ESSREG_A2_Acquire:
+        test    byte [ESSREG_Opts+1],OPT_A1_FILTER >> 8
+        jnz     ESSREG_A2_Mode
+        VxDCall Test_Sys_VM_Handle
+        je      ESSREG_A2_Mode
+        test    al,ESSREG_A1_SCF_BYPASS
+        jnz     ESSREG_A2_Mode
+        or      al,ESSREG_A1_SCF_BYPASS
+        or      byte [edi+EX_Flags],EXF_A1_BYPASS
+        jmp     ESSREG_A2_Mode
+
+; in place of VDMAD_Default_Handler as Audio 1's DMA handler (L1_0546),
+; EAX = DMA handle, EBX = VM, EDI = the ADI or 0: when a DOS program
+; starts a transfer on Audio 1's channel, 71h bit 2 follows its direction.
+; From memory, the DAC plays with its filter bypassed; to memory, the ADC
+; records with the filter in use, because the same filter keeps what is
+; above half the sample rate out of a recording. Then VDMAD's handler, as
+; ESS's code calls it
+ESSREG_DMA1:
+        test    byte [ESSREG_Opts+1],OPT_A1_FILTER >> 8
+        jnz     .default
+        pushad
+        call    ESSREG_DMA_DOS
+        jc      .done
+        movzx   edx,word [edi+ADI_AudioBase]
+        mov     ah,0x71
+        call    ESSREG_Mix_Read
+        test    cl,DMA_FROM_MEMORY
+        jz      .adc
+        test    al,ESSREG_A1_SCF_BYPASS
+        jnz     .done
+        or      al,ESSREG_A1_SCF_BYPASS
+        or      byte [edi+EX_Flags],EXF_A1_BYPASS
+        jmp     short .write
+.adc:   test    cl,DMA_TO_MEMORY
+        jz      .done
+        test    al,ESSREG_A1_SCF_BYPASS
+        jz      .done
+        and     al,~ESSREG_A1_SCF_BYPASS & 0xFF
+.write: call    ESSREG_Mix_Write
+.done:  popad
+.default:
+        VxDJmp  VDMAD_Default_Handler
+
+; in place of VDMAD_Default_Handler as Audio 2's DMA handler (L1_0870),
+; EAX = DMA handle, EBX = VM: a DOS program's transfer on Audio 2's channel
+; gets the DAC's mode from SYSTEM.INI in 71h again, in case the program
+; reset the mixer after it took the DSP. ESS's setting leaves 71h
+ESSREG_DMA2:
+        test    byte [ESSREG_Opts+1],OPT_A2_4X >> 8
+        jz      .mine
+        test    byte [ESSREG_Opts+1],OPT_A2_FILTER >> 8
+        jnz     .default
+.mine:  pushad
+        call    ESSREG_DMA2_ADI
+        call    ESSREG_DMA_DOS
+        jc      .done
+        movzx   edx,word [edi+ADI_AudioBase]
+        mov     ah,0x71
+        call    ESSREG_Mix_Read
+        call    ESSREG_A2_Bits
+        call    ESSREG_Mix_Write
+.done:  popad
+.default:
+        VxDJmp  VDMAD_Default_Handler
+
+; CF clear if the transfer of DMA handle EAX is a DOS program's: its VM
+; (EBX) owns the DSP of the ADI in EDI (0: none) and the channel is
+; unmasked; CL = its mode (VDMAD_Get_Virt_State). Keeps EAX, EBX and EDI
+ESSREG_DMA_DOS:
+        or      edi,edi
+        jz      .no
+        VxDCall Test_Sys_VM_Handle
+        je      .no
+        cmp     [edi+ADI_DSPOwner],ebx
+        jne     .no
+        push    edx
+        push    esi
+        VxDCall VDMAD_Get_Virt_State
+        mov     cl,dl
+        pop     esi
+        pop     edx
+        test    cl,DMA_MASKED
+        jnz     .no
+        clc
+        ret
+.no:    stc
+        ret
+
+; EDI = the ADI whose Audio 2 DMA handle is EAX, 0 if none
+ESSREG_DMA2_ADI:
+        push    eax
+        push    ecx
+        push    esi
+        mov     ecx,eax
+        xor     edi,edi
+        mov     esi,[ADI_List]
+        or      esi,esi
+        jz      .done
+        pushfd
+        cli
+        VxDCall List_Get_First
+        jz      .none
+.next:  mov     edi,[eax]
+        cmp     [edi+ADI_DMA2Handle],ecx
+        je      .found
+        VxDCall List_Get_Next
+        jnz     .next
+.none:  xor     edi,edi
+.found: popfd
+.done:  pop     esi
+        pop     ecx
+        pop     eax
+        ret
 
 ; --- Windows' ESS functions, wrapped -------------------------------------------
 
@@ -951,9 +1092,9 @@ ESSREG_FM_Hard:
 
 ; Windows plays a sound or changes the mixer (EBX = system VM): for every
 ; device, Windows' saved mixer goes back if a DOS program's release didn't
-; manage to, and the FM chip is reset if a DOS program had it (notes it
-; left on stop, and the next DOS program starts from a clean chip), unless
-; ResetDosFM=0
+; manage to, Audio 1's filter is in use again (ESSREG_A1_Back), and the FM
+; chip is reset if a DOS program had it (notes it left on stop, and the
+; next DOS program starts from a clean chip), unless ResetDosFM=0
 ESSREG_Reclaim:
         pushad
         mov     esi,[ADI_List]
@@ -971,7 +1112,8 @@ ESSREG_Reclaim:
         cmp     dword [edi+ADI_DSPOwner],byte 0
         jne     .fm
         call    ESSREG_Snap_Restore
-.fm:    test    byte [ESSREG_Opts],OPT_RESET_FM
+.fm:    call    ESSREG_A1_Back
+        test    byte [ESSREG_Opts],OPT_RESET_FM
         jz      .skip
         test    byte [edi+EX_Flags],EXF_DOS_FM
         jz      .skip
@@ -997,6 +1139,27 @@ ESSREG_Reclaim:
 .done:  popad
         ret
 
+; the Audio 1 DAC's filter in use again, EDI = the ADI, once no VM has the
+; DSP, if a DOS program had it bypassed: Windows records from Audio 1 with
+; the filter as ESS's driver leaves it (ES1869.DRV's recording, DirectSound
+; capture), and ES1869.DRV's player bypasses it for itself
+ESSREG_A1_Back:
+        test    byte [edi+EX_Flags],EXF_A1_BYPASS
+        jz      .done
+        cmp     dword [edi+ADI_DSPOwner],byte 0
+        jne     .done
+        and     byte [edi+EX_Flags],~EXF_A1_BYPASS
+        push    eax
+        push    edx
+        movzx   edx,word [edi+ADI_AudioBase]
+        mov     ah,0x71
+        call    ESSREG_Mix_Read
+        and     al,~ESSREG_A1_SCF_BYPASS & 0xFF
+        call    ESSREG_Mix_Write
+        pop     edx
+        pop     eax
+.done:  ret
+
 ; --- Windows' mixer while a DOS VM has the audio device ------------------------
 
 ; in place of ESS's Save_DOS_Mixer when a VM (EBX) acquires the DSP:
@@ -1021,13 +1184,17 @@ ESSREG_DSP_Save:
         mov     [edi+EX_Snap+ecx],al
         inc     ecx
         jmp     .next
-        ; what a DOS FM owner changed (ESSREG_FM_Audible) isn't Windows'
+        ; what a DOS FM owner changed (ESSREG_FM_Audible) isn't Windows',
+        ; nor the Audio 1 filter that a DOS program got (ESSREG_A2_Acquire)
 .end:   test    byte [edi+EX_D1],D1_VOL
         jz      .dac
         mov     byte [edi+EX_Snap+SNAP_36],0
 .dac:   test    byte [edi+EX_D1],D1_DAC
-        jz      .saved
+        jz      .a1
         or      byte [edi+EX_Snap+SNAP_7F],1
+.a1:    test    byte [edi+EX_Flags],EXF_A1_BYPASS
+        jz      .saved
+        and     byte [edi+EX_Snap+SNAP_71],~ESSREG_A1_SCF_BYPASS & 0xFF
 .saved: or      byte [edi+EX_Flags],EXF_SNAP
         pop     edx
         pop     ecx
@@ -1099,6 +1266,7 @@ ESSREG_Snap_Regs:
         db 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F
         db 0x71, 0x7C, 0x7D, 0x7F, 0x60, 0x62, 0
 SNAP_36                 equ 4           ; the index of 36h in the list
+SNAP_71                 equ 24          ; of 71h
 SNAP_7F                 equ 27          ; and of 7Fh; 30 registers fit in the
                                         ; 32 bytes at EX_Snap
 
@@ -2129,6 +2297,8 @@ ESSREG_Settings:
         ; the Audio 2 mode, the same for DirectSound as for ES1869.DRV
         dd ESSREG_Key_4X, ESSREG_Sec_Drv, OPT_A2_4X
         dd ESSREG_Key_Filter, ESSREG_Sec_Drv, OPT_A2_FILTER
+        ; and the Audio 1 DAC's filter, for DOS programs here
+        dd ESSREG_Key_A1Filter, ESSREG_Sec_Drv, OPT_A1_FILTER
         dd 0
 ESSREG_Sec_VxD:         db "ES1869.VXD", 0
 ESSREG_Sec_Drv:         db "ES1869.DRV", 0
@@ -2141,3 +2311,4 @@ ESSREG_Key_Mixer:       db "DosMixerRestore", 0
 ESSREG_Key_Reset:       db "ResetDosFM", 0
 ESSREG_Key_4X:          db "Audio2Oversampling", 0
 ESSREG_Key_Filter:      db "Audio2Filter", 0
+ESSREG_Key_A1Filter:    db "Audio1Filter", 0

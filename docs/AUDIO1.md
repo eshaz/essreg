@@ -190,8 +190,9 @@ before ESS frees its interrupt handler.
   not be in its no-DMA mode. Otherwise `WODM_GETNUMDEVS` stays at 1. For
   dual playback, Audio 2 may use any channel, including the 16-bit channel
   5, because the player programs it as ESS's playback does.
-* The CODEC's switched-capacitor filter is bypassed by default (71h bit 2),
-  as the Audio 2 DAC's filter is. `Audio1Filter=1` puts it to use.
+* The CODEC's switched-capacitor filter is bypassed by default while the
+  player plays (71h bit 2), as the Audio 2 DAC's filter is ([The filter of
+  the Audio 1 CODEC](#the-filter-of-the-audio-1-codec)).
 * DirectSound can't start while the player holds the DSP, which is also true
   of ESS's wave output.
 
@@ -269,6 +270,34 @@ make the tone quietest. Use those values for every file you make afterwards.
 A recording of the output
 ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#measuring-the-dac-on-the-card))
 measures the null more accurately than listening does.
+
+## The filter of the Audio 1 CODEC
+
+The Audio 1 CODEC has one switched-capacitor filter for both directions.
+While the CODEC plays, the filter smooths the DAC's steps on their way to
+the mixer (DS p.15). While it records, the filter sits in the ADC's input
+path (DS p.25), where it keeps what lies above half the sample rate out of
+the recording. Mixer register 71h bit 2 bypasses the filter in either
+direction (DS p.64).
+
+ESS's drivers never set bit 2, so the filter is always in use. With
+`Audio1Filter=0`, the default, the rebuilt drivers bypass it whenever the
+Audio 1 DAC plays, and keep it in use whenever Audio 1 records:
+* The Audio 1 player in `build/ES1869.DRV` sets bit 2 when it starts and
+  clears it when the device closes.
+* The extended `ES1869.VXD` sets bit 2 when a DOS program takes the DSP,
+  because DOS programs play through the Audio 1 DAC. Each time the program
+  then starts a DMA transfer on Audio 1's channel, the VxD looks at the
+  transfer's direction. From memory, the DAC plays, and bit 2 stays set. To
+  memory, the ADC records, and the VxD clears bit 2 again.
+* When Windows takes the DSP back, bit 2 is clear again, so ES1869.DRV's
+  recording and DirectSound capture start with the filter in use, as with
+  ESS's drivers.
+
+`Audio1Filter=1` leaves the filter in use in all of these places, as ESS's
+drivers do. A DOS program that records without DMA, in direct mode, is the
+one case that records with the filter bypassed, because the VxD can't see
+the direction of such a transfer.
 
 ## The FM recording device
 

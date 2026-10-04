@@ -315,20 +315,24 @@ See
    [README](../README.md#es1869drv-with-four-wave-devices-and-unfiltered-playback)
    and restart Windows. Play the same music. F5 shows the oversampling off
    and the filter bypassed, and the music sounds like the setting you tried
-   in step 1.
+   in step 1. Restart Windows once more and open essctl before any sound
+   plays. F5 already shows the same setting.
 3. Switch Winamp to its DirectSound output. With the extended `ES1869.VXD`
    from section E, F5 shows the same setting. With ESS's VxD, the
    oversampling is on.
-4. Play Windows sounds at 11 and 22 kHz, such as those in
+4. With the extended VxD, play a DOS game with Sound Blaster sound in a
+   window. While its sound plays, F5 shows *Audio 1 filter bypass* on. Quit
+   the game and play a Windows sound, and it is off again.
+5. Play Windows sounds at 11 and 22 kHz, such as those in
    `C:\WINDOWS\MEDIA`, and music at 44.1 and 48 kHz. Each plays at its own
    pitch and speed.
-5. If the computer has a standby mode, pause Winamp, choose Start > *Shut
+6. If the computer has a standby mode, pause Winamp, choose Start > *Shut
    Down* > *Stand by*, then wake the computer and play on. The music keeps
    its pitch, and F5 shows the same setting.
-6. Record the Wave output with each setting, as described in [Measuring the
+7. Record the Wave output with each setting, as described in [Measuring the
    DAC on the card](AUDIO_PIPELINE.md#measuring-the-dac-on-the-card), and
    keep both files.
-7. Check that Sound Recorder records, a MIDI file plays and a DOS game in a
+8. Check that Sound Recorder records, a MIDI file plays and a DOS game in a
    window has its sound, as before.
 
 ### E3b. The Audio 1 device
@@ -441,14 +445,16 @@ installs `build\ESFM.DRV`.
      the VxD couldn't read `SYSTEM.INI` on this computer. Note it.
 2. Add every key with the value 0: the keys of the example in
    DRIVER_CONFIG.md, `DualPlayback=0` and all of section 6.3, but set
-   `Audio2Oversampling=1` and `Audio2Filter=1`. Keep `RegisterAPI`, which
-   essctl needs to read the VxD's settings. Restart Windows.
+   `Audio2Oversampling=1`, `Audio2Filter=1` and `Audio1Filter=1`. Keep
+   `RegisterAPI`, which essctl needs to read the VxD's settings. Restart
+   Windows.
    * Both pages list every change as off. The "Wave driver" line has "off:
-     Audio1Device, SharedWaveOut, DualPlayback", and the ESFM page says
-     "ESS's bank".
+     Audio1Device, SharedWaveOut, DualPlayback, FMRecordDevice", and the
+     ESFM page says "ESS's bank".
    * In E2 step 2, the FM game doesn't detect FM while Media Player has it,
      as with ESS's driver.
-   * In E3, F5 shows the 4x oversampling on.
+   * In E3, F5 shows the 4x oversampling on, and in E3 step 4 the DOS game's
+     sound leaves *Audio 1 filter bypass* off.
    * In G, the stress test reports refused messages, as ESS's driver does.
 3. Take the lines out and restart Windows. Every change is back.
 4. Try the keys one at a time, for example `[ESFM.DRV] BetterSquareWave=0`

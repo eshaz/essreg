@@ -8,6 +8,10 @@
 ; right after ESS's own configuration (read_config), with
 ; GetPrivateProfileInt: a key that isn't there keeps its default.
 ;
+; The Audio 2 DAC's mode goes into mixer 71h at every start and resume,
+; right after ESS's mixer reset (es_restore_mixer), so that the chip holds
+; it from the start and not only from the first playback.
+;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
 ; Licensed under GPL Version 3.0
@@ -23,6 +27,38 @@ es_read_config:
         push    cs
         call    es_read_ini
         pop     bp
+        retf    2
+
+; far calls into segment 1: each site has its own relocation record
+; (settings_relocs), in segment 3's table
+%assign SET_NREL 0
+%macro callf1 1                         ; the target
+%assign SET_NREL SET_NREL + 1
+        callf   %1, ..@SET_R%[SET_NREL], 0xFFFF
+%endmacro
+
+; in place of restore_mixer_state(dev) in hw_init (3:4897), far pascal:
+; ESS's levels back, then 71h with the Audio 2 DAC's mode from SYSTEM.INI
+; while the DSP is still held; ESS's setting leaves 71h as the reset left it
+es_restore_mixer:
+        push    bp
+        mov     bp,sp
+        push    word [bp+6]
+        push    cs
+        call    restore_mixer_state
+        mov     al,[es_opts+1]
+        and     al,(OPT_A2_4X | OPT_A2_FILTER) >> 8
+        cmp     al,(OPT_A2_4X | OPT_A2_FILTER) >> 8
+        je      .done
+        push    word [bp+6]             ; mixer_write(dev, 71h, its mode)
+        mov     ax,MX_A2_MODE
+        push    ax
+        push    word [bp+6]
+        push    ax
+        callf1  a2_mode_read
+        push    ax
+        callf1  mixer_write
+.done:  pop     bp
         retf    2
 
 ; es_opts from SYSTEM.INI (es_settings), far, once
@@ -60,7 +96,13 @@ es_read_ini:
         pop     si
 .done:  retf
 
-; the import's relocation record, for the relocation table of segment 3
+; the relocation records, for the relocation table of segment 3: the
+; import, and the far calls into segment 1
 %macro settings_relocs 0
         reloc 3, 1, ..@ES_I_PPINT, 0x0001, 0x007F       ; KERNEL.GetPrivateProfileInt
+%assign i 1
+%rep SET_NREL
+        reloc 2, 0, ..@SET_R%[i], 0x0001, 0x0000
+%assign i i + 1
+%endrep
 %endmacro

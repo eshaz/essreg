@@ -614,12 +614,23 @@ class DualTest(A1Case):
         e.wod(0, WODM_RESET, user)
         self.assertEqual(e.wod(0, WODM_CLOSE, user), 0)
         self.assertEqual(e.dev8(0x100), 0)
-        self.assertTrue(e.chip.mixer[0x71] & 0x02)  # at its own rate again
+        # Audio 2 at its own rate again, not oversampled and the filter
+        # bypassed, and Audio 1's filter as ESS leaves it
+        self.assertEqual(e.chip.mixer[0x71] & 0x1E, 0x0A)
         self.assertEqual(e.chip.mixer[0x78], 0)
         self.assertTrue(e.chip.dma[drvemu.A2_DMA]["mask"])
         # and ESS's wave-out can have Audio 2
         self.assertEqual(e.call((drvemu.SEG_PARA[4], 0x0054),
                                 (drvemu.DEV_OFF,)) & 0xFFFF, 0)
+
+    def test_close_gives_audio2_its_mode(self):
+        # Audio2Oversampling=1: dual playback runs without 4x oversampling,
+        # and Audio 2 has it back once the device closes
+        opts = OPT_A1_DEVICE | OPT_A1_SHARED | OPT_DUAL | OPT_A2_4X
+        e, user = self.dual(opts=opts)
+        self.assertFalse(e.chip.mixer[0x71] & 0x10)
+        self.assertEqual(e.wod(0, WODM_CLOSE, user), 0)
+        self.assertEqual(e.chip.mixer[0x71] & 0x1E, 0x1A)
 
     def test_wave_out_refused_while_dual(self):
         e, _u = self.dual()

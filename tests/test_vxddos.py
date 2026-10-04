@@ -4,8 +4,9 @@
 """DOS boxes and the rebuilt ES1869.VXD, in a CPU emulator: FM detection
 in every ownership state, the virtual FM chip and its hand-over, the music
 DAC and FM volume of a DOS FM owner, Windows' mixer around a DOS program,
-and the reset when Windows uses the card again. Where the stock driver
-behaves differently, it runs the same steps to show what changed.
+the DACs' filters and modes for a DOS program, and the reset when Windows
+uses the card again. Where the stock driver behaves differently, it runs
+the same steps to show what changed.
 
 usage: python3 -m unittest tests.test_vxddos   (needs nasm and unicorn)
 """
@@ -20,10 +21,11 @@ from test_vxdext import HAVE_UNICORN, VxDBuilds, have_nasm  # noqa: E402
 
 if HAVE_UNICORN:
     from vxdemu import (VM_SYS, VM_DOS, VM_DOS2, ADI, ADI_FM,  # noqa: E402
-                        ADI_FM_OWNER, ADI_FM_LAST, ADI_DSP_OWNER)
+                        ADI_FM_OWNER, ADI_FM_LAST, ADI_DSP_OWNER, DMA1,
+                        DMA2)
 
 WIN_AUDIO = 0x220          # AX of 0002/0003 (Audio_Base) and 0102/0103
-EXF_FM_SOFT, EXF_DOS_FM = 0x02, 0x08
+EXF_FM_SOFT, EXF_DOS_FM, EXF_A1_BYPASS = 0x02, 0x08, 0x20
 
 
 def adlib(m, vm, base=0x388):
@@ -446,6 +448,115 @@ class DosMixerTest(VxDBuilds, unittest.TestCase):
         _out, cf = m.api(VM_SYS, 0x0002, EBX=1, EAX=WIN_AUDIO)
         self.assertFalse(cf)                    # FM and the DSP are separate
         self.assertTrue(m.hw.fm.key_on(0, 0))
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class DosDacTest(VxDBuilds, unittest.TestCase):
+    """The DACs for a DOS program: the Audio 1 DAC plays with its filter
+    bypassed and records with the filter, as its DMA transfers go
+    (ESSREG_DMA1), Audio 2 keeps its mode after the program resets the
+    mixer (ESSREG_DMA2), and Windows gets Audio 1's filter back"""
+
+    PLAY, RECORD = 0x58, 0x54           # auto-init, from or to memory
+    MASKED = 0x59
+
+    def game(self, ext=True, ini=None, a71=0x32):
+        """a DOS game takes the DSP with a reset, 71h as Windows left it"""
+        m = self.machine(ext)
+        if ini is not None:
+            m.start(ini)
+        m.hw.mixer[0x71] = a71
+        m.outb(VM_DOS, 0x226, 1)
+        m.outb(VM_DOS, 0x226, 0)
+        self.assertEqual(m.adi32(ADI_DSP_OWNER), VM_DOS)
+        return m
+
+    def test_dos_program_plays_unfiltered(self):
+        # from 32h (4x and bit 5, from Windows): the Audio 2 mode as
+        # before, and the Audio 1 filter bypassed
+        m = self.game()
+        self.assertEqual(m.hw.mixer[0x71], 0x2E)
+        self.assertTrue(m.adi8(0xEC) & EXF_A1_BYPASS)
+        self.assertEqual(self.game(False).hw.mixer[0x71], 0x32)
+
+    def test_transfer_direction(self):
+        m = self.game()
+        m.dma(VM_DOS, 1, self.RECORD)
+        self.assertEqual(m.hw.mixer[0x71], 0x2A)    # the ADC: the filter
+        m.dma(VM_DOS, 1, self.MASKED)
+        self.assertEqual(m.hw.mixer[0x71], 0x2A)
+        m.dma(VM_DOS, 1, self.PLAY)
+        self.assertEqual(m.hw.mixer[0x71], 0x2E)
+        # VDMAD's own handler programs the channel every time
+        self.assertEqual(m.emu.dma_default, [(DMA1, VM_DOS)] * 3)
+
+    def test_after_a_mixer_reset(self):
+        m = self.game()
+        m.outb(VM_DOS, 0x224, 0x71)             # the game clears 71h
+        m.outb(VM_DOS, 0x225, 0x00)
+        m.dma(VM_DOS, 1, self.PLAY)
+        self.assertEqual(m.hw.mixer[0x71], 0x04)
+        m.hw.mixer[0x71] = 0x00
+        m.dma(VM_DOS, 2, self.PLAY)             # not oversampled, bypassed
+        self.assertEqual(m.hw.mixer[0x71], 0x08)
+        self.assertEqual(m.emu.dma_default,
+                         [(DMA1, VM_DOS), (DMA2, VM_DOS)])
+        self.assertEqual(m.hw.index, 0x71)      # the game's index kept
+
+    def test_only_the_owner(self):
+        m = self.game()
+        m.hw.mixer[0x71] = 0x00
+        for vm in (VM_DOS2, VM_SYS):
+            for channel in (1, 2):
+                m.dma(vm, channel, self.PLAY)
+        self.assertEqual(m.hw.mixer[0x71], 0x00)
+        self.assertEqual(len(m.emu.dma_default), 4)
+        # nor Windows' own transfers: ES1869.DRV sets the bits itself
+        m = self.machine()
+        m.api(VM_SYS, 0x0002, EAX=WIN_AUDIO, EBX=1)
+        m.hw.mixer[0x71] = 0x00
+        m.dma(VM_SYS, 1, self.PLAY)
+        m.dma(VM_SYS, 2, self.PLAY)
+        self.assertEqual(m.hw.mixer[0x71], 0x00)
+
+    def test_windows_gets_the_filter_back(self):
+        for restore in ("1", "0"):
+            with self.subTest(DosMixerRestore=restore):
+                m = self.game(ini={("ES1869.VXD", "DosMixerRestore"):
+                                   restore})
+                m.program_end(VM_DOS)
+                # Windows' mixer comes back without it; with ESS's 11
+                # registers it stays until Windows takes the DSP
+                self.assertEqual(m.hw.mixer[0x71] & 0x04,
+                                 0 if restore == "1" else 0x04)
+                _out, cf = m.api(VM_SYS, 0x0002, EAX=WIN_AUDIO, EBX=1)
+                self.assertFalse(cf)
+                self.assertEqual(m.hw.mixer[0x71] & 0x04, 0)
+                self.assertFalse(m.adi8(0xEC) & EXF_A1_BYPASS)
+
+    def test_windows_setting_kept(self):
+        # bit 2 set in Windows already: the DOS program leaves it so
+        m = self.game(a71=0x36)
+        self.assertEqual(m.hw.mixer[0x71], 0x2E)
+        self.assertFalse(m.adi8(0xEC) & EXF_A1_BYPASS)
+        m.program_end(VM_DOS)
+        m.api(VM_SYS, 0x0002, EAX=WIN_AUDIO, EBX=1)
+        self.assertTrue(m.hw.mixer[0x71] & 0x04)
+
+    def test_settings_at_1_are_ess(self):
+        ini = {("ES1869.DRV", "Audio1Filter"): "1",
+               ("ES1869.DRV", "Audio2Oversampling"): "1",
+               ("ES1869.DRV", "Audio2Filter"): "1"}
+        for ext in (False, True):
+            with self.subTest(ext=ext):
+                m = self.game(ext, ini if ext else None)
+                self.assertEqual(m.hw.mixer[0x71], 0x32)
+                for channel, mode in ((1, self.PLAY), (1, self.RECORD),
+                                      (2, self.PLAY)):
+                    m.hw.mixer[0x71] = 0x00
+                    m.dma(VM_DOS, channel, mode)
+                    self.assertEqual(m.hw.mixer[0x71], 0x00)
+                self.assertEqual(m.emu.services.count(0x00040004), 0)
 
 
 if __name__ == "__main__":

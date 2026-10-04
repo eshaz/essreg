@@ -36,11 +36,13 @@ KEYS = {                            # key: its bit in ESSREG_Opts
     (VXD, "ResetDosFM"): 0x0040,
     (DRV, "Audio2Oversampling"): 0x0100,
     (DRV, "Audio2Filter"): 0x0200,
+    (DRV, "Audio1Filter"): 0x0400,
 }
 DEFAULT, READ = 0x007F, 0x8000
 # every change off: ESS's driver
 ESS = {key: "0" for key in KEYS}
-ESS.update({(DRV, "Audio2Oversampling"): "1", (DRV, "Audio2Filter"): "1"})
+ESS.update({(DRV, "Audio2Oversampling"): "1", (DRV, "Audio2Filter"): "1",
+            (DRV, "Audio1Filter"): "1"})
 WIN_AUDIO = 0x220
 
 
@@ -57,7 +59,7 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         m = self.machine()
         names = ("OPT_API", "OPT_VFM", "OPT_TAKES_FM", "OPT_KEEPS_FM",
                  "OPT_FM_AUDIBLE", "OPT_DOS_MIXER", "OPT_RESET_FM",
-                 "OPT_A2_4X", "OPT_A2_FILTER")
+                 "OPT_A2_4X", "OPT_A2_FILTER", "OPT_A1_FILTER")
         self.assertEqual([m.syms[n] for n in names], list(KEYS.values()))
         self.assertEqual(m.syms["OPT_READ"], READ)
 
@@ -128,15 +130,15 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         m.start({})
         out, cf = m.api(VM_SYS, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0111)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x03FF)
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0112)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x07FF)
         self.assertEqual(out["ECX"] & 0xFFFF, DEFAULT | READ)
         m = self.machine()
         m.start({(VXD, "VirtualFM"): "0", (VXD, "DosMixerRestore"): "0",
-                 (DRV, "Audio2Filter"): "1"})
+                 (DRV, "Audio2Filter"): "1", (DRV, "Audio1Filter"): "1"})
         out, cf = m.api(VM_SYS, 0x0400)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x03FF & ~0x0180)
-        self.assertEqual(out["ECX"] & 0xFFFF, 0x005D | 0x0200 | READ)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x07FF & ~0x0580)
+        self.assertEqual(out["ECX"] & 0xFFFF, 0x005D | 0x0600 | READ)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
@@ -242,6 +244,18 @@ class EachSettingTest(VxDBuilds, unittest.TestCase):
                     if (over, filt) == ("1", "1"):
                         self.assertEqual(want, stock.hw.mixer[0x71])
 
+    def test_audio1_filter(self):
+        # a DOS program's Audio 1 DAC plays through the filter, bit 2 as
+        # Windows left it, as with ESS's driver
+        m = self.machine_with({(DRV, "Audio1Filter"): "1"})
+        m.hw.mixer[0x71] = 0x30
+        m.outb(VM_DOS, 0x226, 1)
+        m.outb(VM_DOS, 0x226, 0)
+        self.assertEqual(m.hw.mixer[0x71], 0x2A)    # the Audio 2 mode only
+        m.dma(VM_DOS, 1, 0x58)
+        self.assertEqual(m.hw.mixer[0x71], 0x2A)
+        self.assertEqual(m.emu.services.count(0x00040004), 0)
+
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
 class AllOffTest(VxDBuilds, unittest.TestCase):
@@ -255,7 +269,7 @@ class AllOffTest(VxDBuilds, unittest.TestCase):
         m = self.machine(ext)
         if ext:
             self.assertTrue(m.start(ESS))
-            self.assertEqual(m.opts(), 0x0300 | READ)
+            self.assertEqual(m.opts(), 0x0700 | READ)
         for reg, v in WINDOWS.items():
             m.hw.mixer[reg] = v
         e = m.emu
@@ -280,6 +294,9 @@ class AllOffTest(VxDBuilds, unittest.TestCase):
             ("Windows reads FM", lambda: m.inb(VM_SYS, 0x220)),
             ("DOS FM", lambda: adlib(m, VM_DOS2)),
             ("DOS mixer", lambda: dos_mixer(m)),
+            ("DOS plays", lambda: m.dma(VM_DOS, 1, 0x58)),
+            ("DOS records", lambda: m.dma(VM_DOS, 1, 0x54)),
+            ("DOS Audio 2", lambda: m.dma(VM_DOS, 2, 0x58)),
             ("program ends", lambda: m.program_end(VM_DOS)),
             ("Windows sound", lambda: api(0x0002, EBX=1, EAX=WIN_AUDIO)),
             ("Windows done", lambda: api(0x0003, EBX=1, EAX=WIN_AUDIO)),

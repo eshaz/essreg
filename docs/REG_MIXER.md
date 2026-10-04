@@ -602,10 +602,12 @@ DS p.64.
 * **4 Audio 2 4x oversampling** (`a2.oversample4x`, bit, caution, driver
   sets it). 1 = the Audio 2 DAC is in 4x oversampling mode, which always
   bypasses its switched-capacitor filter (DS p.64).
-* **3 Audio 2 filter bypass** (`a2.scf_bypass`, bit, caution). 1 = bypass
-  the switched-capacitor filter of the Audio 2 DAC (DS p.64).
-* **2 Audio 1 filter bypass** (`a1.scf_bypass`, bit, caution). 1 = bypass
-  the switched-capacitor filter of the Audio 1 CODEC (DS p.64).
+* **3 Audio 2 filter bypass** (`a2.scf_bypass`, bit, caution, driver sets
+  it). 1 = bypass the switched-capacitor filter of the Audio 2 DAC (DS
+  p.64).
+* **2 Audio 1 filter bypass** (`a1.scf_bypass`, bit, caution, driver sets
+  it). 1 = bypass the switched-capacitor filter of the Audio 1 CODEC, which
+  is in the ADC's input path too (DS p.25, p.64).
 * **1 Audio 2 asynchronous** (`a2.async`, bit, expert, driver sets it). 1 =
   the Audio 2 DAC runs at its own rate (70h, 72h); 0 = it is slaved to the
   Audio 1 sample and filter rate (DS p.64).

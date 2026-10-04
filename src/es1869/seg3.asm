@@ -7984,7 +7984,11 @@ L3_4883:
         callf mixer_write, R3_4893, R3_48C3             ; 4890 far seg1
         push si                                         ; 4895
         push cs                                         ; 4896
+%if ES1869_FIX
+        call es_restore_mixer           ; essreg: then the Audio 2 mode
+%else
         call restore_mixer_state                        ; 4897
+%endif
         push si                                         ; 489A
         push word [si]                                  ; 489B
         mov ax,0x1                                      ; 489D

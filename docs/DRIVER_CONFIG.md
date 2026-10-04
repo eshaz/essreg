@@ -657,7 +657,7 @@ the way `GetPrivateProfileInt` reads it, as its leading digits, or 0 if
 there are none. Write `1` or `0`, because `yes` and `on` read as 0.
 
 For example, these settings give ESS's DOS box behavior, ESS's wave devices
-and ESS's Audio 2 mode, while keeping the register API:
+and ESS's modes of both DACs, while keeping the register API:
 
 ```
 [ES1869.VXD]
@@ -674,6 +674,7 @@ SharedWaveOut=0
 FMRecordDevice=0
 Audio2Oversampling=1
 Audio2Filter=1
+Audio1Filter=1
 ```
 
 ### 6.1 [ES1869.VXD]
@@ -718,10 +719,11 @@ key does at 1, and the sentence that begins "With 0" says what happens at 0:
 * **SharedWaveOut** (default 1). A program that opens device 0 while another
   plays there gets the Audio 1 DAC. With 0, the program gets
   `MMSYSERR_ALLOCATED`, as with ESS's driver.
-* **Audio1Filter** (default 0). While the Audio 1 player plays, the CODEC's
-  switched-capacitor filter smooths the DAC's steps. With 0, the filter is
-  bypassed while the player plays (71h bit 2 set, and cleared again when it
-  closes).
+* **Audio1Filter** (default 0). While the Audio 1 DAC plays, for the Audio 1
+  player or for a DOS program, the CODEC's switched-capacitor filter smooths
+  the DAC's steps. With 0, the filter is bypassed while the DAC plays (71h
+  bit 2 set) and in use while Audio 1 records
+  ([AUDIO1.md](AUDIO1.md#the-filter-of-the-audio-1-codec)).
 * **DualPlayback** (default 1). Device 1 also accepts 4 channels, with 1-2
   on the Audio 1 DAC and 3-4 on the Audio 2 DAC, from one clock
   ([AUDIO1.md](AUDIO1.md#dual-playback)). With 0, a 4-channel format is
@@ -746,8 +748,11 @@ message as ESS's driver does.
 With `Audio2Oversampling=1` and `Audio2Filter=1`, 71h gets ESS's value: bits
 4 and 1 set, and bit 3 as it was. ES1869.DRV applies these two keys to
 Windows' wave output, at the open (1:1157) and at every playback start
-(6:2DE6), and ES1869.VXD reads the same two keys from this section for
-DirectSound and for a DOS program that takes the DSP.
+(6:2DE6), and with any other setting it also writes the mode right after the
+mixer reset of every start and resume (3:4897). ES1869.VXD reads the same
+two keys and `Audio1Filter` from this section. It applies them to
+DirectSound, and to a DOS program when the program takes the DSP and when it
+starts a DMA transfer.
 [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter)
 explains why the defaults sound better.
 

@@ -18,8 +18,8 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   FM digitally to a WAV file.
 * `src/vxd/` holds `ES1869.VXD` as NASM source, made by `tools/vxd2asm.py`.
   `essext.asm` adds the register API and the DOS box improvements (the
-  virtual FM chip, and Windows' mixer around a DOS program), and
-  `essext.inc` has its layout.
+  virtual FM chip, Windows' mixer around a DOS program, and the DACs' modes
+  for it), and `essext.inc` has its layout.
 * `src/esfm/` holds `ESFM.DRV` as NASM source, made by `tools/ne2asm.py`.
   `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm`
   and `esfmgm.asm` hold the fixes and General MIDI, and `esfmini.asm` their
@@ -30,8 +30,8 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   `a1play.asm` (the Audio 1 player's wave messages, and its interrupt code
   in fixed memory), `fmwave.asm` and `fmdac.asm` (the FM recording device:
   its wave-in messages, and mixer 7Fh while it records), `settings.asm`
-  (SYSTEM.INI), `fixdata.asm` (their data) and `fix.inc` (constants and
-  ESS's device fields).
+  (SYSTEM.INI, and the Audio 2 mode after every mixer reset), `fixdata.asm`
+  (their data) and `fix.inc` (constants and ESS's device fields).
 * `driver/` holds ESS's original drivers, the reference for the
   byte-identical rebuilds, and `build/` the committed binaries.
 * `tools/` holds the builders, the RE tools, `guard.py`, `wineshot.sh` and

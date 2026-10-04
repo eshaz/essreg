@@ -328,9 +328,11 @@ sound finds no Sound Blaster, and it finds one once the sound has ended.
 DirectSound and the rest of the driver's own Audio 2 playback play without
 4x oversampling and with the filter bypassed, as
 [`ES1869.DRV`](#es1869drv-with-four-wave-devices-and-unfiltered-playback)
-below does for Windows sounds. In every other way the driver works like
-ESS's, and `python3 tools/build_vxd.py --stock --verify` rebuilds the
-original byte for byte. Each change can be turned off with its own key under
+below does for Windows sounds. A DOS program plays through the Audio 1 DAC
+with its filter bypassed too, while a DOS program that records keeps the
+filter, which the ADC needs. In every other way the driver works like ESS's,
+and `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte
+for byte. Each change can be turned off with its own key under
 `[ES1869.VXD]` in `SYSTEM.INI`, which the driver reads when Windows starts
 ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings)).
 
@@ -431,14 +433,14 @@ one](#es1869vxd-with-a-register-interface-and-better-dos-boxes) plays it in
 the same mode, and ESS's turns the 4x oversampling on. To try each setting
 live, use *Audio 2 4x oversampling* and *Audio 2 filter bypass* on essctl's
 *Audio 2 channel* page. The driver puts its own setting back the next time a
-program opens the wave device and plays.
+program opens the wave device and plays, and when Windows starts or resumes.
 
 The driver is rebuilt from the source in [`src/es1869`](src/es1869), and
 `python3 tools/build_es1869drv.py --stock --verify` rebuilds the original
-byte for byte. The changes are ten instructions and table entries of ESS's
-code, each kept at the same length, and code added after ESS's, which stays
-at its addresses. The driver replaces ESS's 4.04.00.1319 only, so check the
-version as for [`ESFM.DRV`](#before-you-start).
+byte for byte. The changes are thirteen instructions and table entries of
+ESS's code, each kept at the same length, and code added after ESS's, which
+stays at its addresses. The driver replaces ESS's 4.04.00.1319 only, so
+check the version as for [`ESFM.DRV`](#before-you-start).
 
 Install it from MS-DOS mode, because Windows has the driver open (Start >
 *Shut Down* > *Restart in MS-DOS mode*), with the file copied to

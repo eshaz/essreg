@@ -306,6 +306,24 @@ class Audio2ModeTest(unittest.TestCase):
                     if opts == OPT_A2_4X | OPT_A2_FILTER:
                         self.assertEqual(fixed.writes, stock.writes)
 
+    def test_start_and_resume(self):
+        # es_restore_mixer at the end of hw_init (3:4897), after the mixer
+        # reset of every start and resume: 71h gets the mode right away,
+        # and ESS's setting writes nothing. ESS's restore_mixer_state asks
+        # CONFIGMG for the levels, so here it only returns
+        for opts, want in ((OPT_DEFAULT, 0x28), (OPT_A2_FILTER, 0x20),
+                           (OPT_A2_4X, 0x38),
+                           (OPT_A2_4X | OPT_A2_FILTER, None)):
+            with self.subTest(opts=hex(opts)):
+                d = Drv(self.fixed, self.syms)
+                d.opts = opts
+                seg, off = self.syms["restore_mixer_state"]
+                d.uc.mem_write(SEG_PARA[seg] * 16 + off, b"\xCA\x02\x00")
+                d.mixer[0x71] = 0x30
+                d.call_far("es_restore_mixer", DEV)
+                self.assertEqual(d.writes,
+                                 [] if want is None else [(0x71, want)])
+
 
 @unittest.skipUnless(HAVE_UNICORN, "needs the unicorn module")
 class SettingsTest(unittest.TestCase):
@@ -385,6 +403,7 @@ HOOKS = [
     (1, 0x1158, 0x1159),    # audio2_init: 71h read through a2_mode_read
     (1, 0x115B, 0x115B),    # and or al,02h (ESS: 12h)
     (3, 0x47E2, 0x47E3),    # the device structure: the Audio 1 player after
+    (3, 0x4898, 0x4899),    # hw_init: es_restore_mixer, the Audio 2 mode
     (3, 0x4B57, 0x4B58),    # the first enable: es_read_config, SYSTEM.INI
     (3, 0x4D1C, 0x4D1D),    # APM resume: es_wid_resume, and the player
     (3, 0x4E21, 0x4E22),    # the last disable's record stop: a1_disable

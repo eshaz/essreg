@@ -63,6 +63,12 @@ static void settings_text(char *p) {
           s & VXD_S_A2_4X       ? "bypassed (4x)"
           : s & VXD_S_A2_FILTER ? "in use"
                                 : "bypassed");
+  // 1.12 bypasses Audio 1's filter while a DOS program plays through it
+  if (vxd.ext_version >= 0x0112)
+    strcat(p, vxd.ext_features & VXD_F_DOS_A1
+                  ? "VxD Audio 1:\tfilter bypassed while a DOS program "
+                    "plays\r\n"
+                  : "VxD Audio 1:\tfilter in use\r\n");
 }
 
 static const char *owner_name(u32 handle) {

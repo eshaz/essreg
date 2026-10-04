@@ -89,8 +89,8 @@ class ExtensionTest(VxDBuilds, unittest.TestCase):
         m, _hw = self.emu()
         out, cf = self.api(m, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0111)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x03FF)
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0112)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x07FF)
         self.assertEqual(out["EDX"] & 0xFFFF, 13)
         out, cf = self.api(m, 0x0000)            # stock functions still work
         self.assertEqual((cf, out["EAX"] & 0xFFFF), (False, 0x0404))
@@ -335,6 +335,8 @@ HOOKS = [
     (1, 0x0400, 0x0403),    # Sys_Dynamic_Device_Init: ESSREG_Dynamic_Init
     (1, 0x0409, 0x040C),    # Sys_Dynamic_Device_Exit: ESSREG_Dynamic_Exit
     (1, 0x0511, 0x0516),    # the DOSMGR hook's last jump: ESSREG_App_End
+    (1, 0x0546, 0x054B),    # Audio 1's DMA handler: ESSREG_DMA1
+    (1, 0x0870, 0x0875),    # Audio 2's DMA handler: ESSREG_DMA2
     (4, 0x00AC, 0x00AC),    # the per-VM node's size
     (4, 0x0236, 0x0237),    # the ADI's size
     (4, 0x09C2, 0x09C5),    # a node removed: ESSREG_Node_Remove
@@ -345,7 +347,7 @@ HOOKS = [
     (5, 0x127A, 0x127D),    # Acquire_Resources, DSP: ESSREG_DSP_Save
     (5, 0x1362, 0x1362),    # the API's groups: 0-4
     (5, 0x136D, 0x1370),    # and their table
-    (5, 0x198D, 0x1990),    # a VM takes the DSP, 71h: ESSREG_A2_Mode
+    (5, 0x198D, 0x1990),    # a VM takes the DSP, 71h: ESSREG_A2_Acquire
     (5, 0x3604, 0x3607),    # the VxD's Audio 2 start, 71h: ESSREG_A2_Mode
     (7, 0x0043, 0x0043),    # the per-VM node's size
 ] + [(6, off, off + 3) for off in (     # the FM ports' trap handler
