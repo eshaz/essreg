@@ -455,14 +455,14 @@ class PcmPathTest(VxDBuilds, unittest.TestCase):
     @staticmethod
     def a2_mode(step):
         """the step as the extended driver makes it: mixer 71h without 4x
-        oversampling and with the filter bypassed (ESSREG_A2_Mode)"""
+        oversampling and with both filters bypassed (ESSREG_A2_Mode)"""
         name, result, log, svc, owners, traps = step
         out, index = [], None
         for op, port, value in log:
             if op == "out" and port == 0x224:
                 index = value
             elif op == "out" and port == 0x225 and index == 0x71:
-                value = (value & ~0x10) | 0x08
+                value = (value & ~0x10) | 0x0C
             out.append((op, port, value))
         return name, result, out, svc, owners, traps
 
@@ -473,7 +473,7 @@ class PcmPathTest(VxDBuilds, unittest.TestCase):
             self.assertEqual(x, self.a2_mode(s), s[0])
         # the one difference: 71h, here at the first acquisition
         self.assertIn(("out", 0x225, 0x12), stock[0][2])
-        self.assertIn(("out", 0x225, 0x0A), ext[0][2])
+        self.assertIn(("out", 0x225, 0x0E), ext[0][2])
         # the steps did what they're for: Windows took the DSP and gave it
         # back each time, DirectSound too, and the position moved
         sys_vm = vxdemu.VM_SYS
@@ -492,7 +492,7 @@ class PcmPathTest(VxDBuilds, unittest.TestCase):
 class Audio2ModeTest(VxDBuilds, unittest.TestCase):
     """The VxD's own Audio 2 start (L5_3594) and a VM taking the DSP set
     mixer 71h: ESS's driver 4x oversampling, the extended one no
-    oversampling and the switched-capacitor filter bypassed."""
+    oversampling and both switched-capacitor filters bypassed."""
 
     def start(self, ext, old):
         import vxdemu
@@ -513,11 +513,11 @@ class Audio2ModeTest(VxDBuilds, unittest.TestCase):
                                  (old | 0x12, 0x93))
                 # bit 5 (48 kHz rates) and bit 0 stay, bit 1 as ESS's
                 self.assertEqual(self.start(True, old),
-                                 ((old | 0x0A) & ~0x10, 0x93))
+                                 ((old | 0x0E) & ~0x10, 0x93))
 
     def test_acquire(self):
         import vxdemu
-        for ext, want in ((False, 0x32), (True, 0x2A)):
+        for ext, want in ((False, 0x32), (True, 0x2E)):
             m = self.machine(ext)
             m.hw.mixer[0x71] = 0x30             # 4x left on, bit 5 set
             m.api(vxdemu.VM_SYS, 0x0002, EAX=0x220, EBX=1)

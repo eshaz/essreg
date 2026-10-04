@@ -435,22 +435,19 @@ a1_close:
         call    a1_stop
         mov     al,DSP_A1_OFF
         call    a1_dsp
+        ; the filter stays as a1_setup set it, as SYSTEM.INI says
         test    byte [si+A1_FMT],FMT_DUAL
-        jnz     .dual
-        mov     al,MX_A2_MODE           ; Audio 1's filter as ESS leaves it
-        call    a1_mixer_read
-        jmp     short .mode
-.dual:  push    si                      ; and after dual playback, Audio 2
-        mov     ax,MX_A2_MODE           ; at its own rate and in its own
-        push    ax                      ; mode again
+        jz      .free
+        push    si                      ; after dual playback, Audio 2 at
+        mov     ax,MX_A2_MODE           ; its own rate and in its own mode
+        push    ax                      ; again
         fcall   1, a2_mode_read
         or      al,A2_ASYNC
         mov     byte [si+DEV_A2_USER],0
-.mode:  and     al,~A1_BYPASS & 0FFh
         mov     ah,al
         mov     al,MX_A2_MODE
         call    a1_mixer_write
-        call    a1_release
+.free:  call    a1_release
         mov     ax,WOM_CLOSE
         call    a1_notify
         xor     ax,ax

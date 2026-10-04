@@ -71,7 +71,7 @@ int VXD_CALL vxd_raw_call(void ESS_FAR *entry, vxd_regs ESS_FAR *r);
 #define VXD_F_DOS_FM 0x0080    // the virtual FM chip (VirtualFM=1)
 #define VXD_F_DOS_MIXER 0x0100 // Windows' mixer back (DosMixerRestore=1)
 #define VXD_F_SETTINGS 0x0200  // CX holds the settings (version 1.11)
-#define VXD_F_DOS_A1 0x0400    // Audio 1's filter bypassed for DOS (1.12)
+#define VXD_F_DOS_A1 0x0400    // Audio 1's filter bypassed (1.12)
 
 // the SYSTEM.INI settings the VxD runs with (0400, CX), 1 = on
 #define VXD_S_API 0x0001        // [ES1869.VXD] RegisterAPI

@@ -224,24 +224,28 @@ class EachSettingTest(VxDBuilds, unittest.TestCase):
         self.assertTrue(m.hw.fm.key_on(0, 0))   # the note goes on, as ESS's
 
     def test_audio2_mode(self):
-        # (Audio2Oversampling, Audio2Filter): 71h after a VM takes the DSP,
-        # from 30h (4x left on, bit 5) and from 38h (the filter bypassed)
-        for over, filt, from30, from38 in (
-                ("0", "0", 0x2A, 0x2A),         # the default
-                ("0", "1", 0x22, 0x22),         # the filter in use
-                ("1", "0", 0x3A, 0x3A),         # 4x (no filter anyway)
-                ("1", "1", 0x32, 0x3A)):        # ESS's: bit 3 as it was
+        # (Audio2Oversampling, Audio2Filter, Audio1Filter): 71h after a VM
+        # takes the DSP, from 30h (4x left on, bit 5) and from 38h (the
+        # Audio 2 filter bypassed)
+        for over, filt, a1, from30, from38 in (
+                ("0", "0", "0", 0x2E, 0x2E),    # the default
+                ("0", "1", "0", 0x26, 0x26),    # the Audio 2 filter in use
+                ("1", "0", "0", 0x3E, 0x3E),    # 4x (no filter anyway)
+                ("1", "1", "0", 0x36, 0x3E),    # bit 3 as it was
+                ("0", "0", "1", 0x2A, 0x2A),    # the Audio 1 filter in use
+                ("1", "1", "1", 0x32, 0x3A)):   # ESS's
             for old, want in ((0x30, from30), (0x38, from38)):
-                with self.subTest(over=over, filt=filt, old=hex(old)):
+                with self.subTest(over=over, filt=filt, a1=a1, old=hex(old)):
                     m = self.machine_with({(DRV, "Audio2Oversampling"): over,
-                                           (DRV, "Audio2Filter"): filt})
+                                           (DRV, "Audio2Filter"): filt,
+                                           (DRV, "Audio1Filter"): a1})
                     m.hw.mixer[0x71] = old
                     m.api(VM_SYS, 0x0002, EAX=WIN_AUDIO, EBX=1)
                     self.assertEqual(m.hw.mixer[0x71], want)
                     stock = self.machine(False)
                     stock.hw.mixer[0x71] = old
                     stock.api(VM_SYS, 0x0002, EAX=WIN_AUDIO, EBX=1)
-                    if (over, filt) == ("1", "1"):
+                    if (over, filt, a1) == ("1", "1", "1"):
                         self.assertEqual(want, stock.hw.mixer[0x71])
 
     def test_audio1_filter(self):

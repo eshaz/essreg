@@ -328,12 +328,12 @@ sound finds no Sound Blaster, and it finds one once the sound has ended.
 DirectSound and the rest of the driver's own Audio 2 playback play without
 4x oversampling and with the filter bypassed, as
 [`ES1869.DRV`](#es1869drv-with-four-wave-devices-and-unfiltered-playback)
-below does for Windows sounds. A DOS program plays through the Audio 1 DAC
-with its filter bypassed too, while a DOS program that records keeps the
-filter, which the ADC needs. In every other way the driver works like ESS's,
-and `python3 tools/build_vxd.py --stock --verify` rebuilds the original byte
-for byte. Each change can be turned off with its own key under
-`[ES1869.VXD]` in `SYSTEM.INI`, which the driver reads when Windows starts
+below does for Windows sounds. The Audio 1 CODEC's filter stays bypassed as
+well, for DOS programs that play or record through it. In every other way
+the driver works like ESS's, and `python3 tools/build_vxd.py --stock
+--verify` rebuilds the original byte for byte. Each change can be turned off
+with its own key under `[ES1869.VXD]` in `SYSTEM.INI`, which the driver
+reads when Windows starts
 ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings)).
 
 [`essinst.exe`](#essinstexe) installs it and restarts Windows.
@@ -422,11 +422,14 @@ the treble.
 [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter)
 explains why, and what each setting does. This is how a non-oversampling
 (NOS) DAC plays, so at low sample rates, such as the 11 and 22 kHz of many
-Windows sounds, its images are audible as treble above the sound's own.
+Windows sounds, its images are audible as treble above the sound's own. The
+Audio 1 CODEC's filter, which smooths the Audio 1 DAC and filters what the
+ADC records, stays bypassed too, at all times
+([docs/AUDIO1.md](docs/AUDIO1.md#the-filter-of-the-audio-1-codec)).
 
 `SYSTEM.INI` chooses the mode, and the driver reads it when Windows starts.
-`Audio2Oversampling=1` and `Audio2Filter=1` under `[ES1869.DRV]` give ESS's
-mode back, for DirectSound too
+`Audio2Oversampling=1`, `Audio2Filter=1` and `Audio1Filter=1` under
+`[ES1869.DRV]` give ESS's mode back, for DirectSound too
 ([docs/DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#62-es1869drv)). DirectSound
 plays through `ES1869.VXD`. The [extended
 one](#es1869vxd-with-a-register-interface-and-better-dos-boxes) plays it in
@@ -437,7 +440,7 @@ program opens the wave device and plays, and when Windows starts or resumes.
 
 The driver is rebuilt from the source in [`src/es1869`](src/es1869), and
 `python3 tools/build_es1869drv.py --stock --verify` rebuilds the original
-byte for byte. The changes are thirteen instructions and table entries of
+byte for byte. The changes are fourteen instructions and table entries of
 ESS's code, each kept at the same length, and code added after ESS's, which
 stays at its addresses. The driver replaces ESS's 4.04.00.1319 only, so
 check the version as for [`ESFM.DRV`](#before-you-start).

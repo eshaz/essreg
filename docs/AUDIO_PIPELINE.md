@@ -143,8 +143,8 @@ change at once. The driver puts its own setting back at the next wave open
 and playback start, and when Windows starts or resumes.
 
 The Audio 1 DAC has a switched-capacitor filter of its own, 71h bit 2, which
-is also the ADC's filter when Audio 1 records. The rebuilt drivers bypass it
-while the Audio 1 DAC plays and keep it in use for recording
+is also the ADC's filter when Audio 1 records. The rebuilt drivers keep it
+bypassed at all times, for playback and recording
 ([AUDIO1.md](AUDIO1.md#the-filter-of-the-audio-1-codec)).
 
 ### Measuring the DAC on the card

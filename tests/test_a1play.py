@@ -182,7 +182,9 @@ class OpenTest(A1Case):
         self.assertIn(0xA2, [x[1] for x in e.chip.log if x[0] == "reg"])
 
     def test_filter_with_the_key(self):
-        e, _u = self.opened(opts=OPT_A1_DEVICE | OPT_A1_FILTER)
+        e, user = self.opened(opts=OPT_A1_DEVICE | OPT_A1_FILTER)
+        self.assertFalse(e.chip.mixer[0x71] & 0x04)
+        self.assertEqual(e.wod(1, WODM_CLOSE, user), 0)
         self.assertFalse(e.chip.mixer[0x71] & 0x04)
 
     def test_bad_formats(self):
@@ -432,7 +434,7 @@ class PlayTest(A1Case):
         self.assertEqual(e.dev8(0x5D), 0)
         self.assertIn((0x0003, 1), e.vxd_calls)
         self.assertFalse(e.chip.a1_dac)             # D3h
-        self.assertFalse(e.chip.mixer[0x71] & 0x04)
+        self.assertTrue(e.chip.mixer[0x71] & 0x04)  # the filter stays off
         self.assertEqual(e.dev8(A1_STATE), 0)
         # the device again, and wave-in may have Audio 1 now
         self.assertEqual(e.call((drvemu.SEG_PARA[4], 0x00E0),
@@ -614,9 +616,9 @@ class DualTest(A1Case):
         e.wod(0, WODM_RESET, user)
         self.assertEqual(e.wod(0, WODM_CLOSE, user), 0)
         self.assertEqual(e.dev8(0x100), 0)
-        # Audio 2 at its own rate again, not oversampled and the filter
-        # bypassed, and Audio 1's filter as ESS leaves it
-        self.assertEqual(e.chip.mixer[0x71] & 0x1E, 0x0A)
+        # Audio 2 at its own rate again, not oversampled, and both filters
+        # bypassed
+        self.assertEqual(e.chip.mixer[0x71] & 0x1E, 0x0E)
         self.assertEqual(e.chip.mixer[0x78], 0)
         self.assertTrue(e.chip.dma[drvemu.A2_DMA]["mask"])
         # and ESS's wave-out can have Audio 2
@@ -630,7 +632,7 @@ class DualTest(A1Case):
         e, user = self.dual(opts=opts)
         self.assertFalse(e.chip.mixer[0x71] & 0x10)
         self.assertEqual(e.wod(0, WODM_CLOSE, user), 0)
-        self.assertEqual(e.chip.mixer[0x71] & 0x1E, 0x1A)
+        self.assertEqual(e.chip.mixer[0x71] & 0x1E, 0x1E)
 
     def test_wave_out_refused_while_dual(self):
         e, _u = self.dual()
@@ -803,6 +805,23 @@ class SettingsTest(A1Case):
             out.append(list(e.chip.log))
             results.append((out, e.vxd_calls, e.callbacks))
         self.assertEqual(results[0], results[1])
+
+
+class RecordingFilterTest(A1Case):
+    """ESS's recording keeps 71h as the driver's start left it: the ADC
+    records without the filter, and Audio 2 stays as it was"""
+
+    def test_records_unfiltered(self):
+        from drvemu import WIDM_ADDBUFFER, WIDM_START
+        for rate in (8000, 22050, 48000):
+            with self.subTest(rate=rate):
+                e = self.emu()
+                e.chip.mixer[0x71] = 0x0E       # as es_restore_mixer left it
+                r, user = e.open_in(dev_id=0, rate=rate)
+                self.assertEqual(r, 0)
+                e.wid(0, WIDM_ADDBUFFER, user, e.header(b"\0" * 4096), 0x20)
+                self.assertEqual(e.wid(0, WIDM_START, user), 0)
+                self.assertEqual(e.chip.mixer[0x71] & 0x1C, 0x0C)
 
 
 if __name__ == "__main__":

@@ -720,10 +720,10 @@ key does at 1, and the sentence that begins "With 0" says what happens at 0:
 * **SharedWaveOut** (default 1). A program that opens device 0 while another
   plays there gets the Audio 1 DAC. With 0, the program gets
   `MMSYSERR_ALLOCATED`, as with ESS's driver.
-* **Audio1Filter** (default 0). While the Audio 1 DAC plays, for the Audio 1
-  player or for a DOS program, the CODEC's switched-capacitor filter smooths
-  the DAC's steps. With 0, the filter is bypassed while the DAC plays (71h
-  bit 2 set) and in use while Audio 1 records
+* **Audio1Filter** (default 0). The Audio 1 CODEC's switched-capacitor
+  filter smooths the DAC's steps and keeps high frequencies out of the ADC
+  (71h bit 2 clear), as with ESS's driver. With 0, the filter is bypassed at
+  all times, for playback and recording (71h bit 2 set)
   ([AUDIO1.md](AUDIO1.md#the-filter-of-the-audio-1-codec)).
 * **DualPlayback** (default 1). Device 1 also accepts 4 channels, with 1-2
   on the Audio 1 DAC and 3-4 on the Audio 2 DAC, from one clock
@@ -746,12 +746,12 @@ output message as ESS's driver does, and `SettingsTest` in
 then have no effect. With `FMRecordDevice=0`, it answers every wave input
 message as ESS's driver does.
 
-With `Audio2Oversampling=1` and `Audio2Filter=1`, 71h gets ESS's value: bits
-4 and 1 set, and bit 3 as it was. ES1869.DRV applies these two keys to
-Windows' wave output, at the open (1:1157) and at every playback start
-(6:2DE6), and with any other setting it also writes the mode right after the
-mixer reset of every start and resume (3:4897). ES1869.VXD reads the same
-two keys and `Audio1Filter` from this section. It applies them to
+With `Audio2Oversampling=1`, `Audio2Filter=1` and `Audio1Filter=1`, 71h gets
+ESS's value: bits 4 and 1 set, and bits 3 and 2 as they were. ES1869.DRV
+applies these three keys to Windows' wave output, at the open (1:1157) and
+at every playback start (6:2DE6), and with any other setting it also writes
+the mode right after the mixer reset of every start and resume (3:4897).
+ES1869.VXD reads the same three keys from this section. It applies them to
 DirectSound, and to a DOS program when the program takes the DSP and when it
 starts a DMA transfer.
 [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter)

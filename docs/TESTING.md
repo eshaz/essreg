@@ -334,15 +334,18 @@ See
 2. Install `build\ES1869.DRV` as described in the
    [README](../README.md#es1869drv-with-four-wave-devices-and-unfiltered-playback)
    and restart Windows. Play the same music. F5 shows the oversampling off
-   and the filter bypassed, and the music sounds like the setting you tried
-   in step 1. Restart Windows once more and open essctl before any sound
-   plays. F5 already shows the same setting.
+   and both filters bypassed (*Audio 2 filter bypass* and *Audio 1 filter
+   bypass* on), and the music sounds like the setting you tried in step 1.
+   Restart Windows once more and open essctl before any sound plays. F5
+   already shows the same setting.
+   * Record a few seconds in Sound Recorder. F5 still shows both filters
+     bypassed while it records and after it stops.
 3. Switch Winamp to its DirectSound output. With the extended `ES1869.VXD`
    from section E, F5 shows the same setting. With ESS's VxD, the
    oversampling is on.
 4. With the extended VxD, play a DOS game with Sound Blaster sound in a
    window. While its sound plays, F5 shows *Audio 1 filter bypass* on. Quit
-   the game and play a Windows sound, and it is off again.
+   the game and play a Windows sound, and it stays on.
 5. Play Windows sounds at 11 and 22 kHz, such as those in
    `C:\WINDOWS\MEDIA`, and music at 44.1 and 48 kHz. Each plays at its own
    pitch and speed.

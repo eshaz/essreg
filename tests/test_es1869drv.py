@@ -227,6 +227,8 @@ class Drv:
 
 def a2_mode(old, opts):
     """71h as the fixed driver writes it, from old, at both sites"""
+    if not opts & OPT_A1_FILTER:
+        old |= 0x04                     # the Audio 1 CODEC's filter bypassed
     if opts & OPT_A2_4X:
         v = old | 0x12
         return v if opts & OPT_A2_FILTER else v | 0x08
@@ -255,7 +257,7 @@ class Audio2ModeTest(unittest.TestCase):
 
     def test_defaults(self):
         d = Drv(self.fixed, self.syms)
-        # not oversampled, filter bypassed; the Audio 1 player on
+        # not oversampled, both filters bypassed; the Audio 1 player on
         self.assertEqual(d.opts, OPT_DEFAULT)
 
     def test_wave_open(self):
@@ -263,7 +265,7 @@ class Audio2ModeTest(unittest.TestCase):
             with self.subTest(old=hex(old)):
                 stock, fixed = self.run_both(old, Drv.wave_open)
                 self.assertEqual(stock.mixer[0x71], old | 0x12)
-                self.assertEqual(fixed.mixer[0x71], (old & ~0x10) | 0x0A)
+                self.assertEqual(fixed.mixer[0x71], (old & ~0x10) | 0x0E)
                 # the rest as ESS's: 70h-78h to 0, then 70h and 72h FFh
                 self.assertEqual(stock.writes[1:], fixed.writes[1:])
                 self.assertEqual(fixed.writes[1:], [
@@ -279,12 +281,12 @@ class Audio2ModeTest(unittest.TestCase):
                     self.assertEqual(stock.writes,
                                      [(0x71, old | 0x12), (0x78, xfer)])
                     self.assertEqual(fixed.writes, [
-                        (0x71, (old & ~0x10) | 0x0A), (0x78, xfer)])
+                        (0x71, (old & ~0x10) | 0x0E), (0x78, xfer)])
 
     def test_open_then_start(self):
         # what the DAC plays with: ESS's 4x oversampling, here none and
-        # the filter bypassed; asynchronous and bit 5 (48 kHz) either way
-        for old, want in ((0x00, 0x0A), (0x10, 0x0A), (0x32, 0x2A)):
+        # both filters bypassed; asynchronous and bit 5 (48 kHz) either way
+        for old, want in ((0x00, 0x0E), (0x10, 0x0E), (0x32, 0x2E)):
             with self.subTest(old=hex(old)):
                 stock, fixed = self.run_both(old, lambda d: (
                     d.wave_open(), d.playback_start_end()))
@@ -292,9 +294,11 @@ class Audio2ModeTest(unittest.TestCase):
                 self.assertEqual(fixed.mixer[0x71], want)
 
     def test_settings(self):
-        # each (Audio2Oversampling, Audio2Filter) at both sites; with
-        # both 1 the fixed driver writes what ESS's does
-        for opts in (0, OPT_A2_FILTER, OPT_A2_4X, OPT_A2_4X | OPT_A2_FILTER):
+        # each (Audio2Oversampling, Audio2Filter, Audio1Filter) at both
+        # sites; with all three 1 the fixed driver writes what ESS's does
+        ess = OPT_A2_4X | OPT_A2_FILTER | OPT_A1_FILTER
+        for opts in (0, OPT_A2_FILTER, OPT_A2_4X, OPT_A2_4X | OPT_A2_FILTER,
+                     OPT_A1_FILTER, ess):
             for old in (0x00, 0x08, 0x10, 0x18, 0x22, 0x3A):
                 with self.subTest(opts=hex(opts), old=hex(old)):
                     stock, fixed = self.run_both(old, Drv.wave_open, opts)
@@ -303,17 +307,19 @@ class Audio2ModeTest(unittest.TestCase):
                         old, Drv.playback_start_end, opts)
                     self.assertEqual(fixed.writes[0],
                                      (0x71, a2_mode(old, opts)))
-                    if opts == OPT_A2_4X | OPT_A2_FILTER:
+                    if opts == ess:
                         self.assertEqual(fixed.writes, stock.writes)
 
     def test_start_and_resume(self):
         # es_restore_mixer at the end of hw_init (3:4897), after the mixer
         # reset of every start and resume: 71h gets the mode right away,
-        # and ESS's setting writes nothing. ESS's restore_mixer_state asks
+        # and ESS's settings write nothing. ESS's restore_mixer_state asks
         # CONFIGMG for the levels, so here it only returns
-        for opts, want in ((OPT_DEFAULT, 0x28), (OPT_A2_FILTER, 0x20),
-                           (OPT_A2_4X, 0x38),
-                           (OPT_A2_4X | OPT_A2_FILTER, None)):
+        for opts, want in ((OPT_DEFAULT, 0x2C), (OPT_A2_FILTER, 0x24),
+                           (OPT_A2_4X, 0x3C),
+                           (OPT_A2_4X | OPT_A2_FILTER, 0x34),
+                           (OPT_A1_FILTER, 0x28),
+                           (OPT_A2_4X | OPT_A2_FILTER | OPT_A1_FILTER, None)):
             with self.subTest(opts=hex(opts)):
                 d = Drv(self.fixed, self.syms)
                 d.opts = opts
@@ -390,7 +396,8 @@ class SettingsTest(unittest.TestCase):
 
     def test_ess_mode_from_system_ini(self):
         d = self.enable({("ES1869.DRV", "Audio2Oversampling"): "1",
-                         ("ES1869.DRV", "Audio2Filter"): "1"})
+                         ("ES1869.DRV", "Audio2Filter"): "1",
+                         ("ES1869.DRV", "Audio1Filter"): "1"})
         d.mixer[0x71] = 0x20
         d.wave_open()
         d.playback_start_end()

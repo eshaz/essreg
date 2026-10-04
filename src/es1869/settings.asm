@@ -8,9 +8,9 @@
 ; right after ESS's own configuration (read_config), with
 ; GetPrivateProfileInt: a key that isn't there keeps its default.
 ;
-; The Audio 2 DAC's mode goes into mixer 71h at every start and resume,
-; right after ESS's mixer reset (es_restore_mixer), so that the chip holds
-; it from the start and not only from the first playback.
+; The DACs' mode goes into mixer 71h at every start and resume, right
+; after ESS's mixer reset (es_restore_mixer), so that the chip holds it
+; from the start and not only from the first playback.
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
@@ -38,18 +38,21 @@ es_read_config:
 %endmacro
 
 ; in place of restore_mixer_state(dev) in hw_init (3:4897), far pascal:
-; ESS's levels back, then 71h with the Audio 2 DAC's mode from SYSTEM.INI
-; while the DSP is still held; ESS's setting leaves 71h as the reset left it
+; ESS's levels back, then 71h with the DACs' mode from SYSTEM.INI while the
+; DSP is still held; ESS's settings leave 71h as the reset left it
 es_restore_mixer:
         push    bp
         mov     bp,sp
         push    word [bp+6]
         push    cs
         call    restore_mixer_state
+        test    byte [es_opts],OPT_A1_FILTER
+        jz      .mode
         mov     al,[es_opts+1]
         and     al,(OPT_A2_4X | OPT_A2_FILTER) >> 8
         cmp     al,(OPT_A2_4X | OPT_A2_FILTER) >> 8
         je      .done
+.mode:
         push    word [bp+6]             ; mixer_write(dev, 71h, its mode)
         mov     ax,MX_A2_MODE
         push    ax

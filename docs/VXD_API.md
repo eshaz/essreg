@@ -355,24 +355,25 @@ the write also changes the value that Windows gets back afterwards.
 
 0400 returns these feature bits in BX:
 
-| Bit | Function                                                       |
-|-----|----------------------------------------------------------------|
-| 0   | mixer                                                          |
-| 1   | controller                                                     |
-| 2   | ports                                                          |
-| 3   | configuration ports                                            |
-| 4   | PnP                                                            |
-| 5   | mixer block                                                    |
-| 6   | owner information                                              |
-| 7   | DOS FM, clear with `VirtualFM=0`                               |
-| 8   | DOS mixer, clear with `DosMixerRestore=0`                      |
-| 9   | CX holds the settings below (version 1.11)                     |
-| 10  | DOS Audio 1 filter, clear with `Audio1Filter=1` (version 1.12) |
+| Bit | Function                                                   |
+|-----|------------------------------------------------------------|
+| 0   | mixer                                                      |
+| 1   | controller                                                 |
+| 2   | ports                                                      |
+| 3   | configuration ports                                        |
+| 4   | PnP                                                        |
+| 5   | mixer block                                                |
+| 6   | owner information                                          |
+| 7   | DOS FM, clear with `VirtualFM=0`                           |
+| 8   | DOS mixer, clear with `DosMixerRestore=0`                  |
+| 9   | CX holds the settings below (version 1.11)                 |
+| 10  | Audio 1 filter, clear with `Audio1Filter=1` (version 1.12) |
 
 DOS FM stands for the virtual FM chip and the rest of [DOS
 boxes](VXD_INTERNALS.md#dos-boxes). DOS mixer means that Windows' mixer is
-saved and put back around a DOS program. DOS Audio 1 filter means that a DOS
-program plays through the Audio 1 DAC with its filter bypassed.
+saved and put back around a DOS program. Audio 1 filter means that the VxD
+keeps the Audio 1 CODEC's filter bypassed, for DOS programs and for
+DirectSound.
 
 CX holds the settings that the VxD read from SYSTEM.INI when it started
 ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings)).

@@ -2565,7 +2565,7 @@ L5_197F:
         or al,0x12                                      ; 1988
         mov ah,0x71                                     ; 198A
 %if ESSREG_EXT
-        call ESSREG_A2_Acquire                  ; essreg: and Audio 1's for DOS
+        call ESSREG_A2_Mode                     ; essreg: no 4x, no filters
 %else
         call L1_09A8                                    ; 198C
 %endif
