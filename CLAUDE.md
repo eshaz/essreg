@@ -10,10 +10,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   catalog, from `esscat.tbl`), `profile`, `vxdapi`, `simhw` (a simulated
   ES1869 for the tests), `ess3d` (the commands of `ess3d.exe`), `fmrec`
   (esfmrec's WAV header, file names and levels), `s3dmeas` (ess3d's
-  measurement of the 3-D effect, with a made-up effect in `s3dsim` for the
-  tests and /sim), `wavestat` (what ES1869.DRV is doing, read from its data
-  segment for essctl) and `drvinst` (essinst's checks of the drivers, and
-  its staging through WININIT.INI).
+  measurement of the 3-D effect, with an effect in `s3dsim` that follows one
+  card's measurement, for the tests and /sim), `wavestat` (what ES1869.DRV
+  is doing, read from its data segment for essctl) and `drvinst` (essinst's
+  checks of the drivers, and its staging through WININIT.INI).
 * `src/win/` holds `essctl.exe`, the 16-bit Windows control panel, and
   `ess3dw.c`, the Windows side of `ess3d.exe`, which sets the 3-D effect
   from the command line for keys. `ess3dtr.c` is ess3d's tray icon and

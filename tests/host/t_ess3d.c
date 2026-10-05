@@ -482,6 +482,8 @@ static void test_limit_and_regs(void) {
   CHECK(!strcmp(c.out, "c:\\r.txt"));
   CHECK_EQ(ess3d_parse("MEASURE 5Ah", &c), 0);
   CHECK(c.plan == S3D_PLAN_REG && c.plan_reg == 0x5A);
+  CHECK_EQ(ess3d_parse("measure limit", &c), 0);
+  CHECK(c.measure && c.plan == S3D_PLAN_LIMIT && !c.nact);
   CHECK_EQ(ess3d_parse("measure 56", &c), 0);
   CHECK(c.plan == S3D_PLAN_REG && c.plan_reg == 0x56);
   CHECK_EQ(ess3d_parse("measure on", &c), -1);

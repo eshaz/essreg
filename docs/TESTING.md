@@ -72,12 +72,12 @@ ES1869 (`src/simhw.c`). They test:
 * the register catalog (`t_esscat`)
 * profiles (`t_profile`)
 * ess3d's command line and 3-D register changes (`t_ess3d`)
-* ess3d's measurement of the 3-D effect, against the made-up effect of
-  `src/s3dsim.c`: the shape and phase of its boost, the bit that turns the
-  boost around, the width its model makes from mono, where panned tones come
-  out, its limit and the register that sets the limit's release, devices
-  that start apart, a recording at another rate and a recording with no
-  signal (`t_s3dmeas`)
+* ess3d's measurement of the 3-D effect, against the effect of
+  `src/s3dsim.c`, which follows one card's measurement: the shape and phase
+  of its boost, its level in steps of 0.75 dB, the channels' imbalance, the
+  width its model makes from mono, where panned tones come out, and the
+  limit's level and rates in each plan, devices that start apart, a
+  recording at another rate and a recording with no signal (`t_s3dmeas`)
 * essreg's register functions that the original didn't have, such as the 3-D
   limit (`t_regs`)
 * patch banks (`t_esfm`)
@@ -128,7 +128,7 @@ Wine and Xvfb, and covers these cases:
   ess3d's `/log=` file, because Wine drops the exit code of a 16-bit Windows
   program, whose process always exits with 0.
 * A second ess3d hands its setting to the box of the first one and exits.
-* `ess3d measure quick /sim` writes its report of the made-up effect and
+* `ess3d measure quick /sim` writes its report of the effect of /sim and
   puts the mixer back. Ended by force with `taskkill /f`, it leaves its
   restore file and the report so far, and the next ess3d puts the mixer
   back.
@@ -690,8 +690,11 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
      5A. `ess3d defaults` puts ESS's values back.
    * Close every program that plays or records, then run
      `C:\ESSREG\ESS3D.EXE measure` from Start > *Run*. A window counts the
-     runs for about 9 minutes, and the speakers stay quiet. At the end it
+     runs for about 6 minutes, and the speakers stay quiet. At the end it
      says "Done" and where the report is. Keep `C:\ESSREG\ESS3D.TXT`.
+   * Run `C:\ESSREG\ESS3D.EXE measure limit /out=C:\ESSREG\LIMIT.TXT`, about
+     7 minutes, and keep `LIMIT.TXT`. `ESS3D.LOG` has a line for each run
+     whose mixer was set late, which should never happen.
    * Check that the mixer is as it was: the master volume, the Windows
      mixer's levels and the 3-D setting are back.
    * Run `ess3d measure quick` and end it with Ctrl+Alt+Del in the middle.

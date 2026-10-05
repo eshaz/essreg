@@ -347,14 +347,14 @@ DS p.62.
   Active-low reset of the 3-D effect: 1 = release from reset, 0 = reset (DS
   p.62).
 * **1 3-D model (undocumented)** (`fx.3d.mono`, bit, caution, profile,
-  driver sets it). Reserved in the data sheet (write 0). Most likely the
-  mode that makes a stereo effect from mono input (Solo-1 data sheet): you
-  hear the effect's own model of the space. NetBSD calls it MONO (DS p.62,
-  docs/SPATIALIZER.md).
+  driver sets it). Reserved in the data sheet (write 0). Measured: the
+  effect makes its S from the mono sum through its band-pass and drops the
+  program's own S, a stereo effect made from mono. NetBSD calls it MONO (DS
+  p.62, docs/SPATIALIZER.md).
 * **0 3-D limit (undocumented)** (`fx.3d.limit`, bit, caution, profile,
   driver sets it). Reserved in the data sheet (write 0); ESS's drivers set
-  it from their 3D Limit setting, 0 by default. Most likely it widens the
-  image toward the model, up to the 3-D level, following the program (DS
+  it from their 3D Limit setting, 0 by default. Measured: holds the S out
+  under the M by the level in 54h, moving the boost at the rate in 58h (DS
   p.62, docs/SPATIALIZER.md).
 
 ### 52h 3-D level
@@ -362,11 +362,11 @@ DS p.62.
 DS p.62.
 
 * **5:0 3-D level** (`fx.3d.level`, level, safe, profile, driver sets it).
-  Amount of 3-D effect: 0 = minimum, 3Fh = maximum; the space control bits
-  of ESS's ES938. Reset to zero by hardware reset (DS p.62,
-  docs/SPATIALIZER.md).
+  Amount of 3-D effect: 0 = minimum, 3Fh = maximum, in steps of 0.75 dB
+  (measured, about +17 dB at 400 Hz at 3Fh); the space control bits of ESS's
+  ES938. Reset to zero by hardware reset (DS p.62, docs/SPATIALIZER.md).
 
-### 54h 3-D register 54h (undocumented)
+### 54h 3-D limit level (undocumented)
 
 Not in the data sheet.
 
@@ -375,37 +375,39 @@ Not in the data sheet.
 > them as "recommended values". ESS's Windows 98 driver leaves them alone.
 > No data sheet describes them (docs/SPATIALIZER.md).
 
-* **7:0 3-D register 54h** (`fx.3d.reg54`, value, caution, profile, driver
-  sets it). Undocumented; ESS's drivers and Linux write 8Fh when they enable
-  3-D. Most likely a shape of the effect (a filter edge, a level or a time);
-  ess3d measure 54 shows what it changes (docs/SPATIALIZER.md).
+* **7:0 3-D limit level** (`fx.3d.reg54`, value, caution, profile, driver
+  sets it). Undocumented; ESS's drivers and Linux write 8Fh. Measured: with
+  the limit on, the S out it holds against the M, about -6 dB at 00h, +5.5
+  at 8Fh, +10 at FFh; nothing with it off (docs/SPATIALIZER.md).
 
 ### 56h 3-D register 56h (undocumented)
 
 Not in the data sheet.
 
 * **7:0 3-D register 56h** (`fx.3d.reg56`, value, caution, profile, driver
-  sets it). Undocumented; ESS's drivers and Linux write 95h when they enable
-  3-D. Most likely a shape of the effect (a filter edge, a level or a time);
-  ess3d measure 56 shows what it changes (docs/SPATIALIZER.md).
+  sets it). Undocumented; ESS's drivers and Linux write 95h. Measured:
+  nothing with the limit off; with it on, FFh raised the level it holds as
+  54h at FFh does, 00h changed nothing. ess3d measure limit tries each bit
+  (docs/SPATIALIZER.md).
 
-### 58h 3-D register 58h (undocumented)
+### 58h 3-D limit speed (undocumented)
 
 Not in the data sheet.
 
-* **7:0 3-D register 58h** (`fx.3d.reg58`, value, caution, profile, driver
-  sets it). Undocumented; ESS's drivers and Linux write 94h when they enable
-  3-D. Most likely a shape of the effect (a filter edge, a level or a time);
-  ess3d measure 58 shows what it changes (docs/SPATIALIZER.md).
+* **7:0 3-D limit speed** (`fx.3d.reg58`, value, caution, profile, driver
+  sets it). Undocumented; ESS's drivers and Linux write 94h. Measured: with
+  the limit on, how fast it moves the boost: about 260 dB a second at 00h,
+  51 down and a few up at 94h, 17 down at FFh; nothing with it off
+  (docs/SPATIALIZER.md).
 
 ### 5Ah 3-D register 5Ah (undocumented)
 
 Not in the data sheet.
 
 * **7:0 3-D register 5Ah** (`fx.3d.reg5a`, value, caution, profile, driver
-  sets it). Undocumented; ESS's drivers and Linux write 80h when they enable
-  3-D. Most likely a shape of the effect (a filter edge, a level or a time);
-  ess3d measure 5A shows what it changes (docs/SPATIALIZER.md).
+  sets it). Undocumented; ESS's drivers and Linux write 80h. Measured:
+  nothing with the limit off; with it on, FFh raised the level it holds by
+  about 1 dB and 00h lowered it by about 1 dB (docs/SPATIALIZER.md).
 
 ### 60h Left master volume and mute
 

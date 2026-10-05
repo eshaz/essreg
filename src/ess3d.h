@@ -69,7 +69,7 @@ struct ess3d_cmd {
   u8 tray;         // tray: stay in the taskbar's tray
   u8 exit;         // exit: close the tray icon
   u8 measure;      // measure: the measurement of ess3dms.c, alone
-  u8 plan;         // its plan, S3D_PLAN_FULL, _QUICK or _REG (s3dmeas.h)
+  u8 plan;         // its plan, S3D_PLAN_FULL to _LIMIT (s3dmeas.h)
   u8 plan_reg;     // the register of S3D_PLAN_REG
   char out[128];   // /out=, the measurement's report
   char log[128];   // /log=, the file every result is appended to

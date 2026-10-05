@@ -4,11 +4,13 @@
  * the recording; this is the program around it.
  *
  * Usage:
- *   `ess3d measure [quick | 54 | 56 | 58 | 5A] [/out=file] [/sim]`
+ *   `ess3d measure [quick | limit | 54 | 56 | 58 | 5A] [/out=file] [/sim]`
  *
- *   quick      each register's ends only, about 2 minutes, instead of
- *              every setting, about 9 minutes
- *   54 ... 5A  one register from 00h to FFh in steps of 10h
+ *   quick      each kind of run once or twice, about 2 minutes, instead
+ *              of every kind, about 6 minutes
+ *   limit      each bit of 54h-5Ah with the limit on, about 7 minutes
+ *   54 ... 5A  one register from 00h to FFh in steps of 10h, with the
+ *              limit on
  *   /out=file  the report, ESS3D.TXT in ess3d's directory if left out
  *   /q         no window: it closes when it's done (exit code 0 done, 1
  *              cancelled, 2 failed)
@@ -644,13 +646,17 @@ static void queue_in(int i) {
   }
 }
 
-static void queue_out(int i) {
-  s3d_fill(meas, (s16 *)outb[i].h->lpData, BUF_FRAMES);
+static void write_out(int i) {
   outb[i].h->dwFlags &= ~WHDR_DONE;
   if (!waveOutWrite(hwo, outb[i].h, sizeof(WAVEHDR))) {
     out_queued++;
     play_left = play_left > BUF_FRAMES ? play_left - BUF_FRAMES : 0;
   }
+}
+
+static void queue_out(int i) {
+  s3d_fill(meas, (s16 *)outb[i].h->lpData, BUF_FRAMES);
+  write_out(i);
 }
 
 static void end_run(int stalled) {
@@ -695,8 +701,9 @@ static void start_run(void) {
   char info[400], text[160];
   u8 reg[S3D_REGS];
   u32 rate_play, rate_rec;
+  DWORD t;
   time_t now;
-  int i;
+  int i, n;
 
   if (state == S_DONE)
     return;
@@ -724,6 +731,12 @@ static void start_run(void) {
   if (cmd->sim) {
     s3dsim_regs(&sim, reg);
   } else {
+    // the playback's first blocks filled before it starts, so that the
+    // mixer is set a few ms after the start, in the silence before the
+    // burst: set after the blocks were filled, 0.75 s in on the card, the
+    // level was 3.6 dB high until then and 85 ms of sound went missing
+    for (n = 0; n < BUFS && play_left > (u32)n * BUF_FRAMES; n++)
+      s3d_fill(meas, (s16 *)outb[n].h->lpData, BUF_FRAMES);
     // the recording first, so it starts in the silence before the tones
     for (i = 0; i < BUFS && rec_left; i++)
       queue_in(i);
@@ -733,12 +746,22 @@ static void start_run(void) {
       end_run(1);
       return;
     }
-    for (i = 0; i < BUFS && play_left; i++)
-      queue_out(i);
+    t = GetTickCount();
+    for (i = 0; i < n; i++)
+      write_out(i);
     if (play_path() < 0) {
       log_line("ess3d measure: the Audio 2 volume didn't stay");
       end_run(1);
       return;
+    }
+    // the burst comes 250 ms in, and the mixer has to be set by then
+    t = GetTickCount() - t;
+    if (t > 150) {
+      sprintf(text,
+              "ess3d measure: run %d's mixer was set %lu ms after its "
+              "playback started",
+              cur, (unsigned long)t);
+      log_line(text);
     }
   }
   if (first) {

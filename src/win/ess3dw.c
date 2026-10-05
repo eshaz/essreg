@@ -22,8 +22,8 @@
  *   tray              an icon in the taskbar's tray with a panel of every
  *                     3-D setting (ess3dtr.c)
  *   exit              close the tray icon
- *   measure [quick | 54 | 56 | 58 | 5A]  measure what each setting does,
- *                     alone on the command line (ess3dms.c)
+ *   measure [quick | limit | 54 | 56 | 58 | 5A]  measure what each setting
+ *                     does, alone on the command line (ess3dms.c)
  *
  *   /q                no display and no message boxes, problems go to
  *                     ESS3D.LOG (or the /log= file)
@@ -84,7 +84,7 @@ static const char usage[] =
     "Commands: on, off, toggle, level N (0 to 63, or N%), level +N, "
     "level -N, up [N], down [N], reset, hold, limit on|off|toggle, "
     "model on|off|toggle, reg XX YY (hex), defaults, show, tray, exit, "
-    "measure [quick|54|56|58|5A]\n\n"
+    "measure [quick|limit|54|56|58|5A]\n\n"
     "Options: /q, /t=1500 (ms), /log=file, /out=file, /sim, /base=220, "
     "/cfg=800, /novxd";
 

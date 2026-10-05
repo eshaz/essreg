@@ -14,13 +14,14 @@
  * - sweep runs: a tone in both channels (M), then in opposite phase (S),
  *   at 11 frequencies from 100 Hz to 10 kHz
  * - ratio runs: 400 Hz in M and 1 kHz in S at five S/M ratios, to see
- *   whether the effect's gain follows the program
- * - band runs: an S tone at each frequency over 400 Hz in M, to see in
- *   which band a limit acts
+ *   the level at which the limit holds the S out
+ * - band runs: an S tone at each frequency over 400 Hz in M, to see the
+ *   limit at each frequency
  * - pan runs: 1 kHz panned from left to right, to see where each place
  *   comes out, and whether the effect pushes it past a speaker
- * - step runs: the 1 kHz S tone jumps up and back down, to see how fast
- *   the gain follows, over 2 s
+ * - step runs: the 1 kHz S tone steps from -12 to 0 dB re the M tone and
+ *   back, to see how fast the limit holds the boost down, at which level,
+ *   and how fast it lets it back up
  *
  * Each tone is measured over a whole number of its cycles (100 ms, or 20
  * ms early in step runs), after time for the effect to settle, as the
@@ -30,11 +31,20 @@
  * frequency gives the phase the effect adds to S, which a coefficient
  * with its sign flipped turns by 180 degrees.
  *
+ * With the limit on, the S out of a run with the 1 kHz S tone gives the
+ * boost's own gain: S>S is 1 + a B, where B is the boost with the limit
+ * off, from a sweep run with the same 50h (without bit 0) and 52h, and a
+ * is what the limit leaves of it. On the card a moves at a fixed rate in
+ * dB, which the summary gives in dB a second.
+ *
+ * Every plan ends with the effect off again, which shows how much the
+ * path from the DAC to the ADC moved during the measurement.
+ *
  * The engine doesn't touch the chip or Windows: the program around it
  * writes each run's registers, plays what s3d_fill gives, hands over what
  * it records through s3d_take, and writes the report lines that come to
  * the out function. The host tests and ess3d /sim drive it with the
- * made-up effect of s3dsim.c.
+ * effect of s3dsim.c, which follows one card's measurement.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -48,19 +58,22 @@
 
 #define S3D_RATE 48000UL // what both devices are opened at
 #define S3D_FREQS 11
-#define S3D_MAX_RUNS 100
+#define S3D_MAX_RUNS 64
 #define S3D_MAX_SEGS 32
 #define S3D_MAX_WINS 96
-#define S3D_PATHS 4   // M>M, S>S, M>S, S>M
-#define S3D_PANS 5    // pan runs: 0, 22.5, 45, 67.5 and 90 degrees
-#define S3D_FINE 25   // step runs: 20 ms windows over the first 500 ms
-#define S3D_COARSE 13 // and 100 ms windows from 500 ms to 1.8 s
-#define S3D_TRAJ (S3D_FINE + S3D_COARSE)
+#define S3D_PATHS 4      // M>M, S>S, M>S, S>M
+#define S3D_PANS 5       // pan runs: 0, 22.5, 45, 67.5 and 90 degrees
+#define S3D_FINE 25      // step runs: 20 ms windows over the first 500 ms
+#define S3D_COARSE_UP 13 // then 100 ms windows to 1.8 s after the step up
+#define S3D_COARSE_DN 25 // and to 3 s after the step down
+#define S3D_UP (S3D_FINE + S3D_COARSE_UP)
+#define S3D_DN (S3D_FINE + S3D_COARSE_DN)
 
 // the plans
-#define S3D_PLAN_FULL 0  // every setting below, about 8 minutes
-#define S3D_PLAN_QUICK 1 // each register's ends only, about 2 minutes
-#define S3D_PLAN_REG 2   // one register from 00h to FFh in steps of 10h
+#define S3D_PLAN_FULL 0  // every kind of run below, about 6 minutes
+#define S3D_PLAN_QUICK 1 // each kind once or twice, about 2 minutes
+#define S3D_PLAN_REG 2   // one register from 00h to FFh, with the limit
+#define S3D_PLAN_LIMIT 3 // each bit of 54h-5Ah with the limit, 7 minutes
 
 // kinds of runs
 #define S3D_SWEEP 0
@@ -127,15 +140,29 @@ struct s3d_run {
     } sw;
     struct {
       float ss[5], mm[5]; // S>S at 1 kHz and M>M at 400 Hz, dB
+      float b_re, b_im;   // the boost B at 1 kHz, 0 if unknown
     } ra;
     struct {
       float deg[S3D_PANS], lev[S3D_PANS]; // where it comes out, its level
     } pa;
     struct {
-      float traj[2][S3D_TRAJ]; // S>S after the step up and the step down
-      float steady[3];         // low, high, low again
+      float up[S3D_UP], dn[S3D_DN]; // S>S after the step up and down
+      float steady[3];              // low, high, low again
+      float b_re, b_im;             // the boost B at 1 kHz, 0 if unknown
     } st;
   } u;
+};
+
+// what the limit does in a step run, from the boost's gain in dB
+struct s3d_lim {
+  // steady: before the step, at 0 dB S/M, and after
+  float low, high, again;
+  // the S out where it holds the boost down, re the M in, dB, or
+  // S3D_FLOOR
+  float held;
+  float fall; // dB a second after the step up, 0 if it holds
+  float rise; // dB a second after the step down, 0 if none
+  int delay;  // ms before it rises 3 dB, -1 if it doesn't
 };
 
 struct s3d_meas {
@@ -211,6 +238,9 @@ void s3d_failed(struct s3d_meas *m, const char *why);
 
 // the summary after the last run
 void s3d_summary(struct s3d_meas *m);
+
+// what the limit did in step run i: 0, or -1 without B or a result
+int s3d_limit(const struct s3d_meas *m, int i, struct s3d_lim *l);
 
 // the stimulus of the current run at play frame pos (pos may have a
 // fraction), full scale 1

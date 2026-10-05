@@ -1,6 +1,6 @@
 /*
- * A made-up 3-D effect for the measurement's tests and for /sim (see
- * s3dsim.h).
+ * A 3-D effect made after the measurement of one card, for the
+ * measurement's tests and for /sim (see s3dsim.h).
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -14,26 +14,31 @@
 
 #define PI 3.14159265358979
 #define GAIN 0.5
-#define LIMIT 0.7 // the boost stays under this times the M
+#define RIGHT 0.975      // the right channel's level against the left
+#define PEAK 8.2         // the boost's gain for 16.7 dB at its peak
+#define MODEL 0.70710678 // the model's S, 3 dB under the boost
+#define KEEP (1.0 / 32)  // the input's S that the model keeps
 
-// the coefficients for the registers: high-pass b0 b1 b2 a1 a2 (biquad,
-// Q 0.707), low-pass b0 b1 a1 and all-pass c (first order)
-static void design(const u8 *reg, u32 rate, double *hb, double *lb,
-                   double *ab) {
-  double fc = 150.0 + 10.0 * (reg[2] & 0x7F);
-  double w = 2 * PI * fc / rate, cw = cos(w), al = sin(w) / (2 * 0.70710678);
-  double a0 = 1 + al, k;
+// a first-order section by the bilinear transform: b0 b1 a1
+static void first(double hz, u32 rate, int high, double *c) {
+  double k = tan(PI * hz / rate);
 
-  hb[0] = (1 + cw) / 2 / a0;
-  hb[1] = -(1 + cw) / a0;
-  hb[2] = (1 + cw) / 2 / a0;
-  hb[3] = -2 * cw / a0;
-  hb[4] = (1 - al) / a0;
-  k = tan(PI * 4000.0 / rate);
-  lb[0] = lb[1] = k / (1 + k);
-  lb[2] = (k - 1) / (k + 1);
-  k = tan(PI * 1000.0 / rate);
-  ab[0] = (k - 1) / (k + 1);
+  c[0] = high ? 1 / (1 + k) : k / (1 + k);
+  c[1] = high ? -c[0] : c[0];
+  c[2] = (k - 1) / (k + 1);
+}
+
+static double boost_gain(const u8 *reg) {
+  return PEAK * pow(10.0, -0.75 * (63 - (reg[1] & 0x3F)) / 20);
+}
+
+void s3dsim_limit(const u8 *reg, double *level, double *fall, double *rise) {
+  double v = reg[2];
+
+  *level = v <= 0x8F ? -5.6 + 11.1 * v / 0x8F
+                     : 5.5 + 4.3 * (v - 0x8F) / (0xFF - 0x8F);
+  *fall = 260 * pow(2.0, -reg[4] / 65.0);
+  *rise = reg[4] & 0x80 ? *fall / 16 : *fall;
 }
 
 void s3dsim_reset(struct s3dsim *s, u32 rate) {
@@ -42,12 +47,24 @@ void s3dsim_reset(struct s3dsim *s, u32 rate) {
   memset(s, 0, sizeof(*s));
   s->rate = rate;
   s->seed = 12345;
+  s->gain = 1;
   s3dsim_regs(s, off);
 }
 
 void s3dsim_regs(struct s3dsim *s, const u8 *reg) {
+  double level, fall, rise;
+
   memcpy(s->reg, reg, sizeof(s->reg));
-  design(reg, s->rate, s->hb, s->lb, s->ab);
+  // each run on the card started with the boost back
+  s->gain = 1;
+  s->env_m = s->env_s = 0;
+  first(200, s->rate, 1, s->hb);
+  first(1000, s->rate, 0, s->lb);
+  s->g = boost_gain(reg);
+  s3dsim_limit(reg, &level, &fall, &rise);
+  s->lim = pow(10.0, level / 20);
+  s->f_down = pow(10.0, -fall / s->rate / 20);
+  s->f_up = pow(10.0, rise / s->rate / 20);
 }
 
 static double noise(struct s3dsim *s) {
@@ -66,54 +83,43 @@ static s16 to_s16(double v) {
 }
 
 void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
-  int on = (s->reg[0] & 0x0C) == 0x0C;
-  double k = (s->reg[1] & 0x3F) / 63.0;
+  int on = (s->reg[0] & 0x0C) == 0x0C, model = s->reg[0] & 2;
   double up = 1 - exp(-1.0 / (0.005 * s->rate));
-  double down = 1 - exp(-1.0 / ((0.02 + 0.01 * (s->reg[4] & 0x7F)) * s->rate));
-  double m, sd, b, y, a, l, r;
+  double down = 1 - exp(-1.0 / (0.05 * s->rate));
+  double l, r, m, sd, x, y, b;
   u16 i;
 
   for (i = 0; i < n; i++) {
     l = in[2 * i] / 32768.0;
-    r = in[2 * i + 1] / 32768.0;
+    r = in[2 * i + 1] / 32768.0 * RIGHT;
     m = (l + r) / 2;
     sd = (l - r) / 2;
     if (on) {
-      // the boost: high-pass, then the low-pass while 56h bit 4 is set
-      y = s->hb[0] * sd + s->hb[1] * s->hx[0] + s->hb[2] * s->hx[1] -
-          s->hb[3] * s->hy[0] - s->hb[4] * s->hy[1];
-      s->hx[1] = s->hx[0];
-      s->hx[0] = sd;
-      s->hy[1] = s->hy[0];
-      s->hy[0] = y;
-      b = y;
-      if (s->reg[3] & 0x10) {
-        y = s->lb[0] * b + s->lb[1] * s->lx - s->lb[2] * s->ly;
-        s->lx = b;
-        s->ly = y;
-        b = y;
-      }
-      b *= s->reg[2] & 0x80 ? 2 * k : -2 * k; // 54h bit 7, its sign
+      // the boost: high-pass, then low-pass, of the S, or of the M for
+      // the model
+      x = model ? m : sd;
+      y = s->hb[0] * x + s->hb[1] * s->hx - s->hb[2] * s->hy;
+      s->hx = x;
+      s->ly = s->lb[0] * y + s->lb[1] * s->hy - s->lb[2] * s->ly;
+      s->hy = y;
+      b = s->g * s->ly * (model ? MODEL : 1);
       if (s->reg[0] & 1) {
-        // the limit: follow both levels, with the release that 58h sets,
-        // and scale the boost down when it passes 0.7 times the M
+        // the limit: follow the M in and the S out, and move the boost's
+        // gain down while the S passes the level, and up otherwise
+        b *= s->gain;
+        x = (model ? sd * KEEP : sd) + b;
         s->env_m += (fabs(m) - s->env_m) * (fabs(m) > s->env_m ? up : down);
-        s->env_b += (fabs(b) - s->env_b) * (fabs(b) > s->env_b ? up : down);
-        a = s->env_b > LIMIT * s->env_m && s->env_b > 1e-9
-                ? LIMIT * s->env_m / s->env_b
-                : 1.0;
-        b *= a;
+        s->env_s += (fabs(x) - s->env_s) * (fabs(x) > s->env_s ? up : down);
+        // (over -80 dBFS, so that silence doesn't count)
+        s->gain *= s->env_s > s->lim * s->env_m + 1e-4 ? s->f_down : s->f_up;
+        if (s->gain > 1)
+          s->gain = 1;
+        if (s->gain < 0.001)
+          s->gain = 0.001;
+      } else {
+        s->gain = 1;
       }
-      sd += b;
-      if (s->reg[0] & 2) {
-        // the model: the M through an all-pass, as width from mono
-        y = s->ab[0] * m + s->ax - s->ab[0] * s->ay;
-        s->ax = m;
-        s->ay = y;
-        sd += 1.5 * k * y;
-      }
-      if (s->reg[5] & 1)
-        m *= 1.12201845; // +1 dB
+      sd = (model ? sd * KEEP : sd) + b;
     }
     // the path's gain and delay, then the recording's noise
     out[2 * i] = s->dl[0][s->dpos];
@@ -124,13 +130,10 @@ void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
   }
 }
 
-// num / den of a section of up to second order at z = e^(jw)
-static void at(double b0, double b1, double b2, double a1, double a2, double w,
-               double *re, double *im) {
-  double c1 = cos(w), s1 = sin(w), c2 = cos(2 * w), s2 = sin(2 * w);
-  double nr = b0 + b1 * c1 + b2 * c2, ni = -b1 * s1 - b2 * s2;
-  double dr = 1 + a1 * c1 + a2 * c2, di = -a1 * s1 - a2 * s2;
-  double d = dr * dr + di * di;
+// b0 + b1 z^-1 over 1 + a1 z^-1 at z = e^(jw)
+static void at(const double *c, double w, double *re, double *im) {
+  double nr = c[0] + c[1] * cos(w), ni = -c[1] * sin(w);
+  double dr = 1 + c[2] * cos(w), di = -c[2] * sin(w), d = dr * dr + di * di;
 
   *re = (nr * dr + ni * di) / d;
   *im = (ni * dr - nr * di) / d;
@@ -138,34 +141,35 @@ static void at(double b0, double b1, double b2, double a1, double a2, double w,
 
 void s3dsim_response(const u8 *reg, u32 rate, double hz, double *re,
                      double *im) {
-  double hb[5], lb[3], ab[3], w = 2 * PI * hz / rate;
-  double k = (reg[1] & 0x3F) / 63.0, g, hr, hi, lr, li, br, bi;
+  double hb[3], lb[3], w = 2 * PI * hz / rate, hr, hi, lr, li, br, bi;
+  double mi = (1 + RIGHT) / 2, cross = (1 - RIGHT) / 2;
   int i;
 
+  // the M and S that reach the effect from an M in and an S in, against
+  // the M that an M in brings with the effect off
   for (i = 0; i < 4; i++)
-    re[i] = im[i] = 0;
+    im[i] = 0;
   re[0] = re[1] = 1;
+  re[2] = re[3] = cross / mi;
   if ((reg[0] & 0x0C) != 0x0C)
     return;
-  design(reg, rate, hb, lb, ab);
-  at(hb[0], hb[1], hb[2], hb[3], hb[4], w, &hr, &hi);
-  br = hr;
-  bi = hi;
-  if (reg[3] & 0x10) {
-    at(lb[0], lb[1], 0, lb[2], 0, w, &lr, &li);
-    br = hr * lr - hi * li;
-    bi = hr * li + hi * lr;
-  }
-  // the boost, taken away while 54h bit 7 is clear
-  g = reg[2] & 0x80 ? 2 * k : -2 * k;
-  re[1] = 1 + g * br;
-  im[1] = g * bi;
+  first(200, rate, 1, hb);
+  first(1000, rate, 0, lb);
+  at(hb, w, &hr, &hi);
+  at(lb, w, &lr, &li);
+  br = boost_gain(reg) * (hr * lr - hi * li);
+  bi = boost_gain(reg) * (hr * li + hi * lr);
   if (reg[0] & 2) {
-    // the model: the M through the all-pass
-    at(ab[0], 1, 0, ab[0], 0, w, &re[2], &im[2]);
-    re[2] *= 1.5 * k;
-    im[2] *= 1.5 * k;
+    // the model: the S from the M, and a 32nd of the input's S
+    re[1] = KEEP + MODEL * br * cross / mi;
+    im[1] = MODEL * bi * cross / mi;
+    re[2] = KEEP * cross / mi + MODEL * br;
+    im[2] = MODEL * bi;
+  } else {
+    // S out is S in plus its boost
+    re[1] = 1 + br;
+    im[1] = bi;
+    re[2] = cross / mi * (1 + br);
+    im[2] = cross / mi * bi;
   }
-  if (reg[5] & 1)
-    re[0] = 1.12201845;
 }

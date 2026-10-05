@@ -196,18 +196,21 @@ on Audio 1 from record source 7, which is the effect's own output before the
 master volume, so the speakers stay quiet. For each setting it measures how
 much of a tone in both channels (M) and of a tone in opposite phase (S)
 comes out as M and as S, and in which phase, at 11 frequencies from 100 Hz
-to 10 kHz. Other runs show whether the gain follows the program and in which
-band, where panned sounds come out, how fast the limit follows a jump and
-comes back, and whether 54h, 56h and 58h act as one vector. It needs ESS's
-wave devices, so close programs that play or record first.
+to 10 kHz. Other runs show the level at which the limit holds the effect,
+where panned sounds come out, and how fast the limit moves, in dB a second.
+It needs ESS's wave devices, so close programs that play or record first.
 
-The full plan takes about 9 minutes, `measure quick` about 2, and
-`measure 54` tries one register from 00h to FFh. A window shows the
+The full plan takes about 6 minutes, `measure quick` about 2,
+`measure limit` tries each bit of 54h-5Ah with the limit on in about 7, and
+`measure 58` tries one register from 00h to FFh. A window shows the
 progress, and the report goes to `ESS3D.TXT` next to ess3d.exe, or to the
 `/out=` file. ess3d puts the mixer back at the end, and if the measurement
 is ended by force, the next ess3d puts it back.
 [docs/SPATIALIZER.md](docs/SPATIALIZER.md#measuring-on-the-card) explains
-the report.
+the report, and what one card showed: 52h sets the boost in steps of 0.75
+dB, the model makes the stereo image from the mono sum, and with the limit
+on, 54h sets the level that the limit holds and 58h how fast it moves. With
+the limit off, 54h-5Ah do nothing.
 
 ### Putting ess3d on a key
 

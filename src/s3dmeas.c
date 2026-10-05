@@ -20,14 +20,21 @@
 #define FADE 5        // ms of the fades at the ends of a tone
 #define F400 3        // freq[] index of 400 Hz
 #define F1K 5         // and of 1 kHz
-#define STEP_MS 2000  // each level of a step run: whole cycles of both tones
+#define CROSS_MIN -15 // the summary leaves out cross paths under this, dB
+#define OFF_DB -40    // a boost under this is off, dB
+
+// a step run: the S tone at -12 dB re the M tone, at 0 dB, then at -12 dB
+// again, in ms that are whole cycles of both tones
+#define STEP_LOW 1500
+#define STEP_HIGH 2000
+#define STEP_DOWN 3200
 
 // the windows of a step run
-#define W_LOW 0                   // steady, before the step up
-#define W_UP 1                    // after the step up
-#define W_HIGH (W_UP + S3D_TRAJ)  // steady, before the step down
-#define W_DOWN (W_HIGH + 1)       // after the step down
-#define W_END (W_DOWN + S3D_TRAJ) // steady, at the end
+#define W_LOW 0                 // steady, before the step up
+#define W_UP 1                  // after the step up
+#define W_HIGH (W_UP + S3D_UP)  // steady, before the step down
+#define W_DOWN (W_HIGH + 1)     // after the step down
+#define W_END (W_DOWN + S3D_DN) // steady, at the end
 
 // recording states
 #define R_NOISE 0   // the first 50 ms: the noise floor
@@ -42,7 +49,8 @@ static const char *const freq_name[S3D_FREQS] = {"100", "160",  "250",  "400",
                                                  "630", "1k",   "1.6k", "2.5k",
                                                  "4k",  "6.3k", "10k"};
 static const char *const path_name[S3D_PATHS] = {"M>M", "S>S", "M>S", "S>M"};
-static const char *const plan_name[3] = {"full", "quick", "one register"};
+static const char *const plan_name[4] = {"full", "quick", "one register",
+                                         "limit"};
 
 // what ESS's driver sets when Windows starts (docs/SPATIALIZER.md)
 static const u8 ess_set[S3D_REGS] = {0x0C, 0x3F, 0x8F, 0x95, 0x94, 0x80};
@@ -108,16 +116,16 @@ static int add_reg(struct s3d_meas *m, const char *prefix, const u8 *from,
   return add(m, name, reg, kind, base);
 }
 
-// ESS's setting with 54h, 56h and 58h changed together, as one vector
-static void add_vec(struct s3d_meas *m, const char *name, u8 v54, u8 v56,
-                    u8 v58, int base) {
+// a setting with 54h, 56h and 58h changed together, as one vector
+static void add_vec(struct s3d_meas *m, const char *name, const u8 *from,
+                    u8 v54, u8 v56, u8 v58, int base) {
   u8 reg[S3D_REGS];
 
-  memcpy(reg, ess_set, S3D_REGS);
+  memcpy(reg, from, S3D_REGS);
   reg[S3D_R54] = v54;
   reg[S3D_R56] = v56;
   reg[S3D_R58] = v58;
-  add(m, name, reg, S3D_SWEEP, base);
+  add(m, name, reg, S3D_STEP, base);
 }
 
 // bits 6:0 halved or doubled, bit 7 kept
@@ -129,11 +137,40 @@ static u8 twice(u8 v) {
   return (u8)(0x80 | (x > 0x7F ? 0x7F : x));
 }
 
+// 54h-58h as one vector, with the limit on, where they act: the sign bits
+// cleared, the length halved and doubled, the coordinates turned and two
+// of them swapped
+static void add_vecs(struct s3d_meas *m, const u8 *from, int all, int base) {
+  add_vec(m, "vec neg", from, 0x0F, 0x15, 0x14, base);
+  if (!all)
+    return;
+  add_vec(m, "vec /2", from, half(0x8F), half(0x95), half(0x94), base);
+  add_vec(m, "vec x2", from, twice(0x8F), twice(0x95), twice(0x94), base);
+  add_vec(m, "vec rot", from, 0x95, 0x94, 0x8F, base);
+  add_vec(m, "vec swap", from, 0x95, 0x8F, 0x94, base);
+}
+
+// each bit of ESS's value of 54h-5Ah flipped, and each register at its
+// ends, in a step run with the limit on
+static void add_limit_bits(struct s3d_meas *m, const u8 *lim, int base) {
+  char more[8];
+  int i, b;
+
+  for (i = S3D_R54; i <= S3D_R5A; i++) {
+    for (b = 7; b >= 0; b--) {
+      sprintf(more, " b%d", b);
+      add_reg(m, "L ", lim, i, (u8)(ess_set[i] ^ (1 << b)), more, S3D_STEP,
+              base);
+    }
+    add_reg(m, "L ", lim, i, 0x00, "", S3D_STEP, base);
+    add_reg(m, "L ", lim, i, 0xFF, "", S3D_STEP, base);
+  }
+}
+
 void s3d_init(struct s3d_meas *m, int plan, u8 reg, s3d_out_fn out, void *ctx) {
   static const u8 levels[8] = {0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38};
   u8 r[S3D_REGS], model[S3D_REGS], lim[S3D_REGS];
-  char more[8];
-  int i, b, ess, mod, band, blim, step, slim, pan, ri = -1;
+  int i, ess, mod, band, blim, step, slim, pan, ri = -1;
   int full = plan == S3D_PLAN_FULL;
 
   memset(m, 0, sizeof(*m));
@@ -158,79 +195,71 @@ void s3d_init(struct s3d_meas *m, int plan, u8 reg, s3d_out_fn out, void *ctx) {
   memcpy(lim, ess_set, S3D_REGS);
   lim[S3D_R50] = 0x0D;
 
-  if (plan == S3D_PLAN_REG) {
-    for (i = 0; i <= 0x100; i += 0x10)
-      add_reg(m, "", ess_set, ri, (u8)(i > 0xFF ? 0xFF : i), "", S3D_SWEEP,
-              ess);
+  if (plan == S3D_PLAN_LIMIT) {
+    // the limit, where 54h-5Ah act on the card; 52=20 gives the B of its
+    // step run
+    add_reg(m, "", ess_set, S3D_R52, 0x20, "", S3D_SWEEP, ess);
+    add(m, "ratio", ess_set, S3D_RATIO, ess);
+    add(m, "ratio limit", lim, S3D_RATIO, ess);
+    step = add(m, "step", ess_set, S3D_STEP, ess);
+    slim = add(m, "step limit", lim, S3D_STEP, step);
+    add_limit_bits(m, lim, slim);
+    add_reg(m, "L ", lim, S3D_R52, 0x20, "", S3D_STEP, slim);
+    add_vecs(m, lim, 1, slim);
+  } else if (plan == S3D_PLAN_REG) {
+    // one register: its ends with the limit off and with the model, then
+    // every 10h with the limit on
+    add_reg(m, "", ess_set, ri, 0x00, "", S3D_SWEEP, ess);
+    add_reg(m, "", ess_set, ri, 0xFF, "", S3D_SWEEP, ess);
     mod = add(m, "model", model, S3D_SWEEP, ess);
     add_reg(m, "M ", model, ri, 0x00, "", S3D_SWEEP, mod);
     add_reg(m, "M ", model, ri, 0xFF, "", S3D_SWEEP, mod);
-    blim = add(m, "band limit", lim, S3D_BAND, ess);
-    add_reg(m, "band L ", lim, ri, 0x00, "", S3D_BAND, blim);
-    add_reg(m, "band L ", lim, ri, 0xFF, "", S3D_BAND, blim);
+    add(m, "ratio limit", lim, S3D_RATIO, ess);
     slim = add(m, "step limit", lim, S3D_STEP, ess);
-    add_reg(m, "step L ", lim, ri, 0x00, "", S3D_STEP, slim);
-    add_reg(m, "step L ", lim, ri, 0xFF, "", S3D_STEP, slim);
-    return;
-  }
-  for (i = 0; i < 8; i++)
-    if (full || levels[i] == 0x00 || levels[i] == 0x20)
-      add_reg(m, "", ess_set, S3D_R52, levels[i], "", S3D_SWEEP, ess);
-  mod = add(m, "model", model, S3D_SWEEP, ess);
-  add(m, "limit", lim, S3D_SWEEP, ess);
-  r[S3D_R50] = 0x0F;
-  memcpy(r + 1, ess_set + 1, S3D_REGS - 1);
-  add(m, "model+limit", r, S3D_SWEEP, ess);
-
-  // each register around ESS's value, one bit at a time, and at its ends
-  for (i = S3D_R54; i <= S3D_R5A; i++) {
-    if (full)
-      for (b = 7; b >= 0; b--) {
-        sprintf(more, " b%d", b);
-        add_reg(m, "", ess_set, i, (u8)(ess_set[i] ^ (1 << b)), more, S3D_SWEEP,
-                ess);
-      }
-    add_reg(m, "", ess_set, i, 0x00, "", S3D_SWEEP, ess);
-    add_reg(m, "", ess_set, i, 0xFF, "", S3D_SWEEP, ess);
-  }
-  // 54h-58h as one vector: its sign bits cleared, its length halved and
-  // doubled, its coordinates turned and two of them swapped
-  add_vec(m, "vec neg", 0x0F, 0x15, 0x14, ess);
-  add_vec(m, "vec /2", half(0x8F), half(0x95), half(0x94), ess);
-  if (full) {
-    add_vec(m, "vec x2", twice(0x8F), twice(0x95), twice(0x94), ess);
-    add_vec(m, "vec rot", 0x95, 0x94, 0x8F, ess);
-    add_vec(m, "vec swap", 0x95, 0x8F, 0x94, ess);
-    // the registers with the model on, to see whether they shape it
+    for (i = 0; i <= 0x100; i += 0x10)
+      add_reg(m, "L ", lim, ri, (u8)(i > 0xFF ? 0xFF : i), "", S3D_STEP, slim);
+  } else {
+    for (i = 0; i < 8; i++)
+      if (full || levels[i] == 0x00 || levels[i] == 0x20)
+        add_reg(m, "", ess_set, S3D_R52, levels[i], "", S3D_SWEEP, ess);
+    mod = add(m, "model", model, S3D_SWEEP, ess);
+    add(m, "limit", lim, S3D_SWEEP, ess);
+    r[S3D_R50] = 0x0F;
+    add(m, "model+limit", r, S3D_SWEEP, ess);
+    // 54h-5Ah at their ends, with the limit off and with the model
     for (i = S3D_R54; i <= S3D_R5A; i++) {
+      add_reg(m, "", ess_set, i, 0x00, "", S3D_SWEEP, ess);
+      add_reg(m, "", ess_set, i, 0xFF, "", S3D_SWEEP, ess);
+    }
+    for (i = S3D_R54; full && i <= S3D_R5A; i++) {
       add_reg(m, "M ", model, i, 0x00, "", S3D_SWEEP, mod);
       add_reg(m, "M ", model, i, 0xFF, "", S3D_SWEEP, mod);
-      add_reg(m, "M ", model, i, (u8)(ess_set[i] ^ 0x80), " b7", S3D_SWEEP,
-              mod);
     }
+    // whether the gain follows the program, in which band, where a panned
+    // tone comes out, and how the limit moves, with each register at its
+    // ends
+    add(m, "ratio", ess_set, S3D_RATIO, ess);
+    add(m, "ratio limit", lim, S3D_RATIO, ess);
+    band = add(m, "band", ess_set, S3D_BAND, ess);
+    blim = add(m, "band limit", lim, S3D_BAND, band);
+    if (full)
+      add_reg(m, "band L ", lim, S3D_R58, 0x00, "", S3D_BAND, blim);
+    pan = add(m, "pan", ess_set, S3D_PAN, ess);
+    add(m, "pan limit", lim, S3D_PAN, pan);
+    step = add(m, "step", ess_set, S3D_STEP, ess);
+    slim = add(m, "step limit", lim, S3D_STEP, step);
+    for (i = S3D_R54; full && i <= S3D_R5A; i++) {
+      add_reg(m, "L ", lim, i, 0x00, "", S3D_STEP, slim);
+      add_reg(m, "L ", lim, i, 0xFF, "", S3D_STEP, slim);
+    }
+    if (full)
+      add_reg(m, "L ", lim, S3D_R52, 0x20, "", S3D_STEP, slim);
+    add_vecs(m, lim, full, slim);
   }
-
-  // whether the gain follows the program, in which band, where a panned
-  // tone comes out, and how fast the gain follows; with the limit off and
-  // on, and on with each register at its ends
-  add(m, "ratio", ess_set, S3D_RATIO, ess);
-  add(m, "ratio limit", lim, S3D_RATIO, ess);
-  band = add(m, "band", ess_set, S3D_BAND, ess);
-  blim = add(m, "band limit", lim, S3D_BAND, band);
-  for (i = S3D_R54; full && i <= S3D_R5A; i++) {
-    add_reg(m, "band L ", lim, i, 0x00, "", S3D_BAND, blim);
-    add_reg(m, "band L ", lim, i, 0xFF, "", S3D_BAND, blim);
-  }
-  pan = add(m, "pan", ess_set, S3D_PAN, ess);
-  add(m, "pan limit", lim, S3D_PAN, pan);
-  step = add(m, "step", ess_set, S3D_STEP, ess);
-  slim = add(m, "step limit", lim, S3D_STEP, step);
-  for (i = S3D_R54; full && i <= S3D_R5A; i++) {
-    add_reg(m, "step L ", lim, i, 0x00, "", S3D_STEP, slim);
-    add_reg(m, "step L ", lim, i, 0xFF, "", S3D_STEP, slim);
-  }
-  if (full)
-    add_reg(m, "step L ", lim, S3D_R52, 0x20, "", S3D_STEP, slim);
+  // the path again, for how much it moved
+  memcpy(r, ess_set, S3D_REGS);
+  r[S3D_R50] = 0x04;
+  add(m, "off again", r, S3D_SWEEP, 0);
 }
 
 int s3d_count(const struct s3d_meas *m) { return m->nruns; }
@@ -275,13 +304,13 @@ static void win_add(struct s3d_meas *m, u32 pstart, u16 ms) {
   w->seg = (u8)(m->nseg - 1);
 }
 
-// the windows after a step: 20 ms over the first 500 ms, then 100 ms
-static void step_windows(struct s3d_meas *m, u32 s) {
+// the windows after a step: 20 ms over the first 500 ms, then n of 100 ms
+static void step_windows(struct s3d_meas *m, u32 s, int n) {
   int k;
 
   for (k = 0; k < S3D_FINE; k++)
     win_add(m, s + fr(20 * k), 20);
-  for (k = 0; k < S3D_COARSE; k++)
+  for (k = 0; k < n; k++)
     win_add(m, s + fr(500 + 100 * k), 100);
 }
 
@@ -304,7 +333,7 @@ int s3d_seconds(const struct s3d_meas *m) {
       ms += S3D_PANS * tone;
       break;
     case S3D_STEP:
-      ms += 3 * STEP_MS;
+      ms += STEP_LOW + STEP_HIGH + STEP_DOWN;
       break;
     default:
       ms += 2 * S3D_FREQS * tone;
@@ -371,17 +400,16 @@ u32 s3d_begin(struct s3d_meas *m, int i, u32 *rec_frames) {
     // a cycle, so neither jumps in phase
     a = AMP_M * pow(10.0, -12 / 20.0);
     s = t;
-    t = seg_add(m, t, fr(STEP_MS), 400, AMP_M, AMP_M, 1000, a, -a, 1);
-    win_add(m, s + fr(STEP_MS - 120), 100);
+    t = seg_add(m, t, fr(STEP_LOW), 400, AMP_M, AMP_M, 1000, a, -a, 1);
+    win_add(m, s + fr(STEP_LOW - 120), 100);
     s = t;
-    t = seg_add(m, t, fr(STEP_MS), 400, AMP_M, AMP_M, 1000, 2 * AMP_M,
-                -2 * AMP_M, 0);
-    step_windows(m, s);
-    win_add(m, s + fr(STEP_MS - 120), 100);
+    t = seg_add(m, t, fr(STEP_HIGH), 400, AMP_M, AMP_M, 1000, AMP_M, -AMP_M, 0);
+    step_windows(m, s, S3D_COARSE_UP);
+    win_add(m, s + fr(STEP_HIGH - 120), 100);
     s = t;
-    t = seg_add(m, t, fr(STEP_MS), 400, AMP_M, AMP_M, 1000, a, -a, 2);
-    step_windows(m, s);
-    win_add(m, s + fr(STEP_MS - 120), 100);
+    t = seg_add(m, t, fr(STEP_DOWN), 400, AMP_M, AMP_M, 1000, a, -a, 2);
+    step_windows(m, s, S3D_COARSE_DN);
+    win_add(m, s + fr(STEP_DOWN - 120), 100);
     break;
   default:
     for (side = 1; side >= -1; side -= 2)
@@ -706,6 +734,71 @@ static double z_abs(struct cx z) { return sqrt(z.re * z.re + z.im * z.im); }
 
 static double z_deg(struct cx z) { return atan2(z.im, z.re) * 180 / PI; }
 
+// --- the boost ---------------------------------------------------------------
+
+static int ok(const struct s3d_run *r) {
+  return r->result != 0xFF && !(r->result & (S3D_NOSIGNAL | S3D_SHORT));
+}
+
+// the boost at 1 kHz with the limit off, B in S>S = 1 + B, from the sweep
+// run with the same registers but 50h bit 0, or else one with the same
+// 50h and 52h, since on the card 54h-5Ah don't change it with the limit
+// off; 0 if there's none
+static int boost_ref(const struct s3d_meas *m, const struct s3d_run *r,
+                     float *re, float *im) {
+  const struct s3d_run *s;
+  u8 r50 = (u8)(r->reg[S3D_R50] & ~1);
+  double g, ph;
+  int i, best = -1;
+
+  *re = *im = 0;
+  if ((r50 & 0x0C) != 0x0C)
+    return 0;
+  for (i = 0; i < m->nruns; i++) {
+    s = &m->run[i];
+    if (s->kind != S3D_SWEEP || !ok(s) || s->reg[S3D_R50] != r50 ||
+        s->reg[S3D_R52] != r->reg[S3D_R52] || !has(s->u.sw.db[1][F1K]) ||
+        !has(s->u.sw.ph[0][F1K]))
+      continue;
+    if (!memcmp(s->reg + S3D_R54, r->reg + S3D_R54, S3D_REGS - S3D_R54)) {
+      best = i;
+      break;
+    }
+    if (best < 0)
+      best = i;
+  }
+  if (best < 0)
+    return 0;
+  s = &m->run[best];
+  g = pow(10.0, s->u.sw.db[1][F1K] / 20);
+  ph = s->u.sw.ph[0][F1K] * PI / 180;
+  *re = (float)(g * cos(ph) - 1);
+  *im = (float)(g * sin(ph));
+  return 1;
+}
+
+// the boost's own gain in dB, a in |1 + a B| = S>S with a at least 0,
+// from S>S in dB; -60 for a boost that is off
+static float boost_db(double ss, double bre, double bim) {
+  double b2 = bre * bre + bim * bim, g, d, a;
+
+  if (!has(ss) || b2 < 1e-6)
+    return S3D_FLOOR;
+  g = pow(10.0, ss / 20);
+  d = bre * bre - b2 * (1 - g * g);
+  a = d > 0 ? (-bre + sqrt(d)) / b2 : 0;
+  return (float)(a > 1e-3 ? db(a) : -60.0);
+}
+
+// n values of S>S as the boost's gain, into out
+static void to_boost(const float *ss, int n, double bre, double bim,
+                     float *out) {
+  int k;
+
+  for (k = 0; k < n; k++)
+    out[k] = boost_db(ss[k], bre, bim);
+}
+
 // --- the report -------------------------------------------------------------
 
 static void say(struct s3d_meas *m, const char *line) {
@@ -744,6 +837,14 @@ static void cell_deg(char *out, double v) {
     sprintf(out + strlen(out), "%+6.0f", fabs(v) < 0.5 ? 0.0 : v);
 }
 
+// the boost's gain in six columns, off under OFF_DB
+static void cell_boost(char *out, double v) {
+  if (has(v) && v < OFF_DB)
+    strcat(out, "   off");
+  else
+    cell(out, v);
+}
+
 static void table_head(struct s3d_meas *m, int kind) {
   char line[256];
   int k;
@@ -774,15 +875,17 @@ static void table_head(struct s3d_meas *m, int kind) {
       sprintf(line + strlen(line), "%6.1f", 22.5 * k);
     break;
   case S3D_STEP:
-    say(m, "step runs: 1 kHz in S jumps from -12 to +6 dB re 400 Hz in M at "
-           "0 ms, and back after 2 s; S>S in 20 ms windows to 500 ms, then "
-           "in 100 ms windows to 1.8 s");
+    say(m, "step runs: 1 kHz in S steps from -12 to 0 dB re 400 Hz in M at 0 "
+           "ms, and back after 2 s; the boost's own gain in dB (0 is as with "
+           "the limit off), or S>S where the boost isn't known");
+    say(m, "in 20 ms windows to 500 ms, then in 100 ms windows to 1.8 s after "
+           "the step up and to 3 s after the step down");
     strcat(line, "ms      ");
     for (k = 0; k < S3D_FINE; k++)
       sprintf(line + strlen(line), "%6d", 20 * k);
     say(m, line);
     sprintf(line, "%39s%-8s", "", "ms");
-    for (k = 0; k < S3D_COARSE; k++)
+    for (k = 0; k < S3D_COARSE_DN; k++)
       sprintf(line + strlen(line), "%6d", 500 + 100 * k);
     break;
   default:
@@ -822,16 +925,23 @@ void s3d_header(struct s3d_meas *m, u32 rate_play, u32 rate_rec,
   table_head(m, S3D_SWEEP);
 }
 
+// a row of n values: dB, degrees (ROW_DEG) or the boost (ROW_BOOST)
+#define ROW_DB 0
+#define ROW_DEG 1
+#define ROW_BOOST 2
+
 static void row(struct s3d_meas *m, int i, const char *label, const float *v,
-                int n, int deg) {
+                int n, int how) {
   char line[256];
   int k;
 
   run_head(m, i, line);
   sprintf(line + strlen(line), "%-8s", label);
   for (k = 0; k < n; k++)
-    if (deg)
+    if (how == ROW_DEG)
       cell_deg(line, v[k]);
+    else if (how == ROW_BOOST)
+      cell_boost(line, v[k]);
     else
       cell(line, v[k]);
   say(m, line);
@@ -851,48 +961,67 @@ static void sweep_lines(struct s3d_meas *m, int i) {
     }
     if (p >= 2 && !any)
       continue;
-    row(m, p ? -1 : i, path_name[p], r->u.sw.db[p], S3D_FREQS, 0);
+    row(m, p ? -1 : i, path_name[p], r->u.sw.db[p], S3D_FREQS, ROW_DB);
     // the phase of S in every run but the reference, where it's the
     // zero, and of each cross term that is there
     if ((p == 1 && i && turned) || p >= 2)
-      row(m, -1, deg_name[p - 1], r->u.sw.ph[p - 1], S3D_FREQS, 1);
+      row(m, -1, deg_name[p - 1], r->u.sw.ph[p - 1], S3D_FREQS, ROW_DEG);
   }
 }
 
 static void band_lines(struct s3d_meas *m, int i) {
   struct s3d_run *r = &m->run[i];
 
-  row(m, i, "S>S", r->u.sw.db[1], S3D_FREQS, 0);
-  row(m, -1, "M>M 400", r->u.sw.db[0], S3D_FREQS, 0);
+  row(m, i, "S>S", r->u.sw.db[1], S3D_FREQS, ROW_DB);
+  row(m, -1, "M>M 400", r->u.sw.db[0], S3D_FREQS, ROW_DB);
 }
 
 static void pan_lines(struct s3d_meas *m, int i) {
   struct s3d_run *r = &m->run[i];
 
-  row(m, i, "out deg", r->u.pa.deg, S3D_PANS, 1);
-  row(m, -1, "level", r->u.pa.lev, S3D_PANS, 0);
+  row(m, i, "out deg", r->u.pa.deg, S3D_PANS, ROW_DEG);
+  row(m, -1, "level", r->u.pa.lev, S3D_PANS, ROW_DB);
 }
 
+// the boost's gain where B is known, or else S>S
 static void step_lines(struct s3d_meas *m, int i) {
   struct s3d_run *r = &m->run[i];
+  float up[S3D_UP], dn[S3D_DN], st[3];
+  int b = r->u.st.b_re != 0 || r->u.st.b_im != 0;
+  int how = b ? ROW_BOOST : ROW_DB;
   char line[256];
 
-  row(m, i, "up", r->u.st.traj[0], S3D_FINE, 0);
-  row(m, -1, "", r->u.st.traj[0] + S3D_FINE, S3D_COARSE, 0);
-  row(m, -1, "down", r->u.st.traj[1], S3D_FINE, 0);
-  row(m, -1, "", r->u.st.traj[1] + S3D_FINE, S3D_COARSE, 0);
+  memcpy(up, r->u.st.up, sizeof(up));
+  memcpy(dn, r->u.st.dn, sizeof(dn));
+  memcpy(st, r->u.st.steady, sizeof(st));
+  if (b) {
+    to_boost(r->u.st.up, S3D_UP, r->u.st.b_re, r->u.st.b_im, up);
+    to_boost(r->u.st.dn, S3D_DN, r->u.st.b_re, r->u.st.b_im, dn);
+    to_boost(r->u.st.steady, 3, r->u.st.b_re, r->u.st.b_im, st);
+  }
+  row(m, i, b ? "boost up" : "S>S up", up, S3D_FINE, how);
+  row(m, -1, "", up + S3D_FINE, S3D_COARSE_UP, how);
+  row(m, -1, b ? "boost dn" : "S>S dn", dn, S3D_FINE, how);
+  row(m, -1, "", dn + S3D_FINE, S3D_COARSE_DN, how);
   run_head(m, -1, line);
   sprintf(line + strlen(line), "steady: low %+.1f, high %+.1f, low again %+.1f",
-          tidy(r->u.st.steady[0]), tidy(r->u.st.steady[1]),
-          tidy(r->u.st.steady[2]));
+          tidy(st[0]), tidy(st[1]), tidy(st[2]));
+  if (b)
+    sprintf(line + strlen(line), "; S>S at the high level %+.1f",
+            tidy(r->u.st.steady[1]));
   say(m, line);
 }
 
 static void ratio_lines(struct s3d_meas *m, int i) {
   struct s3d_run *r = &m->run[i];
+  float b[5];
 
-  row(m, i, "S>S 1k", r->u.ra.ss, 5, 0);
-  row(m, -1, "M>M 400", r->u.ra.mm, 5, 0);
+  row(m, i, "S>S 1k", r->u.ra.ss, 5, ROW_DB);
+  row(m, -1, "M>M 400", r->u.ra.mm, 5, ROW_DB);
+  if (r->u.ra.b_re != 0 || r->u.ra.b_im != 0) {
+    to_boost(r->u.ra.ss, 5, r->u.ra.b_re, r->u.ra.b_im, b);
+    row(m, -1, "boost", b, 5, ROW_BOOST);
+  }
 }
 
 // noise of the M or S of one window of n frames, against an amplitude
@@ -1011,13 +1140,14 @@ static void step_end(struct s3d_meas *m, struct s3d_run *r) {
   double a = AMP_M * pow(10.0, -12 / 20.0);
   int k;
 
-  for (k = 0; k < S3D_TRAJ; k++) {
-    r->u.st.traj[0][k] = step_db(m, W_UP + k, AMP_M * 2);
-    r->u.st.traj[1][k] = step_db(m, W_DOWN + k, a);
-  }
+  for (k = 0; k < S3D_UP; k++)
+    r->u.st.up[k] = step_db(m, W_UP + k, AMP_M);
+  for (k = 0; k < S3D_DN; k++)
+    r->u.st.dn[k] = step_db(m, W_DOWN + k, a);
   r->u.st.steady[0] = step_db(m, W_LOW, a);
-  r->u.st.steady[1] = step_db(m, W_HIGH, AMP_M * 2);
+  r->u.st.steady[1] = step_db(m, W_HIGH, AMP_M);
   r->u.st.steady[2] = step_db(m, W_END, a);
+  boost_ref(m, r, &r->u.st.b_re, &r->u.st.b_im);
 }
 
 int s3d_end(struct s3d_meas *m) {
@@ -1037,6 +1167,7 @@ int s3d_end(struct s3d_meas *m) {
         r->u.ra.mm[k] =
             rel(z_abs(z_mid(&m->win[k], 0)) / AMP_M, m->ref_mm[F400], fl);
       }
+      boost_ref(m, r, &r->u.ra.b_re, &r->u.ra.b_im);
       break;
     case S3D_BAND:
       band_end(m, r);
@@ -1096,17 +1227,11 @@ void s3d_failed(struct s3d_meas *m, const char *why) {
 
 // --- the summary ------------------------------------------------------------
 
-static int ok(const struct s3d_run *r) {
-  return r->result != 0xFF && !(r->result & (S3D_NOSIGNAL | S3D_SHORT));
-}
-
-static int run_named(const struct s3d_meas *m, const char *name) {
-  int i;
-
-  for (i = 0; i < m->nruns; i++)
-    if (!strcmp(m->run[i].name, name) && ok(&m->run[i]))
-      return i;
-  return -1;
+// a value of path p that the summary counts: over the floor, and for a
+// cross path over CROSS_MIN, where it isn't the imbalance of the DAC and
+// the ADC that the boost raises
+static int counts(double v, int p) {
+  return has(v) && (p < 2 || v > CROSS_MIN);
 }
 
 // the largest change of sweep or band run a from run b where both have a
@@ -1119,8 +1244,8 @@ static int biggest(const struct s3d_run *a, const struct s3d_run *b, int mask,
 
   for (p = 0; p < S3D_PATHS; p++)
     for (k = 0; k < S3D_FREQS; k++) {
-      if (!(mask & (1 << p)) || !has(a->u.sw.db[p][k]) ||
-          !has(b->u.sw.db[p][k]))
+      if (!(mask & (1 << p)) || !counts(a->u.sw.db[p][k], p) ||
+          !counts(b->u.sw.db[p][k], p))
         continue;
       d = a->u.sw.db[p][k] - b->u.sw.db[p][k];
       if (!found || fabs(d) > fabs(*change)) {
@@ -1141,7 +1266,9 @@ static int biggest_turn(const struct s3d_run *a, const struct s3d_run *b, int q,
   double d;
 
   for (k = 0; k < S3D_FREQS; k++) {
-    if (!has(a->u.sw.ph[q][k]) || !has(b->u.sw.ph[q][k]))
+    if (!has(a->u.sw.ph[q][k]) || !has(b->u.sw.ph[q][k]) ||
+        !counts(a->u.sw.db[q + 1][k], q + 1) ||
+        !counts(b->u.sw.db[q + 1][k], q + 1))
       continue;
     d = wrap(a->u.sw.ph[q][k] - b->u.sw.ph[q][k]);
     if (!found || fabs(d) > fabs(*turn)) {
@@ -1164,53 +1291,20 @@ static void new_path(const struct s3d_run *a, const struct s3d_run *b,
     up = down = 0;
     most = S3D_FLOOR;
     for (k = 0; k < S3D_FREQS; k++) {
-      if (has(a->u.sw.db[p][k]) && !has(b->u.sw.db[p][k])) {
+      if (counts(a->u.sw.db[p][k], p) && !counts(b->u.sw.db[p][k], p)) {
         up = 1;
         if (a->u.sw.db[p][k] > most)
           most = a->u.sw.db[p][k];
       }
-      down |= !has(a->u.sw.db[p][k]) && has(b->u.sw.db[p][k]);
+      down |= !counts(a->u.sw.db[p][k], p) && counts(b->u.sw.db[p][k], p);
     }
     if (up)
       sprintf(out + strlen(out), ", %s appears, up to %+.1f", path_name[p],
               tidy(most));
     else if (down)
-      sprintf(out + strlen(out), ", %s goes under the floor", path_name[p]);
+      sprintf(out + strlen(out), ", %s goes under %s", path_name[p],
+              p < 2 ? "the floor" : "-15 dB");
   }
-}
-
-// a step run's window k after the step, in ms
-static int traj_ms(int k) {
-  return k < S3D_FINE ? 20 * k : 500 + 100 * (k - S3D_FINE);
-}
-
-// the first window after which a step run stays within 1 dB of v, in ms,
-// or -1 if it doesn't settle
-static int settle_ms(const float *traj, double v) {
-  int k;
-
-  for (k = S3D_TRAJ; k > 0; k--)
-    if (!has(traj[k - 1]) || fabs(traj[k - 1] - v) > 1.0)
-      break;
-  return k < S3D_TRAJ ? traj_ms(k) : -1;
-}
-
-static void settled(char *out, const float *traj, double v, const char *step) {
-  int ms = settle_ms(traj, v);
-
-  if (ms >= 0)
-    sprintf(out + strlen(out), "%d ms after the step %s", ms, step);
-  else
-    sprintf(out + strlen(out), "not by %d ms after the step %s",
-            traj_ms(S3D_TRAJ - 1), step);
-}
-
-// a settling time of the window line, 30000 for none
-static void window_ms(char *out, int ms) {
-  if (ms >= 30000)
-    sprintf(out + strlen(out), "over %d ms", traj_ms(S3D_TRAJ - 1));
-  else
-    sprintf(out + strlen(out), "%d ms", ms);
 }
 
 // the sweep and band runs against the run each varies
@@ -1222,7 +1316,8 @@ static void summary_runs(struct s3d_meas *m) {
 
   say(m, "");
   say(m, "summary: the biggest change of each run from the run it varies, "
-         "in dB, and of the phase of S, in degrees");
+         "in dB, and of the phase of S, in degrees; M>S and S>M only over "
+         "-15 dB");
   say(m, "run  name           50 52 54 56 58 5A  from  path  change  at");
   for (i = 1; i < m->nruns; i++) {
     r = &m->run[i];
@@ -1279,83 +1374,12 @@ static void summary_model(struct s3d_meas *m) {
   say(m, line);
 }
 
-// the change of S>S from run b to run a at frequency k, in dB and degrees;
-// 0 where either is under the floor
-static int ss_change(const struct s3d_run *a, const struct s3d_run *b, int k,
-                     double *d, double *turn) {
-  if (!has(a->u.sw.db[1][k]) || !has(b->u.sw.db[1][k]) ||
-      !has(a->u.sw.ph[0][k]) || !has(b->u.sw.ph[0][k]))
-    return 0;
-  *d = a->u.sw.db[1][k] - b->u.sw.db[1][k];
-  *turn = wrap(a->u.sw.ph[0][k] - b->u.sw.ph[0][k]);
-  return 1;
-}
-
-// whether 54h-58h act as one vector: their sign bits cleared together,
-// against the sum of each one cleared alone, which is the same where
-// each acts by itself, one after another
-static void summary_vector(struct s3d_meas *m) {
-  static const char *const alone[3] = {"54=0F b7", "56=15 b7", "58=14 b7"};
+// the ratio and pan runs
+static void summary_ratio_pan(struct s3d_meas *m) {
   char line[256];
-  double d, t, dj, tj, most = 0, most_t = 0, joint = 0, joint_t = 0;
-  int ess = run_named(m, "ess"), neg = run_named(m, "vec neg");
-  int i, j, k, all = 1, one[3];
-
-  for (j = 0; j < 3; j++) {
-    one[j] = run_named(m, alone[j]);
-    all &= one[j] >= 0;
-  }
-  if (ess < 0 || neg < 0)
-    return;
-  for (k = 0; k < S3D_FREQS; k++) {
-    if (!ss_change(&m->run[neg], &m->run[ess], k, &dj, &tj))
-      continue;
-    if (fabs(dj) > fabs(joint))
-      joint = dj;
-    if (fabs(tj) > fabs(joint_t))
-      joint_t = tj;
-    for (j = 0; all && j < 3; j++) {
-      if (!ss_change(&m->run[one[j]], &m->run[ess], k, &d, &t))
-        break;
-      dj -= d;
-      tj = wrap(tj - t);
-    }
-    if (all && j == 3) {
-      if (fabs(dj) > fabs(most))
-        most = dj;
-      if (fabs(tj) > fabs(most_t))
-        most_t = tj;
-    }
-  }
-  sprintf(line,
-          "vector: clearing bit 7 of 54h-58h together changes S>S by up to "
-          "%+.1f dB and its phase by up to %+.0f degrees",
-          tidy(joint), fabs(joint_t) < 0.5 ? 0.0 : joint_t);
-  say(m, line);
-  if (all) {
-    sprintf(line,
-            "        and differs from the sum of the three cleared alone by "
-            "up to %+.1f dB and %+.0f degrees (near 0 if each acts by itself)",
-            tidy(most), fabs(most_t) < 0.5 ? 0.0 : most_t);
-    say(m, line);
-  }
-  for (i = 0; i < m->nruns; i++)
-    if (!strncmp(m->run[i].name, "vec ", 4) && i != neg && ok(&m->run[i]) &&
-        biggest(&m->run[i], &m->run[ess], 15, &d, &j, &k)) {
-      sprintf(line, "        %s: up to %+.1f dB (%s at %s)", m->run[i].name,
-              tidy(d), path_name[j], freq_name[k]);
-      if (biggest_turn(&m->run[i], &m->run[ess], 0, &t, &k))
-        sprintf(line + strlen(line), ", S>S phase up to %+.0f degrees",
-                fabs(t) < 0.5 ? 0.0 : t);
-      say(m, line);
-    }
-}
-
-// the ratio, pan and step runs, and how the registers move the time the
-// limit takes
-static void summary_limit(struct s3d_meas *m) {
-  char line[256];
-  int i, k, ms, fast = -1, slow = -1, fast_i = -1, slow_i = -1;
+  float b[5];
+  double v, lo = 0, hi = 0;
+  int i, k, held;
   const struct s3d_run *r;
 
   for (i = 0; i < m->nruns; i++) {
@@ -1366,6 +1390,22 @@ static void summary_limit(struct s3d_meas *m) {
       sprintf(line,
               "%s: from S/M -24 to +6 dB, S>S at 1 kHz changes by %+.1f dB",
               r->name, tidy(r->u.ra.ss[4] - r->u.ra.ss[0]));
+      // where the limit holds the boost down but not off, the S out
+      // against the M in
+      to_boost(r->u.ra.ss, 5, r->u.ra.b_re, r->u.ra.b_im, b);
+      for (k = held = 0; k < 5; k++) {
+        if (!has(b[k]) || b[k] > -1 || b[k] < OFF_DB)
+          continue;
+        v = r->u.ra.ss[k] + ratio_db[k];
+        if (!held++ || v < lo)
+          lo = v;
+        if (held == 1 || v > hi)
+          hi = v;
+      }
+      if (held)
+        sprintf(line + strlen(line),
+                "; it holds S out at %+.1f to %+.1f dB re M", tidy(lo),
+                tidy(hi));
       say(m, line);
     } else if (r->kind == S3D_PAN) {
       sprintf(line, "%s: 0, 22.5, 45, 67.5 and 90 degrees come out at",
@@ -1377,49 +1417,181 @@ static void summary_limit(struct s3d_meas *m) {
         else
           strcat(line, k ? ", ." : " .");
       say(m, line);
-    } else if (r->kind == S3D_STEP) {
-      // up: to the level it reaches, down: back to the level before the
-      // step up, which a limit that learns wouldn't come back to
-      sprintf(line, "%s: within 1 dB ", r->name);
-      settled(line, r->u.st.traj[0], r->u.st.steady[1], "up");
-      strcat(line, " and ");
-      settled(line, r->u.st.traj[1], r->u.st.steady[0], "down");
-      sprintf(line + strlen(line), "; low %+.1f dB before, %+.1f after",
-              tidy(r->u.st.steady[0]), tidy(r->u.st.steady[2]));
-      say(m, line);
-      // the window of the limit: the runs that vary the step with it on,
-      // where one that doesn't settle counts as the slowest
-      if (strncmp(r->name, "step L ", 7))
-        continue;
-      ms = settle_ms(r->u.st.traj[1], r->u.st.steady[0]);
-      if (ms < 0)
-        ms = 30000;
-      if (fast_i < 0 || ms < fast) {
-        fast = ms;
-        fast_i = i;
-      }
-      if (slow_i < 0 || ms > slow) {
-        slow = ms;
-        slow_i = i;
-      }
     }
   }
-  if (fast_i < 0)
-    return;
-  strcpy(line, "window: with the limit on, the settling after the step down "
-               "goes from ");
-  window_ms(line, fast);
-  sprintf(line + strlen(line), " (run %d, %s) to ", fast_i,
-          m->run[fast_i].name);
-  window_ms(line, slow);
-  sprintf(line + strlen(line), " (run %d, %s)", slow_i, m->run[slow_i].name);
-  say(m, line);
+}
+
+// a step run's window k after the step, in ms, and its middle
+static int traj_ms(int k) {
+  return k < S3D_FINE ? 20 * k : 500 + 100 * (k - S3D_FINE);
+}
+
+static double traj_mid(int k) { return traj_ms(k) + (k < S3D_FINE ? 10 : 50); }
+
+// the slope of the boost's gain over windows k0 to k1, in dB a second, by
+// least squares over the values that aren't off
+static double slope(const float *v, int k0, int k1) {
+  double n = 0, st = 0, sv = 0, stt = 0, stv = 0, t, d;
+  int k;
+
+  for (k = k0; k <= k1; k++) {
+    if (!has(v[k]) || v[k] < OFF_DB)
+      continue;
+    t = traj_mid(k) / 1000;
+    n++;
+    st += t;
+    sv += v[k];
+    stt += t * t;
+    stv += t * v[k];
+  }
+  d = n * stt - st * st;
+  return n >= 2 && d > 0 ? (n * stv - st * sv) / d : 0;
+}
+
+int s3d_limit(const struct s3d_meas *m, int i, struct s3d_lim *l) {
+  const struct s3d_run *r = &m->run[i];
+  float up[S3D_UP], dn[S3D_DN], st[3];
+  int k0, k1;
+
+  memset(l, 0, sizeof(*l));
+  l->delay = -1;
+  if (r->kind != S3D_STEP || !ok(r) || (r->u.st.b_re == 0 && r->u.st.b_im == 0))
+    return -1;
+  to_boost(r->u.st.up, S3D_UP, r->u.st.b_re, r->u.st.b_im, up);
+  to_boost(r->u.st.dn, S3D_DN, r->u.st.b_re, r->u.st.b_im, dn);
+  to_boost(r->u.st.steady, 3, r->u.st.b_re, r->u.st.b_im, st);
+  l->low = st[0];
+  l->high = st[1];
+  l->again = st[2];
+  // the S out against the M in where the limit holds the boost down but
+  // not off: at 0 dB S/M, or else at -12 dB
+  l->held = S3D_FLOOR;
+  if (st[1] < -1 && st[1] > OFF_DB)
+    l->held = r->u.st.steady[1];
+  else if (st[0] < -1 && st[0] > OFF_DB)
+    l->held = r->u.st.steady[0] - 12;
+  // the fall: from the first window under the low level to the last one
+  // over the level it ends at, plus 3 dB
+  if (st[1] < st[0] - 6) {
+    for (k0 = 0; k0 < S3D_UP - 1 && up[k0] > st[0] - 1; k0++)
+      ;
+    for (k1 = k0; k1 < S3D_UP - 1 && up[k1 + 1] > st[1] + 3; k1++)
+      ;
+    l->fall = (float)-slope(up, k0 > 0 ? k0 - 1 : 0, k1);
+  }
+  // the rise: from the first window 3 dB over the level right after the
+  // step down, to the last one under the low level minus 3 dB; or else
+  // over the last second, where it may only just start
+  for (k0 = 1; k0 < S3D_DN && !(dn[k0] > dn[0] + 3); k0++)
+    ;
+  if (k0 < S3D_DN) {
+    l->delay = traj_ms(k0);
+    for (k1 = k0; k1 < S3D_DN - 1 && dn[k1 + 1] < st[0] - 3; k1++)
+      ;
+    l->rise = (float)slope(dn, k0 - 1, k1 > k0 ? k1 : k0 + 1);
+  } else {
+    l->rise = (float)slope(dn, S3D_DN - 10, S3D_DN - 1);
+  }
+  if (l->rise < 0.1)
+    l->rise = 0;
+  return 0;
+}
+
+// a level in w columns: off under OFF_DB
+static void col_db(char *out, double v, int w) {
+  if (!has(v))
+    sprintf(out + strlen(out), "%*s", w, ".");
+  else if (v < OFF_DB)
+    sprintf(out + strlen(out), "%*s", w, "off");
+  else
+    sprintf(out + strlen(out), "%+*.1f", w, tidy(v));
+}
+
+// the step runs: how the limit moves the boost, and the runs where it
+// falls and rises fastest and slowest, and holds S highest and lowest
+static void summary_steps(struct s3d_meas *m) {
+  struct s3d_lim l;
+  char line[256];
+  int i, j, n = 0, at[6];
+  float v[6], val[6];
+
+  for (j = 0; j < 6; j++)
+    at[j] = -1;
+  for (i = 0; i < m->nruns; i++) {
+    if (s3d_limit(m, i, &l) < 0)
+      continue;
+    if (!n++) {
+      say(m, "");
+      say(m, "limit: the boost's gain in the step runs, from S/M -12 to 0 dB "
+             "and back; fall and rise in dB a second, held the S out it holds "
+             "against the M in");
+      say(m, "run  name           50 52 54 56 58 5A    fall  high   low    "
+             "held  delay   rise  again");
+      say(m, "                                         dB/s    dB    dB  dB re "
+             "M     ms   dB/s     dB");
+    }
+    run_head(m, i, line);
+    if (l.fall > 0)
+      sprintf(line + strlen(line), "%6.0f", l.fall);
+    else
+      strcat(line, "     -");
+    col_db(line, l.high, 6);
+    col_db(line, l.low, 6);
+    if (has(l.held))
+      sprintf(line + strlen(line), "%+8.1f", tidy(l.held));
+    else
+      strcat(line, "       -");
+    if (l.delay >= 0)
+      sprintf(line + strlen(line), "%7d", l.delay);
+    else
+      strcat(line, "      -");
+    if (l.rise > 0)
+      sprintf(line + strlen(line), "%7.1f", l.rise);
+    else
+      strcat(line, "      -");
+    col_db(line, l.again, 7);
+    say(m, line);
+    // among the runs with the limit on: the slowest and fastest fall and
+    // rise, the lowest and highest S held
+    if (!(m->run[i].reg[S3D_R50] & 1))
+      continue;
+    v[0] = v[1] = l.fall;
+    v[2] = v[3] = l.rise;
+    v[4] = v[5] = l.held;
+    for (j = 0; j < 6; j++)
+      if ((j < 4 && v[j] <= 0) || !has(v[j]))
+        continue;
+      else if (at[j] < 0 || (j & 1 ? v[j] > val[j] : v[j] < val[j])) {
+        at[j] = i;
+        val[j] = v[j];
+      }
+  }
+  if (at[0] >= 0) {
+    sprintf(line, "fall: from %.0f dB/s (run %d, %s) to %.0f dB/s (run %d, %s)",
+            val[0], at[0], m->run[at[0]].name, val[1], at[1],
+            m->run[at[1]].name);
+    say(m, line);
+  }
+  if (at[2] >= 0) {
+    sprintf(line, "rise: from %.1f dB/s (run %d, %s) to %.1f dB/s (run %d, %s)",
+            val[2], at[2], m->run[at[2]].name, val[3], at[3],
+            m->run[at[3]].name);
+    say(m, line);
+  }
+  if (at[4] >= 0) {
+    sprintf(line,
+            "held: S out from %+.1f dB re M (run %d, %s) to %+.1f dB (run %d, "
+            "%s)",
+            tidy(val[4]), at[4], m->run[at[4]].name, tidy(val[5]), at[5],
+            m->run[at[5]].name);
+    say(m, line);
+  }
 }
 
 void s3d_summary(struct s3d_meas *m) {
   summary_runs(m);
   say(m, "");
   summary_model(m);
-  summary_vector(m);
-  summary_limit(m);
+  summary_ratio_pan(m);
+  summary_steps(m);
 }

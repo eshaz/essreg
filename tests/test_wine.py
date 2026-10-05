@@ -31,8 +31,8 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   first and exits, and the first goes after the second one's time
 - ess3d's tray icon: a second "ess3d tray" opens the panel of the first,
   and "ess3d exit" closes it
-- ess3d measure: the quick plan against the made-up effect of /sim writes
-  its report and puts the mixer back, and the next ess3d puts back the
+- ess3d measure: the quick plan against the effect of /sim writes its
+  report and puts the mixer back, and the next ess3d puts back the
   mixer of a measurement that was ended by force
 - esfmrec: /sim records the test tone for /t= seconds into a WAV file at
   the music DAC's rate, and /raw writes the samples alone
@@ -405,14 +405,17 @@ class WineTest(unittest.TestCase):
         self.assertTrue(text.startswith("ess3d measure: the 3-D effect"))
         self.assertIn("plan: quick, 25 runs", text)
         self.assertIn("  1  ess            0C 3F 8F 95 94 80  M>M", text)
-        self.assertIn("S>S deg     +8   +33   +55", text)
+        self.assertIn("S>S deg    +46   +36   +21", text)
         self.assertIn("ratio limit: from S/M -24 to +6 dB, S>S at 1 kHz "
-                      "changes by -6.7 dB", text)
+                      "changes by -16.1 dB; it holds S out at +5.5 to +5.5 "
+                      "dB re M", text)
         self.assertIn("pan: 0, 22.5, 45, 67.5 and 90 degrees come out at "
-                      "-26, -5, 45, 95, 116", text)
-        self.assertIn("step limit: within 1 dB 20 ms after the step up and "
-                      "420 ms after the step down", text)
-        self.assertIn("vector: clearing bit 7 of 54h-58h together", text)
+                      "-37, -26, 41, 115, 127", text)
+        # the limit's fall and rise in dB a second, and the S it holds
+        self.assertIn(" 22  step limit     0D 3F 8F 95 94 80      54 -15.4  "
+                      "+0.0    +5.5    900    3.4   -4.9", text)
+        self.assertIn(" 24  off again      04 3F 8F 95 94 80     0  no "
+                      "change over 0.1 dB", text)
         self.assertIn("\r\n", text)
         # the mixer is back and the restore file gone
         self.assertFalse(os.path.exists(self.path("ESS3DSIM.RST")))

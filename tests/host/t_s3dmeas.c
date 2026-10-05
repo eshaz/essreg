@@ -1,12 +1,13 @@
 /*
  * t_s3dmeas runs ess3d's measurement of the 3-D effect (src/s3dmeas.c)
- * against the made-up effect of src/s3dsim.c, and checks that the report
- * finds each part of it again: the boost's shape and phase, its sign bit,
- * the width the model makes from mono, the register that does nothing in
- * the sweeps, where panned tones come out, and the limit, with the
- * release that 58h sets. It also checks the measurement with devices that
- * start apart, a recording at another rate, and a recording with no
- * signal.
+ * against the effect of src/s3dsim.c, made after one card's measurement,
+ * and checks that the report finds each part of it again: the boost's
+ * shape and phase, its level in 0.75 dB steps, the imbalance of the
+ * channels, the model's width made from mono, the registers that do
+ * nothing with the limit off, where panned tones come out, and the limit:
+ * the level it holds, which 54h sets, and how fast it falls and rises,
+ * which 58h sets. It also checks the measurement with devices that start
+ * apart, a recording at another rate, and a recording with no signal.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -57,8 +58,8 @@ static int find_from(int from, const char *start) {
 
 static int find_line(const char *start) { return find_from(0, start); }
 
-// run i through the made-up effect: lead frames of silence come first, as
-// a recording that starts before the playback
+// run i through the effect: lead frames of silence come first, as a
+// recording that starts before the playback
 static int run_sim(int i, u32 lead) {
   u32 rec_frames, fed = 0;
   u8 reg[S3D_REGS];
@@ -83,6 +84,20 @@ static int run_sim(int i, u32 lead) {
     fed += n;
   }
   return s3d_end(&meas);
+}
+
+// the plan through the effect, every run good, then the summary
+static void run_plan(int plan, u8 reg, const char *info) {
+  int i;
+
+  nlines = 0;
+  report_bytes = 0;
+  s3d_init(&meas, plan, reg, out, 0);
+  s3dsim_reset(&sim, S3D_RATE);
+  s3d_header(&meas, S3D_RATE, S3D_RATE, info);
+  for (i = 0; i < s3d_count(&meas); i++)
+    CHECK_EQ(run_sim(i, 2000 + 111 * i), S3D_OK);
+  s3d_summary(&meas);
 }
 
 static int run_named(const char *name) {
@@ -112,7 +127,7 @@ static double wrap(double deg) {
   return deg;
 }
 
-// what the made-up effect does with run i's registers at hz
+// what the effect does with run i's registers at hz
 static void response(int i, double hz, double *re, double *im) {
   u8 reg[S3D_REGS];
 
@@ -143,8 +158,7 @@ static double model_deg(int i, int q, double hz) {
 static const double hz[S3D_FREQS] = {100,  160,  250,  400,  630,  1000,
                                      1600, 2500, 4000, 6300, 10000};
 
-// every frequency of path p of run i matches the made-up effect within
-// tol dB
+// every frequency of path p of run i matches the effect within tol dB
 static void check_path(int i, int p, double tol) {
   int k;
   double want, got;
@@ -152,13 +166,9 @@ static void check_path(int i, int p, double tol) {
   for (k = 0; k < S3D_FREQS; k++) {
     want = model_db(i, p, hz[k]);
     got = val(i, p, k);
-    if (want <= S3D_FLOOR + 1) {
-      CHECK(!has(got));
-      continue;
-    }
-    CHECK(fabs(want - got) < tol);
-    if (fabs(want - got) >= tol)
-      printf("  run %s path %d at %g Hz: %.2f dB, the model %.2f dB\n",
+    CHECK(has(got) && fabs(want - got) < tol);
+    if (!has(got) || fabs(want - got) >= tol)
+      printf("  run %s path %d at %g Hz: %.2f dB, the effect %.2f dB\n",
              s3d_name(&meas, i), p, hz[k], got, want);
   }
 }
@@ -176,14 +186,22 @@ static int check_phase(int i, int q, double tol) {
     want = model_deg(i, q, hz[k]);
     CHECK(fabs(wrap(got - want)) < tol);
     if (fabs(wrap(got - want)) >= tol)
-      printf("  run %s phase %d at %g Hz: %.2f degrees, the model %.2f\n",
+      printf("  run %s phase %d at %g Hz: %.2f degrees, the effect %.2f\n",
              s3d_name(&meas, i), q, hz[k], got, want);
   }
   return n;
 }
 
-// where the made-up effect puts 1 kHz panned to th degrees, and its level
-// in dB, as the report works them out
+// paths p of run i the same as run j's within 0.1 dB
+static void check_same(int i, int j, int p) {
+  int k;
+
+  for (k = 0; k < S3D_FREQS; k++)
+    CHECK(fabs(val(i, p, k) - val(j, p, k)) < 0.1);
+}
+
+// where the effect puts 1 kHz panned to th degrees, and its level in dB,
+// as the report works them out
 static void model_pan(int i, double th, double *deg, double *lev) {
   double re[4], im[4], m, s, lr, li, rr, ri, ur, ui, a;
 
@@ -209,17 +227,29 @@ static void model_pan(int i, double th, double *deg, double *lev) {
   *lev = 10 * log10(lr * lr + li * li + rr * rr + ri * ri);
 }
 
-// the first step window after which S>S stays within 1 dB of v, in ms, or
-// -1
-static int settle_ms(const float *traj, double v) {
-  int k;
+// what s3d_limit finds in step run i against the effect's own limit: its
+// level where it holds the boost, its fall, and its rise where it isn't
+// too slow to see
+static void check_limit(int i) {
+  struct s3d_lim l;
+  double level, fall, rise;
+  u8 reg[S3D_REGS];
+  int bad = 0;
 
-  for (k = S3D_TRAJ; k > 0; k--)
-    if (!has(traj[k - 1]) || fabs(traj[k - 1] - v) > 1.0)
-      break;
-  if (k >= S3D_TRAJ)
-    return -1;
-  return k < S3D_FINE ? 20 * k : 500 + 100 * (k - S3D_FINE);
+  CHECK_EQ(s3d_limit(&meas, i, &l), 0);
+  s3d_regs(&meas, i, reg);
+  s3dsim_limit(reg, &level, &fall, &rise);
+  if (has(l.held))
+    bad |= fabs(l.held - level) > 0.3;
+  if (l.fall > 0)
+    bad |= fabs(l.fall - fall) > 0.1 * fall;
+  if (l.rise > 0 && l.delay >= 0)
+    bad |= fabs(l.rise - rise) > 0.2 * rise;
+  CHECK(!bad);
+  if (bad)
+    printf("  run %s: held %.1f fall %.1f rise %.1f, the effect %.1f %.1f "
+           "%.1f\n",
+           s3d_name(&meas, i), l.held, l.fall, l.rise, level, fall, rise);
 }
 
 static void check_report_lines(void) {
@@ -230,33 +260,25 @@ static void check_report_lines(void) {
     if (strlen(report[i]) >= 200)
       printf("  too long: %s\n", report[i]);
   }
+  // Notepad opens it on Windows 98 (64 KB at most)
+  CHECK(report_bytes < 60000);
 }
 
 static void test_quick_plan(void) {
-  int i, k, n, res, off, ess, model, limit, r58, r54, r54z, ratio, ratlim;
-  int band, bandlim, pan, panlim, step, steplim, vneg, line;
+  struct s3d_lim l;
+  int k, off, ess, model, limit, ratio, ratlim, band, bandlim, pan, panlim;
+  int step, steplim, line;
   double deg, lev;
 
-  nlines = 0;
   s3d_init(&meas, S3D_PLAN_QUICK, 0, out, 0);
-  s3dsim_reset(&sim, S3D_RATE);
-  n = s3d_count(&meas);
-  CHECK_EQ(n, 25);
+  CHECK_EQ(s3d_count(&meas), 25);
   CHECK(s3d_seconds(&meas) > 100 && s3d_seconds(&meas) < 180);
-  s3d_header(&meas, S3D_RATE, S3D_RATE, "host test");
-  for (i = 0; i < n; i++) {
-    res = run_sim(i, 3000 + 111 * i);
-    CHECK_EQ(res, S3D_OK);
-  }
-  s3d_summary(&meas);
+  run_plan(S3D_PLAN_QUICK, 0, "host test");
 
   off = run_named("off");
   ess = run_named("ess");
   model = run_named("model");
   limit = run_named("limit");
-  r58 = run_named("58=00");
-  r54 = run_named("54=FF");
-  r54z = run_named("54=00");
   ratio = run_named("ratio");
   ratlim = run_named("ratio limit");
   band = run_named("band");
@@ -265,96 +287,81 @@ static void test_quick_plan(void) {
   panlim = run_named("pan limit");
   step = run_named("step");
   steplim = run_named("step limit");
-  vneg = run_named("vec neg");
-  CHECK(off == 0 && ess == 1 && model > 0 && limit > 0 && r58 > 0);
-  CHECK(r54 > 0 && r54z > 0 && ratio > 0 && ratlim > 0 && band > 0);
-  CHECK(bandlim > 0 && pan > 0 && panlim > 0 && step > 0 && steplim > 0);
-  CHECK(vneg > 0 && run_named("vec /2") > 0);
+  CHECK(off == 0 && ess == 1 && model > 0 && limit > 0 && ratio > 0);
+  CHECK(ratlim > 0 && band > 0 && bandlim > 0 && pan > 0 && panlim > 0);
+  CHECK(step > 0 && steplim > 0 && run_named("vec neg") > 0);
+  CHECK(run_named("off again") == s3d_count(&meas) - 1);
   CHECK(run(bandlim)->base == band && run(panlim)->base == pan);
   CHECK(run(steplim)->base == step && run(limit)->slow && !run(ess)->slow);
 
-  // the reference is 0 dB with no phase, and its cross terms are under
-  // the floor
+  // the reference is 0 dB with no phase, and the imbalance of the two
+  // channels puts M into S and S into M at -38 dB
   for (k = 0; k < S3D_FREQS; k++) {
     CHECK(fabs(val(off, 0, k)) < 0.01 && fabs(val(off, 1, k)) < 0.01);
-    CHECK(!has(val(off, 2, k)) && !has(val(off, 3, k)));
     CHECK(fabs(phase(off, 0, k)) < 0.01);
-    CHECK(!has(phase(off, 1, k)) && !has(phase(off, 2, k)));
   }
-  // the boost's shape and phase, ESS's setting and the high-pass moved
-  // by 54h
+  check_path(off, 2, 0.3);
+  check_path(off, 3, 0.3);
+  // the boost's shape and phase with ESS's setting, and its level
   check_path(ess, 0, 0.1);
   check_path(ess, 1, 0.15);
-  check_path(r54, 1, 0.15);
+  check_path(ess, 2, 0.3);
   CHECK(check_phase(ess, 0, 1.0) == S3D_FREQS);
-  CHECK(check_phase(r54, 0, 1.0) == S3D_FREQS);
-  CHECK(val(ess, 1, 7) > 8 && val(ess, 1, 0) < 0);
-  CHECK(val(r54, 1, 2) < val(ess, 1, 2) - 3);
-  // 54h bit 7 clear takes the boost away: S comes out turned around
-  // where the boost is bigger than the direct path
-  check_path(r54z, 1, 0.15);
-  CHECK(check_phase(r54z, 0, 1.0) == S3D_FREQS);
-  CHECK(fabs(phase(r54z, 0, 5)) > 150);
-  CHECK(fabs(phase(ess, 0, 5)) < 30);
-  // the model's width from mono, and its phase against the M
+  CHECK(check_phase(ess, 1, 2.0) == S3D_FREQS);
+  CHECK(fabs(val(ess, 1, 3) - 17.9) < 0.3);
+  check_path(run_named("52=20"), 1, 0.15);
+  check_path(run_named("52=00"), 1, 0.15);
+  // the model makes S from M and drops the input's S
+  check_path(model, 1, 0.3);
   check_path(model, 2, 0.15);
   CHECK(check_phase(model, 1, 1.0) == S3D_FREQS);
-  CHECK(phase(model, 1, 5) < -80 && phase(model, 1, 5) > -100);
-  // 58h does nothing in the sweeps
-  for (k = 0; k < S3D_FREQS; k++)
-    CHECK(fabs(val(r58, 1, k) - val(ess, 1, k)) < 0.1);
-  // 5Ah bit 0 raises M by 1 dB: 5A=FF has it, 5A=00 doesn't
-  CHECK(fabs(val(run_named("5A=FF"), 0, 5) - 1.0) < 0.1);
-  CHECK(fabs(val(run_named("5A=00"), 0, 5)) < 0.1);
-  // the sign bits of 56h and 58h do nothing here, so the vector's
-  // negative is 54h's alone
-  check_path(vneg, 1, 0.15);
-  CHECK(check_phase(vneg, 0, 1.0) == S3D_FREQS);
+  CHECK(val(model, 2, 3) > 13 && val(model, 1, 3) < -20);
+  // 54h-5Ah do nothing with the limit off
+  for (k = 0; k < 8; k++) {
+    static const char *const names[8] = {"54=00", "54=FF", "56=00", "56=FF",
+                                         "58=00", "58=FF", "5A=00", "5A=FF"};
+    CHECK(run_named(names[k]) > 0);
+    check_same(run_named(names[k]), ess, 0);
+    check_same(run_named(names[k]), ess, 1);
+  }
 
-  // the limit: S alone gets no boost, and the more S, the less boost
+  // the limit: S alone gets no boost, and the more S, the less boost,
+  // from where the S out passes +5.5 dB re M
   CHECK(fabs(val(limit, 1, 8)) < 0.5);
-  CHECK(fabs(run(ratio)->u.ra.ss[0] - run(ratio)->u.ra.ss[4]) < 0.2);
-  CHECK(run(ratlim)->u.ra.ss[4] < run(ratlim)->u.ra.ss[0] - 3);
   for (k = 0; k < 5; k++)
-    CHECK(fabs(run(ratio)->u.ra.mm[k]) < 0.1);
-  // band runs: without the limit S>S is the sweep's, with it the boost is
-  // held down where it's big
+    CHECK(fabs(run(ratio)->u.ra.ss[k] - run(ratio)->u.ra.ss[0]) < 0.2);
+  CHECK(fabs(run(ratlim)->u.ra.ss[0] - run(ratio)->u.ra.ss[0]) < 0.2);
+  CHECK(fabs(run(ratlim)->u.ra.ss[1] - run(ratio)->u.ra.ss[1]) < 0.2);
+  CHECK(fabs(run(ratlim)->u.ra.ss[2] + -6 - 5.5) < 0.3);
+  CHECK(fabs(run(ratlim)->u.ra.ss[3] - 5.5) < 0.3);
+  CHECK(fabs(run(ratlim)->u.ra.ss[4]) < 0.5);
+  // band runs: without the limit S>S is the sweep's
   for (k = 0; k < S3D_FREQS; k++) {
     CHECK(fabs(val(band, 1, k) - val(ess, 1, k)) < 0.2);
-    CHECK(fabs(val(band, 0, k)) < 0.1);
+    CHECK(fabs(val(band, 0, k)) < 0.2);
   }
-  CHECK(val(bandlim, 1, 8) < val(band, 1, 8) - 3);
-  CHECK(fabs(val(bandlim, 1, 0) - val(band, 1, 0)) < 0.5);
-  // pan runs: the boost puts the sides past the speakers, the middle
-  // stays
+  CHECK(val(bandlim, 1, 3) < val(band, 1, 3) - 6);
+  // pan runs: the boost puts the sides past the speakers
   for (k = 0; k < S3D_PANS; k++) {
     model_pan(pan, 22.5 * k, &deg, &lev);
     CHECK(fabs(run(pan)->u.pa.deg[k] - deg) < 1.0);
     CHECK(fabs(run(pan)->u.pa.lev[k] - lev) < 0.2);
     if (fabs(run(pan)->u.pa.deg[k] - deg) >= 1.0 ||
         fabs(run(pan)->u.pa.lev[k] - lev) >= 0.2)
-      printf("  pan %g: %.1f degrees %.2f dB, the model %.1f %.2f\n", 22.5 * k,
+      printf("  pan %g: %.1f degrees %.2f dB, the effect %.1f %.2f\n", 22.5 * k,
              run(pan)->u.pa.deg[k], run(pan)->u.pa.lev[k], deg, lev);
   }
-  CHECK(run(pan)->u.pa.deg[0] < -10 && run(pan)->u.pa.deg[4] > 100);
-  CHECK(fabs(run(pan)->u.pa.deg[2] - 45) < 0.5);
-  CHECK(fabs(run(panlim)->u.pa.deg[2] - 45) < 0.5);
+  CHECK(run(pan)->u.pa.deg[0] < -20 && run(pan)->u.pa.deg[4] > 110);
   CHECK(run(panlim)->u.pa.deg[0] > run(pan)->u.pa.deg[0] + 5);
-  // step runs: without the limit S>S doesn't move; with it, the first
-  // window after the step up has the boost before the attack holds it,
-  // and the boost comes back with the release after the step down
-  for (k = 0; k < S3D_TRAJ; k++) {
-    CHECK(fabs(run(step)->u.st.traj[0][k] - run(step)->u.st.steady[1]) < 0.3);
-    CHECK(fabs(run(step)->u.st.traj[1][k] - run(step)->u.st.steady[2]) < 0.3);
-  }
-  CHECK(fabs(run(step)->u.st.steady[0] - val(ess, 1, 5)) < 0.2);
-  CHECK(run(steplim)->u.st.traj[0][0] > run(steplim)->u.st.steady[1] + 1);
-  CHECK(run(steplim)->u.st.steady[1] < run(steplim)->u.st.steady[0] - 3);
-  CHECK(run(steplim)->u.st.traj[1][0] < run(steplim)->u.st.steady[0] - 3);
-  CHECK(fabs(run(steplim)->u.st.steady[2] - run(steplim)->u.st.steady[0]) <
-        0.3);
-  k = settle_ms(run(steplim)->u.st.traj[1], run(steplim)->u.st.steady[0]);
-  CHECK(k >= 300 && k <= 900);
+  // step runs: the boost stays with the limit off, and with it on the
+  // limit holds it at +5.5 dB re M, falls at 53 dB a second and rises at
+  // a 16th of that
+  CHECK_EQ(s3d_limit(&meas, step, &l), 0);
+  CHECK(l.fall == 0 && fabs(l.high) < 0.2 && !has(l.held));
+  check_limit(steplim);
+  CHECK_EQ(s3d_limit(&meas, steplim, &l), 0);
+  CHECK(l.fall > 45 && l.rise > 2.5 && l.rise < 4.5 && l.delay > 0);
+  CHECK_EQ(s3d_limit(&meas, ess, &l), -1);
 
   // the report
   CHECK(find_line("ess3d measure: ") == 0);
@@ -363,103 +370,99 @@ static void test_quick_plan(void) {
   CHECK(find_line("  0  off            04 3F 8F 95 94 80  M>M") > 0);
   line = find_line("  1  ess            0C 3F 8F 95 94 80  M>M");
   CHECK(line > 0 && strstr(report[line + 2], "S>S deg"));
-  line = find_line("  0  off");
-  CHECK(line > 0 && !strstr(report[line + 2], "S>S deg"));
-  CHECK(find_line("ratio runs") > 0);
-  CHECK(find_line("band runs") > 0);
-  CHECK(find_line("pan runs") > 0);
-  CHECK(find_line("step runs") > 0);
-  CHECK(find_line("summary") > 0);
-  line = find_from(find_line("summary"), "  7  54=00 ");
-  CHECK(line > 0 && strstr(report[line], ", S>S phase "));
-  CHECK(find_line("ratio limit: from S/M -24 to +6 dB") > 0);
-  CHECK(find_line("pan: 0, 22.5, 45, 67.5 and 90 degrees come out at -") > 0);
-  CHECK(find_line("step: within 1 dB 0 ms after the step up and 0 ms after "
-                  "the step down") > 0);
-  CHECK(find_line("step limit: within 1 dB ") > 0);
-  line = find_line("vector: clearing bit 7 of 54h-58h together");
+  CHECK(find_line("ratio runs") > 0 && find_line("band runs") > 0);
+  CHECK(find_line("pan runs") > 0 && find_line("step runs") > 0);
+  line = find_line("summary");
   CHECK(line > 0);
-  CHECK(find_line("        and differs from") < 0);
+  // the imbalance that the boost raises to -20 dB stays out of the summary
+  CHECK(find_from(line, "  1  ess            0C 3F 8F 95 94 80     0  S>S   "
+                        "+17.9  400, S>S phase") > 0);
+  CHECK(!strstr(report[find_from(line, "  1  ess")], "M>S"));
+  CHECK(strstr(report[find_from(line, "  4  model")], "M>S appears"));
+  CHECK(strstr(report[find_from(line, " 24  off again")], "no change"));
+  CHECK(find_line("ratio limit: from S/M -24 to +6 dB, S>S at 1 kHz changes "
+                  "by -16.1 dB; it holds S out at +5.5 to +5.5 dB re M") > 0);
+  CHECK(find_line("pan: 0, 22.5, 45, 67.5 and 90 degrees come out at -") > 0);
+  CHECK(find_line("limit: the boost's gain in the step runs") > 0);
+  CHECK(find_line(" 22  step limit     0D 3F 8F 95 94 80      54 -15.4  +0.0 "
+                  "   +5.5") > 0);
   check_report_lines();
 }
 
 static void test_full_plan(void) {
-  int i, n, line, fast, slow, ess;
+  int i, line;
 
-  nlines = 0;
-  report_bytes = 0;
   s3d_init(&meas, S3D_PLAN_FULL, 0, out, 0);
-  s3dsim_reset(&sim, S3D_RATE);
-  n = s3d_count(&meas);
-  CHECK_EQ(n, 95);
-  CHECK(n <= S3D_MAX_RUNS);
-  CHECK(s3d_seconds(&meas) > 420 && s3d_seconds(&meas) < 600);
-  CHECK(!strcmp(s3d_name(&meas, run_named("54=0F b7")), "54=0F b7"));
-  CHECK(run_named("M 56=15 b7") > 0 && run_named("vec swap") > 0);
-  CHECK(run_named("band L 5A=FF") > 0 && run_named("step L 52=20") > 0);
-  s3d_header(&meas, S3D_RATE, S3D_RATE, 0);
-  for (i = 0; i < n; i++)
-    CHECK_EQ(run_sim(i, 2000 + 37 * i), S3D_OK);
-  s3d_summary(&meas);
-  ess = run_named("ess");
-  // the model's registers: 54h and 56h shape the boost, not the model
+  CHECK_EQ(s3d_count(&meas), 53);
+  CHECK(s3d_seconds(&meas) > 280 && s3d_seconds(&meas) < 400);
+  CHECK(run_named("M 56=FF") > 0 && run_named("vec swap") > 0);
+  CHECK(run_named("band L 58=00") > 0 && run_named("L 52=20") > 0);
+  run_plan(S3D_PLAN_FULL, 0, 0);
+  // the model's registers: none of them changes the model
   line = find_line("model: with 50h bit 1 set");
   CHECK(line > 0 && strstr(report[line], "by 0.0 dB and 0 degrees at most"));
-  check_path(run_named("54=0F b7"), 1, 0.15);
-  check_path(run_named("56=85 b4"), 1, 0.15);
-  CHECK(check_phase(run_named("56=85 b4"), 0, 1.0) == S3D_FREQS);
-  CHECK(check_phase(run_named("vec rot"), 0, 1.0) == S3D_FREQS);
-  // the sign bits act apart: clearing all three is 54h's alone
-  line = find_line("vector: clearing bit 7 of 54h-58h together");
-  CHECK(line > 0 && strstr(report[line + 1], "up to +0.0 dB and +0 degrees"));
-  CHECK(find_line("        vec x2: up to ") > 0);
-  // 58h sets the limit's release: fast at 00h, too slow for the run at
-  // FFh
-  fast = settle_ms(run(run_named("step L 58=00"))->u.st.traj[1],
-                   run(run_named("step L 58=00"))->u.st.steady[0]);
-  slow = settle_ms(run(run_named("step L 58=FF"))->u.st.traj[1],
-                   run(run_named("step L 58=FF"))->u.st.steady[0]);
-  CHECK(fast >= 0 && fast <= 100);
-  CHECK(slow < 0);
-  CHECK(find_line("step L 58=FF: within 1 dB ") > 0);
-  line = find_line("window: with the limit on, the settling after the step");
-  CHECK(line > 0 && strstr(report[line], "to over 1700 ms (run 91, step L "
-                                         "58=FF)"));
-  CHECK(line > 0 && strstr(report[line], "(run 90, step L 58=00) to"));
-  // the bits that do nothing here don't move it
-  CHECK(settle_ms(run(run_named("step L 5A=00"))->u.st.traj[1],
-                  run(run_named("step L 5A=00"))->u.st.steady[0]) ==
-        settle_ms(run(run_named("step limit"))->u.st.traj[1],
-                  run(run_named("step limit"))->u.st.steady[0]));
-  CHECK(settle_ms(run(run_named("step L 56=FF"))->u.st.traj[1],
-                  run(run_named("step L 56=FF"))->u.st.steady[0]) ==
-        settle_ms(run(run_named("step limit"))->u.st.traj[1],
-                  run(run_named("step limit"))->u.st.steady[0]));
-  CHECK(ess == 1);
+  // each 52h level
+  for (i = 0; i < 8; i++) {
+    char name[8];
+
+    sprintf(name, "52=%02X", i * 8);
+    check_path(run_named(name), 1, 0.15);
+  }
+  // the limit in each step run
+  for (i = 0; i < s3d_count(&meas); i++)
+    if (run(i)->kind == S3D_STEP && (run(i)->reg[0] & 1))
+      check_limit(i);
+  CHECK(find_line("fall: from 17 dB/s (run 43, L 58=FF) to 261 dB/s (run 42, "
+                  "L 58=00)") > 0);
+  CHECK(find_line("held: S out from -5.6 dB re M (run 38, L 54=00) to +9.8 dB "
+                  "(run 39, L 54=FF)") > 0);
   check_report_lines();
-  // Notepad opens it on Windows 98 (64 KB at most)
-  CHECK(report_bytes < 60000);
   if (verbose)
-    printf("report: %d lines, %ld bytes\n", nlines, report_bytes);
+    printf("full report: %d lines, %ld bytes\n", nlines, report_bytes);
+}
+
+static void test_limit_plan(void) {
+  int i, n = 0;
+
+  s3d_init(&meas, S3D_PLAN_LIMIT, 0, out, 0);
+  CHECK_EQ(s3d_count(&meas), 54);
+  CHECK(s3d_seconds(&meas) > 360 && s3d_seconds(&meas) < 480);
+  CHECK(run_named("L 54=0F b7") > 0 && run_named("L 5A=81 b0") > 0);
+  CHECK(run_named("52=20") < run_named("L 52=20"));
+  run_plan(S3D_PLAN_LIMIT, 0, 0);
+  // every bit of 54h-5Ah, against the effect's limit
+  for (i = 0; i < s3d_count(&meas); i++)
+    if (run(i)->kind == S3D_STEP && (run(i)->reg[0] & 1)) {
+      check_limit(i);
+      n++;
+    }
+  CHECK_EQ(n, 47);
+  CHECK(find_line("plan: limit, 54 runs") == 1);
+  check_report_lines();
+  if (verbose)
+    printf("limit report: %d lines, %ld bytes\n", nlines, report_bytes);
 }
 
 static void test_one_register(void) {
-  int n;
+  int i;
 
   nlines = 0;
-  s3d_init(&meas, S3D_PLAN_REG, 0x56, out, 0);
-  n = s3d_count(&meas);
-  CHECK_EQ(n, 28);
-  CHECK(run_named("56=00") == 2 && run_named("56=FF") == 18);
-  CHECK(run_named("M 56=FF") == 21);
-  CHECK(run_named("band L 56=FF") == 24 && run_named("step L 56=FF") == 27);
+  s3d_init(&meas, S3D_PLAN_REG, 0x58, out, 0);
+  CHECK_EQ(s3d_count(&meas), 27);
+  CHECK(run_named("58=00") == 2 && run_named("58=FF") == 3);
+  CHECK(run_named("M 58=FF") == 6 && run_named("step limit") == 8);
+  CHECK(run_named("L 58=00") == 9 && run_named("L 58=FF") == 25);
+  run_plan(S3D_PLAN_REG, 0x58, 0);
+  for (i = 9; i <= 25; i++)
+    check_limit(i);
+  check_report_lines();
   // a register that isn't one of 54h-5Ah gives the quick plan
   s3d_init(&meas, S3D_PLAN_REG, 0x50, out, 0);
   CHECK_EQ(s3d_count(&meas), 25);
 }
 
-// a recording at 44,194 Hz of a stimulus played at 48 kHz: the made-up
-// effect's output, sampled where the recorder's clock puts it
+// a recording at 44,194 Hz of a stimulus played at 48 kHz: the stimulus,
+// sampled where the recorder's clock puts it
 static void test_other_rate(void) {
   u32 rec_frames, r, rate_rec = 44194;
   double pos, l, rr;
@@ -522,6 +525,7 @@ int main(int argc, char **argv) {
   verbose = argc > 1 && !strcmp(argv[1], "-v");
   test_quick_plan();
   test_full_plan();
+  test_limit_plan();
   test_one_register();
   test_other_rate();
   test_no_signal();
