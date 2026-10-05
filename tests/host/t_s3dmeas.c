@@ -34,6 +34,7 @@ static char report[MAX_LINES][240];
 static int nlines;
 static long report_bytes;
 static int verbose;
+static int click; // a DAC's click and its settling in the first 50 ms
 
 static void out(void *ctx, const char *line) {
   (void)ctx;
@@ -58,6 +59,24 @@ static int find_from(int from, const char *start) {
 
 static int find_line(const char *start) { return find_from(0, start); }
 
+// what a DAC and the mixer can do as the playback starts: a click and a
+// step that settles over 10 ms, 10 ms into the recording, in frames from
+// fed on
+static void add_click(s16 *pcm, u16 n, u32 fed) {
+  u32 at;
+  u16 k;
+  double v;
+
+  for (k = 0; click && k < n; k++) {
+    at = fed + k;
+    if (at < 480 || at >= 480 + 2400)
+      continue;
+    v = 3000 * exp(-((double)at - 480) / 480) + (at < 520 ? 12000 : 0);
+    pcm[2 * k] = (s16)(pcm[2 * k] + v);
+    pcm[2 * k + 1] = (s16)(pcm[2 * k + 1] + v / 2);
+  }
+}
+
 // run i through the effect: lead frames of silence come first, as a
 // recording that starts before the playback
 static int run_sim(int i, u32 lead) {
@@ -72,6 +91,8 @@ static int run_sim(int i, u32 lead) {
   memset(rec, 0, sizeof(rec));
   while (lead && !full) {
     n = lead > BLOCK ? BLOCK : (u16)lead;
+    memset(rec, 0, sizeof(rec));
+    add_click(rec, n, fed);
     full = s3d_take(&meas, rec, n);
     lead -= n;
     fed += n;
@@ -80,6 +101,7 @@ static int run_sim(int i, u32 lead) {
     n = BLOCK;
     s3d_fill(&meas, play, n);
     s3dsim_run(&sim, play, rec, n);
+    add_click(rec, n, fed);
     full = s3d_take(&meas, rec, n);
     fed += n;
   }
@@ -493,6 +515,24 @@ static void test_other_rate(void) {
   }
 }
 
+// the playback's start in the first 50 ms of the recording, where the
+// noise floor comes from: a click and a step that settles mustn't hide
+// the burst
+static void test_click(void) {
+  int i;
+
+  nlines = 0;
+  click = 1;
+  s3d_init(&meas, S3D_PLAN_QUICK, 0, out, 0);
+  s3dsim_reset(&sim, S3D_RATE);
+  s3d_header(&meas, S3D_RATE, S3D_RATE, 0);
+  for (i = 0; i < 2; i++)
+    CHECK_EQ(run_sim(i, 1500), S3D_OK);
+  click = 0;
+  check_path(1, 1, 0.15);
+  check_path(0, 2, 0.3);
+}
+
 static void test_no_signal(void) {
   u32 rec_frames, r;
   int full = 0;
@@ -506,7 +546,8 @@ static void test_no_signal(void) {
     full = s3d_take(&meas, rec, BLOCK);
   CHECK_EQ(s3d_end(&meas), S3D_NOSIGNAL);
   s3d_failed(&meas, "no signal");
-  CHECK(strstr(report[nlines - 1], "failed: no signal") != 0);
+  CHECK(strstr(report[nlines - 1], "failed: no signal (noise under -90 "
+                                   "dBFS, loudest under -90 dBFS)") != 0);
 
   // a click alone (a DAC that starts) is no onset either
   s3d_begin(&meas, 0, &rec_frames);
@@ -528,6 +569,7 @@ int main(int argc, char **argv) {
   test_limit_plan();
   test_one_register();
   test_other_rate();
+  test_click();
   test_no_signal();
   return CHECK_DONE("t_s3dmeas");
 }

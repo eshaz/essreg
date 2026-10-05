@@ -193,12 +193,13 @@ found.
 `ess3d measure` finds out what each of these settings does, without a
 microphone. It plays test tones on the Audio 2 wave device and records them
 on Audio 1 from record source 7, which is the effect's own output before the
-master volume, so the speakers stay quiet. For each setting it measures how
-much of a tone in both channels (M) and of a tone in opposite phase (S)
-comes out as M and as S, and in which phase, at 11 frequencies from 100 Hz
-to 10 kHz. Other runs show the level at which the limit holds the effect,
-where panned sounds come out, and how fast the limit moves, in dB a second.
-It needs ESS's wave devices, so close programs that play or record first.
+master volume, so the speakers play the tones only faintly. For each setting
+it measures how much of a tone in both channels (M) and of a tone in
+opposite phase (S) comes out as M and as S, and in which phase, at 11
+frequencies from 100 Hz to 10 kHz. Other runs show the level at which the
+limit holds the effect, where panned sounds come out, and how fast the limit
+moves, in dB a second. It needs ESS's wave devices, so close programs that
+play or record first.
 
 The full plan takes about 6 minutes, `measure quick` about 2,
 `measure limit` tries each bit of 54h-5Ah with the limit on in about 7, and

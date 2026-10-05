@@ -690,8 +690,9 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
      5A. `ess3d defaults` puts ESS's values back.
    * Close every program that plays or records, then run
      `C:\ESSREG\ESS3D.EXE measure` from Start > *Run*. A window counts the
-     runs for about 6 minutes, and the speakers stay quiet. At the end it
-     says "Done" and where the report is. Keep `C:\ESSREG\ESS3D.TXT`.
+     runs for about 6 minutes, and the speakers play the tones only faintly.
+     If a run fails, keep `C:\ESSREG\ESS3D.LOG` too. At the end it says
+     "Done" and where the report is. Keep `C:\ESSREG\ESS3D.TXT`.
    * Run `C:\ESSREG\ESS3D.EXE measure limit /out=C:\ESSREG\LIMIT.TXT`, about
      7 minutes, and keep `LIMIT.TXT`. `ESS3D.LOG` has a line for each run
      whose mixer was set late, which should never happen.

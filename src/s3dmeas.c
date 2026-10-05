@@ -354,11 +354,11 @@ u32 s3d_begin(struct s3d_meas *m, int i, u32 *rec_frames) {
   m->play_pos = 0;
   m->rpos = 0;
   m->rstate = R_NOISE;
-  m->nsum[0] = m->nsum[1] = m->nsq[0] = m->nsq[1] = 0;
   m->bl[0] = m->bl[1] = m->bq[0] = m->bq[1] = 0;
-  m->qsum = 0;
-  m->qn = 0;
-  m->nn = 0;
+  m->bn = 0;
+  m->bstart = 0;
+  m->nquiet = m->quiet_at = 0;
+  m->e0 = 0;
   m->wcur = 0;
   m->wn = 0;
   m->peak = 0;
@@ -590,9 +590,33 @@ static void window_end(struct s3d_meas *m) {
   }
 }
 
+// the median of n block powers
+static double median(const float *v, int n) {
+  float s[S3D_QUIET], x;
+  int i, j;
+
+  if (n <= 0)
+    return 0;
+  for (i = 0; i < n; i++) {
+    x = v[i];
+    for (j = i; j > 0 && s[j - 1] > x; j--)
+      s[j] = s[j - 1];
+    s[j] = x;
+  }
+  return s[n / 2];
+}
+
+// a quiet block's power, into the last S3D_QUIET
+static void quiet_add(struct s3d_meas *m, double e) {
+  m->quiet[m->quiet_at] = (float)e;
+  m->quiet_at = (m->quiet_at + 1) % S3D_QUIET;
+  if (m->nquiet < S3D_QUIET)
+    m->nquiet++;
+}
+
 int s3d_take(struct s3d_meas *m, const s16 *pcm, u16 n) {
   const struct s3d_seg *s;
-  u32 blk = m->rate_rec / 1000;
+  u32 blk = m->rate_rec / 1000, start;
   double l, r, e, t, thr;
   u16 i, a;
   int j;
@@ -608,25 +632,9 @@ int s3d_take(struct s3d_meas *m, const s16 *pcm, u16 n) {
       m->peak = a;
     switch (m->rstate) {
     case R_NOISE:
-      // the run starts with 250 ms of silence, the first 50 are the floor
-      m->nsum[0] += l;
-      m->nsum[1] += r;
-      m->nsq[0] += l * l;
-      m->nsq[1] += r * r;
-      if (++m->nn >= blk * 50) {
-        m->e0 = 0;
-        for (j = 0; j < 2; j++) {
-          t = m->nsum[j] / m->nn;
-          m->e0 += m->nsq[j] / m->nn - t * t;
-        }
-        m->rstate = R_ONSET;
-        m->bn = 0;
-        m->bstart = m->rpos + 1;
-      }
-      break;
     case R_ONSET:
-      // the burst: a millisecond well over the floor, and nine more after
-      // it, where a click from a DAC starting would die away
+      // 1 ms blocks, each without its own mean, so that a click or a step
+      // as the DAC starts or the mixer changes counts only in its blocks
       m->bl[0] += l;
       m->bl[1] += r;
       m->bq[0] += l * l;
@@ -639,22 +647,38 @@ int s3d_take(struct s3d_meas *m, const s16 *pcm, u16 n) {
         e += m->bq[j] / m->bn - t * t;
         m->bl[j] = m->bq[j] = 0;
       }
+      m->bn = 0;
+      start = m->bstart;
+      m->bstart = m->rpos + 1;
+      if (m->rstate == R_NOISE) {
+        // the run starts with 250 ms of silence: the floor is the median
+        // block of the first 50 ms, which a few loud ones don't move
+        quiet_add(m, e);
+        if (m->nquiet >= 50) {
+          m->e0 = median(m->quiet, m->nquiet);
+          m->rstate = R_ONSET;
+        }
+        break;
+      }
+      // the burst: a millisecond well over the floor, and nine more after
+      // it, where a click would die away
       thr = 100 * m->e0;
       if (thr < 1e-5)
         thr = 1e-5;
       if (!m->confirm) {
         if (e > thr) {
-          m->cand = m->bstart;
+          m->cand = start;
           m->confirm = 1;
         } else {
-          m->qsum += e;
-          m->qn++;
+          quiet_add(m, e);
         }
       } else if (e > thr / 4) {
         if (++m->confirm >= 10) {
-          // the floor from the quieter of the first 50 ms and the rest of
-          // the silence, which a recording of digital zeros can't fake
-          e = m->qn && m->qsum / m->qn > m->e0 ? m->qsum / m->qn : m->e0;
+          // the floor from the first 50 ms or the blocks just before the
+          // burst, whichever is louder, which digital zeros can't fake
+          e = median(m->quiet, m->nquiet);
+          if (e < m->e0)
+            e = m->e0;
           m->sigma = sqrt(e / 2);
           if (m->sigma < 0.29 / 32768)
             m->sigma = 0.29 / 32768; // 16-bit samples have at least this
@@ -665,8 +689,6 @@ int s3d_take(struct s3d_meas *m, const s16 *pcm, u16 n) {
       } else {
         m->confirm = 0;
       }
-      m->bn = 0;
-      m->bstart = m->rpos + 1;
       if (m->rpos > m->rate_rec * 5)
         m->rstate = R_FAIL;
       break;
@@ -1216,12 +1238,27 @@ int s3d_end(struct s3d_meas *m) {
   return res;
 }
 
+// a level in dBFS, from full scale 1, for a failed run's line
+static void dbfs(char *out, double v) {
+  if (v < 3.2e-5)
+    strcat(out, "under -90");
+  else
+    sprintf(out + strlen(out), "%.0f", db(v));
+}
+
 void s3d_failed(struct s3d_meas *m, const char *why) {
+  double e = median(m->quiet, m->nquiet);
   char line[256];
 
   run_head(m, m->cur, line);
   strcat(line, "failed: ");
-  strncat(line, why, sizeof(line) - strlen(line) - 1);
+  strncat(line, why, 100);
+  // what the recording had: its noise, one channel, and its loudest
+  strcat(line, " (noise ");
+  dbfs(line, sqrt((e > m->e0 ? e : m->e0) / 2));
+  strcat(line, " dBFS, loudest ");
+  dbfs(line, m->peak / 32768.0);
+  strcat(line, " dBFS)");
   say(m, line);
 }
 

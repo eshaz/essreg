@@ -142,12 +142,22 @@ Each item names a driver and says what it writes to 50h, to 52h and to
   54h-5Ah, to "Set spatializer parameters to recommended values".
 * **NetBSD ess.c.** For 50h, it names 04h RESET, 08h ENABLE and 02h MONO,
   and clears MONO with ENABLE. It writes the 3-D level to 52h and never
+  writes 54h-5Ah. NetBSD's Solo-1 driver, eso.c, has the same two controls.
+* **ESS's Solo-1 WDM driver** (ES1969.SYS, as a reconstruction from its
+  binary shows it). Its header calls 50h the "Spatializer enable and mode
+  control" register. It writes 00h and then 04h to 50h and the level to 52h
+  at start, and 0Ch or 04h for its *3D Effect Enable* switch. It never
   writes 54h-5Ah.
+* **Linux esssolo1.c (OSS, Solo-1).** It writes the level to 52h, and 08h or
+  00h to 50h, which leaves bit 2 clear, so the effect stays in reset. It
+  never writes 54h-5Ah.
 
 ESS's drivers and Linux write the same four values, and Linux calls them
 "recommended values", which suggests that they come from ESS's own
-programming notes. Under ESS's Windows 98 driver, 54h-5Ah keep whatever
-values the chip powers up with.
+programming notes. A search of drivers, data sheets and patents in 2026
+found no source that names 54h-5Ah or 50h bit 0, or says what they do, so
+the measurement below is the only evidence. Under ESS's Windows 98 driver,
+54h-5Ah keep whatever values the chip powers up with.
 
 ## The Spatializer processor
 
@@ -234,9 +244,9 @@ on. Run 0 has the effect off, and every other run is given in dB relative to
 it, so the DAC, the mixer and the ADC drop out of the values. The last run
 has the effect off again, which shows whether the path moved during the
 measurement. While it measures, ess3d mutes the mixer's other inputs and
-sets the master volume to its lowest step, so the speakers stay quiet, and
-it puts both back at the end. Close the programs that play or record before
-you start, and end any DOS game with sound.
+sets the master volume to its lowest step, where the speakers play the tones
+only faintly, and it puts both back at the end. Close the programs that play
+or record before you start, and end any DOS game with sound.
 
 Each sweep run has a line for each path, with a value for each of 11
 frequencies from 100 Hz to 10 kHz:
@@ -409,8 +419,11 @@ come out at -26 and 113 degrees.
 * ESS's drivers: `driver/ES1869.DRV` 4.04, and the ES1868 driver sets for
   Windows 95, 98 and NT 4.0, which aren't in the repository (see
   [RE_NOTES.md](RE_NOTES.md)).
-* Linux's `sound/isa/es18xx.c` and `sound/pci/es1938.c`, and NetBSD's
-  `sys/dev/isa/ess.c` and `essreg.h`.
+* Linux's `sound/isa/es18xx.c`, `sound/pci/es1938.c` and
+  `sound/oss/esssolo1.c`, and NetBSD's `sys/dev/isa/ess.c`, `essreg.h` and
+  `sys/dev/pci/eso.c`.
+* The reconstruction of ESS's ES1969.SYS at github.com/leecher1337/es1969,
+  which is decompiled rather than ESS's own source.
 * US patent 5,412,731, Stephen W. Desper, "Automatic stereophonic
   manipulation system and apparatus for image enhancement" (1995), and US
   5,896,456, which has the same description.

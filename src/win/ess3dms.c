@@ -28,10 +28,11 @@
  * recording, and the Audio 2 volume to -4.5 dB.
  *
  * The mixer's other inputs are muted while it runs, and the master volume
- * is at its lowest step, so the speakers stay quiet. That step puts a
- * fixed -5.25 dB before the effect (DS p.59), the same for every run. The
- * driver takes 60h and 62h as its master volume at each playback start,
- * so the end plays one silent block after the mixer is back.
+ * is at its lowest step, so the speakers play the tones only faintly. That
+ * step puts a fixed -5.25 dB before the effect (DS p.59), the same for
+ * every run. The driver takes 60h and 62h as its master volume at each
+ * playback start, so the end plays one silent block after the mixer is
+ * back.
  *
  * Before it changes the mixer it writes the old values to ESS3D.RST, and
  * it puts them back and deletes the file at the end. If it's ended by
@@ -119,7 +120,8 @@ static int rep_bad; // writing it failed
 static char rep_tmp[144], rep_path[144];
 static char dev_out[40], dev_in[40];
 static DWORD t_start, t_run, t_last;
-static int code; // the exit code
+static DWORD t_play; // the run's playback started, 0 once its mixer is checked
+static int code;     // the exit code
 
 // --- small things -----------------------------------------------------------
 
@@ -326,6 +328,32 @@ static int play_path(void) {
     v = esshw_mixer_read(0x7C) == A2VOL ? 0 : -1;
   winio_end();
   return v < 0 ? -1 : 0;
+}
+
+// a moment into the playback: whether ESS's driver changed the record
+// source, the record level, the Audio 2 volume or the filters after ess3d
+// set them, and if so, all of them again
+static void check_path(void) {
+  char text[160];
+  int s1c, sb4, s7c, s71;
+
+  if (winio_begin() < 0)
+    return;
+  s1c = esshw_mixer_read(0x1C);
+  sb4 = esshw_ctrl_read(0xB4);
+  s7c = esshw_mixer_read(0x7C);
+  s71 = esshw_mixer_read(0x71);
+  winio_end();
+  if (s1c < 0 || sb4 < 0 || s7c < 0 || s71 < 0 ||
+      ((s1c & 0x17) == 0x07 && sb4 == RECLEV && s7c == A2VOL && !(s71 & 0x1C)))
+    return;
+  sprintf(text,
+          "ess3d measure: run %d's mixer changed after its playback started "
+          "(1Ch %02Xh, B4h %02Xh, 7Ch %02Xh, 71h %02Xh), set again",
+          cur, s1c, sb4, s7c, s71);
+  log_line(text);
+  record_path();
+  play_path();
 }
 
 // the master volume at its lowest step and the other inputs muted
@@ -568,8 +596,8 @@ static void show_progress(void) {
   else
     left = s3d_seconds(meas);
   sprintf(text,
-          "About %d min %02d s left. The speakers stay quiet: ess3d records "
-          "the tones inside the chip.",
+          "About %d min %02d s left. The tones are faint: ess3d records them "
+          "inside the chip.",
           left / 60, left % 60);
   set_text(IDC_M_LEFT, text);
   show_bar(cur, n);
@@ -746,7 +774,13 @@ static void start_run(void) {
       end_run(1);
       return;
     }
+    // the first 50 ms of the recording give the noise floor, so the
+    // playback, and the clicks of the DAC and the mixer as it starts,
+    // come after them
     t = GetTickCount();
+    while (GetTickCount() - t < 100)
+      Yield();
+    t = t_play = GetTickCount();
     for (i = 0; i < n; i++)
       write_out(i);
     if (play_path() < 0) {
@@ -786,6 +820,11 @@ static void service(void) {
 
   if (state != S_RUN || cmd->sim)
     return;
+  // before the burst, 250 ms into the playback
+  if (t_play && GetTickCount() - t_play > 50) {
+    t_play = 0;
+    check_path();
+  }
   while (in_queued && (inb[next_in].h->dwFlags & WHDR_DONE)) {
     h = inb[next_in].h;
     in_queued--;

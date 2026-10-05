@@ -66,6 +66,7 @@
 #define S3D_FINE 25      // step runs: 20 ms windows over the first 500 ms
 #define S3D_COARSE_UP 13 // then 100 ms windows to 1.8 s after the step up
 #define S3D_COARSE_DN 25 // and to 3 s after the step down
+#define S3D_QUIET 64     // 1 ms blocks the noise floor comes from
 #define S3D_UP (S3D_FINE + S3D_COARSE_UP)
 #define S3D_DN (S3D_FINE + S3D_COARSE_DN)
 
@@ -183,13 +184,11 @@ struct s3d_meas {
   // the recording
   u32 rpos, rmax;
   int rstate;
-  double nsum[2], nsq[2]; // noise window: sums and squares of L and R
-  u32 nn;
-  double e0;           // its noise power, both channels
+  float quiet[S3D_QUIET]; // power of the last 1 ms blocks before the burst
+  int nquiet, quiet_at;
+  double e0;           // the noise power of the first 50 ms, both channels
   double sigma;        // noise of one channel, full scale 1
-  double bl[2], bq[2]; // the onset search: sums and squares of a 1 ms block
-  double qsum;         // noise power of the quiet blocks before the burst
-  u32 qn;
+  double bl[2], bq[2]; // sums and squares of the 1 ms block so far
   u16 bn;
   u32 bstart, cand;
   int confirm;
