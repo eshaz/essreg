@@ -69,7 +69,7 @@ void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
   int on = (s->reg[0] & 0x0C) == 0x0C;
   double k = (s->reg[1] & 0x3F) / 63.0;
   double up = 1 - exp(-1.0 / (0.005 * s->rate));
-  double down = 1 - exp(-1.0 / (0.2 * s->rate));
+  double down = 1 - exp(-1.0 / ((0.02 + 0.01 * (s->reg[4] & 0x7F)) * s->rate));
   double m, sd, b, y, a, l, r;
   u16 i;
 
@@ -93,10 +93,10 @@ void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
         s->ly = y;
         b = y;
       }
-      b *= 2 * k;
+      b *= s->reg[2] & 0x80 ? 2 * k : -2 * k; // 54h bit 7, its sign
       if (s->reg[0] & 1) {
-        // the limit: follow both levels, and scale the boost down when it
-        // passes 0.7 times the M
+        // the limit: follow both levels, with the release that 58h sets,
+        // and scale the boost down when it passes 0.7 times the M
         s->env_m += (fabs(m) - s->env_m) * (fabs(m) > s->env_m ? up : down);
         s->env_b += (fabs(b) - s->env_b) * (fabs(b) > s->env_b ? up : down);
         a = s->env_b > LIMIT * s->env_m && s->env_b > 1e-9
@@ -124,9 +124,9 @@ void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
   }
 }
 
-// |num / den| of first and second order sections at z = e^(jw)
-static double mag2(double b0, double b1, double b2, double a1, double a2,
-                   double w, double *re, double *im) {
+// num / den of a section of up to second order at z = e^(jw)
+static void at(double b0, double b1, double b2, double a1, double a2, double w,
+               double *re, double *im) {
   double c1 = cos(w), s1 = sin(w), c2 = cos(2 * w), s2 = sin(2 * w);
   double nr = b0 + b1 * c1 + b2 * c2, ni = -b1 * s1 - b2 * s2;
   double dr = 1 + a1 * c1 + a2 * c2, di = -a1 * s1 - a2 * s2;
@@ -134,29 +134,38 @@ static double mag2(double b0, double b1, double b2, double a1, double a2,
 
   *re = (nr * dr + ni * di) / d;
   *im = (ni * dr - nr * di) / d;
-  return sqrt(*re * *re + *im * *im);
 }
 
-void s3dsim_response(const u8 *reg, u32 rate, double hz, double *gain) {
+void s3dsim_response(const u8 *reg, u32 rate, double hz, double *re,
+                     double *im) {
   double hb[5], lb[3], ab[3], w = 2 * PI * hz / rate;
-  double k = (reg[1] & 0x3F) / 63.0, hr, hi, lr, li, br, bi;
+  double k = (reg[1] & 0x3F) / 63.0, g, hr, hi, lr, li, br, bi;
+  int i;
 
-  gain[0] = gain[1] = 1;
-  gain[2] = gain[3] = 0;
+  for (i = 0; i < 4; i++)
+    re[i] = im[i] = 0;
+  re[0] = re[1] = 1;
   if ((reg[0] & 0x0C) != 0x0C)
     return;
   design(reg, rate, hb, lb, ab);
-  mag2(hb[0], hb[1], hb[2], hb[3], hb[4], w, &hr, &hi);
+  at(hb[0], hb[1], hb[2], hb[3], hb[4], w, &hr, &hi);
   br = hr;
   bi = hi;
   if (reg[3] & 0x10) {
-    mag2(lb[0], lb[1], 0, lb[2], 0, w, &lr, &li);
+    at(lb[0], lb[1], 0, lb[2], 0, w, &lr, &li);
     br = hr * lr - hi * li;
     bi = hr * li + hi * lr;
   }
-  gain[1] = sqrt((1 + 2 * k * br) * (1 + 2 * k * br) + 4 * k * k * bi * bi);
-  if (reg[0] & 2)
-    gain[2] = 1.5 * k; // an all-pass passes every frequency at 1
+  // the boost, taken away while 54h bit 7 is clear
+  g = reg[2] & 0x80 ? 2 * k : -2 * k;
+  re[1] = 1 + g * br;
+  im[1] = g * bi;
+  if (reg[0] & 2) {
+    // the model: the M through the all-pass
+    at(ab[0], 1, 0, ab[0], 0, w, &re[2], &im[2]);
+    re[2] *= 1.5 * k;
+    im[2] *= 1.5 * k;
+  }
   if (reg[5] & 1)
-    gain[0] = 1.12201845;
+    re[0] = 1.12201845;
 }

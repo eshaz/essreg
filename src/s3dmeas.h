@@ -14,14 +14,21 @@
  * - sweep runs: a tone in both channels (M), then in opposite phase (S),
  *   at 11 frequencies from 100 Hz to 10 kHz
  * - ratio runs: 400 Hz in M and 1 kHz in S at five S/M ratios, to see
- *   whether the effect's gain follows the program (a limit)
+ *   whether the effect's gain follows the program
+ * - band runs: an S tone at each frequency over 400 Hz in M, to see in
+ *   which band a limit acts
+ * - pan runs: 1 kHz panned from left to right, to see where each place
+ *   comes out, and whether the effect pushes it past a speaker
  * - step runs: the 1 kHz S tone jumps up and back down, to see how fast
- *   the gain follows
+ *   the gain follows, over 2 s
  *
  * Each tone is measured over a whole number of its cycles (100 ms, or 20
- * ms in step runs), after time for the effect to settle, as the complex
- * amplitude of each output channel at its frequency (lock-in). The left
- * and right amplitudes give the M and S out of each tone.
+ * ms early in step runs), after time for the effect to settle, as the
+ * complex amplitude of each output channel at its frequency (lock-in).
+ * The phases count from the onset, so tones of one run can be compared:
+ * the S out of an S tone against the M out of an M tone at the same
+ * frequency gives the phase the effect adds to S, which a coefficient
+ * with its sign flipped turns by 180 degrees.
  *
  * The engine doesn't touch the chip or Windows: the program around it
  * writes each run's registers, plays what s3d_fill gives, hands over what
@@ -41,14 +48,17 @@
 
 #define S3D_RATE 48000UL // what both devices are opened at
 #define S3D_FREQS 11
-#define S3D_MAX_RUNS 80
+#define S3D_MAX_RUNS 100
 #define S3D_MAX_SEGS 32
-#define S3D_MAX_WINS 64
-#define S3D_PATHS 4 // M>M, S>S, M>S, S>M
-#define S3D_STEP_WINS 25
+#define S3D_MAX_WINS 96
+#define S3D_PATHS 4   // M>M, S>S, M>S, S>M
+#define S3D_PANS 5    // pan runs: 0, 22.5, 45, 67.5 and 90 degrees
+#define S3D_FINE 25   // step runs: 20 ms windows over the first 500 ms
+#define S3D_COARSE 13 // and 100 ms windows from 500 ms to 1.8 s
+#define S3D_TRAJ (S3D_FINE + S3D_COARSE)
 
 // the plans
-#define S3D_PLAN_FULL 0  // every setting below, about 5 minutes
+#define S3D_PLAN_FULL 0  // every setting below, about 8 minutes
 #define S3D_PLAN_QUICK 1 // each register's ends only, about 2 minutes
 #define S3D_PLAN_REG 2   // one register from 00h to FFh in steps of 10h
 
@@ -56,6 +66,8 @@
 #define S3D_SWEEP 0
 #define S3D_RATIO 1
 #define S3D_STEP 2
+#define S3D_PAN 3
+#define S3D_BAND 4
 
 // s3d_end
 #define S3D_OK 0
@@ -77,15 +89,14 @@
 typedef void (*s3d_out_fn)(void *ctx, const char *line);
 
 struct s3d_tone {
-  u16 hz;    // 0 for none
-  s8 side;   // 1: the same in both channels (M), -1: opposite (S)
-  float amp; // of each channel, full scale 1
+  u16 hz;     // 0 for none
+  float l, r; // amplitude in each channel, full scale 1, with its sign
 };
 
 struct s3d_seg {
   u32 start, len; // play frames
   struct s3d_tone t[2];
-  u8 ramp; // 5 ms fades at both ends
+  u8 ramp; // 5 ms fades: bit 0 at the start, bit 1 at the end
 };
 
 struct s3d_win {
@@ -94,20 +105,37 @@ struct s3d_win {
   u16 rlen;   // recorded frames
   u16 ms;     // length
   u8 seg;
-  float re[2][2], im[2][2]; // [tone][left, right], amplitude at the tone
+  float psi[2];             // [tone] phase of the stimulus at the start
+  float zr[2][2], zi[2][2]; // [tone][left, right], A e^(j phase)
 };
 
 struct s3d_run {
   char name[14];
   u8 reg[S3D_REGS];
-  u8 kind;   // S3D_SWEEP, S3D_RATIO or S3D_STEP
+  u8 kind;   // S3D_SWEEP to S3D_BAND
   u8 base;   // the run the summary compares it with
   u8 slow;   // the limit is on: longer settling
   u8 result; // s3d_end's, 0xFF before the run
-  // sweep: dB relative to run 0, S3D_FLOOR under the floor
-  float db[S3D_PATHS][S3D_FREQS];
-  // ratio: S>S at 1 kHz for each ratio, step: the end values
-  float extra[S3D_STEP_WINS * 2];
+  union {
+    struct {
+      // dB relative to run 0, S3D_FLOOR under the floor; band runs only
+      // have S>S, and the M>M of the 400 Hz tone
+      float db[S3D_PATHS][S3D_FREQS];
+      // degrees: the phase the effect adds to S against M, then M>S
+      // against M>M and S>M against S>S in the same window
+      float ph[3][S3D_FREQS];
+    } sw;
+    struct {
+      float ss[5], mm[5]; // S>S at 1 kHz and M>M at 400 Hz, dB
+    } ra;
+    struct {
+      float deg[S3D_PANS], lev[S3D_PANS]; // where it comes out, its level
+    } pa;
+    struct {
+      float traj[2][S3D_TRAJ]; // S>S after the step up and the step down
+      float steady[3];         // low, high, low again
+    } st;
+  } u;
 };
 
 struct s3d_meas {
@@ -117,8 +145,7 @@ struct s3d_meas {
   struct s3d_run run[S3D_MAX_RUNS];
   u32 rate_play, rate_rec;
   float ref_mm[S3D_FREQS], ref_ss[S3D_FREQS]; // run 0's gains
-  float ref_mm400, ref_ss1k;                  // and at the ratio tones
-  float floor_db[S3D_FREQS];                  // run 0's noise floor
+  float ref_ph[S3D_FREQS]; // run 0's phase of S against M, degrees
   // the run being measured
   int cur;
   struct s3d_seg seg[S3D_MAX_SEGS];
@@ -160,7 +187,7 @@ const char *s3d_name(const struct s3d_meas *m, int i);
 // the seconds the plan takes, roughly
 int s3d_seconds(const struct s3d_meas *m);
 
-// the report's first lines; info says where it ran (a line, or 0)
+// the report's first lines; info says where it ran (lines, or 0)
 void s3d_header(struct s3d_meas *m, u32 rate_play, u32 rate_rec,
                 const char *info);
 

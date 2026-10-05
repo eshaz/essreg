@@ -403,10 +403,16 @@ class WineTest(unittest.TestCase):
                   "/log=E3M.LOG", "/out=M.TXT")
         text = read(self.path("M.TXT")).decode("latin-1")
         self.assertTrue(text.startswith("ess3d measure: the 3-D effect"))
-        self.assertIn("plan: quick, 19 runs", text)
+        self.assertIn("plan: quick, 25 runs", text)
         self.assertIn("  1  ess            0C 3F 8F 95 94 80  M>M", text)
+        self.assertIn("S>S deg     +8   +33   +55", text)
         self.assertIn("ratio limit: from S/M -24 to +6 dB, S>S at 1 kHz "
                       "changes by -6.7 dB", text)
+        self.assertIn("pan: 0, 22.5, 45, 67.5 and 90 degrees come out at "
+                      "-26, -5, 45, 95, 116", text)
+        self.assertIn("step limit: within 1 dB 20 ms after the step up and "
+                      "420 ms after the step down", text)
+        self.assertIn("vector: clearing bit 7 of 54h-58h together", text)
         self.assertIn("\r\n", text)
         # the mixer is back and the restore file gone
         self.assertFalse(os.path.exists(self.path("ESS3DSIM.RST")))

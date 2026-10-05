@@ -23,11 +23,14 @@ calls a mode that makes a stereo effect from a mono input. With the bit set,
 you hear the model in place of the program's own image, so you can compare a
 tuning with it. 50h bit 0, the limit, most likely lets the effect widen the
 image toward the model and no further than the 3-D level, as the AutoSpace
-mode of Desper's patent does. The registers 54h-5Ah would then shape the
-effect, as the edges of its filters, its levels or its times.
-`ess3d measure` measures what each of them does on the card ([Measuring on
-the card](#measuring-on-the-card)), and essctl, `ess3d` and the tray panel
-can set every one of them.
+mode of Desper's patent does. The limit may also learn: follow the program
+over a window of time and keep the effect where the program has been. The
+registers 54h-5Ah would then shape the effect, as the edges of its filters,
+its levels or its times, or tune the limit's window. Another reading takes
+54h, 56h and 58h together as the three coordinates of one 3-D vector.
+`ess3d measure` tests each of these readings on the card ([Measuring on the
+card](#measuring-on-the-card)), and essctl, `ess3d` and the tray panel can
+set every one of the registers.
 
 ## Where it comes from
 
@@ -197,8 +200,20 @@ like in the report of `ess3d measure`.
   3-D level as the limit, following the program as the AutoSpace mode of
   Desper's patent does. It may instead limit the effect like *Double Detect
   and Protect*. In the report, a limit shows in the ratio runs as an S>S
-  gain that falls as the program's S rises, and in the step runs as the time
-  the gain takes to follow a jump.
+  gain that falls as the program's S rises, in the band runs as the
+  frequencies where that happens, and in the step runs as the time the gain
+  takes to follow a jump.
+* **The limit as learning over a tuned window.** The patent's AutoSpace
+  follows the program through filters with "adjustable rise and fall
+  ballistics", which is a window of time over which it learns the program's
+  levels. If the limit works this way, the step runs show the window: S>S
+  takes time to come back after the program's S falls, and the time is the
+  window's length. A limit that learns more than a level may also not come
+  back to where it was before the step, and the step lines give the level
+  before and after. The step runs with each register at 00h and FFh show
+  whether one of them tunes the window, and the pan runs show whether the
+  limit pulls panned sounds toward a fixed place, as a model it works toward
+  would.
 * **54h, 56h, 58h and 5Ah, the shapes.** The drivers that write them always
   write 8Fh, 95h, 94h and 80h, at the place where the ES938 gets its fixed
   settings. Bit 7 is set in all four, and the low bits are 0Fh, 15h, 14h and
@@ -209,7 +224,22 @@ like in the report of `ess3d measure`.
   bit, as the values of a pair of times or of the two channels of one
   setting would. In the report, a filter edge moves the frequency where S>S
   rises, a level moves S>S up or down at every frequency, and a time changes
-  only the ratio and step runs.
+  only the ratio, band and step runs.
+* **54h, 56h and 58h as one vector.** The three registers may not be three
+  settings but the coordinates of one 3-D vector, a direction or a shape
+  that places the image. Read as signed numbers with bit 7 for plus, or as
+  the byte minus 80h, ESS's values are +15, +21 and +20, a vector about 33
+  long, and 5Ah's 80h is 0, which fits a fourth value at rest. The report's
+  vector runs test this. *vec neg* clears the three sign bits together, and
+  the summary compares it with the sum of each sign bit cleared alone: the
+  two are the same where each register acts by itself, one after another,
+  and differ where the three make one thing. *vec /2* and *vec x2* halve and
+  double the length and keep the direction, and *vec rot* and *vec swap*
+  keep the length and turn the direction (*vec rot* gives 54h 56h's value,
+  56h 58h's and 58h 54h's, and *vec swap* exchanges 54h and 56h). If only
+  the direction counts, *vec /2* and *vec x2* change nothing while *vec rot*
+  and *vec swap* do. A sign bit that turns a part of the effect around shows
+  as a change of about 180 degrees in the S>S phase.
 
 ## Measuring on the card
 
@@ -232,37 +262,69 @@ frequencies from 100 Hz to 10 kHz:
   from mono shows here.
 * **S>M** is M coming out of an S tone, relative to run 0's S>S.
 
+Under them come the phases, in degrees. *S>S deg* is the phase that the
+effect adds to S against M, measured from the S tone's S and the M tone's M
+at the same frequency, so the time at which the recording starts drops out.
+A part of the effect whose sign flips turns it by about 180 degrees where
+that part is bigger than the sound that passes straight through. *M>S deg*
+and *S>M deg* give the phase of a cross path against the direct path of the
+same tone.
+
 A dot is a value under the noise floor, and the M>S and S>M lines are left
-out where every value is. The full plan has these runs:
+out where every value is. The full plan has these runs, in about 9 minutes:
 1. Run 0, *off*, and run 1, *ess*, which is ESS's setting (50h 0Ch, 52h 3Fh
    and 54h-5Ah 8Fh, 95h, 94h and 80h).
 2. The level 52h from 00h to 38h.
 3. *model*, *limit*, and both bits together.
 4. Each of 54h-5Ah with one bit of ESS's value flipped (*b7* to *b0*), and
    at 00h and FFh.
-5. 54h-5Ah at 00h, at FFh and with bit 7 of ESS's value flipped, with the
+5. The vector runs, *vec neg*, *vec /2*, *vec x2*, *vec rot* and *vec swap*,
+   which change 54h, 56h and 58h together.
+6. 54h-5Ah at 00h, at FFh and with bit 7 of ESS's value flipped, with the
    model on. These are the runs whose names start with *M*.
-6. *ratio* and *ratio limit*: 400 Hz in M and 1 kHz in S, with the S from
+7. *ratio* and *ratio limit*: 400 Hz in M and 1 kHz in S, with the S from
    -24 to +6 dB relative to the M, which shows whether the gain follows the
    program.
-7. *step* and *step limit*: the S tone jumps from -12 to +6 dB at 0 ms and
-   back after 1 s, measured every 20 ms, which shows how fast the gain
-   follows.
+8. *band* and *band limit*: S at each of the 11 frequencies over 400 Hz in
+   M, which shows in which band the limit holds the effect down. The runs
+   whose names start with *band L* have the limit on and one register at 00h
+   or FFh, which shows whether that register moves the band.
+9. *pan* and *pan limit*: 1 kHz panned in five steps from the left (0
+   degrees) to the right (90 degrees). *out deg* is where it comes out, from
+   the parts of the two channels in phase with the stronger one, so a value
+   under 0 or over 90 degrees is past a speaker, where the far channel plays
+   in opposite phase. *level* is its level against run 0.
+10. *step* and *step limit*: the S tone jumps from -12 to +6 dB at 0 ms and
+    back after 2 s, measured every 20 ms for 500 ms and then every 100 ms to
+    1.8 s, which shows how fast the gain follows and how long it takes to
+    come back. The runs whose names start with *step L* have the limit on
+    and one register at 00h or FFh, or the level at 20h, which shows whether
+    a register tunes the window.
 
 The summary at the end gives each run's biggest change from the run it
-varies, and three lines that answer the questions of the reading above. The
-*model* line gives how much the registers change M>S with the model on,
-which is about 0 dB if the model is fixed. The *ratio limit* line gives how
-much S>S falls from S/M -24 to +6 dB with the limit on, against the *ratio*
-line with it off, and the *step limit* line gives how long the gain takes to
-follow a jump.
+varies, and lines that answer the questions of the readings above:
+* The *model* line gives how much the registers change M>S with the model
+  on, which is about 0 dB if the model is fixed.
+* The *vector* lines give what clearing the three sign bits together does,
+  how far that is from the sum of each cleared alone, and what each of the
+  other vector runs changes.
+* The *ratio limit* line gives how much S>S falls from S/M -24 to +6 dB with
+  the limit on, against the *ratio* line with it off.
+* The *pan* lines give where each place comes out, with the limit off and
+  on.
+* Each step run's line gives how long S>S takes to settle within 1 dB after
+  the step up, and to come back within 1 dB of the level before it after the
+  step down, and the low level before and after. The *window* line gives the
+  fastest and the slowest return among the *step L* runs, with their names,
+  which shows the register that tunes the window, if any.
 
-`ess3d measure quick` runs only 00h and FFh of each register, in about 2
+`ess3d measure quick` runs only 00h and FFh of each register, two vector
+runs and each of the other kinds with the limit off and on, in about 2
 minutes. `ess3d measure 56` runs 56h from 00h to FFh in steps of 10h, which
-shows the shape that one register sets more finely.
-`ess3d measure quick /sim` shows what a report looks like without the card,
-from a made-up effect in `src/s3dsim.c` that is not a model of the real
-chip.
+shows the shape that one register sets more finely, and then the model, band
+and step runs with 56h at its ends. `ess3d measure quick /sim` shows what a
+report looks like without the card, from a made-up effect in `src/s3dsim.c`
+that is not a model of the real chip.
 
 The same steps are in [TESTING.md](TESTING.md#h-ess3d), step 8, along with
 two that need no measurement:

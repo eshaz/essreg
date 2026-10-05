@@ -30,9 +30,9 @@ accepts a decimal number, or hex for raw values, and writes it when you
 press Enter or leave the field.
 
 The pages also include the registers that the data sheet leaves out but the
-drivers use, marked *(undocumented)*: the 3-D limit and mono bits (mixer 50h
-bits 0 and 1), the 3-D registers 54h, 56h, 58h and 5Ah, and bits 7:5 and 2
-of controller register A8h. [docs/REGISTERS.md](docs/REGISTERS.md) and
+drivers use, marked *(undocumented)*: the 3-D limit and model bits (mixer
+50h bits 0 and 1), the 3-D registers 54h, 56h, 58h and 5Ah, and bits 7:5 and
+2 of controller register A8h. [docs/REGISTERS.md](docs/REGISTERS.md) and
 [docs/SPATIALIZER.md](docs/SPATIALIZER.md) describe them. The *Plug and
 Play* page shows the optional logical devices (MPU-401, CD-ROM, modem and
 general-purpose) under the numbers that the card's PnP header gives them,
@@ -195,11 +195,13 @@ microphone. It plays test tones on the Audio 2 wave device and records them
 on Audio 1 from record source 7, which is the effect's own output before the
 master volume, so the speakers stay quiet. For each setting it measures how
 much of a tone in both channels (M) and of a tone in opposite phase (S)
-comes out as M and as S, at 11 frequencies from 100 Hz to 10 kHz, and
-whether the gain follows the program. It needs ESS's wave devices, so close
-programs that play or record first.
+comes out as M and as S, and in which phase, at 11 frequencies from 100 Hz
+to 10 kHz. Other runs show whether the gain follows the program and in which
+band, where panned sounds come out, how fast the limit follows a jump and
+comes back, and whether 54h, 56h and 58h act as one vector. It needs ESS's
+wave devices, so close programs that play or record first.
 
-The full plan takes about 6 minutes, `measure quick` about 2, and
+The full plan takes about 9 minutes, `measure quick` about 2, and
 `measure 54` tries one register from 00h to FFh. A window shows the
 progress, and the report goes to `ESS3D.TXT` next to ess3d.exe, or to the
 `/out=` file. ess3d puts the mixer back at the end, and if the measurement
@@ -236,7 +238,7 @@ changes.
 shows a green *3D* while the effect is heard and turns gray while the effect
 is off or held in reset, and its tooltip shows the setting. A click on the
 icon, with either button, opens a small panel with every 3-D setting:
-* Check boxes switch 3-D on, release it from reset, and set the mono and
+* Check boxes switch 3-D on, release it from reset, and set the model and
   limit bits. *Reset* resets the effect.
 * The level and each Spatializer register have a text field with a slider to
   its right, which moves in steps of one. The text field takes the level in

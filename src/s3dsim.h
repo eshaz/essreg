@@ -9,12 +9,14 @@
  *
  * With 50h bits 3 and 2 set, the S of the input, (L - R) / 2, gets a
  * boost through a high-pass at 150 + 10 x (54h bits 6:0) Hz, followed by a
- * 4 kHz low-pass while 56h bit 4 is set, scaled by 2 x 52h / 63. 50h bit 1
+ * 4 kHz low-pass while 56h bit 4 is set, scaled by 2 x 52h / 63, and
+ * taken away instead of added while 54h bit 7 is clear (a sign). 50h bit 1
  * adds the M through an all-pass at 1 kHz to the S (width made from
  * mono), 50h bit 0 holds the boost under 0.7 times the M (a limit, with 5
- * ms attack and 200 ms release), and 5Ah bit 0 raises the M by 1 dB. 58h
- * does nothing. The path has a gain of 0.5, a delay of 37 frames and
- * noise of about 2 LSB.
+ * ms attack and a release of 20 + 10 x (58h bits 6:0) ms, 220 ms with
+ * ESS's value), and 5Ah bit 0 raises the M by 1 dB. The other bits do
+ * nothing. The path has a gain of 0.5, a delay of 37 frames and noise of
+ * about 2 LSB.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -48,8 +50,9 @@ void s3dsim_regs(struct s3dsim *s, const u8 *reg);
 // n frames of 16-bit stereo through the effect, in to out
 void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n);
 
-// the gains at hz of M>M, S>S, M>S and S>M with these registers, relative
-// to the effect off, without the limit
-void s3dsim_response(const u8 *reg, u32 rate, double hz, double *gain);
+// the response at hz of M>M, S>S, M>S and S>M with these registers,
+// relative to the effect off and without the limit: re[4] and im[4]
+void s3dsim_response(const u8 *reg, u32 rate, double hz, double *re,
+                     double *im);
 
 #endif /* S3DSIM_H */

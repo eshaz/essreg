@@ -73,9 +73,11 @@ ES1869 (`src/simhw.c`). They test:
 * profiles (`t_profile`)
 * ess3d's command line and 3-D register changes (`t_ess3d`)
 * ess3d's measurement of the 3-D effect, against the made-up effect of
-  `src/s3dsim.c`: the shape of its boost, the width its model makes from
-  mono, the register that does nothing, its limit, devices that start apart,
-  a recording at another rate and a recording with no signal (`t_s3dmeas`)
+  `src/s3dsim.c`: the shape and phase of its boost, the bit that turns the
+  boost around, the width its model makes from mono, where panned tones come
+  out, its limit and the register that sets the limit's release, devices
+  that start apart, a recording at another rate and a recording with no
+  signal (`t_s3dmeas`)
 * essreg's register functions that the original didn't have, such as the 3-D
   limit (`t_regs`)
 * patch banks (`t_esfm`)
@@ -688,7 +690,7 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
      5A. `ess3d defaults` puts ESS's values back.
    * Close every program that plays or records, then run
      `C:\ESSREG\ESS3D.EXE measure` from Start > *Run*. A window counts the
-     runs for about 6 minutes, and the speakers stay quiet. At the end it
+     runs for about 9 minutes, and the speakers stay quiet. At the end it
      says "Done" and where the report is. Keep `C:\ESSREG\ESS3D.TXT`.
    * Check that the mixer is as it was: the master volume, the Windows
      mixer's levels and the 3-D setting are back.

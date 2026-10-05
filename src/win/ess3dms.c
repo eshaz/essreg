@@ -6,7 +6,8 @@
  * Usage:
  *   `ess3d measure [quick | 54 | 56 | 58 | 5A] [/out=file] [/sim]`
  *
- *   quick      each register's ends only, about 2 minutes
+ *   quick      each register's ends only, about 2 minutes, instead of
+ *              every setting, about 9 minutes
  *   54 ... 5A  one register from 00h to FFh in steps of 10h
  *   /out=file  the report, ESS3D.TXT in ess3d's directory if left out
  *   /q         no window: it closes when it's done (exit code 0 done, 1
