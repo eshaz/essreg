@@ -143,18 +143,22 @@ up [N], down [N]  up or down N steps, 4 if N is left out
 reset             reset the effect, keeping on/off and the level
 hold              hold the effect in reset (on or reset releases it)
 limit on, off, toggle   the 3-D limit (mixer 50h bit 0, undocumented)
-mono on, off, toggle    the 3-D mono bit (mixer 50h bit 1, undocumented)
+model on, off, toggle   the 3-D model (mixer 50h bit 1, undocumented),
+                  also called mono
 reg XX YY         Spatializer register XX (54, 56, 58 or 5A) to YY, in hex
 defaults          what ESS's driver sets when Windows starts: 3-D on,
                   level 63, limit off, 54h-5Ah 8Fh, 95h, 94h and 80h
 show              change nothing, show the setting
 tray              the tray icon, or the panel if it's already there
 exit              close the tray icon
+measure [quick | 54 | 56 | 58 | 5A]   measure what each setting does to
+                  the sound, alone on the command line (below)
 
 /q                no box and no message boxes (problems go to ESS3D.LOG,
                   or to the /log= file)
 /t=1500           how long the box stays, in ms
 /log=file         append each result to a file, problems too
+/out=file         the measurement's report, ESS3D.TXT if left out
 /sim, /base=220, /cfg=800, /novxd   as for essctl
 
 Examples:
@@ -176,10 +180,32 @@ such limit.
 The exit code is 0 when the command worked, 1 when the chip returned other
 values than were written, 2 when it failed, and 3 for a bad command line.
 
-The data sheet doesn't describe registers 54h-5Ah or the limit and mono
+The data sheet doesn't describe registers 54h-5Ah or the limit and model
 bits. ESS's drivers set them when Windows starts, but what they do isn't
-known yet. [docs/SPATIALIZER.md](docs/SPATIALIZER.md) has what is known, and
-how to find out more.
+known yet. The model is most likely the effect's own rendering of the space,
+which you can hear in place of your tuning, the limit lets the effect widen
+the image toward the model, and the registers most likely shape the effect.
+[docs/SPATIALIZER.md](docs/SPATIALIZER.md) has what is known and how it was
+found.
+
+### Measuring the 3-D effect
+
+`ess3d measure` finds out what each of these settings does, without a
+microphone. It plays test tones on the Audio 2 wave device and records them
+on Audio 1 from record source 7, which is the effect's own output before the
+master volume, so the speakers stay quiet. For each setting it measures how
+much of a tone in both channels (M) and of a tone in opposite phase (S)
+comes out as M and as S, at 11 frequencies from 100 Hz to 10 kHz, and
+whether the gain follows the program. It needs ESS's wave devices, so close
+programs that play or record first.
+
+The full plan takes about 6 minutes, `measure quick` about 2, and
+`measure 54` tries one register from 00h to FFh. A window shows the
+progress, and the report goes to `ESS3D.TXT` next to ess3d.exe, or to the
+`/out=` file. ess3d puts the mixer back at the end, and if the measurement
+is ended by force, the next ess3d puts it back.
+[docs/SPATIALIZER.md](docs/SPATIALIZER.md#measuring-on-the-card) explains
+the report.
 
 ### Putting ess3d on a key
 

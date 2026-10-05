@@ -14,18 +14,22 @@
  *   reset             reset the effect, keeping on/off and the level
  *   hold              hold the effect in reset
  *   limit on, off, toggle  the undocumented 3-D limit (50h bit 0)
- *   mono on, off, toggle   the undocumented 3-D mono bit (50h bit 1)
+ *   model on, off, toggle  the undocumented 3-D model, or mono mode (50h
+ *                     bit 1); "mono" works too
  *   reg XX YY         Spatializer register XX (54, 56, 58, 5A) to YY, hex
  *   defaults          what ESS's driver sets when Windows starts
  *   show              change nothing, show the setting
  *   tray              an icon in the taskbar's tray with a panel of every
  *                     3-D setting (ess3dtr.c)
  *   exit              close the tray icon
+ *   measure [quick | 54 | 56 | 58 | 5A]  measure what each setting does,
+ *                     alone on the command line (ess3dms.c)
  *
  *   /q                no display and no message boxes, problems go to
  *                     ESS3D.LOG (or the /log= file)
  *   /t=1500           how long the display stays, in ms
  *   /log=file         append each result to a file, problems too
+ *   /out=file         the measurement's report, ESS3D.TXT if left out
  *   /sim, /base=220, /cfg=800, /novxd  as for essctl
  *
  * Notes:
@@ -55,6 +59,7 @@
 #include <time.h>
 
 #include "ess3d.h"
+#include "ess3dms.h"
 #include "ess3dtr.h"
 #include "esshw.h"
 #include "winio.h"
@@ -78,9 +83,10 @@ static const char usage[] =
     "ess3d [options] command [command...]\n\n"
     "Commands: on, off, toggle, level N (0 to 63, or N%), level +N, "
     "level -N, up [N], down [N], reset, hold, limit on|off|toggle, "
-    "mono on|off|toggle, reg XX YY (hex), defaults, show, tray, exit\n\n"
-    "Options: /q, /t=1500 (ms), /log=file, /sim, /base=220, /cfg=800, "
-    "/novxd";
+    "model on|off|toggle, reg XX YY (hex), defaults, show, tray, exit, "
+    "measure [quick|54|56|58|5A]\n\n"
+    "Options: /q, /t=1500 (ms), /log=file, /out=file, /sim, /base=220, "
+    "/cfg=800, /novxd";
 
 static HINSTANCE inst;
 
@@ -97,7 +103,7 @@ static void display(const struct ess3d_state *s, const char *text, u16 ms);
 // --- log and messages -------------------------------------------------------
 
 // relative names are in ess3d.exe's directory
-static void full_path(const char *name, char *path, unsigned size) {
+void ess3d_path(const char *name, char *path, unsigned size) {
   char *slash;
 
   if (name[0] && (name[1] == ':' || name[0] == '\\')) {
@@ -119,7 +125,7 @@ void ess3d_log(const char *name, const char *text) {
   time_t now = time(0);
   FILE *f;
 
-  full_path(name, path, sizeof(path));
+  ess3d_path(name, path, sizeof(path));
   f = fopen(path, "a");
   if (!f)
     return;
@@ -338,6 +344,8 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev, LPSTR cmdline, int show) {
     problem(&c, c.err, 1);
     return 3;
   }
+  if (c.measure)
+    return measure_main(&c, hinst);
   // no commands for the chip: a running tray icon shows its panel, or
   // closes
   tray = tray_window();
@@ -363,6 +371,9 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev, LPSTR cmdline, int show) {
   io.sim = c.sim;
   io.novxd = c.novxd;
   err = winio_init(&io);
+  // a measurement ended by force left the mixer changed
+  if (err == 0)
+    measure_put_back(c.sim);
   // with "tray" alone this only reads, so a card that doesn't answer is
   // reported before the icon shows
   if (err == 0)

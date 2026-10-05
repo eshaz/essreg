@@ -11,7 +11,8 @@ usage: python3 tests/run_tests.py
   unicorn)
 - C tests (tests/host/t_*.c), built with gcc against the simulated ES1869:
   esshw protocols, the VxD API wrappers, the register catalog, profiles,
-  ess3d's commands, ESFM patch banks and driver patching, esfmrec's WAV
+  ess3d's commands and its measurement of the 3-D effect, ESFM patch banks
+  and driver patching, esfmrec's WAV
   header and resampler, essinst's checks and staging of the drivers,
   essreg's newer register functions, and an old-versus-new port trace of
   its original ones
@@ -69,6 +70,7 @@ def c_tests(tmp):
               [os.path.join(ROOT, "driver", "ESFM.DRV"),
                os.path.join(ROOT, "esfm_patch_banks", "bnk_com.bin"),
                esfm_work]),
+             ("t_s3dmeas", src("s3dmeas.c", "s3dsim.c"), []),
              ("t_fmrec", src("fmrec.c"), []),
              ("t_wavestat", src("wavestat.c"),
               [os.path.join(ROOT, "driver", "ES1869.DRV"),

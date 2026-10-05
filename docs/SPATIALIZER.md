@@ -1,7 +1,8 @@
 # The 3-D effect (Spatializer)
 
 This page describes what the ES1869's 3-D effect is, where its registers
-come from, and what is still unknown about the undocumented ones.
+come from, what the undocumented ones most likely do, and how
+`ess3d measure` finds out on the card.
 
 ## In short
 
@@ -13,12 +14,20 @@ bit 2 releases it from reset, and 52h sets its level.
 Six more are undocumented: 50h bits 1 and 0, and the registers 54h, 56h, 58h
 and 5Ah. ESS's Windows 95 and NT drivers and Linux write 8Fh, 95h, 94h and
 80h to 54h-5Ah. ESS's Windows 95 and NT drivers also set 50h bit 0 from a
-setting called *3D Limit*, and NetBSD calls 50h bit 1 *MONO*. No document
-found says what any of them does, but the ES938's data sheet and Desper's
-patent point to where they may come from: an effect *limit* and *mode*, a
-noise gate, and an automatic level control with attack and release times.
-essctl, `ess3d` and the tray panel can set every one of them, so you can try
-them on the card.
+setting called *3D Limit*, and NetBSD calls 50h bit 1 *MONO*.
+
+The reading that fits them best is a model and a limit. 50h bit 1 most
+likely switches the effect to its model: its own rendering of the space,
+made from the sum of the two channels, which is what the Solo-1's data sheet
+calls a mode that makes a stereo effect from a mono input. With the bit set,
+you hear the model in place of the program's own image, so you can compare a
+tuning with it. 50h bit 0, the limit, most likely lets the effect widen the
+image toward the model and no further than the 3-D level, as the AutoSpace
+mode of Desper's patent does. The registers 54h-5Ah would then shape the
+effect, as the edges of its filters, its levels or its times.
+`ess3d measure` measures what each of them does on the card ([Measuring on
+the card](#measuring-on-the-card)), and essctl, `ess3d` and the tray panel
+can set every one of them.
 
 ## Where it comes from
 
@@ -162,33 +171,101 @@ found through a search engine, describes a *Double Detect and Protect*
 circuit that turns the effect down when the level and the stereo difference
 are both high. That circuit is a limiter of the effect.
 
-## What the undocumented bits and registers may be
+## What the undocumented bits and registers most likely do
 
 No document describes these bits and registers. Each item gives the evidence
-for one of them, and then the reading that fits the evidence best, which
-remains to be tried on the card.
+for one of them, the reading that fits it best, and what the reading looks
+like in the report of `ess3d measure`.
 
-* **50h bit 1.** NetBSD names it MONO, and ESS's drivers leave it 0. The
-  ES938 turns "existing stereo and mono audio input signals" into 3-D. The
-  bit is most likely a mono mode, which makes a wide sound from mono input.
-* **50h bit 0.** It holds ESS's *3D Limit* setting, which is 0 by default
-  and applies to the ES1869 and ES1879 only. The ES938's register 5 is the
-  effect *limit* and *mode*. The bit is most likely a limit or mode of the
-  effect, either AutoSpace or a limiter like Double Detect and Protect.
-* **54h, 56h, 58h and 5Ah.** The drivers that write them always write 8Fh,
-  95h, 94h and 80h, at the place where the ES938 gets its fixed settings.
-  Bit 7 is set in all four, and the low bits are 0Fh, 15h, 14h and 00h.
-  These registers are most likely the processor's fixed settings, such as
-  the noise gate threshold, attack and release times, and the filters that
-  the ES938 has as outside parts.
+* **50h bit 1, the model.** NetBSD names it MONO, and ESS's drivers never
+  set it. The data sheet of the Solo-1 (ES1938), which has the same
+  processor, says that its Spatializer "also has a mode that generates a
+  stereo effect given a mono input", and the ES1946's data sheet calls 50h
+  the "3-D Enable and Mode" register. The ES938 turns "existing stereo and
+  mono audio input signals" into 3-D. In a mode for mono input, the effect
+  can't work from the program's own L - R, so what comes out is its model of
+  the space, made from the sum of the channels. As far as is known, that
+  model is fixed in the chip, and listening to it is a way to compare a
+  tuning of the other registers with it. In the report, the model shows as
+  M>S, which is S coming out of a tone that is the same in both channels. If
+  the runs that change 54h-5Ah with the model on leave M>S as it is, the
+  model is fixed.
+* **50h bit 0, the limit.** It holds ESS's *3D Limit* setting, which is 0 by
+  default and applies to the ES1869 and ES1879 only. The ES938 calls the
+  amount of effect its *limit*, in register 5 and at its SPEN pin. The bit
+  most likely makes the effect widen the image toward the model, with the
+  3-D level as the limit, following the program as the AutoSpace mode of
+  Desper's patent does. It may instead limit the effect like *Double Detect
+  and Protect*. In the report, a limit shows in the ratio runs as an S>S
+  gain that falls as the program's S rises, and in the step runs as the time
+  the gain takes to follow a jump.
+* **54h, 56h, 58h and 5Ah, the shapes.** The drivers that write them always
+  write 8Fh, 95h, 94h and 80h, at the place where the ES938 gets its fixed
+  settings. Bit 7 is set in all four, and the low bits are 0Fh, 15h, 14h and
+  00h. They most likely shape the effect: the high-pass on L - R (about 300
+  Hz and 18 dB per octave in the patent), the edges of other filters, the
+  noise gate's threshold, and the attack and release times that the ES938
+  sets with outside parts. 56h and 58h get 95h and 94h, which differ by one
+  bit, as the values of a pair of times or of the two channels of one
+  setting would. In the report, a filter edge moves the frequency where S>S
+  rises, a level moves S>S up or down at every frequency, and a time changes
+  only the ratio and step runs.
 
-56h and 58h get 95h and 94h, which differ by one bit, as the values of a
-pair of times or of the two channels of one setting would.
+## Measuring on the card
 
-## Finding out on the card
+`ess3d measure` plays tones on the Audio 2 wave device and records them on
+Audio 1 from record source 7, which is the effect's output before the master
+volume (DS p.59), with the record level at 0 dB and the filters of both DACs
+on. Run 0 has the effect off, and every other run is given in dB relative to
+it, so the DAC, the mixer and the ADC drop out of the values. While it
+measures, ess3d mutes the mixer's other inputs and sets the master volume to
+its lowest step, so the speakers stay quiet, and it puts both back at the
+end. Close the programs that play or record before you start, and end any
+DOS game with sound.
 
-The same steps are in [TESTING.md](TESTING.md#h-ess3d), step 8.
+Each sweep run has a line for each path, with a value for each of 11
+frequencies from 100 Hz to 10 kHz:
+* **M>M** is a tone that is the same in both channels (M) coming out as M.
+* **S>S** is a tone in opposite phase in the two channels (S) coming out as
+  S. This is where the effect widens the image.
+* **M>S** is S coming out of an M tone, relative to run 0's M>M. Width made
+  from mono shows here.
+* **S>M** is M coming out of an S tone, relative to run 0's S>S.
 
+A dot is a value under the noise floor, and the M>S and S>M lines are left
+out where every value is. The full plan has these runs:
+1. Run 0, *off*, and run 1, *ess*, which is ESS's setting (50h 0Ch, 52h 3Fh
+   and 54h-5Ah 8Fh, 95h, 94h and 80h).
+2. The level 52h from 00h to 38h.
+3. *model*, *limit*, and both bits together.
+4. Each of 54h-5Ah with one bit of ESS's value flipped (*b7* to *b0*), and
+   at 00h and FFh.
+5. 54h-5Ah at 00h, at FFh and with bit 7 of ESS's value flipped, with the
+   model on. These are the runs whose names start with *M*.
+6. *ratio* and *ratio limit*: 400 Hz in M and 1 kHz in S, with the S from
+   -24 to +6 dB relative to the M, which shows whether the gain follows the
+   program.
+7. *step* and *step limit*: the S tone jumps from -12 to +6 dB at 0 ms and
+   back after 1 s, measured every 20 ms, which shows how fast the gain
+   follows.
+
+The summary at the end gives each run's biggest change from the run it
+varies, and three lines that answer the questions of the reading above. The
+*model* line gives how much the registers change M>S with the model on,
+which is about 0 dB if the model is fixed. The *ratio limit* line gives how
+much S>S falls from S/M -24 to +6 dB with the limit on, against the *ratio*
+line with it off, and the *step limit* line gives how long the gain takes to
+follow a jump.
+
+`ess3d measure quick` runs only 00h and FFh of each register, in about 2
+minutes. `ess3d measure 56` runs 56h from 00h to FFh in steps of 10h, which
+shows the shape that one register sets more finely.
+`ess3d measure quick /sim` shows what a report looks like without the card,
+from a made-up effect in `src/s3dsim.c` that is not a model of the real
+chip.
+
+The same steps are in [TESTING.md](TESTING.md#h-ess3d), step 8, along with
+two that need no measurement:
 1. Read the power-on values. Boot to DOS without Windows and run
    `essreg r=boot.txt`, which lists 50h-5Ah. Neither ESSDC.EXE nor any other
    ESS DOS program writes these registers, so the values are the chip's own
@@ -199,20 +276,20 @@ The same steps are in [TESTING.md](TESTING.md#h-ess3d), step 8.
    `ess3d reg 54 FF`, and read each value back. Bits that stay 0 don't
    exist.
 3. Listen. Play music with a wide stereo image, and a mono voice. Try
-   `ess3d mono toggle` and `ess3d limit toggle` with the 3-D level high,
+   `ess3d model toggle` and `ess3d limit toggle` with the 3-D level high,
    then try each register from 00h to FFh with `ess3d reg` or the tray
    panel's sliders, and note what changes. `ess3d defaults` puts ESS's
    values back.
-4. Measure. Record source 7 of mixer register 1Ch records the 3-D output
-   itself, so playing test tones with a known left and right and recording
-   them back would show what each setting does to the level and the
-   frequency response, without a microphone.
+4. Measure with `ess3d measure`, and keep `ESS3D.TXT`.
 
 ## Sources
 
 * The ES1869 data sheet, SAM0023-122898, in [docs/datasheet](datasheet).
 * The ES938 data sheet, SAM0054-090497, and the ES1868 data sheet, in
   [docs/datasheet](datasheet).
+* The Solo-1 (ES1938) data sheet, SAM0090-012398, and the ES1946 data sheet,
+  SAM0219-051998, quoted as a search engine's index shows them. They aren't
+  in the repository.
 * ESS's drivers: `driver/ES1869.DRV` 4.04, and the ES1868 driver sets for
   Windows 95, 98 and NT 4.0, which aren't in the repository (see
   [RE_NOTES.md](RE_NOTES.md)).

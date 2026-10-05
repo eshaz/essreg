@@ -31,6 +31,9 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   first and exits, and the first goes after the second one's time
 - ess3d's tray icon: a second "ess3d tray" opens the panel of the first,
   and "ess3d exit" closes it
+- ess3d measure: the quick plan against the made-up effect of /sim writes
+  its report and puts the mixer back, and the next ess3d puts back the
+  mixer of a measurement that was ended by force
 - esfmrec: /sim records the test tone for /t= seconds into a WAV file at
   the music DAC's rate, and /raw writes the samples alone
 - esfmrec ended by force: the header it saved every 5 s holds the
@@ -390,6 +393,49 @@ class WineTest(unittest.TestCase):
                          ["No ES1869 answered at 220h: use /base=, or /sim "
                           "to try ess3d without the card"])
         self.assertLess(time.time() - t, 30)
+
+    def test_ess3d_measure(self):
+        # the quick plan against the made-up effect of src/s3dsim.c
+        for name in ("M.TXT", "M.$$$", "ESS3DSIM.RST"):
+            if os.path.exists(self.path(name)):
+                os.remove(self.path(name))
+        self.wine("ess3d.exe", "measure", "quick", "/sim", "/q",
+                  "/log=E3M.LOG", "/out=M.TXT")
+        text = read(self.path("M.TXT")).decode("latin-1")
+        self.assertTrue(text.startswith("ess3d measure: the 3-D effect"))
+        self.assertIn("plan: quick, 19 runs", text)
+        self.assertIn("  1  ess            0C 3F 8F 95 94 80  M>M", text)
+        self.assertIn("ratio limit: from S/M -24 to +6 dB, S>S at 1 kHz "
+                      "changes by -6.7 dB", text)
+        self.assertIn("\r\n", text)
+        # the mixer is back and the restore file gone
+        self.assertFalse(os.path.exists(self.path("ESS3DSIM.RST")))
+        self.assertFalse(os.path.exists(self.path("M.$$$")))
+        self.assertIn("ess3d measure started",
+                      read(self.path("E3M.LOG")).decode())
+        # ended by force: the restore file and the report so far stay, and
+        # the next ess3d puts the mixer back
+        run = subprocess.Popen(["wine", "ess3d.exe", "measure", "quick",
+                                "/sim", "/q", "/out=K.TXT"], env=self.env,
+                               cwd=self.link, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        deadline = time.time() + 60
+        while not os.path.exists(self.path("K.$$$")) or \
+                b"  1  ess" not in read(self.path("K.$$$")):
+            self.assertLess(time.time(), deadline)
+            time.sleep(0.2)
+        self.wine("taskkill", "/f", "/im", "winevdm.exe")
+        run.wait(timeout=60)
+        self.assertTrue(os.path.exists(self.path("ESS3DSIM.RST")))
+        self.ess3d("/sim", "/q", "/log=E3M.LOG", "show")
+        self.assertFalse(os.path.exists(self.path("ESS3DSIM.RST")))
+        self.assertIn("ess3d put the mixer back",
+                      read(self.path("ESS3D.LOG")).decode())
+        # one from before a restart only goes away
+        with open(self.path("ESS3DSIM.RST"), "w", newline="") as f:
+            f.write("boot=1000\r\n50=0F\r\n")
+        self.ess3d("/sim", "/q", "/log=E3M.LOG", "show")
+        self.assertFalse(os.path.exists(self.path("ESS3DSIM.RST")))
 
     def test_ess3d_display(self):
         def start(*args):

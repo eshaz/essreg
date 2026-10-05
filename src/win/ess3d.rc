@@ -8,6 +8,11 @@
 
 #include <windows.h>
 #include <ver.h>
+#include "ess3dres.h"
+
+#ifndef DS_3DLOOK
+#define DS_3DLOOK 0x0004L
+#endif
 
 ESS3D ICON "essctl.ico"
 
@@ -20,6 +25,22 @@ PANEL DIALOG 0, 0, 222, 120
 STYLE WS_POPUP | WS_DLGFRAME
 FONT 8, "MS Sans Serif"
 BEGIN
+END
+
+/* the measurement's window (ess3dms.c) */
+MEASURE DIALOG 0, 0, 236, 98
+STYLE WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | DS_3DLOOK
+CLASS "Ess3dMeasure"
+CAPTION "ES1869 3-D measurement"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "", IDC_M_RUN, 6, 6, 224, 9, SS_NOPREFIX
+    LTEXT           "", IDC_M_INFO, 6, 17, 224, 9, SS_NOPREFIX
+    CONTROL         "", IDC_M_FRAME, "STATIC", SS_BLACKFRAME, 6, 29, 224, 9
+    CONTROL         "", IDC_M_FILL, "STATIC", SS_BLACKRECT, 8, 31, 0, 5
+    LTEXT           "", IDC_M_LEFT, 6, 42, 224, 27, SS_NOPREFIX
+    PUSHBUTTON      "&Open report", IDC_M_OPEN, 6, 78, 60, 14, WS_DISABLED
+    PUSHBUTTON      "Cancel", IDCANCEL, 170, 78, 60, 14
 END
 
 1 VERSIONINFO

@@ -49,6 +49,9 @@ static void test_tables(void) {
     CHECK(f->key && f->key[0] && f->label && f->label[0] && f->help &&
           f->help[0]);
     CHECK(strlen(f->label) <= 32);
+    // essctl's help line has 512 characters for the label, the register,
+    // the help and its notes (pagefld.c)
+    CHECK(strlen(f->help) <= 300);
     page_fields[f->page]++;
     // fields of a register do not overlap
     for (j = f->shift; j < f->shift + f->width; j++) {

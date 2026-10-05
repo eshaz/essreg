@@ -346,14 +346,16 @@ DS p.62.
 * **2 3-D released from reset** (`fx.3d.run`, bit, caution, driver sets it).
   Active-low reset of the 3-D effect: 1 = release from reset, 0 = reset (DS
   p.62).
-* **1 3-D mono (undocumented)** (`fx.3d.mono`, bit, caution, profile, driver
-  sets it). Reserved in the data sheet (always write 0). NetBSD's driver
-  calls it MONO and clears it with bit 3; ESS's drivers leave it 0. What it
-  does isn't documented (DS p.62, docs/SPATIALIZER.md).
+* **1 3-D model (undocumented)** (`fx.3d.mono`, bit, caution, profile,
+  driver sets it). Reserved in the data sheet (write 0). Most likely the
+  mode that makes a stereo effect from mono input (Solo-1 data sheet): you
+  hear the effect's own model of the space. NetBSD calls it MONO (DS p.62,
+  docs/SPATIALIZER.md).
 * **0 3-D limit (undocumented)** (`fx.3d.limit`, bit, caution, profile,
-  driver sets it). Reserved in the data sheet (always write 0), but ESS's
-  Windows 95 and NT drivers set it from their 3D Limit setting, 0 unless
-  changed. What it does isn't documented (DS p.62, docs/SPATIALIZER.md).
+  driver sets it). Reserved in the data sheet (write 0); ESS's drivers set
+  it from their 3D Limit setting, 0 by default. Most likely it widens the
+  image toward the model, up to the 3-D level, following the program (DS
+  p.62, docs/SPATIALIZER.md).
 
 ### 52h 3-D level
 
@@ -375,7 +377,8 @@ Not in the data sheet.
 
 * **7:0 3-D register 54h** (`fx.3d.reg54`, value, caution, profile, driver
   sets it). Undocumented; ESS's drivers and Linux write 8Fh when they enable
-  3-D (docs/SPATIALIZER.md).
+  3-D. Most likely a shape of the effect (a filter edge, a level or a time);
+  ess3d measure 54 shows what it changes (docs/SPATIALIZER.md).
 
 ### 56h 3-D register 56h (undocumented)
 
@@ -383,7 +386,8 @@ Not in the data sheet.
 
 * **7:0 3-D register 56h** (`fx.3d.reg56`, value, caution, profile, driver
   sets it). Undocumented; ESS's drivers and Linux write 95h when they enable
-  3-D (docs/SPATIALIZER.md).
+  3-D. Most likely a shape of the effect (a filter edge, a level or a time);
+  ess3d measure 56 shows what it changes (docs/SPATIALIZER.md).
 
 ### 58h 3-D register 58h (undocumented)
 
@@ -391,7 +395,8 @@ Not in the data sheet.
 
 * **7:0 3-D register 58h** (`fx.3d.reg58`, value, caution, profile, driver
   sets it). Undocumented; ESS's drivers and Linux write 94h when they enable
-  3-D (docs/SPATIALIZER.md).
+  3-D. Most likely a shape of the effect (a filter edge, a level or a time);
+  ess3d measure 58 shows what it changes (docs/SPATIALIZER.md).
 
 ### 5Ah 3-D register 5Ah (undocumented)
 
@@ -399,7 +404,8 @@ Not in the data sheet.
 
 * **7:0 3-D register 5Ah** (`fx.3d.reg5a`, value, caution, profile, driver
   sets it). Undocumented; ESS's drivers and Linux write 80h when they enable
-  3-D (docs/SPATIALIZER.md).
+  3-D. Most likely a shape of the effect (a filter edge, a level or a time);
+  ess3d measure 5A shows what it changes (docs/SPATIALIZER.md).
 
 ### 60h Left master volume and mute
 

@@ -480,7 +480,8 @@ void fields_refresh(int how) {
 static void help_for(int i) {
   const struct ess_field *f;
   const struct ess_reg *r;
-  char text[400];
+  char text[512]; // a help of up to 300 characters and every note
+                  // (t_esscat)
 
   if (rows[i].field < 0)
     return; // a heading

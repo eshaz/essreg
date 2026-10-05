@@ -13,6 +13,7 @@
 #include "ess3d.h"
 #include "esscat.h"
 #include "essio.h"
+#include "s3dmeas.h"
 
 int ess3d_level_max(void) { return cat_max(&ess_fields[F_3D_LEVEL]); }
 
@@ -166,6 +167,11 @@ static void switch_word(char *w, struct ess3d_cmd *c) {
       c->audio_base = (u16)v;
     else
       c->config_base = (u16)v;
+  } else if (arg && !strcmp(w, "out")) {
+    if (!*arg)
+      fail(c, "/out= needs a file name", "");
+    strncpy(c->out, arg, sizeof(c->out) - 1);
+    c->out[sizeof(c->out) - 1] = 0;
   } else if (arg && !strcmp(w, "log")) {
     if (!*arg)
       fail(c, "/log= needs a file name", "");
@@ -228,7 +234,7 @@ int ess3d_parse(const char *line, struct ess3d_cmd *c) {
   const char *after;
   struct ess3d_action spare;
   struct ess3d_action *a;
-  char sign;
+  char sign, *end;
   int n;
 
   memset(c, 0, sizeof(*c));
@@ -261,8 +267,30 @@ int ess3d_parse(const char *line, struct ess3d_cmd *c) {
     } else if (!strcmp(word, "exit")) {
       c->exit = 1;
       continue;
-    } else if (!strcmp(word, "limit") || !strcmp(word, "mono")) {
-      // an undocumented bit: on, off or toggle
+    } else if (!strcmp(word, "measure")) {
+      // the plan is optional: quick, or a register
+      c->measure = 1;
+      c->plan = S3D_PLAN_FULL;
+      after = next_word(p, arg, sizeof(arg));
+      if (after) {
+        lower(arg);
+        n = (int)strtoul(arg, &end, 16);
+        if (*end == 'h')
+          end++;
+        if (!strcmp(arg, "quick")) {
+          c->plan = S3D_PLAN_QUICK;
+          p = after;
+        } else if (arg[0] && !*end &&
+                   (n == 0x54 || n == 0x56 || n == 0x58 || n == 0x5A)) {
+          c->plan = S3D_PLAN_REG;
+          c->plan_reg = (u8)n;
+          p = after;
+        }
+      }
+      continue;
+    } else if (!strcmp(word, "limit") || !strcmp(word, "model") ||
+               !strcmp(word, "mono")) {
+      // an undocumented bit: on, off or toggle; mono is model's old name
       after = next_word(p, arg, sizeof(arg));
       if (after)
         lower(arg);
@@ -316,7 +344,9 @@ int ess3d_parse(const char *line, struct ess3d_cmd *c) {
     else
       c->nact++;
   }
-  if (!c->nact && !c->tray && !c->exit)
+  if (c->measure && (c->nact || c->tray || c->exit))
+    fail(c, "measure goes alone, without other commands", "");
+  if (!c->nact && !c->tray && !c->exit && !c->measure)
     fail(c, "no command", "");
   return c->err[0] ? -1 : 0;
 }
@@ -377,7 +407,7 @@ static int reset(struct ess3d_state *s) {
 }
 
 // what ESS's driver sets when Windows starts: 3-D on, level 63, no
-// limit (its 3D Limit setting is 0 unless changed), mono off, and 54h-5Ah
+// limit (its 3D Limit setting is 0 unless changed), model off, and 54h-5Ah
 static int defaults(struct ess3d_state *s) {
   int i, v, err = set(F_3D_LIMIT, &s->limit, 0);
 
@@ -459,7 +489,7 @@ void ess3d_text(const struct ess3d_state *s, char *buf, unsigned size) {
   sprintf(tmp, "3-D %s%s, level %u of %d%s%s", s->enable ? "on" : "off",
           s->enable && !s->run ? ", held in reset" : "", s->level,
           ess3d_level_max(), s->limit ? ", limit on" : "",
-          s->mono ? ", mono on" : "");
+          s->mono ? ", model on" : "");
   strncpy(buf, tmp, size - 1);
   buf[size - 1] = 0;
 }

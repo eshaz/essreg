@@ -12,7 +12,7 @@
  * On Windows 9x a 16-bit window or icon handle is also the 32-bit one.
  *
  * The panel is built from the catalog like essctl's pages: a check box for
- * each 3-D bit (on, run, and the undocumented mono and limit), and a text
+ * each 3-D bit (on, run, and the undocumented model and limit), and a text
  * field with a slider on its right for the level
  * and for each Spatializer register (ess3d_reg_field). A register added to
  * the catalog shows up here too. The sliders move in steps of one over the

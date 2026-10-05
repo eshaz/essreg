@@ -2,7 +2,7 @@
  * t_ess3d checks ess3d's command line and its 3-D register changes against
  * the simulated ES1869: on, off and toggle, hold and reset on the run bit,
  * absolute and relative levels with clamping, several commands in a row,
- * the limit and mono bits, the Spatializer registers, the driver's
+ * the limit and model bits, the Spatializer registers, the driver's
  * defaults, and bad input.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
@@ -16,6 +16,7 @@
 #include "ess3d.h"
 #include "esscat.h"
 #include "esshw.h"
+#include "s3dmeas.h"
 #include "simhw.h"
 
 // faults of a broken chip, see fault_out
@@ -430,13 +431,17 @@ static void test_limit_and_regs(void) {
   CHECK_EQ(run("toggle", &s), 0);
   CHECK_EQ(simhw.mixer[0x50], 0x0D);
 
-  // mono: bit 1 of 50h, the other bits kept
-  CHECK_EQ(run("mono on", &s), 0);
+  // model: bit 1 of 50h, the other bits kept; mono is its old name
+  CHECK_EQ(run("model on", &s), 0);
   CHECK_EQ(simhw.mixer[0x50], 0x0F);
-  CHECK(text_is(&s, "3-D on, level 40 of 63, limit on, mono on"));
+  CHECK(text_is(&s, "3-D on, level 40 of 63, limit on, model on"));
   CHECK_EQ(run("MONO toggle limit off", &s), 0);
   CHECK_EQ(simhw.mixer[0x50], 0x0C);
   CHECK(!s.mono && !s.limit);
+  CHECK_EQ(run("Model toggle", &s), 0);
+  CHECK_EQ(simhw.mixer[0x50], 0x0E);
+  CHECK_EQ(run("model off", &s), 0);
+  CHECK_EQ(simhw.mixer[0x50], 0x0C);
 
   // reg: a register and a value in hex, written only if it changes
   CHECK_EQ(run("reg 54 8f reg 5Ah 7Fh", &s), 0);
@@ -469,12 +474,30 @@ static void test_limit_and_regs(void) {
   CHECK_EQ(ess3d_parse("on tray", &c), 0);
   CHECK(c.tray && c.nact == 1);
 
+  // measure goes alone, with a plan and a report file
+  CHECK_EQ(ess3d_parse("measure", &c), 0);
+  CHECK(c.measure && c.plan == S3D_PLAN_FULL && !c.nact && !c.out[0]);
+  CHECK_EQ(ess3d_parse("measure quick /out=c:\\r.txt /sim", &c), 0);
+  CHECK(c.measure && c.plan == S3D_PLAN_QUICK && c.sim);
+  CHECK(!strcmp(c.out, "c:\\r.txt"));
+  CHECK_EQ(ess3d_parse("MEASURE 5Ah", &c), 0);
+  CHECK(c.plan == S3D_PLAN_REG && c.plan_reg == 0x5A);
+  CHECK_EQ(ess3d_parse("measure 56", &c), 0);
+  CHECK(c.plan == S3D_PLAN_REG && c.plan_reg == 0x56);
+  CHECK_EQ(ess3d_parse("measure on", &c), -1);
+  CHECK(!strcmp(c.err, "measure goes alone, without other commands"));
+  CHECK_EQ(ess3d_parse("measure 52", &c), -1); // 52 isn't a plan
+  CHECK_EQ(ess3d_parse("tray measure", &c), -1);
+  CHECK_EQ(ess3d_parse("measure /out=", &c), -1);
+
   // bad ones
   CHECK_EQ(ess3d_parse("limit", &c), -1);
   CHECK(!strcmp(c.err, "limit needs on, off or toggle"));
   CHECK_EQ(ess3d_parse("limit maybe", &c), -1);
   CHECK_EQ(ess3d_parse("mono", &c), -1);
   CHECK(!strcmp(c.err, "mono needs on, off or toggle"));
+  CHECK_EQ(ess3d_parse("model", &c), -1);
+  CHECK(!strcmp(c.err, "model needs on, off or toggle"));
   CHECK_EQ(ess3d_parse("reg 54", &c), -1);
   CHECK(!strcmp(c.err,
                 "reg needs a register and a value in hex, like reg 54 8F"));

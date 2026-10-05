@@ -10,7 +10,8 @@
  *
  * The effect is the fx.3d fields of the catalog: fx.3d.enable (mixer 50h
  * bit 3), fx.3d.run (50h bit 2, active-low reset), fx.3d.mono and
- * fx.3d.limit (50h bits 1 and 0, undocumented), fx.3d.level (52h bits
+ * fx.3d.limit (50h bits 1 and 0, undocumented: the model and the limit,
+ * docs/SPATIALIZER.md), fx.3d.level (52h bits
  * 5:0), and the Spatializer's undocumented registers (54h-5Ah). Every
  * other fx.3d field is one of those registers, so a register added to the
  * catalog is in the reg command and the tray panel too. Only the fields
@@ -44,7 +45,7 @@ enum ess3d_op {
   ESS3D_LEVEL,   // level N
   ESS3D_ADD,     // level +N, level -N, up, down
   ESS3D_LIMIT,   // limit on (arg 1), off (0) or toggle (2)
-  ESS3D_MONO,    // mono on (arg 1), off (0) or toggle (2)
+  ESS3D_MONO,    // model (or mono) on (arg 1), off (0) or toggle (2)
   ESS3D_REG,     // reg XX YY: register reg (ess3d_reg_field) to value
   ESS3D_DEFAULTS // what ESS's driver sets when Windows starts
 };
@@ -67,6 +68,10 @@ struct ess3d_cmd {
   u8 quiet;        // /q
   u8 tray;         // tray: stay in the taskbar's tray
   u8 exit;         // exit: close the tray icon
+  u8 measure;      // measure: the measurement of ess3dms.c, alone
+  u8 plan;         // its plan, S3D_PLAN_FULL, _QUICK or _REG (s3dmeas.h)
+  u8 plan_reg;     // the register of S3D_PLAN_REG
+  char out[128];   // /out=, the measurement's report
   char log[128];   // /log=, the file every result is appended to
   char err[80];    // what was wrong when parsing failed
 };

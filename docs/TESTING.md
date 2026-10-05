@@ -72,6 +72,10 @@ ES1869 (`src/simhw.c`). They test:
 * the register catalog (`t_esscat`)
 * profiles (`t_profile`)
 * ess3d's command line and 3-D register changes (`t_ess3d`)
+* ess3d's measurement of the 3-D effect, against the made-up effect of
+  `src/s3dsim.c`: the shape of its boost, the width its model makes from
+  mono, the register that does nothing, its limit, devices that start apart,
+  a recording at another rate and a recording with no signal (`t_s3dmeas`)
 * essreg's register functions that the original didn't have, such as the 3-D
   limit (`t_regs`)
 * patch banks (`t_esfm`)
@@ -122,6 +126,10 @@ Wine and Xvfb, and covers these cases:
   ess3d's `/log=` file, because Wine drops the exit code of a 16-bit Windows
   program, whose process always exits with 0.
 * A second ess3d hands its setting to the box of the first one and exits.
+* `ess3d measure quick /sim` writes its report of the made-up effect and
+  puts the mixer back. Ended by force with `taskkill /f`, it leaves its
+  restore file and the report so far, and the next ess3d puts the mixer
+  back.
 * A second `ess3d tray` opens the panel of the first one, and `ess3d exit`
   closes the tray icon. Wine shows no tray icon for a 16-bit program,
   because its 16-bit and 32-bit icon handles differ. Windows 9x has only one
@@ -641,7 +649,7 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
    * A *3D* icon appears next to the clock, green if 3-D is on and gray if
      it's off. When you point at it, the tooltip shows the setting.
    * Right-click the icon. A panel opens above it with *3-D effect*, *3-D
-     released from reset*, *3-D mono (undocumented)*, *3-D limit
+     released from reset*, *3-D model (undocumented)*, *3-D limit
      (undocumented)*, a *Reset* button, *3-D level* and the registers
      54h-5Ah. A left click opens the panel too.
    * Switch *3-D effect* on and click the arrows of the level slider. The
@@ -666,7 +674,7 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
    * Start `ess3d tray` twice at once, with two shortcuts, or with the
      StartUp folder and a key right after a restart. Only one icon appears.
 8. Try the undocumented settings
-   ([SPATIALIZER.md](SPATIALIZER.md#finding-out-on-the-card)). No document
+   ([SPATIALIZER.md](SPATIALIZER.md#measuring-on-the-card)). No document
    says what they do, so note everything.
    * Boot to DOS from a cold start and, before Windows starts, run
      `essreg r=boot.txt`. Note 50h, 52h and 54h-5Ah, which hold the chip's
@@ -675,9 +683,18 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
      the *Raw registers* page and read it back, then do the same with 00h.
      Note which bits stay.
    * With music playing, once with a wide stereo image and once with a mono
-     voice, try `ess3d mono toggle` and `ess3d limit toggle` at level 63,
+     voice, try `ess3d model toggle` and `ess3d limit toggle` at level 63,
      then `ess3d reg 54 00`, `ess3d reg 54 FF` and the same for 56, 58 and
      5A. `ess3d defaults` puts ESS's values back.
+   * Close every program that plays or records, then run
+     `C:\ESSREG\ESS3D.EXE measure` from Start > *Run*. A window counts the
+     runs for about 6 minutes, and the speakers stay quiet. At the end it
+     says "Done" and where the report is. Keep `C:\ESSREG\ESS3D.TXT`.
+   * Check that the mixer is as it was: the master volume, the Windows
+     mixer's levels and the 3-D setting are back.
+   * Run `ess3d measure quick` and end it with Ctrl+Alt+Del in the middle.
+     Then run `ess3d show`. The master volume and the other levels are back,
+     and `ESS3D.LOG` says that ess3d put the mixer back.
 
 ### I. esfmrec
 
