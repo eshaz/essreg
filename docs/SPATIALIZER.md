@@ -24,14 +24,18 @@ showed](#what-one-card-showed)):
 * 50h bit 1, the model, makes the S from the M through the same band-pass
   and drops the program's own S: a stereo effect made from mono, as the
   Solo-1's data sheet describes.
-* 50h bit 0, the limit, holds the S out at a level against the M, about 5.5
-  dB over it with ESS's values. It moves the boost down and up at a fixed
-  rate in dB a second, so it follows the program over a window of time.
-* With the limit off, 54h-5Ah change nothing. With it on, 54h sets the level
-  that the limit holds and 58h how fast it moves, while 56h and 5Ah acted
-  only at their ends.
+* 50h bit 0, the limit, holds the S out at a level against the M, 5.5 dB
+  over it with ESS's values. It moves the boost down and up at fixed rates
+  in dB a second, 51.5 down and 5.2 up with ESS's values, so it follows the
+  program over a few seconds. It hardly acts under 400 Hz.
+* With the limit off, 54h-5Ah change nothing. With it on, they are its
+  settings. Bits 6:0 of 54h and 56h add up to raise its level, and 5Ah trims
+  the level by about 1 dB either way. The low four bits of 58h set how fast
+  the boost falls and its high four bits how much slower it rises, and 54h
+  bit 7 clear stops it rising.
 
-essctl, `ess3d` and the tray panel can set every one of these registers.
+essctl, `ess3d` and the tray panel can set every one of these registers, and
+call 54h-5Ah the limit's level, level 2, speed and trim.
 
 ## Where it comes from
 
@@ -197,43 +201,69 @@ showed](#what-one-card-showed)), and what is still open.
   stereo effect given a mono input", and the ES1946's data sheet calls 50h
   the "3-D Enable and Mode" register. On the card, the bit makes the S out
   of the M, through nearly the same band-pass as the boost and about 3 dB
-  lower, and drops the program's own S to between -24 and -37 dB. What you
+  lower, and drops the program's own S to between -24 and -44 dB. What you
   hear is the effect's own image of the space, made from the mono sum, in
-  place of the program's stereo, and none of 54h-5Ah changes it.
+  place of the program's stereo, and none of 54h-5Ah changes it. With the
+  limit on as well, the limit holds this S down too, and the M around 400 Hz
+  drops by up to 9 dB with it, so in this mode part of the M also comes
+  through the processed path.
 * **50h bit 0, the limit.** It holds ESS's *3D Limit* setting, which is 0 by
   default and applies to the ES1869 and ES1879 only. The ES938 calls the
   amount of effect its *limit*, in register 5 and at its SPEN pin. On the
-  card, the bit holds the S out under a level against the M, at about +5.5
-  dB with ESS's values, so a program that is already wide gets less boost,
-  and one that is wider still gets none. With S and no M, it turns the boost
-  off. This is the AutoSpace mode of Desper's patent, which holds the
-  enhancement at a constant ratio to the program.
-* **The limit's window.** AutoSpace follows the program through filters with
-  "adjustable rise and fall ballistics". On the card, the limit moves the
-  boost at a fixed rate in dB a second, down while the S is over the level
-  and up again once it is under, and 58h sets the rate. With ESS's 94h, the
-  boost falls at about 51 dB a second and rises at a few, so after a wide
-  passage the effect takes many seconds to come back. The limit follows the
-  program over a window of several seconds, and 58h tunes the window's
-  length. Each run of the measurement started with the boost back, so the
-  pause between runs, or writing the registers, puts it back.
-* **54h, 56h, 58h and 5Ah.** The drivers that write them always write 8Fh,
-  95h, 94h and 80h, at the place where the ES938 gets its fixed settings. On
-  the card, with the limit off, none of them changes the effect at any
-  frequency, with any bit flipped or at either end, so they don't shape its
-  filters. With the limit on, 54h sets the level it holds, about -5.6 dB
-  against the M at 00h, +5.5 at 8Fh and +9.8 at FFh. 58h sets how fast it
-  moves: about 260 dB a second at 00h, 51 at 94h and 17 at FFh. 56h at FFh
-  raised the level as 54h at FFh does, while 56h at 00h changed nothing, and
-  5Ah moved the level by about 1 dB at its ends. `ess3d measure limit`
-  measures each bit of the four with the limit on.
+  card, the bit holds the S out at a level against the M, 5.5 dB over it
+  with ESS's values, so a program that is already wide gets less boost, and
+  one that is wider still gets none. With S and no M, it turns the boost
+  off. The level is a ratio to the M, which is what the AutoSpace mode of
+  Desper's patent does: it holds the enhancement at a constant ratio to the
+  program. The limit follows the S through a high-pass, so it hardly acts on
+  bass: with a fast limit it holds the S at +5.4 dB from 1 to 4 kHz, at +6.6
+  dB at 630 Hz, +8.3 at 400 Hz and +11.2 at 250 Hz, and not at all at 160 Hz
+  and under.
+* **58h, the limit's speed.** AutoSpace follows the program through filters
+  with "adjustable rise and fall ballistics". On the card, the limit moves
+  the boost in a straight line in dB, down while the S is over the level and
+  up once it is under, from the moment the S crosses it. Bits 3:0 of 58h, n,
+  set the fall, 257.5 / (n + 1) dB a second, and bits 7:4, h, make the rise
+  h + 1 times slower. With ESS's 94h, n is 4 and h is 9: the boost falls at
+  51.5 dB a second and rises at 5.2, so after a wide passage the effect
+  takes about 3 seconds to come back from 14 dB down. With 58h at 00h both
+  are 257.5 dB a second, and at FFh 16 and 1. All 14 values of 58h that the
+  card was measured with fit these to within 2 percent.
+* **54h, 56h and 5Ah, the limit's level.** The drivers that write them
+  always write 8Fh, 95h and 80h, at the place where the ES938 gets its fixed
+  settings. On the card, with the limit off, none of them changes the effect
+  at any frequency, with any bit flipped or at either end, so they don't
+  shape its filters. With the limit on, bits 6:0 of 54h and of 56h add, and
+  the level grows with their sum: the same bit in either register moves it
+  by the same amount. 5Ah trims the level by its value less 80h, from -1.2
+  dB at 00h to +1.0 dB at FFh. In dB over the M, the level is close to 10
+  log ((1.77 + 0.00216 v)^2 + (0.0176 x)^2), with x the sum and v 5Ah less
+  80h, which matches every measured setting to within 0.4 dB:
+
+  | 54h + 56h, bits 6:0    | 5Ah | Level held, dB over the M |
+  |------------------------|-----|---------------------------|
+  | 21 (54h at 00h)        | 80h | +5.3                      |
+  | 36 (ESS's 8Fh and 95h) | 80h | +5.4                      |
+  | 52                     | 80h | +6.0                      |
+  | 68                     | 80h | +6.7                      |
+  | 100                    | 80h | +8.1                      |
+  | 142 (56h at FFh)       | 80h | +9.7                      |
+  | 148 (54h at FFh)       | 80h | +9.8                      |
+  | 36                     | 00h | +4.2                      |
+  | 36                     | FFh | +6.4                      |
+
+* **The sign bits.** Bit 7 of 54h, cleared alone, stops the boost rising:
+  the limit lowers it and it stays down. Bit 7 of 56h, cleared alone, does
+  nothing, and bit 7 of 58h is part of its rise. With bit 7 of 54h, 56h and
+  58h all cleared, the level dropped to about -7 dB against the M, and the
+  boost rose again. `ess3d measure limit` now clears the three two at a
+  time, and 54h and 56h at 00h and 7Fh together, to tell which bits do this.
 * **54h, 56h and 58h as one vector.** As signed numbers with bit 7 for plus,
   or as the byte minus 80h, ESS's values are +15, +21 and +20, and 5Ah's 80h
-  is 0. The three don't act together on the sound, though. With the limit
-  off, nothing changes whatever the vector, and with it on, 54h and 58h set
-  different things. The vector runs, now with the limit on, show whether
-  halving, doubling or turning the three together does more than each
-  register alone.
+  is 0. The three don't act as one vector, though. With the limit off,
+  nothing changes whatever the vector. With it on, 54h and 56h only add, 58h
+  is two rates, and halving, doubling or turning the three together does
+  what the formulas of each predict.
 
 ## Measuring on the card
 
@@ -305,12 +335,17 @@ The full plan has these runs, in about 6 minutes:
 
 `ess3d measure limit` has each bit of 54h-5Ah flipped from ESS's value, and
 each of them at 00h and FFh, in step runs with the limit on, with the ratio
-runs and the vector runs, in about 7 minutes. `ess3d measure quick` runs
-each kind once or twice in about 2 minutes, and `ess3d measure 58` runs 58h
-from 00h to FFh in steps of 10h with the limit on.
-`ess3d measure quick /sim` shows what a report looks like without the card,
-from an effect in `src/s3dsim.c` that follows this card's measurement and is
-made up in between.
+runs and the vector runs, in about 8 minutes. It also clears the sign bits
+of 54h, 56h and 58h two at a time, puts 54h and 56h at 00h and at 7Fh
+together, repeats the step with every tone 12 dB lower (*L -12 dB*), which
+shows whether the level is a ratio to the M or a fixed level, and has a band
+run with a fast limit, which shows the level at each frequency. Its report
+is bigger than Notepad can open, so the *Open report* button opens it in
+WordPad. `ess3d measure quick` runs each kind once or twice in about 2
+minutes, and `ess3d measure 58` runs 58h from 00h to FFh in steps of 10h
+with the limit on. `ess3d measure quick /sim` shows what a report looks like
+without the card, from an effect in `src/s3dsim.c` that follows this card's
+measurement and is made up in between.
 
 The summary at the end gives each run's biggest change from the run it
 varies, and lines that answer the questions of the readings above:
@@ -322,10 +357,18 @@ varies, and lines that answer the questions of the readings above:
   on.
 * The *limit* table gives, for each step run, how fast the boost falls after
   the step up, in dB a second, its gain at 0 dB S/M and at -12 dB S/M, the S
-  out it holds against the M (*held*), the time before it rises 3 dB after
-  the step down, how fast it rises then, and its gain at the end. The
+  out it holds against the M (*held*), how long it waits after the step down
+  before it rises (*hold*), how fast it rises then, and its gain at the end.
+  The rates come from a straight line through the windows on the way. The
   *fall*, *rise* and *held* lines name the runs at both ends of each, which
   shows the register that sets it.
+
+Every run with the limit off also checks that each of its tones gives the
+same amplitude and phase in both halves of its window. A window whose halves
+differ means that the recording or the playback skipped there. ess3d
+measures such a run again, logs it in `ESS3D.LOG`, and if it skips again,
+the report says from which window on its values may be off. One run of the
+card's second measurement had such a skip, before this check existed.
 
 The same steps are in [TESTING.md](TESTING.md#h-ess3d), step 8, along with
 two that need no measurement:
@@ -348,14 +391,19 @@ two that need no measurement:
 
 ## What one card showed
 
-The first measurement ran the full plan of an earlier version of ess3d, in
-which each run's 3-D registers changed one at a time with the limit off, on
-an ES1869 under Windows 98 with the rebuilt drivers. Its step runs stepped
-the S from -12 to +6 dB against the M. That version also set the mixer about
-0.75 s into each run, so the first windows of each run had 3.6 dB more
-level, and about 85 ms of sound went missing around the 250 Hz tone. The
-values below leave those windows out, and ess3d now sets the mixer a few ms
-into each run, before the tones.
+The card is an ES1869 under Windows 98 with the rebuilt drivers, measured
+three times: the full plan of an earlier version of ess3d, then the limit
+plan and the full plan of the current one.
+
+### The first measurement
+
+In the earlier version, each run changed one register with the limit off,
+and the step runs stepped the S from -12 to +6 dB against the M. That
+version set the mixer about 0.75 s into each run, so the first windows of
+each run had 3.6 dB more level, and about 85 ms of sound went missing around
+the 250 Hz tone. The values below leave those windows out. ess3d now sets
+the mixer a few ms into each run, before the tones, and the later
+measurements confirm these values.
 
 **The boost.** With ESS's setting, S>S rises from +10.9 dB at 100 Hz to
 +17.9 dB at 400 Hz and falls to +0.5 dB at 10 kHz, and its phase goes from
@@ -369,33 +417,9 @@ dB a step: at 400 Hz it is -24.5 dB at 08h, -12.7 at 18h, -0.4 at 28h, +11.4
 at 38h and +16.7 at 3Fh. At 00h it is under -30 dB, so S>S is +0.2 dB.
 
 **50h bit 1, the model.** M>S becomes +6.6 dB at 100 Hz, +13.9 at 400 Hz and
--4.4 at 10 kHz, which is the boost's own shape about 2.8 dB lower, and S>S
-falls to between -24 and -37 dB. With the model on, none of 54h-5Ah at 00h
+-4.5 at 10 kHz, which is the boost's own shape about 2.8 dB lower, and S>S
+falls to between -24 and -44 dB. With the model on, none of 54h-5Ah at 00h
 or FFh changes M>S.
-
-**50h bit 0, the limit.** In the ratio runs, S>S at 1 kHz stays at +15.7 dB
-from S/M -24 to -12 dB, then falls to +11.5, +5.4 and +0.2 dB at -6, 0 and
-+6 dB: the limit holds the S out at about +5.5 dB against the M, and turns
-the boost off once the input's S alone is over that. In the step runs, the
-boost's gain falls in a straight line in dB, the same number of dB in each
-20 ms window, and rises the same way.
-
-**58h, the limit's speed.** With 58h at 00h the boost falls at about 260 dB
-a second and rises at the same rate, so it is back 180 ms after the step
-down. With ESS's 94h it falls at about 51 dB a second, and after the step
-down it stays off for about a second, then rises at a few dB a second, not
-back after 2 s. With FFh it falls at about 17 dB a second and rises at
-about 1. These three points fit a rate that halves every 65 or so counts of
-the byte, and they also fit bit 7 making the rise about 15 times slower than
-the fall, which the limit plan tells apart.
-
-**54h, 56h and 5Ah with the limit.** At the low step, -12 dB S/M, 54h at 00h
-held the boost at -13 dB, an S out of about -5.6 dB against the M. At the
-high step, +6 dB S/M, 54h at FFh held it at -18 dB, an S out of about +9.8
-dB, and 56h at FFh at -19 dB, about +9.6 dB. 56h at 00h behaved as ESS's
-value, and 5Ah at FFh left the boost about 1 dB higher. Every run started
-with the boost back at the low step, after the end of a run that had it off,
-so its state doesn't carry from run to run.
 
 **With the limit off.** Every bit of 54h-5Ah flipped from ESS's value, each
 register at 00h and FFh, and the five vector runs leave every path within
@@ -403,10 +427,72 @@ register at 00h and FFh, and the five vector runs leave every path within
 
 **The pan runs.** With the effect at ESS's setting, a tone panned fully left
 comes out at -36 degrees, past the left speaker, and fully right at 127
-degrees, 13 to 16 dB louder, while the middle stays. The channel imbalance
+degrees, about 12.7 dB louder, while the middle stays. The channel imbalance
 of the path puts a centered tone about 4 degrees off, since the boost raises
 the S that the imbalance makes by about 16 dB. With the limit on, the sides
 come out at -26 and 113 degrees.
+
+### The limit, bit by bit
+
+The limit plan stepped the S from -12 to 0 dB against the M and back, with
+each bit of 54h-5Ah flipped from ESS's value. Every run in it worked, and it
+decoded most of the limit:
+
+**The ratio runs.** S>S at 1 kHz stays at +15.7 dB from S/M -24 to -12 dB,
+then falls to +11.4, +5.5 and +0.2 dB at -6, 0 and +6 dB: the limit holds
+the S out at +5.4 to +5.5 dB against the M, and turns the boost off once the
+input's S alone is over that.
+
+**58h.** The boost's gain falls and rises in straight lines in dB, from the
+moment the S crosses the level, with no hold before the rise. The rates fit
+257.5 / (n + 1) dB a second down and h + 1 times slower up, with n and h the
+low and high four bits of 58h:
+
+| 58h       | Fall, dB/s | Formula | Rise, dB/s | Formula |
+|-----------|------------|---------|------------|---------|
+| 00h       | 257.5      | 257.5   | 255        | 257.5   |
+| 90h       | 257.5      | 257.5   | 25.8       | 25.8    |
+| 14h       | 51.6       | 51.5    | 25.7       | 25.8    |
+| 84h       | 51.6       | 51.5    | 5.72       | 5.72    |
+| 94h (ESS) | 51.5       | 51.5    | 5.14       | 5.15    |
+| B4h       | 51.5       | 51.5    | 4.29       | 4.29    |
+| D4h       | 51.5       | 51.5    | 3.67       | 3.68    |
+| 95h       | 43.0       | 42.9    | 4.28       | 4.29    |
+| 96h       | 36.8       | 36.8    | 3.66       | 3.68    |
+| 9Ch       | 19.8       | 19.8    | 1.96       | 1.98    |
+| FFh       | 16.1       | 16.1    | 0.98       | 1.01    |
+
+**54h, 56h and 5Ah.** Setting bit 6, 5 or 4 of 54h raised the held level by
+2.7, 1.3 and 0.6 dB. Setting bit 6 or 5 of 56h raised it by 2.8 and 1.4 dB,
+and clearing its bit 4, which ESS's value has set, lowered it by 0.2 dB, so
+the two registers add. Their low bits and 5Ah's moved it by tenths of a dB,
+5Ah in steps that follow its value less 80h ([the table
+above](#what-the-undocumented-bits-and-registers-do)).
+
+**The sign bits.** With 54h bit 7 cleared, the boost fell as with ESS's
+value and never rose again. With 56h bit 7 cleared, nothing changed. With
+58h bit 7 cleared, the rise was 5 times faster, as its formula says. With
+all three cleared (*vec neg*), the limit held the S at about -7 dB against
+the M, 12 dB lower, and the boost rose again after the step down, from about
+-47 dB, which looks like the least gain the limit leaves.
+
+**The band runs.** With the limit on and 58h at 00h, so that the limit gets
+to its level at each tone, the S comes out at +11.2 dB against the M at 250
+Hz, +8.3 at 400 Hz, +6.6 at 630 Hz and +5.3 to +5.9 from 1 to 4 kHz. At 160
+Hz and under the boost isn't limited at all. The limit follows the S through
+a high-pass near 400 Hz.
+
+**The model with the limit.** With both bits on, the limit holds the S that
+the model makes from the M down, by up to 13 dB at 400 Hz, and the M around
+400 Hz drops by up to 9 dB with it.
+
+### The second full plan
+
+The full plan of the current version confirmed the first measurement, with
+the 250 Hz tone and the pan levels now clean. One run, 52h at 38h, had a
+skip from the 1 kHz S tone on: its values there were up to 4.5 dB low with
+the phases scrambled, while the next runs were normal. ess3d now checks each
+window's halves for such skips and measures the run again.
 
 ## Sources
 

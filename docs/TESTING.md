@@ -73,11 +73,13 @@ ES1869 (`src/simhw.c`). They test:
 * profiles (`t_profile`)
 * ess3d's command line and 3-D register changes (`t_ess3d`)
 * ess3d's measurement of the 3-D effect, against the effect of
-  `src/s3dsim.c`, which follows one card's measurement: the shape and phase
+  `src/s3dsim.c`, which follows one card's measurements: the shape and phase
   of its boost, its level in steps of 0.75 dB, the channels' imbalance, the
   width its model makes from mono, where panned tones come out, and the
-  limit's level and rates in each plan, devices that start apart, a
-  recording at another rate and a recording with no signal (`t_s3dmeas`)
+  limit's level, fall and rise in each plan, devices that start apart, a
+  recording at another rate or with a clock 30 ppm off, a click as the
+  playback starts, a recording that skips 21 ms, and a recording with no
+  signal (`t_s3dmeas`)
 * essreg's register functions that the original didn't have, such as the 3-D
   limit (`t_regs`)
 * patch banks (`t_esfm`)
@@ -694,8 +696,9 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
      If a run fails, keep `C:\ESSREG\ESS3D.LOG` too. At the end it says
      "Done" and where the report is. Keep `C:\ESSREG\ESS3D.TXT`.
    * Run `C:\ESSREG\ESS3D.EXE measure limit /out=C:\ESSREG\LIMIT.TXT`, about
-     7 minutes, and keep `LIMIT.TXT`. `ESS3D.LOG` has a line for each run
-     whose mixer was set late, which should never happen.
+     8 minutes, and keep `LIMIT.TXT`. `ESS3D.LOG` has a line for each run
+     whose mixer was set late or changed, and for each run measured again
+     after a skip.
    * Check that the mixer is as it was: the master volume, the Windows
      mixer's levels and the 3-D setting are back.
    * Run `ess3d measure quick` and end it with Ctrl+Alt+Del in the middle.

@@ -18,6 +18,9 @@
 #define PEAK 8.2         // the boost's gain for 16.7 dB at its peak
 #define MODEL 0.70710678 // the model's S, 3 dB under the boost
 #define KEEP (1.0 / 32)  // the input's S that the model keeps
+#define DETECT 420.0     // the limit's high-pass on the S it follows
+#define FLOOR 0.0045     // and the least gain it leaves, -47 dB
+#define DETECT_1K 1.0844 // and its gain at 1 kHz brought to 0 dB
 
 // a first-order section by the bilinear transform: b0 b1 a1
 static void first(double hz, u32 rate, int high, double *c) {
@@ -33,12 +36,19 @@ static double boost_gain(const u8 *reg) {
 }
 
 void s3dsim_limit(const u8 *reg, double *level, double *fall, double *rise) {
-  double v = reg[2];
+  double c = 1.77 + 0.00216 * (reg[5] - 0x80);
+  double x = 0.0176 * ((reg[2] & 0x7F) + (reg[3] & 0x7F));
 
-  *level = v <= 0x8F ? -5.6 + 11.1 * v / 0x8F
-                     : 5.5 + 4.3 * (v - 0x8F) / (0xFF - 0x8F);
-  *fall = 260 * pow(2.0, -reg[4] / 65.0);
-  *rise = reg[4] & 0x80 ? *fall / 16 : *fall;
+  // 54h and 56h add, in power with a part that 5Ah trims
+  *level = 10 * log10(c * c + x * x);
+  if (!(reg[2] & 0x80) && !(reg[3] & 0x80))
+    *level -= 12.4;
+  // 58h: one step of the gain every bits 3:0 + 1 ticks falling, and
+  // bits 7:4 + 1 times as many rising; 54h bit 7 alone stops the rise
+  *fall = 257.5 / ((reg[4] & 0x0F) + 1);
+  *rise = *fall / ((reg[4] >> 4) + 1);
+  if (!(reg[2] & 0x80) && (reg[3] & 0x80))
+    *rise = 0;
 }
 
 void s3dsim_reset(struct s3dsim *s, u32 rate) {
@@ -61,6 +71,7 @@ void s3dsim_regs(struct s3dsim *s, const u8 *reg) {
   first(200, s->rate, 1, s->hb);
   first(1000, s->rate, 0, s->lb);
   s->g = boost_gain(reg);
+  first(DETECT, s->rate, 1, s->db);
   s3dsim_limit(reg, &level, &fall, &rise);
   s->lim = pow(10.0, level / 20);
   s->f_down = pow(10.0, -fall / s->rate / 20);
@@ -84,8 +95,7 @@ static s16 to_s16(double v) {
 
 void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
   int on = (s->reg[0] & 0x0C) == 0x0C, model = s->reg[0] & 2;
-  double up = 1 - exp(-1.0 / (0.005 * s->rate));
-  double down = 1 - exp(-1.0 / (0.05 * s->rate));
+  double k = 1 - exp(-1.0 / (0.01 * s->rate));
   double l, r, m, sd, x, y, b;
   u16 i;
 
@@ -104,18 +114,23 @@ void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
       s->hy = y;
       b = s->g * s->ly * (model ? MODEL : 1);
       if (s->reg[0] & 1) {
-        // the limit: follow the M in and the S out, and move the boost's
-        // gain down while the S passes the level, and up otherwise
+        // the limit: follow the M in and the S out, this through a
+        // high-pass with 0 dB at 1 kHz, and move the boost's gain down
+        // while the S passes the level, and up otherwise
         b *= s->gain;
         x = (model ? sd * KEEP : sd) + b;
-        s->env_m += (fabs(m) - s->env_m) * (fabs(m) > s->env_m ? up : down);
-        s->env_s += (fabs(x) - s->env_s) * (fabs(x) > s->env_s ? up : down);
+        y = s->db[0] * x + s->db[1] * s->dx - s->db[2] * s->dy;
+        s->dx = x;
+        s->dy = y;
+        x = y * DETECT_1K;
+        s->env_m += (fabs(m) - s->env_m) * k;
+        s->env_s += (fabs(x) - s->env_s) * k;
         // (over -80 dBFS, so that silence doesn't count)
         s->gain *= s->env_s > s->lim * s->env_m + 1e-4 ? s->f_down : s->f_up;
         if (s->gain > 1)
           s->gain = 1;
-        if (s->gain < 0.001)
-          s->gain = 0.001;
+        if (s->gain < FLOOR)
+          s->gain = FLOOR;
       } else {
         s->gain = 1;
       }

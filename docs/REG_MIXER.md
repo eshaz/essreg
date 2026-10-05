@@ -353,9 +353,9 @@ DS p.62.
   p.62, docs/SPATIALIZER.md).
 * **0 3-D limit (undocumented)** (`fx.3d.limit`, bit, caution, profile,
   driver sets it). Reserved in the data sheet (write 0); ESS's drivers set
-  it from their 3D Limit setting, 0 by default. Measured: holds the S out
-  under the M by the level in 54h, moving the boost at the rate in 58h (DS
-  p.62, docs/SPATIALIZER.md).
+  it from their 3D Limit setting, 0 by default. Measured: holds the S out at
+  a level against the M that 54h-5Ah set, moving the boost at the rates in
+  58h (DS p.62, docs/SPATIALIZER.md).
 
 ### 52h 3-D level
 
@@ -376,18 +376,19 @@ Not in the data sheet.
 > No data sheet describes them (docs/SPATIALIZER.md).
 
 * **7:0 3-D limit level** (`fx.3d.reg54`, value, caution, profile, driver
-  sets it). Undocumented; ESS's drivers and Linux write 8Fh. Measured: with
-  the limit on, the S out it holds against the M, about -6 dB at 00h, +5.5
-  at 8Fh, +10 at FFh; nothing with it off (docs/SPATIALIZER.md).
+  sets it). Undocumented; ESS's drivers and Linux write 8Fh. Measured with
+  the limit on: bits 6:0 add to 56h's to raise the level it holds, +5.5 dB
+  over the M at 8Fh, +9.8 at FFh; bit 7 clear stops the boost coming back
+  (docs/SPATIALIZER.md).
 
-### 56h 3-D register 56h (undocumented)
+### 56h 3-D limit level 2 (undocumented)
 
 Not in the data sheet.
 
-* **7:0 3-D register 56h** (`fx.3d.reg56`, value, caution, profile, driver
-  sets it). Undocumented; ESS's drivers and Linux write 95h. Measured:
-  nothing with the limit off; with it on, FFh raised the level it holds as
-  54h at FFh does, 00h changed nothing. ess3d measure limit tries each bit
+* **7:0 3-D limit level 2** (`fx.3d.reg56`, value, caution, profile, driver
+  sets it). Undocumented; ESS's drivers and Linux write 95h. Measured with
+  the limit on: bits 6:0 add to 54h's to set the level it holds; bit 7 clear
+  with 54h's lowers that level about 12 dB. Nothing with the limit off
   (docs/SPATIALIZER.md).
 
 ### 58h 3-D limit speed (undocumented)
@@ -395,19 +396,20 @@ Not in the data sheet.
 Not in the data sheet.
 
 * **7:0 3-D limit speed** (`fx.3d.reg58`, value, caution, profile, driver
-  sets it). Undocumented; ESS's drivers and Linux write 94h. Measured: with
-  the limit on, how fast it moves the boost: about 260 dB a second at 00h,
-  51 down and a few up at 94h, 17 down at FFh; nothing with it off
+  sets it). Undocumented; ESS's drivers and Linux write 94h. Measured with
+  the limit on: the boost falls at 257/(n+1) dB a second, n = bits 3:0, and
+  rises h+1 times slower, h = bits 7:4: 52 and 5.2 dB a second at 94h
   (docs/SPATIALIZER.md).
 
-### 5Ah 3-D register 5Ah (undocumented)
+### 5Ah 3-D limit trim (undocumented)
 
 Not in the data sheet.
 
-* **7:0 3-D register 5Ah** (`fx.3d.reg5a`, value, caution, profile, driver
-  sets it). Undocumented; ESS's drivers and Linux write 80h. Measured:
-  nothing with the limit off; with it on, FFh raised the level it holds by
-  about 1 dB and 00h lowered it by about 1 dB (docs/SPATIALIZER.md).
+* **7:0 3-D limit trim** (`fx.3d.reg5a`, value, caution, profile, driver
+  sets it). Undocumented; ESS's drivers and Linux write 80h. Measured with
+  the limit on: a fine trim of the level it holds, by the byte less 80h,
+  from -1.2 dB at 00h to +1.0 dB at FFh. Nothing with the limit off
+  (docs/SPATIALIZER.md).
 
 ### 60h Left master volume and mute
 

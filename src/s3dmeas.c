@@ -150,6 +150,24 @@ static void add_vecs(struct s3d_meas *m, const u8 *from, int all, int base) {
   add_vec(m, "vec swap", from, 0x95, 0x8F, 0x94, base);
 }
 
+// the sign bits of 54h, 56h and 58h two at a time, and 54h and 56h with
+// both cleared at their ends, in step runs with the limit on: clearing
+// all three at once moved the level 12 dB on the card, and 54h's alone
+// stopped the rise
+static void add_signs(struct s3d_meas *m, const u8 *lim, int base) {
+  static const u8 v[5][3] = {{0x0F, 0x15, 0x94},
+                             {0x0F, 0x95, 0x14},
+                             {0x8F, 0x15, 0x14},
+                             {0x00, 0x00, 0x94},
+                             {0x7F, 0x7F, 0x94}};
+  static const char *const name[5] = {"L 54 56 b7", "L 54 58 b7", "L 56 58 b7",
+                                      "L 54,56=00", "L 54,56=7F"};
+  int i;
+
+  for (i = 0; i < 5; i++)
+    add_vec(m, name[i], lim, v[i][0], v[i][1], v[i][2], base);
+}
+
 // each bit of ESS's value of 54h-5Ah flipped, and each register at its
 // ends, in a step run with the limit on
 static void add_limit_bits(struct s3d_meas *m, const u8 *lim, int base) {
@@ -206,6 +224,12 @@ void s3d_init(struct s3d_meas *m, int plan, u8 reg, s3d_out_fn out, void *ctx) {
     add_limit_bits(m, lim, slim);
     add_reg(m, "L ", lim, S3D_R52, 0x20, "", S3D_STEP, slim);
     add_vecs(m, lim, 1, slim);
+    add_signs(m, lim, slim);
+    // relative to the M or a fixed level: the step 12 dB lower
+    m->run[add(m, "L -12 dB", lim, S3D_STEP, slim)].att = 12;
+    // the limit at each frequency, where a fast one gets there
+    band = add(m, "band", ess_set, S3D_BAND, ess);
+    add_reg(m, "band L ", lim, S3D_R58, 0x00, "", S3D_BAND, band);
   } else if (plan == S3D_PLAN_REG) {
     // one register: its ends with the limit off and with the model, then
     // every 10h with the limit on
@@ -347,7 +371,7 @@ u32 s3d_begin(struct s3d_meas *m, int i, u32 *rec_frames) {
   struct s3d_run *r = &m->run[i];
   u32 t = 0, s;
   int k, side, settle = r->slow ? 300 : 50;
-  double a, th;
+  double a, g, th;
 
   m->cur = i;
   m->nseg = m->nwin = 0;
@@ -359,6 +383,8 @@ u32 s3d_begin(struct s3d_meas *m, int i, u32 *rec_frames) {
   m->bstart = 0;
   m->nquiet = m->quiet_at = 0;
   m->e0 = 0;
+  m->disturbed = 0;
+  m->first_bad = -1;
   m->wcur = 0;
   m->wn = 0;
   m->peak = 0;
@@ -398,16 +424,17 @@ u32 s3d_begin(struct s3d_meas *m, int i, u32 *rec_frames) {
   case S3D_STEP:
     // the S tone's level steps where both tones are back at the start of
     // a cycle, so neither jumps in phase
-    a = AMP_M * pow(10.0, -12 / 20.0);
+    g = AMP_M * pow(10.0, -r->att / 20.0);
+    a = g * pow(10.0, -12 / 20.0);
     s = t;
-    t = seg_add(m, t, fr(STEP_LOW), 400, AMP_M, AMP_M, 1000, a, -a, 1);
+    t = seg_add(m, t, fr(STEP_LOW), 400, g, g, 1000, a, -a, 1);
     win_add(m, s + fr(STEP_LOW - 120), 100);
     s = t;
-    t = seg_add(m, t, fr(STEP_HIGH), 400, AMP_M, AMP_M, 1000, AMP_M, -AMP_M, 0);
+    t = seg_add(m, t, fr(STEP_HIGH), 400, g, g, 1000, g, -g, 0);
     step_windows(m, s, S3D_COARSE_UP);
     win_add(m, s + fr(STEP_HIGH - 120), 100);
     s = t;
-    t = seg_add(m, t, fr(STEP_DOWN), 400, AMP_M, AMP_M, 1000, a, -a, 2);
+    t = seg_add(m, t, fr(STEP_DOWN), 400, g, g, 1000, a, -a, 2);
     step_windows(m, s, S3D_COARSE_DN);
     win_add(m, s + fr(STEP_DOWN - 120), 100);
     break;
@@ -571,6 +598,43 @@ static void window_start(struct s3d_meas *m) {
   }
 }
 
+// whether a window's tone is steady, which it is in the runs with the
+// limit off that have one tone a window: the amplitudes of its halves
+// differ by 5 percent or more, or their phases by 15 degrees, which a
+// small difference of the two devices' clocks doesn't reach, while the
+// tone is 30 times over their noise
+static void check_halves(struct s3d_meas *m) {
+  const struct s3d_run *r = &m->run[m->cur];
+  const struct s3d_win *w = &m->win[m->wcur];
+  double nh = w->rlen / 2, a1 = 0, a2 = 0, cr = 0, ci = 0, noise;
+  double x[4], y[4];
+  int k;
+
+  if ((r->kind != S3D_SWEEP && r->kind != S3D_PAN) || (r->reg[S3D_R50] & 1) ||
+      m->seg[w->seg].t[1].hz)
+    return;
+  // the halves' sums at the tone, left I and Q, then right
+  for (k = 0; k < 4; k++) {
+    x[k] = m->half[k] * 2 / nh;
+    y[k] = (m->acc[0][k] - m->half[k]) * 2 / nh;
+    a1 += x[k] * x[k];
+    a2 += y[k] * y[k];
+  }
+  a1 = sqrt(a1);
+  a2 = sqrt(a2);
+  // the turn from the first half to the second, over both channels
+  for (k = 0; k < 4; k += 2) {
+    cr += x[k] * y[k] + x[k + 1] * y[k + 1];
+    ci += x[k + 1] * y[k] - x[k] * y[k + 1];
+  }
+  noise = 2 * m->sigma / sqrt(nh);
+  if (a1 + a2 < 60 * noise)
+    return;
+  if (fabs(a1 - a2) > 0.05 * (a1 + a2) / 2 || fabs(atan2(ci, cr)) > PI / 12)
+    if (!m->disturbed++)
+      m->first_bad = m->wcur;
+}
+
 // A sin(wn + p) gives sums of A n/2 cos(p) over sin(wn) and A n/2 sin(p)
 // over cos(wn): A e^(jp), turned back by the stimulus's own phase
 static void window_end(struct s3d_meas *m) {
@@ -578,6 +642,7 @@ static void window_end(struct s3d_meas *m) {
   double g = 2.0 / w->rlen, a, b, c, s;
   int j, ch;
 
+  check_halves(m);
   for (j = 0; j < 2; j++) {
     c = cos(w->psi[j]);
     s = sin(w->psi[j]);
@@ -714,7 +779,9 @@ int s3d_take(struct s3d_meas *m, const s16 *pcm, u16 n) {
           m->ps[j] *= t;
         }
       }
-      if (++m->wn >= m->win[m->wcur].rlen) {
+      if (++m->wn == m->win[m->wcur].rlen / 2)
+        memcpy(m->half, m->acc[0], sizeof(m->half));
+      if (m->wn >= m->win[m->wcur].rlen) {
         window_end(m);
         m->wn = 0;
         if (++m->wcur >= m->nwin)
@@ -1159,17 +1226,35 @@ static float step_db(const struct s3d_meas *m, int w, double a) {
 }
 
 static void step_end(struct s3d_meas *m, struct s3d_run *r) {
-  double a = AMP_M * pow(10.0, -12 / 20.0);
+  double g = AMP_M * pow(10.0, -r->att / 20.0), a = g * pow(10.0, -12 / 20.0);
   int k;
 
   for (k = 0; k < S3D_UP; k++)
-    r->u.st.up[k] = step_db(m, W_UP + k, AMP_M);
+    r->u.st.up[k] = step_db(m, W_UP + k, g);
   for (k = 0; k < S3D_DN; k++)
     r->u.st.dn[k] = step_db(m, W_DOWN + k, a);
   r->u.st.steady[0] = step_db(m, W_LOW, a);
-  r->u.st.steady[1] = step_db(m, W_HIGH, AMP_M);
+  r->u.st.steady[1] = step_db(m, W_HIGH, g);
   r->u.st.steady[2] = step_db(m, W_END, a);
   boost_ref(m, r, &r->u.st.b_re, &r->u.st.b_im);
+}
+
+// where a run skipped, for its report
+static void disturbed_line(struct s3d_meas *m) {
+  const struct s3d_run *r = &m->run[m->cur];
+  int k = m->first_bad;
+  char line[256];
+
+  strcpy(line, "     (the recording or the playback skipped in the window of ");
+  if (r->kind == S3D_PAN)
+    sprintf(line + strlen(line), "the pan at %.1f degrees", 22.5 * k);
+  else
+    sprintf(line + strlen(line), "the %s tone at %s", k < S3D_FREQS ? "M" : "S",
+            freq_name[k % S3D_FREQS]);
+  if (m->disturbed > 1)
+    sprintf(line + strlen(line), " and %d more", m->disturbed - 1);
+  strcat(line, ": the values from there on may be off)");
+  say(m, line);
 }
 
 int s3d_end(struct s3d_meas *m) {
@@ -1235,8 +1320,12 @@ int s3d_end(struct s3d_meas *m) {
   if (res & S3D_CLIPPED)
     say(m, "     (a recorded sample reached full scale: the values may be "
            "too low)");
+  if (m->disturbed)
+    disturbed_line(m);
   return res;
 }
+
+int s3d_disturbed(const struct s3d_meas *m) { return m->disturbed; }
 
 // a level in dBFS, from full scale 1, for a failed run's line
 static void dbfs(char *out, double v) {
@@ -1465,14 +1554,16 @@ static int traj_ms(int k) {
 
 static double traj_mid(int k) { return traj_ms(k) + (k < S3D_FINE ? 10 : 50); }
 
-// the slope of the boost's gain over windows k0 to k1, in dB a second, by
-// least squares over the values that aren't off
-static double slope(const float *v, int k0, int k1) {
+// the line through the boost's gain over the windows k0 to k1 whose
+// values lie between lo and hi, by least squares: its slope in dB a
+// second, and where it is at 0 ms; 0 with fewer than two of them
+static int fit(const float *v, int k0, int k1, double lo, double hi,
+               double *slope, double *at0) {
   double n = 0, st = 0, sv = 0, stt = 0, stv = 0, t, d;
   int k;
 
   for (k = k0; k <= k1; k++) {
-    if (!has(v[k]) || v[k] < OFF_DB)
+    if (!has(v[k]) || v[k] < OFF_DB || v[k] < lo || v[k] > hi)
       continue;
     t = traj_mid(k) / 1000;
     n++;
@@ -1482,16 +1573,68 @@ static double slope(const float *v, int k0, int k1) {
     stv += t * v[k];
   }
   d = n * stt - st * st;
-  return n >= 2 && d > 0 ? (n * stv - st * sv) / d : 0;
+  if (n < 2 || d <= 0)
+    return 0;
+  *slope = (n * stv - st * sv) / d;
+  *at0 = (sv - *slope * st) / n;
+  return (int)n;
+}
+
+// a ramp of windows k0 to k1 from about from to about to: the windows half
+// a dB past from and 1.5 dB short of to, or where that leaves fewer than
+// three, as with the fastest ramps, every one that isn't within 1 dB of to
+static int ramp(const float *v, int k0, int k1, double from, double to,
+                double *slope, double *at0) {
+  double big = 1000;
+
+  if (to < from) {
+    if (fit(v, k0, k1, to + 1.5, from - 0.5, slope, at0) >= 3)
+      return 1;
+    return fit(v, k0, k1, to + 1, big, slope, at0) >= 2;
+  }
+  if (fit(v, k0, k1, from + 0.5, to - 1.5, slope, at0) >= 3)
+    return 1;
+  return fit(v, k0, k1, -big, to - 1, slope, at0) >= 2;
+}
+
+// a value of the boost's gain, with off as its floor
+static double gain_or_off(double v) { return v < OFF_DB ? OFF_DB - 20 : v; }
+
+// the first window from k0 on within 1 dB of the extreme of windows k0 to
+// n - 1, the lowest for dir < 0 and the highest for dir > 0, and that
+// extreme
+static int reach(const float *v, int k0, int n, int dir, double *x) {
+  int k;
+
+  *x = gain_or_off(v[k0]);
+  for (k = k0; k < n; k++)
+    if (has(v[k]) && (dir < 0 ? gain_or_off(v[k]) < *x : v[k] > *x))
+      *x = gain_or_off(v[k]);
+  for (k = k0; k < n - 1; k++)
+    if (has(v[k]) && (dir < 0 ? gain_or_off(v[k]) <= *x + 1 : v[k] >= *x - 1))
+      break;
+  return k;
+}
+
+// the middle one of three values
+static double mid3(double a, double b, double c) {
+  if (a > b) {
+    double t = a;
+
+    a = b;
+    b = t;
+  }
+  return c < a ? a : c > b ? b : c;
 }
 
 int s3d_limit(const struct s3d_meas *m, int i, struct s3d_lim *l) {
   const struct s3d_run *r = &m->run[i];
   float up[S3D_UP], dn[S3D_DN], st[3];
-  int k0, k1;
+  double sl, at0, from, to;
+  int k0, k1, ok_fit;
 
   memset(l, 0, sizeof(*l));
-  l->delay = -1;
+  l->hold = -1;
   if (r->kind != S3D_STEP || !ok(r) || (r->u.st.b_re == 0 && r->u.st.b_im == 0))
     return -1;
   to_boost(r->u.st.up, S3D_UP, r->u.st.b_re, r->u.st.b_im, up);
@@ -1507,30 +1650,35 @@ int s3d_limit(const struct s3d_meas *m, int i, struct s3d_lim *l) {
     l->held = r->u.st.steady[1];
   else if (st[0] < -1 && st[0] > OFF_DB)
     l->held = r->u.st.steady[0] - 12;
-  // the fall: from the first window under the low level to the last one
-  // over the level it ends at, plus 3 dB
-  if (st[1] < st[0] - 6) {
-    for (k0 = 0; k0 < S3D_UP - 1 && up[k0] > st[0] - 1; k0++)
-      ;
-    for (k1 = k0; k1 < S3D_UP - 1 && up[k1 + 1] > st[1] + 3; k1++)
-      ;
-    l->fall = (float)-slope(up, k0 > 0 ? k0 - 1 : 0, k1);
-  }
-  // the rise: from the first window 3 dB over the level right after the
-  // step down, to the last one under the low level minus 3 dB; or else
-  // over the last second, where it may only just start
-  for (k0 = 1; k0 < S3D_DN && !(dn[k0] > dn[0] + 3); k0++)
+  // the fall, over the windows on the way down: off the low level by half
+  // a dB, and 1.5 dB short of where it ends
+  from = gain_or_off(st[0]);
+  k1 = reach(up, 0, S3D_UP, -1, &to);
+  if (to < from - 6 && ramp(up, 0, k1, from, to, &sl, &at0) && sl < -0.1)
+    l->fall = (float)-sl;
+  // the rise, the same way, from the first window after the step down that
+  // isn't off; the hold is how long the line through it takes to leave
+  // the level right after the step, the middle of the first three windows,
+  // since the first can have the step's own transient
+  for (k0 = 0; k0 < S3D_DN - 3 && (!has(dn[k0]) || dn[k0] < OFF_DB); k0++)
     ;
-  if (k0 < S3D_DN) {
-    l->delay = traj_ms(k0);
-    for (k1 = k0; k1 < S3D_DN - 1 && dn[k1 + 1] < st[0] - 3; k1++)
-      ;
-    l->rise = (float)slope(dn, k0 - 1, k1 > k0 ? k1 : k0 + 1);
-  } else {
-    l->rise = (float)slope(dn, S3D_DN - 10, S3D_DN - 1);
+  from = mid3(dn[k0], dn[k0 + 1], dn[k0 + 2]);
+  k1 = reach(dn, k0, S3D_DN, 1, &to);
+  if (!has(from) || to < dn[k0] + 1)
+    return 0;
+  if (to < from + 3)
+    // a short rise: all of it
+    ok_fit = fit(dn, k0, k1 > k0 ? k1 : k0 + 1, from - 1, to + 1, &sl, &at0);
+  else
+    ok_fit = ramp(dn, k0, k1, dn[k0] < from ? dn[k0] : from, to, &sl, &at0);
+  if (ok_fit && sl > 0.1) {
+    l->rise = (float)sl;
+    if (k0 == 0) {
+      l->hold = (int)floor((from - at0) / sl * 1000 - traj_mid(0) + 0.5);
+      if (l->hold < 0)
+        l->hold = 0;
+    }
   }
-  if (l->rise < 0.1)
-    l->rise = 0;
   return 0;
 }
 
@@ -1563,7 +1711,7 @@ static void summary_steps(struct s3d_meas *m) {
              "and back; fall and rise in dB a second, held the S out it holds "
              "against the M in");
       say(m, "run  name           50 52 54 56 58 5A    fall  high   low    "
-             "held  delay   rise  again");
+             "held   hold   rise  again");
       say(m, "                                         dB/s    dB    dB  dB re "
              "M     ms   dB/s     dB");
     }
@@ -1578,8 +1726,8 @@ static void summary_steps(struct s3d_meas *m) {
       sprintf(line + strlen(line), "%+8.1f", tidy(l.held));
     else
       strcat(line, "       -");
-    if (l.delay >= 0)
-      sprintf(line + strlen(line), "%7d", l.delay);
+    if (l.rise > 0 && l.hold >= 0)
+      sprintf(line + strlen(line), "%7d", (l.hold + 5) / 10 * 10);
     else
       strcat(line, "      -");
     if (l.rise > 0)

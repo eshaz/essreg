@@ -34,7 +34,8 @@ static char report[MAX_LINES][240];
 static int nlines;
 static long report_bytes;
 static int verbose;
-static int click; // a DAC's click and its settling in the first 50 ms
+static int click;   // a DAC's click and its settling in the first 50 ms
+static u32 skip_at; // a recorded frame where the recording skips, or 0
 
 static void out(void *ctx, const char *line) {
   (void)ctx;
@@ -102,9 +103,20 @@ static int run_sim(int i, u32 lead) {
     s3d_fill(&meas, play, n);
     s3dsim_run(&sim, play, rec, n);
     add_click(rec, n, fed);
-    full = s3d_take(&meas, rec, n);
+    if (skip_at && fed <= skip_at && skip_at < fed + n) {
+      // the recording loses 1000 frames, 21 ms
+      full = s3d_take(&meas, rec, (u16)(skip_at - fed));
+      if (!full && n > skip_at - fed + 1000)
+        full = s3d_take(&meas, rec + 2 * (skip_at - fed + 1000),
+                        (u16)(n - (skip_at - fed + 1000)));
+    } else {
+      full = s3d_take(&meas, rec, n);
+    }
     fed += n;
   }
+  // a steady tone has the same amplitude in both halves of its window
+  if (!skip_at)
+    CHECK_EQ(s3d_disturbed(&meas), 0);
   return s3d_end(&meas);
 }
 
@@ -250,8 +262,8 @@ static void model_pan(int i, double th, double *deg, double *lev) {
 }
 
 // what s3d_limit finds in step run i against the effect's own limit: its
-// level where it holds the boost, its fall, and its rise where it isn't
-// too slow to see
+// level where it holds the boost, and its fall and rise where it fell, or
+// no rise where the effect has none
 static void check_limit(int i) {
   struct s3d_lim l;
   double level, fall, rise;
@@ -263,15 +275,17 @@ static void check_limit(int i) {
   s3dsim_limit(reg, &level, &fall, &rise);
   if (has(l.held))
     bad |= fabs(l.held - level) > 0.3;
-  if (l.fall > 0)
-    bad |= fabs(l.fall - fall) > 0.1 * fall;
-  if (l.rise > 0 && l.delay >= 0)
-    bad |= fabs(l.rise - rise) > 0.2 * rise;
+  if (l.fall > 0) {
+    bad |= fabs(l.fall - fall) > 0.05 * fall;
+    bad |= rise > 0 ? fabs(l.rise - rise) > 0.1 * rise : l.rise != 0;
+    bad |= l.rise > 0 && l.hold >= 0 && l.hold > 50;
+  }
   CHECK(!bad);
   if (bad)
-    printf("  run %s: held %.1f fall %.1f rise %.1f, the effect %.1f %.1f "
-           "%.1f\n",
-           s3d_name(&meas, i), l.held, l.fall, l.rise, level, fall, rise);
+    printf("  run %s: held %.1f fall %.1f rise %.1f hold %d, the effect %.1f "
+           "%.1f %.1f\n",
+           s3d_name(&meas, i), l.held, l.fall, l.rise, l.hold, level, fall,
+           rise);
 }
 
 static void check_report_lines(void) {
@@ -283,7 +297,7 @@ static void check_report_lines(void) {
       printf("  too long: %s\n", report[i]);
   }
   // Notepad opens it on Windows 98 (64 KB at most)
-  CHECK(report_bytes < 60000);
+  CHECK(report_bytes < 62000);
 }
 
 static void test_quick_plan(void) {
@@ -376,13 +390,14 @@ static void test_quick_plan(void) {
   CHECK(run(pan)->u.pa.deg[0] < -20 && run(pan)->u.pa.deg[4] > 110);
   CHECK(run(panlim)->u.pa.deg[0] > run(pan)->u.pa.deg[0] + 5);
   // step runs: the boost stays with the limit off, and with it on the
-  // limit holds it at +5.5 dB re M, falls at 53 dB a second and rises at
-  // a 16th of that
+  // limit holds it at +5.5 dB re M, falls at 51.5 dB a second and rises
+  // ten times slower, from the step down on
   CHECK_EQ(s3d_limit(&meas, step, &l), 0);
   CHECK(l.fall == 0 && fabs(l.high) < 0.2 && !has(l.held));
   check_limit(steplim);
   CHECK_EQ(s3d_limit(&meas, steplim, &l), 0);
-  CHECK(l.fall > 45 && l.rise > 2.5 && l.rise < 4.5 && l.delay > 0);
+  CHECK(l.fall > 50 && l.fall < 53 && l.rise > 5 && l.rise < 5.3);
+  CHECK(l.hold >= 0 && l.hold < 30);
   CHECK_EQ(s3d_limit(&meas, ess, &l), -1);
 
   // the report
@@ -403,11 +418,11 @@ static void test_quick_plan(void) {
   CHECK(strstr(report[find_from(line, "  4  model")], "M>S appears"));
   CHECK(strstr(report[find_from(line, " 24  off again")], "no change"));
   CHECK(find_line("ratio limit: from S/M -24 to +6 dB, S>S at 1 kHz changes "
-                  "by -16.1 dB; it holds S out at +5.5 to +5.5 dB re M") > 0);
+                  "by -16.1 dB; it holds S out at +5.4 to +5.4 dB re M") > 0);
   CHECK(find_line("pan: 0, 22.5, 45, 67.5 and 90 degrees come out at -") > 0);
   CHECK(find_line("limit: the boost's gain in the step runs") > 0);
-  CHECK(find_line(" 22  step limit     0D 3F 8F 95 94 80      54 -15.4  +0.0 "
-                  "   +5.5") > 0);
+  CHECK(find_line(" 22  step limit     0D 3F 8F 95 94 80      51 -15.6  +0.0 "
+                  "   +5.4     20    5.1   +0.0") > 0);
   check_report_lines();
 }
 
@@ -434,9 +449,9 @@ static void test_full_plan(void) {
   for (i = 0; i < s3d_count(&meas); i++)
     if (run(i)->kind == S3D_STEP && (run(i)->reg[0] & 1))
       check_limit(i);
-  CHECK(find_line("fall: from 17 dB/s (run 43, L 58=FF) to 261 dB/s (run 42, "
+  CHECK(find_line("fall: from 16 dB/s (run 43, L 58=FF) to 258 dB/s (run 42, "
                   "L 58=00)") > 0);
-  CHECK(find_line("held: S out from -5.6 dB re M (run 38, L 54=00) to +9.8 dB "
+  CHECK(find_line("held: S out from -6.9 dB re M (run 47, vec neg) to +9.8 dB "
                   "(run 39, L 54=FF)") > 0);
   check_report_lines();
   if (verbose)
@@ -444,13 +459,15 @@ static void test_full_plan(void) {
 }
 
 static void test_limit_plan(void) {
+  struct s3d_lim a, b;
   int i, n = 0;
 
   s3d_init(&meas, S3D_PLAN_LIMIT, 0, out, 0);
-  CHECK_EQ(s3d_count(&meas), 54);
-  CHECK(s3d_seconds(&meas) > 360 && s3d_seconds(&meas) < 480);
+  CHECK_EQ(s3d_count(&meas), 62);
+  CHECK(s3d_seconds(&meas) > 420 && s3d_seconds(&meas) < 540);
   CHECK(run_named("L 54=0F b7") > 0 && run_named("L 5A=81 b0") > 0);
   CHECK(run_named("52=20") < run_named("L 52=20"));
+  CHECK(run_named("L 54 56 b7") > 0 && run_named("L 54,56=7F") > 0);
   run_plan(S3D_PLAN_LIMIT, 0, 0);
   // every bit of 54h-5Ah, against the effect's limit
   for (i = 0; i < s3d_count(&meas); i++)
@@ -458,8 +475,18 @@ static void test_limit_plan(void) {
       check_limit(i);
       n++;
     }
-  CHECK_EQ(n, 47);
-  CHECK(find_line("plan: limit, 54 runs") == 1);
+  CHECK_EQ(n, 53);
+  // the effect's limit holds the S against the M, whatever their level
+  CHECK_EQ(s3d_limit(&meas, run_named("step limit"), &a), 0);
+  CHECK_EQ(s3d_limit(&meas, run_named("L -12 dB"), &b), 0);
+  CHECK(run(run_named("L -12 dB"))->att == 12);
+  CHECK(fabs(a.held - b.held) < 0.3 && fabs(a.fall - b.fall) < 2.5);
+  // a fast limit gets to the level at each frequency, which its high-pass
+  // raises under 1 kHz
+  i = run_named("band L 58=00");
+  CHECK(i > 0 && fabs(val(i, 1, 6) - a.held) < 0.6);
+  CHECK(i > 0 && val(i, 1, 2) > a.held + 4);
+  CHECK(find_line("plan: limit, 62 runs") == 1);
   check_report_lines();
   if (verbose)
     printf("limit report: %d lines, %ld bytes\n", nlines, report_bytes);
@@ -483,12 +510,13 @@ static void test_one_register(void) {
   CHECK_EQ(s3d_count(&meas), 25);
 }
 
-// a recording at 44,194 Hz of a stimulus played at 48 kHz: the stimulus,
-// sampled where the recorder's clock puts it
-static void test_other_rate(void) {
-  u32 rec_frames, r, rate_rec = 44194;
+// run 0 recorded at rate Hz, where the report says rate_rec, of the
+// stimulus played at 48 kHz: the stimulus, sampled where the recorder's
+// clock puts it
+static int record_at(double rate, u32 rate_rec) {
+  u32 rec_frames, r;
   double pos, l, rr;
-  int full = 0, res, k;
+  int full = 0;
   u16 n;
 
   nlines = 0;
@@ -498,15 +526,25 @@ static void test_other_rate(void) {
   // the recording starts 70 ms before the playback
   for (r = 0; !full && r < rec_frames; r += n) {
     for (n = 0; n < BLOCK; n++) {
-      pos = ((double)(r + n) / rate_rec - 0.070) * S3D_RATE;
+      pos = ((double)(r + n) / rate - 0.070) * S3D_RATE;
       s3d_signal(&meas, pos, &l, &rr);
       rec[2 * n] = (s16)floor(0.4 * l * 32767 + 0.5);
       rec[2 * n + 1] = (s16)floor(0.4 * rr * 32767 + 0.5);
     }
     full = s3d_take(&meas, rec, n);
   }
-  res = s3d_end(&meas);
-  CHECK_EQ(res, S3D_OK);
+  return s3d_end(&meas);
+}
+
+// a recording at 44,194 Hz, and one whose clock is 30 ppm off the
+// playback's, which turns a 10 kHz tone by 5 degrees in half a window
+static void test_other_rate(void) {
+  int k;
+
+  CHECK_EQ(record_at(48000 * (1 + 30e-6), 48000), S3D_OK);
+  CHECK_EQ(s3d_disturbed(&meas), 0);
+  CHECK_EQ(record_at(44194, 44194), S3D_OK);
+  CHECK_EQ(s3d_disturbed(&meas), 0);
   for (k = 0; k < S3D_FREQS; k++) {
     CHECK(fabs(meas.ref_mm[k] - 0.4) < 0.004);
     CHECK(fabs(meas.ref_ss[k] - 0.4) < 0.004);
@@ -531,6 +569,31 @@ static void test_click(void) {
   click = 0;
   check_path(1, 1, 0.15);
   check_path(0, 2, 0.3);
+}
+
+// the recording skips 21 ms in the window of the 1 kHz S tone: the halves
+// of that window, and of the ones after it, differ
+static void test_skip(void) {
+  int line;
+
+  nlines = 0;
+  s3d_init(&meas, S3D_PLAN_QUICK, 0, out, 0);
+  s3dsim_reset(&sim, S3D_RATE);
+  s3d_header(&meas, S3D_RATE, S3D_RATE, 0);
+  CHECK_EQ(run_sim(0, 2000), S3D_OK);
+  // 2000 frames of lead, the delay, 350 ms before the tones, 16 tones of
+  // 160 ms, and 80 ms into the next
+  skip_at = 2000 + S3DSIM_DELAY + 48 * (350 + 16 * 160 + 80);
+  CHECK_EQ(run_sim(1, 2000) & ~S3D_CLIPPED, S3D_OK);
+  CHECK(s3d_disturbed(&meas) >= 2);
+  line = find_line("     (the recording or the playback skipped in the window "
+                   "of the S tone at 1k and ");
+  CHECK(line > 0 && strstr(report[line], "the values from there on may be "
+                                         "off)"));
+  skip_at = 0;
+  // the run again is good
+  CHECK_EQ(run_sim(1, 2000), S3D_OK);
+  CHECK_EQ(s3d_disturbed(&meas), 0);
 }
 
 static void test_no_signal(void) {
@@ -570,6 +633,7 @@ int main(int argc, char **argv) {
   test_one_register();
   test_other_rate();
   test_click();
+  test_skip();
   test_no_signal();
   return CHECK_DONE("t_s3dmeas");
 }

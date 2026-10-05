@@ -40,6 +40,11 @@
  * Every plan ends with the effect off again, which shows how much the
  * path from the DAC to the ADC moved during the measurement.
  *
+ * A tone that is steady gives the same amplitude in both halves of its
+ * window. In the runs with the limit off, a window whose halves differ
+ * counts as disturbed: the recording or the playback skipped there, and
+ * s3d_disturbed lets the program measure the run again.
+ *
  * The engine doesn't touch the chip or Windows: the program around it
  * writes each run's registers, plays what s3d_fill gives, hands over what
  * it records through s3d_take, and writes the report lines that come to
@@ -74,7 +79,7 @@
 #define S3D_PLAN_FULL 0  // every kind of run below, about 6 minutes
 #define S3D_PLAN_QUICK 1 // each kind once or twice, about 2 minutes
 #define S3D_PLAN_REG 2   // one register from 00h to FFh, with the limit
-#define S3D_PLAN_LIMIT 3 // each bit of 54h-5Ah with the limit, 7 minutes
+#define S3D_PLAN_LIMIT 3 // each bit of 54h-5Ah with the limit, 8 minutes
 
 // kinds of runs
 #define S3D_SWEEP 0
@@ -129,6 +134,7 @@ struct s3d_run {
   u8 kind;   // S3D_SWEEP to S3D_BAND
   u8 base;   // the run the summary compares it with
   u8 slow;   // the limit is on: longer settling
+  u8 att;    // step runs: every tone this many dB lower
   u8 result; // s3d_end's, 0xFF before the run
   union {
     struct {
@@ -163,7 +169,7 @@ struct s3d_lim {
   float held;
   float fall; // dB a second after the step up, 0 if it holds
   float rise; // dB a second after the step down, 0 if none
-  int delay;  // ms before it rises 3 dB, -1 if it doesn't
+  int hold;   // ms after the step down before it rises, -1 if unknown
 };
 
 struct s3d_meas {
@@ -196,6 +202,9 @@ struct s3d_meas {
   int wcur;
   u32 wn;
   double acc[2][4]; // [tone]: I and Q of the left, then of the right
+  double half[4];   // tone 0's in the first half of the window
+  int disturbed;    // windows whose halves differ
+  int first_bad;    // the first of them
   double pc[2], ps[2], wc[2], ws[2];
   u16 peak;
 };
@@ -234,6 +243,10 @@ int s3d_end(struct s3d_meas *m);
 
 // a run that failed twice goes in the report as such
 void s3d_failed(struct s3d_meas *m, const char *why);
+
+// the windows of the run so far whose halves differ, where the recording
+// or the playback skipped: 0 for a good run
+int s3d_disturbed(const struct s3d_meas *m);
 
 // the summary after the last run
 void s3d_summary(struct s3d_meas *m);

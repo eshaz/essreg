@@ -8,7 +8,7 @@
  *
  *   quick      each kind of run once or twice, about 2 minutes, instead
  *              of every kind, about 6 minutes
- *   limit      each bit of 54h-5Ah with the limit on, about 7 minutes
+ *   limit      each bit of 54h-5Ah with the limit on, about 8 minutes
  *   54 ... 5A  one register from 00h to FFh in steps of 10h, with the
  *              limit on
  *   /out=file  the report, ESS3D.TXT in ess3d's directory if left out
@@ -113,10 +113,11 @@ static int in_queued, out_queued, next_in, next_out;
 static u32 play_left, rec_left;
 static int state, cur, tries, full, first = 1, cancel, nfailed;
 static int saved[NSAVED];
-static int marked;  // ESS3D.RST written
-static int changed; // the mixer may differ from saved[]
-static FILE *rep;   // the report
-static int rep_bad; // writing it failed
+static int marked;   // ESS3D.RST written
+static int changed;  // the mixer may differ from saved[]
+static FILE *rep;    // the report
+static int rep_bad;  // writing it failed
+static long rep_len; // its bytes, with the line ends
 static char rep_tmp[144], rep_path[144];
 static char dev_out[40], dev_in[40];
 static DWORD t_start, t_run, t_last;
@@ -148,6 +149,7 @@ static void out_line(void *ctx, const char *line) {
     return;
   if (fputs(line, rep) < 0 || fputs("\n", rep) < 0)
     rep_bad = 1;
+  rep_len += (long)strlen(line) + 2;
 }
 
 // the report on the disk after each run, for a crash; 0 or -1 when the
@@ -697,6 +699,16 @@ static void end_run(int stalled) {
     waveInReset(hwi);
   }
   in_queued = out_queued = 0;
+  // a skip in the recording or the playback: once more
+  if (!stalled && s3d_disturbed(meas) && !tries) {
+    sprintf(text,
+            "ess3d measure: run %d (%s) skipped in %d windows, measured again",
+            cur, s3d_name(meas, cur), s3d_disturbed(meas));
+    log_line(text);
+    tries++;
+    PostMessage(dlg, WM_M_NEXT, 0, 0);
+    return;
+  }
   res = stalled ? S3D_SHORT : s3d_end(meas);
   if (res & (S3D_NOSIGNAL | S3D_SHORT)) {
     sprintf(text, "ess3d measure: run %d (%s) %s", cur, s3d_name(meas, cur),
@@ -945,10 +957,13 @@ static void start(void) {
   PostMessage(dlg, WM_M_NEXT, 0, 0);
 }
 
+// in Notepad, or in WordPad (write.exe starts it) when it's too big for
+// Notepad's 64 KB
 static void open_report(void) {
   char line[160];
 
-  sprintf(line, "notepad.exe %.140s", rep_path);
+  sprintf(line, "%s %.140s", rep_len > 60000L ? "write.exe" : "notepad.exe",
+          rep_path);
   WinExec(line, SW_SHOWNORMAL);
 }
 
