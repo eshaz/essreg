@@ -700,10 +700,10 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
      whose mixer was set late or changed, and for each run measured again
      after a skip.
    * Run `C:\ESSREG\ESS3D.EXE measure window /out=C:\ESSREG\WINDOW.TXT`,
-     about 3.5 minutes, and keep `WINDOW.TXT`. If the limit works as
+     about 4 minutes, and keep `WINDOW.TXT`. If the limit works as
      [SPATIALIZER.md](SPATIALIZER.md#what-the-undocumented-bits-and-registers-do)
-     describes, its *levels* table gives K +4.3 dB for every group, and its
-     *W 8F FF* run ends with the boost where it was held.
+     describes, its *fit* line comes within about 0.25 dB of every run, and
+     its *W3 8F FF* run ends with the boost where it was held.
    * Check that the mixer is as it was: the master volume, the Windows
      mixer's levels and the 3-D setting are back.
    * Run `ess3d measure quick` and end it with Ctrl+Alt+Del in the middle.

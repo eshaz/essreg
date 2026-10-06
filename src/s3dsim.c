@@ -14,21 +14,19 @@
 
 #define PI 3.14159265358979
 #define GAIN 0.5
-#define RIGHT 0.975      // the right channel's level against the left
-#define PEAK 8.2         // the boost's gain for 16.7 dB at its peak
-#define MODEL 0.70710678 // the model's S, 3 dB under the boost
-#define KEEP (1.0 / 32)  // the input's S that the model keeps
-#define DETECT 420.0     // the limit's high-pass on the S it follows
-#define FLOOR 0.0045     // and the least gain it leaves, -47 dB
-#define DETECT_1K 1.0844 // and its gain at 1 kHz brought to 0 dB
-#define K_SET 1.643      // a level's part re the M, bit 7 set, +4.3 dB
-#define K_CLEAR 0.228    // and bit 7 clear, -12.8 dB
-#define RISE 1.08        // 54h's level for the rise, 0.67 dB higher
-#define ENV 0.002        // each stage of the envelopes, seconds
-// a level's fixed part for each step of its bits 6:0 with 5Ah at 80h:
-// 0.01116 of the M the card was measured with, -24 dBFS in each channel,
-// as it reaches the effect
-#define D_STEP (0.01116 * 0.0625 * (1 + RIGHT) / 2)
+#define RIGHT 0.975       // the right channel's level against the left
+#define PEAK 8.2          // the boost's gain for 16.7 dB at its peak
+#define MODEL 0.70710678  // the model's S, 3 dB under the boost
+#define KEEP (1.0 / 32)   // the input's S that the model keeps
+#define DETECT 420.0      // the limit's high-pass on the S it follows
+#define FLOOR 0.0045      // and the least gain it leaves, -47 dB
+#define DETECT_1K 1.0844  // and its gain at 1 kHz brought to 0 dB
+#define K_STEP (1 / 91.2) // a level's part re the M, a step of 54h or 56h
+#define RISE 1.06         // 54h's level for the rise, 0.5 dB higher
+#define ENV 0.002         // each stage of the envelopes, seconds
+// the levels' fixed part for each step of 5Ah: 0.00188 of the M the card
+// was measured with, -24 dBFS in each channel, as it reaches the effect
+#define D_STEP (0.00188 * 0.0625 * (1 + RIGHT) / 2)
 
 // a first-order section by the bilinear transform: b0 b1 a1
 static void first(double hz, u32 rate, int high, double *c) {
@@ -50,18 +48,13 @@ void s3dsim_speed(const u8 *reg, double *fall, double *rise) {
   *rise = *fall / ((reg[4] >> 4) + 1);
 }
 
-// the part of the level of 54h or 56h (v) re the M, and its fixed part,
-// which 5Ah scales
-static double level_k(u8 v) { return v & 0x80 ? K_SET : K_CLEAR; }
-
-static double level_d(u8 v, u8 r5a) { return D_STEP * (v & 0x7F) * r5a / 128; }
-
 void s3dsim_levels(const u8 *reg, double m, double *rise, double *fall) {
   double mi = m * (1 + RIGHT) / 2, a, b;
 
-  // both levels where the effect compares them, against the M there
-  a = level_k(reg[2]) * mi + level_d(reg[2], reg[5]);
-  b = level_k(reg[3]) * mi + level_d(reg[3], reg[5]);
+  // both levels where the effect compares them, against the M there: 54h
+  // or 56h over 91.2 times the M, and 5Ah's fixed part
+  a = K_STEP * reg[2] * mi + D_STEP * reg[5];
+  b = K_STEP * reg[3] * mi + D_STEP * reg[5];
   *rise = 20 * log10(a * RISE / mi);
   *fall = 20 * log10((b > a ? b : a) / mi);
 }
@@ -91,8 +84,8 @@ void s3dsim_regs(struct s3dsim *s, const u8 *reg) {
   // the envelopes are means of the absolute value, 2 / pi of a tone's
   // amplitude
   for (i = 0; i < 2; i++) {
-    s->k[i] = level_k(reg[2 + i]);
-    s->d[i] = 2 / PI * level_d(reg[2 + i], reg[5]);
+    s->k[i] = K_STEP * reg[2 + i];
+    s->d[i] = 2 / PI * D_STEP * reg[5];
   }
   s3dsim_speed(reg, &fall, &rise);
   s->f_down = pow(10.0, -fall / s->rate / 20);

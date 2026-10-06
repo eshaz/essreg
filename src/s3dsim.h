@@ -16,13 +16,13 @@
  * and keeps only a 32nd of the input's own S.
  *
  * 50h bit 0, the limit, compares the S out with a level from 54h and one
- * from 56h. Each is K M + D: M is the M in, K is 1.643 (+4.3 dB) with the
- * register's bit 7 set and 0.228 (-12.8 dB) with it clear, and D is a
- * fixed part, the register's bits 6:0 times 5Ah / 80h times 0.01116 of the
- * M that the card was measured with, -24 dBFS. The boost's gain falls
- * while the S out is over both levels and rises while it is under 54h's
- * level made 0.67 dB higher, both at once where both hold: with ESS's
- * values and that M, the S out settles at 56h's level, +5.5 dB re M. The
+ * from 56h. Each is the register's value, 00h to FFh, over 91.2 times the
+ * M in, plus a fixed part that 5Ah sets: 0.00188 of the M that the card
+ * was measured with, -24 dBFS, for each step, or -36.5 dBFS at 80h. The
+ * boost's gain falls while the S out is over both levels and rises while
+ * it is under 54h's level made 0.5 dB higher, both at once where both
+ * hold: with ESS's values and that M, the S out settles at 56h's level,
+ * +5.5 dB re M. The
  * limit follows the mean of the S out through a high-pass at 420 Hz, so
  * it hardly acts on bass, against the mean of the M, both through two
  * 2 ms stages, about 4 ms late as on the card, and leaves the boost at

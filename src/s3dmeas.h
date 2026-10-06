@@ -83,7 +83,7 @@
 #define S3D_PLAN_QUICK 1  // each kind once or twice, about 2 minutes
 #define S3D_PLAN_REG 2    // one register from 00h to FFh, with the limit
 #define S3D_PLAN_LIMIT 3  // each bit of 54h-5Ah with the limit, 8 minutes
-#define S3D_PLAN_WINDOW 4 // the limit's two levels, 3.5 minutes
+#define S3D_PLAN_WINDOW 4 // the limit's two levels, 4 minutes
 
 // kinds of runs
 #define S3D_SWEEP 0
@@ -141,6 +141,7 @@ struct s3d_run {
   u8 slow;   // the limit is on: longer settling
   u8 att;    // step runs: every tone this many dB lower
   u8 drop;   // and the S after the step down, dB under the M; 0 for 12
+  u16 mhz;   // and the M tone's frequency, 0 for 400 Hz
   u8 result; // s3d_end's, 0xFF before the run
   union {
     struct {

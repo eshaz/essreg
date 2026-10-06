@@ -485,8 +485,11 @@ static void test_full_plan(void) {
       check_limit(i);
   i = find_line("fall: from 16 dB/s (run ");
   CHECK(i > 0 && strstr(report[i], "to 258 dB/s (run 42, L 58=00)"));
-  CHECK(find_line("held: S out from -6.8 dB re M (run 47, vec neg) to +9.7 dB "
+  CHECK(find_line("held: S out from -6.6 dB re M (run 47, vec neg) to +9.6 dB "
                   "(run 39, L 54=FF)") > 0);
+  // one model for the level of every step run
+  CHECK(find_line("fit: S out held = M x the higher of 54h and 56h / 91.6 + "
+                  "-36.5 dBFS x 5Ah / 80h, from 14 runs: within 0.12 dB") > 0);
   check_report_lines();
   if (verbose)
     printf("full report: %d lines, %ld bytes\n", nlines, report_bytes);
@@ -532,50 +535,65 @@ static void test_window_plan(void) {
   int i, n = 0, line;
 
   s3d_init(&meas, S3D_PLAN_WINDOW, 0, out, 0);
-  CHECK_EQ(s3d_count(&meas), 27);
-  CHECK(s3d_seconds(&meas) > 180 && s3d_seconds(&meas) < 240);
+  CHECK_EQ(s3d_count(&meas), 31);
+  CHECK(s3d_seconds(&meas) > 210 && s3d_seconds(&meas) < 280);
   CHECK(run(run_named("L -18 dB"))->att == 18);
-  CHECK(run(run_named("W 8F FF"))->drop == 3 &&
+  CHECK(run(run_named("W3 8F FF"))->drop == 3 &&
+        run(run_named("W18 0F FF"))->drop == 18 &&
         !run(run_named("L 3F 3F"))->drop);
+  CHECK(run(run_named("L M 160 Hz"))->mhz == 160 &&
+        !run(run_named("L 7F 00"))->mhz);
   run_plan(S3D_PLAN_WINDOW, 0, 0);
   for (i = 0; i < s3d_count(&meas); i++)
     if (run(i)->kind == S3D_STEP && (run(i)->reg[0] & 1)) {
       check_limit(i);
       n++;
     }
-  CHECK_EQ(n, 23);
+  CHECK_EQ(n, 27);
   // the window: with ESS's values, and with 54h's level over 56h's, the
   // boost rises back to where it was held, while with 56h's level over
-  // 54h's it stays where it was
-  CHECK_EQ(s3d_limit(&meas, run_named("W 8F 95"), &l), 0);
+  // 54h's it stays where it was, unless the S drops under 54h's level, and
+  // then it rises to that
+  CHECK_EQ(s3d_limit(&meas, run_named("W3 8F 95"), &l), 0);
   CHECK(l.rises_is == 0 && l.rise > 4.5 && fabs(l.rises - l.held) < 0.3);
-  CHECK_EQ(s3d_limit(&meas, run_named("W FF 8F"), &l), 0);
+  CHECK_EQ(s3d_limit(&meas, run_named("W3 FF 8F"), &l), 0);
   CHECK(l.rises_is == 0 && fabs(l.rises - l.held) < 0.3);
-  CHECK_EQ(s3d_limit(&meas, run_named("W 8F FF"), &l), 0);
+  CHECK_EQ(s3d_limit(&meas, run_named("W3 8F FF"), &l), 0);
   CHECK(l.rises_is < 0 && l.rise == 0 && fabs(l.again - l.high) < 0.3);
-  // with 54h's bit 7 clear it never rises from 12 dB under
+  CHECK_EQ(s3d_limit(&meas, run_named("W6 8F FF"), &l), 0);
+  CHECK(l.rises_is == 0 && fabs(l.rises - 5.7) < 0.2);
+  // with 54h at 00h it never rises from 12 dB under
   CHECK_EQ(s3d_limit(&meas, run_named("L 00 7F"), &l), 0);
   CHECK(l.rises_is < 0 && l.rise == 0);
-  // with 54h and 56h at 00h and both sign bits clear, the boost is off
-  // even at -12 dB S/M
+  // with 54h and 56h at 3Fh, the limit holds the S out at -0.6 dB re M,
+  // so the boost is off at 0 dB S/M
   CHECK_EQ(s3d_limit(&meas, run_named("L 3F 3F"), &l), 0);
   CHECK(l.high < -40 && has(l.held) && l.held < -0.3 && l.held > -1.0);
-  // K M + D: K is the same everywhere, and D grows with 54h and 5Ah
+  // K M + D: K follows the higher of 54h and 56h, and D only 5Ah
   line = find_line("levels: ");
   CHECK(line > 0);
-  CHECK(find_from(line, "  3  step limit     0D 3F 8F 95 94 80     +4.3   "
-                        "-36.9  3, 4, 5, 6, 19") > 0);
-  CHECK(find_from(line, "  7  L 5A=00        0D 3F 8F 95 94 00     +4.3       "
+  CHECK(find_from(line, "  3  step limit     0D 3F 8F 95 94 80     +4.2   "
+                        "-36.4  3, 4, 5, 6, 19") > 0);
+  CHECK(find_from(line, "  7  L 5A=00        0D 3F 8F 95 94 00     +4.2       "
                         "-  7, 8") > 0);
-  CHECK(find_from(line, " 12  L 54=AF        0D 3F AF 95 94 80     +4.3   "
-                        "-29.6  12, 13") > 0);
-  CHECK(find_from(line, " 14  L 80 80        0D 3F 80 80 94 80     +4.3       "
-                        "-  14, 15") > 0);
+  CHECK(find_from(line, " 12  L 54=AF        0D 3F AF 95 94 80     +5.6   "
+                        "-36.3  12, 13") > 0);
+  CHECK(find_from(line, " 14  L 80 80        0D 3F 80 80 94 80     +2.9   "
+                        "-36.4  14, 15") > 0);
+  // and the one model for all of them, with the rise 0.5 dB over 54h's
+  // level, as in the effect
+  CHECK(find_line("fit: S out held = M x the higher of 54h and 56h / 91.9 + "
+                  "-36.4 dBFS x 5Ah / 80h, from 25 runs: within 0.08 dB") > 0);
+  CHECK(find_line("rise level: where the boost stopped rising short of the "
+                  "level held, it stopped +0.6 dB over 54h's level of the fit "
+                  "(runs 23, 24)") > 0);
   CHECK(find_line("in the runs named with -6, -12 and -18, every tone is that "
                   "many dB lower") > 0);
-  CHECK(find_line("the W runs step the S back to -3 dB re M after 2 s, not to "
-                  "-12") > 0);
-  CHECK(find_line("plan: window, 27 runs") == 1);
+  CHECK(find_line("the runs named W3, W6 and W18 step the S back to that many "
+                  "dB under the M after 2 s, instead of 12") > 0);
+  CHECK(find_line("in the runs named L M with a frequency, the M tone is at "
+                  "160 Hz and 2500 Hz instead of 400 Hz") > 0);
+  CHECK(find_line("plan: window, 31 runs") == 1);
   check_report_lines();
   if (verbose)
     printf("window report: %d lines, %ld bytes\n", nlines, report_bytes);

@@ -29,14 +29,13 @@ showed](#what-one-card-showed)):
   fixed rates in dB a second, 51.5 down and 5.15 up with ESS's values, so it
   follows the program over a few seconds. It hardly acts under 400 Hz.
 * With the limit off, 54h-5Ah change nothing. With it on, they are its
-  settings. 54h and 56h each set a level of the S out: the boost falls while
-  the S out is over both levels, and rises while it is under 54h's. Each
-  level has a part that follows the M, 4.3 dB over it with the register's
-  bit 7 set and 12.8 dB under it with bit 7 clear, and a fixed part from the
-  register's bits 6:0, which 5Ah scales. The fixed part lets quiet sound
-  keep more width: with ESS's values, an M under about -50 dBFS gets the
-  full boost. The low four bits of 58h set how fast the boost falls, and its
-  high four bits how much slower it rises.
+  settings. 54h and 56h each set a level of the S out: the register's value,
+  00h to FFh, over 91 times the M, plus a fixed part that 5Ah sets. The
+  boost falls while the S out is over both levels, and rises while it is
+  under 54h's. The fixed part lets quiet sound keep more width: with ESS's
+  values, an M under about -49 dBFS gets the full boost. The low four bits
+  of 58h set how fast the boost falls, and its high four bits how much
+  slower it rises.
 
 essctl, `ess3d` and the tray panel can set every one of these registers, and
 call 54h-5Ah the limit's rise, fall, speed and offset.
@@ -238,52 +237,55 @@ showed](#what-one-card-showed)), and what is still open.
   always write 8Fh and 95h, at the place where the ES938 gets its fixed
   settings. On the card, with the limit off, neither changes the effect at
   any frequency, with any bit flipped or at either end, so they don't shape
-  its filters. With the limit on, each sets a level of the S out, K M + D,
-  where M is the M in. K is 1.643, +4.3 dB, with the register's bit 7 set,
-  and 0.228, -12.8 dB, with it clear. D is a fixed part, the register's bits
-  6:0 times 5Ah / 80h, each step 0.0112 of an M at -24 dBFS, or about -63
-  dBFS. The boost falls while the S out is over both levels, and rises while
-  it is under 54h's, which the rise takes about 0.7 dB higher. So the boost
-  settles at the higher of the two levels. Where 56h's is the higher by more
-  than that, a passage whose S drops to between the two leaves the boost
-  where it is. With ESS's values and an M at -24 dBFS, 54h's level is +5.2
-  dB over the M and 56h's +5.5, and the boost settles at +5.5. The model
-  matches every setting that the card was measured with to within 0.2 dB,
-  and 0.06 dB on average:
+  its filters. With the limit on, each sets a level of the S out: the
+  register's value over 91.2 times the M in, plus 5Ah's fixed part. The
+  value is a plain number from 00h to FFh, so 80h puts the level 1.40 times
+  the M, +2.9 dB, and FFh +8.9 dB. The boost falls while the S out is over
+  both levels, and rises while it is under 54h's, which the rise takes about
+  0.5 dB higher. So the boost settles at the higher of the two levels, and
+  where 56h's is the higher by more than that, a passage whose S drops to
+  between the two leaves the boost where it is. With ESS's values and an M
+  at -24 dBFS, 54h's level is +5.2 dB over the M and 56h's +5.5, and the
+  boost settles at +5.5. With only two numbers, 91.2 and 5Ah's step, the
+  model matches all 134 runs of the card's four measurements to within 0.25
+  dB, and 0.07 dB on average:
 
   | 54h | 56h | 5Ah | M, dBFS | Held, dB over the M | Model |
   |-----|-----|-----|---------|---------------------|-------|
   | 8Fh | 95h | 80h | -24     | +5.5                | +5.5  |
-  | 8Fh | 95h | 80h | -36     | +8.3                | +8.2  |
-  | 8Fh | 95h | 00h | -24     | +4.2                | +4.3  |
+  | 8Fh | 95h | 80h | -36     | +8.4                | +8.3  |
+  | 8Fh | 95h | 80h | -42     | +11.1               | +11.0 |
+  | 8Fh | 95h | 00h | -24     | +4.1                | +4.3  |
+  | 8Fh | 95h | 00h | -36     | +4.2                | +4.3  |
   | 8Fh | 95h | FFh | -24     | +6.4                | +6.5  |
-  | CFh | 95h | 80h | -24     | +8.1                | +8.0  |
-  | FFh | 95h | 80h | -24     | +9.8                | +9.7  |
-  | 8Fh | FFh | 80h | -24     | +9.7                | +9.7  |
+  | FFh | 95h | 00h | -24     | +9.0                | +8.9  |
+  | FFh | 95h | 80h | -24     | +9.8                | +9.6  |
+  | 80h | 80h | 80h | -24     | +4.4                | +4.3  |
+  | 80h | 80h | 80h | -36     | +7.5                | +7.5  |
+  | AAh | 80h | 80h | -24     | +6.5                | +6.5  |
   | 9Eh | AAh | 80h | -24     | +6.4                | +6.5  |
-  | 0Fh | 15h | 80h | -24     | -6.6                | -6.7  |
-  | 7Fh | 7Fh | 80h | -24     | +4.3                | +4.3  |
+  | 0Fh | 15h | 80h | -24     | -6.6                | -6.5  |
+  | 3Fh | 3Fh | 80h | -24     | -0.6                | -0.6  |
 
-* **5Ah, the scale of the fixed parts.** It multiplies the fixed part of
-  both levels by its value over 80h. At 00h the levels have no fixed part
-  and are ratios to the M alone, 4.3 dB over it with both bits 7 set, and at
-  FFh the fixed parts are twice ESS's. With ESS's values, the fixed part
-  adds 1.2 dB to the level with an M at -24 dBFS and 3.9 dB at -36, and
-  under about -50 dBFS the boost keeps its full gain even at 0 dB S/M.
-* **The sign bits.** Bit 7 of 54h and of 56h sets the part of its level that
-  follows the M. With 54h's clear alone, 54h's level drops to 8 dB under the
-  M, so once the limit has held a passage, the boost rises again only after
-  the S out drops under that: a step 12 dB down left it down. With 56h's
-  clear alone, 54h's level holds the S, 0.3 dB lower with ESS's values. With
-  both clear, the limit holds the S out at -6.6 dB against the M with ESS's
-  bits 6:0, at +4.3 dB with both registers at 7Fh, and with both at 00h it
+* **5Ah, the fixed part.** It adds the same fixed level to both levels, in
+  proportion to its value: none at 00h, where the levels are ratios to the M
+  alone, and about -36.5 dBFS of the tones that ess3d plays at 80h. With
+  ESS's values, the fixed part adds 1.2 dB to the level with an M at -24
+  dBFS and 4.0 dB at -36, and under about -49 dBFS the boost keeps its full
+  gain even at 0 dB S/M.
+* **Bit 7.** Bit 7 of 54h and 56h is only the top bit of the value, though
+  clearing it looked like a mode. Clearing it in 8Fh leaves 0Fh, a level 20
+  dB lower. With 54h's clear alone, 54h's level drops to 8 dB under the M,
+  so once the limit has held a passage, the boost rises again only after the
+  S out drops under that, and a step 12 dB down left it down. With both
+  clear, at 0Fh and 15h, the limit holds the S out at -6.6 dB against the M,
+  and with both at 00h, 5Ah's fixed part alone is the level, -12.4 dB, which
   turns the boost off even at -12 dB S/M. Bit 7 of 58h is part of its rise.
 * **54h, 56h and 58h as one vector.** As signed numbers with bit 7 for plus,
   or as the byte minus 80h, ESS's values are +15, +21 and +20, and 5Ah's 80h
-  is 0. The three don't act as one vector, though. With the limit off,
-  nothing changes whatever the vector. With it on, 54h and 56h are two
-  levels of which the higher counts, 58h is two rates, and halving, doubling
-  or turning the three together does what the formulas of each predict.
+  is 0. The registers aren't signed, though, and don't act as one vector.
+  With the limit off, nothing changes whatever the vector. With it on, 54h
+  and 56h are two levels of which the higher counts, and 58h is two rates.
 
 ## Measuring on the card
 
@@ -363,21 +365,24 @@ run with a fast limit, which shows the level at each frequency. Its report
 is bigger than Notepad can open, so the *Open report* button opens it in
 WordPad.
 
-`ess3d measure window` tests the two levels in about 3.5 minutes, with step
+`ess3d measure window` tests the two levels in about 4 minutes, with step
 runs that have the limit on:
 * ESS's values with every tone 6, 12 and 18 dB lower (*L -6 dB* to *L -18
-  dB*), for the fixed part.
+  dB*), which shows the fixed part.
 * 5Ah at 00h, 40h and 7Fh, and at 00h with every tone 12 dB lower, and 54h
-  at FFh with 5Ah at 00h, which should have no fixed part.
-* 54h at AFh, at two levels of the M, and 54h and 56h at 80h, at two levels,
-  which should have no fixed part either.
+  at FFh with 5Ah at 00h.
+* 54h at AFh, and 54h and 56h at 80h, each at two levels of the M.
 * 54h and 56h both at AAh, and each alone at AAh with the other at 80h,
-  which should hold the same level if the higher one counts.
-* The *W* runs, which step the S back to only 3 dB under the M. With ESS's
-  values, and with 54h's level over 56h's, the boost should rise back to
-  where it was held. With 56h's level well over 54h's, it should stay.
-* 54h and 56h with both sign bits clear at 7Fh and 00h, 00h and 7Fh, and 3Fh
-  each.
+  which hold the same level, since the higher one counts.
+* The runs named W3, W6 and W18, which step the S back to 3, 6 or 18 dB
+  under the M instead of 12. With ESS's values, and with 54h's level over
+  56h's, the boost rises back to where it was held. With 56h's level well
+  over 54h's, it stays where it was, unless the S drops under 54h's level,
+  and then it rises to that, which shows the rise level.
+* *L M 160 Hz* and *L M 2.5 kHz*, with the M tone at another frequency than
+  400 Hz, which show whether the limit compares the S with the M as it is or
+  through a filter.
+* 54h and 56h at 7Fh and 00h, at 00h and 7Fh, and at 3Fh each.
 
 `ess3d measure quick` runs each kind once or twice in about 2 minutes, and
 `ess3d measure 58` runs 58h from 00h to FFh in steps of 10h with the limit
@@ -407,6 +412,12 @@ varies, and lines that answer the questions of the readings above:
   at different levels, and fits their held S out to K M + D: K in dB over
   the M, and D in dBFS, with a dash for a part that moves the level by less
   than 0.25 dB.
+* The *fit* line fits the S out held in every step run with the M at 400 Hz
+  to the model above, the higher of 54h and 56h over n times the M plus a
+  fixed part in proportion to 5Ah, and gives n, the fixed part at 5Ah 80h,
+  and how close the model comes to the runs. The *rise level* line gives
+  where the boost stopped rising short of the level it was held at, against
+  54h's level of the fit.
 
 Every run with the limit off also checks that each of its tones gives the
 same amplitude and phase in both halves of its window. A window whose halves
@@ -440,10 +451,10 @@ two that need no measurement:
 ## What one card showed
 
 The card is an ES1869 under Windows 98 with the rebuilt drivers. It was
-measured four times: with the full plan of an earlier version of ess3d, with
-the limit plan and the full plan of the next, and with the limit plan once
-more, with runs added for the sign bits, the M's level and the band with a
-fast limit.
+measured five times: with the full plan of an earlier version of ess3d, with
+the limit plan and the full plan of the next, with the limit plan once more,
+with runs added for bit 7, the M's level and the band with a fast limit, and
+with the window plan.
 
 ### The first measurement
 
@@ -516,8 +527,8 @@ low and high four bits of 58h:
 2.7, 1.3 and 0.6 dB. Setting bit 6 or 5 of 56h raised it by 2.8 and 1.4 dB,
 and clearing its bit 4, which ESS's value has set, lowered it by 0.2 dB.
 Their low bits and 5Ah's moved it by tenths of a dB. This looked like the
-two registers adding, until the third measurement showed that the higher
-level counts ([the table
+two registers adding, until the later measurements showed that the higher
+level counts, and that each register is a plain value ([the table
 above](#what-the-undocumented-bits-and-registers-do)).
 
 **The sign bits.** With 54h bit 7 cleared, the boost fell as with ESS's
@@ -557,26 +568,22 @@ dB. A level of 1.643 M plus a fixed 0.240 of the M at -24 dBFS fits both.
 
 **54h and 56h don't add.** *vec x2*, with 54h at 9Eh and 56h at AAh, held
 +6.4 dB in both limit plans, where adding 30 and 42, as the earlier formula
-did, gives +6.8, and the higher of the two alone gives +6.5. Over the 82
-runs of both limit plans with both sign bits set, a level of 1.643 M, plus
-0.01116 of the M at -24 dBFS times 5Ah / 80h times the higher of the two
-registers' bits 6:0, matches every run to within 0.18 dB, 0.06 dB on
-average. Its part that follows the M, 1.643 or +4.3 dB, comes out the same
-as from the runs 12 dB apart, and with 5Ah at 00h, which leaves no fixed
-part, the limit held the S at +4.2 dB.
+did, gives +6.8, and the higher of the two alone gives +6.5. With 5Ah at
+00h, the limit held the S at +4.2 dB.
 
-**The sign bits.** Clearing bit 7 of 54h and 56h together held the S at -6.6
-dB against the M, as with all three cleared, while clearing 58h's along with
+**Bit 7.** Clearing bit 7 of 54h and 56h together held the S at -6.6 dB
+against the M, as with all three cleared, while clearing 58h's along with
 either one changed only the rise. With both bits clear, 54h and 56h at 7Fh
-held the S at +4.3 dB, and at 00h the boost was off even at -12 dB S/M. Both
-fit a level that follows the M at -12.8 dB, plus the same fixed part.
+held the S at +4.3 dB, and at 00h the boost was off even at -12 dB S/M. This
+looked like a mode at first, but the window plan showed that bit 7 is the
+top bit of a plain value.
 
 **The rise.** In run 32, 58h at 90h, the fall of 257.5 dB a second overshot
 to +5.0 dB, under 54h's level of +5.2, and the boost rose back to +5.5 dB,
-56h's level. In *vec neg* it rose from off and stopped at -7.3 dB, 0.7 dB
-over 54h's level of -8.0 there and under 56h's of -6.7. A rise that compares
-with 54h's level made 0.7 dB higher fits both. The overshoot also shows that
-the limit's detector is about 4 ms late.
+56h's level. In *vec neg* it rose from off and stopped at -7.3 dB, 0.5 dB
+over 54h's level of -7.9 there and under 56h's of -6.5. A rise that compares
+with 54h's level made about 0.5 dB higher fits both. The overshoot also
+shows that the limit's detector is about 4 ms late.
 
 **The band with a fast limit.** With 58h at 00h, the S out held at +11.2 dB
 at 250 Hz, +8.4 at 400 Hz, +6.6 at 630 Hz and +5.3 to +5.6 from 1 to 2.5
@@ -588,10 +595,42 @@ high-pass near 400 Hz, and a little less of it over 2.5 kHz.
 windows read the boost 2.4 dB over its full gain. ess3d now checks the step
 runs for such jumps and measures the run again.
 
-`ess3d measure window` tests the model's predictions: K M + D at more levels
-of the M, D gone with 5Ah at 00h at any level, the higher of 54h and 56h
-against their sum, and the boost staying where it is after a small drop of
-the S when 56h's level is well over 54h's.
+### The window plan
+
+The window plan tested the model that the third measurement suggested, in
+which 5Ah scaled a fixed part made of 54h's and 56h's bits 6:0, and bit 7
+was a sign. Part of that model failed, and the plain one took its place:
+
+**5Ah alone sets the fixed part.** The *levels* table gave the same fixed
+part, -36.2 to -36.5 dBFS, with 54h and 56h at 8Fh and 95h, at AFh and 95h,
+and at 80h and 80h, whose bits 6:0 are all 0, and none with 5Ah at 00h. With
+both at 80h, the held S out rose from +4.4 dB against the M to +7.5 dB with
+the tones 12 dB lower, while with 5Ah at 00h it stayed at +4.1 and +4.2 dB.
+
+**54h and 56h are plain values.** The part that follows the M came out +2.9
+dB at 80h, +4.3 dB at 95h and +5.7 dB at AFh, the value over 91.2 each time.
+54h at FFh with 5Ah at 00h held +9.0 dB, where the value alone gives +8.9,
+and the earlier model +4.3. The earlier model missed the window plan by up
+to 4.7 dB, and the plain one by 0.17 dB.
+
+**The higher level counts.** 54h at AAh with 56h at 80h, 56h at AAh with 54h
+at 80h, and both at AAh held +6.4 to +6.5 dB.
+
+**The window.** With ESS's values, with the two swapped, and with 54h at FFh
+over 56h at 8Fh, the boost rose back to where it was held after the S
+stepped back 3 dB. With 56h at FFh over 54h at 8Fh, the limit held the S out
+at +9.7 dB, and after the step back the S out of +6.7 dB stayed over 54h's
+level of +5.2 dB, so the boost stayed where it was for the whole 3 seconds.
+With 54h at 00h, the boost didn't rise after the step down at all.
+
+**The levels at 3Fh.** 54h and 56h at 3Fh held the S out at -0.6 dB against
+the M, as the plain model gives.
+
+**Two skips.** `ESS3D.LOG` shows two step runs whose S jumped further
+between two windows than the limit can move it, which ess3d measured again.
+
+The plan now also has the M tone at 160 Hz and 2.5 kHz, and two runs that
+step the S back far enough to show the rise level.
 
 ## Sources
 

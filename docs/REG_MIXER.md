@@ -378,9 +378,8 @@ Not in the data sheet.
 * **7:0 3-D limit rise** (`fx.3d.reg54`, value, caution, profile, driver
   sets it). Undocumented; ESS's drivers and Linux write 8Fh. Measured with
   the limit on: the boost rises while the S out is under this level, and
-  falls while it is over this and 56h's. Bit 7 set puts the level 4.3 dB
-  over the M, clear 12.8 dB under, and bits 6:0 times 5Ah add a fixed part
-  (docs/SPATIALIZER.md).
+  falls while it is over this and 56h's. The level is the value over 91
+  times the M, +3.9 dB at 8Fh, plus 5Ah's fixed part (docs/SPATIALIZER.md).
 
 ### 56h 3-D limit fall level (undocumented)
 
@@ -389,9 +388,8 @@ Not in the data sheet.
 * **7:0 3-D limit fall** (`fx.3d.reg56`, value, caution, profile, driver
   sets it). Undocumented; ESS's drivers and Linux write 95h. Measured with
   the limit on: the boost falls while the S out is over this level and
-  54h's, +5.5 dB over the M at 95h. Bit 7 set puts the level 4.3 dB over the
-  M, clear 12.8 dB under, and bits 6:0 times 5Ah add a fixed part
-  (docs/SPATIALIZER.md).
+  54h's. The level is the value over 91 times the M, +4.3 dB at 95h, plus
+  5Ah's fixed part (docs/SPATIALIZER.md).
 
 ### 58h 3-D limit speed (undocumented)
 
@@ -403,15 +401,15 @@ Not in the data sheet.
   and rises h+1 times slower, h = bits 7:4: 51.5 and 5.15 dB a second at 94h
   (docs/SPATIALIZER.md).
 
-### 5Ah 3-D limit offset scale (undocumented)
+### 5Ah 3-D limit offset (undocumented)
 
 Not in the data sheet.
 
 * **7:0 3-D limit offset** (`fx.3d.reg5a`, value, caution, profile, driver
   sets it). Undocumented; ESS's drivers and Linux write 80h. Measured with
-  the limit on: scales the fixed part of 54h's and 56h's levels, the part
-  that doesn't follow the M, so quiet sound keeps more width: none at 00h,
-  twice ESS's at FFh. Nothing with the limit off (docs/SPATIALIZER.md).
+  the limit on: a fixed part of both limit levels, in proportion to the
+  value and about -36 dBFS at 80h, so quiet sound keeps more width; none at
+  00h. Nothing with the limit off (docs/SPATIALIZER.md).
 
 ### 60h Left master volume and mute
 

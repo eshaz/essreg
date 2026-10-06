@@ -10,9 +10,9 @@
  *   quick      each kind of run once or twice, about 2 minutes, instead
  *              of every kind, about 6 minutes
  *   limit      each bit of 54h-5Ah with the limit on, about 8 minutes
- *   window     the limit's two levels: against the M's level, with 5Ah,
- *              and the S back to just under where it was held, about 3.5
- *              minutes
+ *   window     the limit's two levels: against the M's level and its
+ *              frequency, with 5Ah, and the S back to just under where it
+ *              was held, about 4 minutes
  *   54 ... 5A  one register from 00h to FFh in steps of 10h, with the
  *              limit on
  *   /out=file  the report, ESS3D.TXT in ess3d's directory if left out

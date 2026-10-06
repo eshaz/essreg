@@ -203,7 +203,7 @@ play or record first.
 
 The full plan takes about 6 minutes, `measure quick` about 2,
 `measure limit` tries each bit of 54h-5Ah with the limit on in about 8,
-`measure window` tests the limit's two levels in about 3.5, and `measure 58`
+`measure window` tests the limit's two levels in about 4, and `measure 58`
 tries one register from 00h to FFh. A window shows the progress, and the
 report goes to `ESS3D.TXT` next to ess3d.exe, or to the `/out=` file. ess3d
 puts the mixer back at the end, and if the measurement is ended by force,
@@ -211,11 +211,11 @@ the next ess3d puts it back.
 [docs/SPATIALIZER.md](docs/SPATIALIZER.md#measuring-on-the-card) explains
 the report, and what one card showed: 52h sets the boost in steps of 0.75
 dB, and the model makes the stereo image from the mono sum. With the limit
-on, 54h and 56h each set a level of the S out, partly a ratio to the M and
-partly fixed: the limit lowers the boost while the S out is over both and
-raises it while it is under 54h's. 5Ah scales the fixed parts, and 58h sets
-how fast the limit lowers the boost and how much slower it raises it again.
-With the limit off, 54h-5Ah do nothing.
+on, 54h and 56h each set a level of the S out, the register's value over 91
+times the M, plus a fixed part that 5Ah sets: the limit lowers the boost
+while the S out is over both levels and raises it while it is under 54h's.
+58h sets how fast the limit lowers the boost and how much slower it raises
+it again. With the limit off, 54h-5Ah do nothing.
 
 ### Putting ess3d on a key
 

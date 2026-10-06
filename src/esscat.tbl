@@ -265,16 +265,16 @@ FLD(F_3D_LEVEL, R_MX52, 0, 6, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, 
 
 /* ESS's Windows 95 and NT drivers write 54h, 56h, 58h and 5Ah with 8Fh, 95h, 94h and 80h each time they enable the device with 3-D on, and Linux writes them as "recommended values". ESS's Windows 98 driver leaves them alone. No data sheet describes them (docs/SPATIALIZER.md). */
 REG(R_MX54, BK_MIXER, 0, 0x54, 0, "3-D limit rise level (undocumented)", 0)
-FLD(F_3D_R54, R_MX54, 0, 8, K_HEX, T_CAUTION, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.reg54", "3-D limit rise", "Undocumented; ESS's drivers and Linux write 8Fh. Measured with the limit on: the boost rises while the S out is under this level, and falls while it is over this and 56h's. Bit 7 set puts the level 4.3 dB over the M, clear 12.8 dB under, and bits 6:0 times 5Ah add a fixed part (docs/SPATIALIZER.md)")
+FLD(F_3D_R54, R_MX54, 0, 8, K_HEX, T_CAUTION, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.reg54", "3-D limit rise", "Undocumented; ESS's drivers and Linux write 8Fh. Measured with the limit on: the boost rises while the S out is under this level, and falls while it is over this and 56h's. The level is the value over 91 times the M, +3.9 dB at 8Fh, plus 5Ah's fixed part (docs/SPATIALIZER.md)")
 
 REG(R_MX56, BK_MIXER, 0, 0x56, 0, "3-D limit fall level (undocumented)", 0)
-FLD(F_3D_R56, R_MX56, 0, 8, K_HEX, T_CAUTION, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.reg56", "3-D limit fall", "Undocumented; ESS's drivers and Linux write 95h. Measured with the limit on: the boost falls while the S out is over this level and 54h's, +5.5 dB over the M at 95h. Bit 7 set puts the level 4.3 dB over the M, clear 12.8 dB under, and bits 6:0 times 5Ah add a fixed part (docs/SPATIALIZER.md)")
+FLD(F_3D_R56, R_MX56, 0, 8, K_HEX, T_CAUTION, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.reg56", "3-D limit fall", "Undocumented; ESS's drivers and Linux write 95h. Measured with the limit on: the boost falls while the S out is over this level and 54h's. The level is the value over 91 times the M, +4.3 dB at 95h, plus 5Ah's fixed part (docs/SPATIALIZER.md)")
 
 REG(R_MX58, BK_MIXER, 0, 0x58, 0, "3-D limit speed (undocumented)", 0)
 FLD(F_3D_R58, R_MX58, 0, 8, K_HEX, T_CAUTION, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.reg58", "3-D limit speed", "Undocumented; ESS's drivers and Linux write 94h. Measured with the limit on: the boost falls at 257.5/(n+1) dB a second, n = bits 3:0, and rises h+1 times slower, h = bits 7:4: 51.5 and 5.15 dB a second at 94h (docs/SPATIALIZER.md)")
 
-REG(R_MX5A, BK_MIXER, 0, 0x5A, 0, "3-D limit offset scale (undocumented)", 0)
-FLD(F_3D_R5A, R_MX5A, 0, 8, K_HEX, T_CAUTION, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.reg5a", "3-D limit offset", "Undocumented; ESS's drivers and Linux write 80h. Measured with the limit on: scales the fixed part of 54h's and 56h's levels, the part that doesn't follow the M, so quiet sound keeps more width: none at 00h, twice ESS's at FFh. Nothing with the limit off (docs/SPATIALIZER.md)")
+REG(R_MX5A, BK_MIXER, 0, 0x5A, 0, "3-D limit offset (undocumented)", 0)
+FLD(F_3D_R5A, R_MX5A, 0, 8, K_HEX, T_CAUTION, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_EFFECTS, FMT_NONE, "fx.3d.reg5a", "3-D limit offset", "Undocumented; ESS's drivers and Linux write 80h. Measured with the limit on: a fixed part of both limit levels, in proportion to the value and about -36 dBFS at 80h, so quiet sound keeps more width; none at 00h. Nothing with the limit off (docs/SPATIALIZER.md)")
 
 REG(R_MX60, BK_MIXER, 0, 0x60, 0, "Left master volume and mute", 62)
 FLD(F_MVOL_L, R_MX60, 0, 6, K_UINT, T_SAFE, FF_PERSIST | FF_DRVOWNED, E_NONE, PG_MASTER, FMT_NONE, "master.vol.l", "Master volume L", "Left master volume presented to the analog output, 0.75 dB per step up to 63 (0 dB); 36h after hardware reset (DS p.25, p.59, p.62)")

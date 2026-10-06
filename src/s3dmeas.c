@@ -169,34 +169,39 @@ static void add_signs(struct s3d_meas *m, const u8 *lim, int base) {
 }
 
 // the window plan's step runs with the limit on: the M's level, 5Ah,
-// which of 54h and 56h counts, the S back to just 3 dB under the M (W),
-// and both sign bits clear
+// which of 54h and 56h counts, the S back to 3, 6 or 18 dB under the M
+// (W3 to W18), the M at other frequencies, and 54h and 56h under 80h
 static void add_window(struct s3d_meas *m, const u8 *lim, int base) {
   static const struct {
     const char *name;
     u8 r54, r56, r5a, att, drop;
-  } w[] = {{"L -6 dB", 0x8F, 0x95, 0x80, 6, 0},
-           {"L -12 dB", 0x8F, 0x95, 0x80, 12, 0},
-           {"L -18 dB", 0x8F, 0x95, 0x80, 18, 0},
-           {"L 5A=00", 0x8F, 0x95, 0x00, 0, 0},
-           {"L 5A=00 -12", 0x8F, 0x95, 0x00, 12, 0},
-           {"L 5A=40", 0x8F, 0x95, 0x40, 0, 0},
-           {"L 5A=7F", 0x8F, 0x95, 0x7F, 0, 0},
-           {"L 54=FF 5A=00", 0xFF, 0x95, 0x00, 0, 0},
-           {"L 54=AF", 0xAF, 0x95, 0x80, 0, 0},
-           {"L 54=AF -12", 0xAF, 0x95, 0x80, 12, 0},
-           {"L 80 80", 0x80, 0x80, 0x80, 0, 0},
-           {"L 80 80 -12", 0x80, 0x80, 0x80, 12, 0},
-           {"L AA AA", 0xAA, 0xAA, 0x80, 0, 0},
-           {"L AA 80", 0xAA, 0x80, 0x80, 0, 0},
-           {"L 80 AA", 0x80, 0xAA, 0x80, 0, 0},
-           {"W 8F 95", 0x8F, 0x95, 0x80, 0, 3},
-           {"W 95 8F", 0x95, 0x8F, 0x80, 0, 3},
-           {"W FF 8F", 0xFF, 0x8F, 0x80, 0, 3},
-           {"W 8F FF", 0x8F, 0xFF, 0x80, 0, 3},
-           {"L 7F 00", 0x7F, 0x00, 0x80, 0, 0},
-           {"L 00 7F", 0x00, 0x7F, 0x80, 0, 0},
-           {"L 3F 3F", 0x3F, 0x3F, 0x80, 0, 0}};
+    u16 mhz;
+  } w[] = {{"L -6 dB", 0x8F, 0x95, 0x80, 6, 0, 0},
+           {"L -12 dB", 0x8F, 0x95, 0x80, 12, 0, 0},
+           {"L -18 dB", 0x8F, 0x95, 0x80, 18, 0, 0},
+           {"L 5A=00", 0x8F, 0x95, 0x00, 0, 0, 0},
+           {"L 5A=00 -12", 0x8F, 0x95, 0x00, 12, 0, 0},
+           {"L 5A=40", 0x8F, 0x95, 0x40, 0, 0, 0},
+           {"L 5A=7F", 0x8F, 0x95, 0x7F, 0, 0, 0},
+           {"L 54=FF 5A=00", 0xFF, 0x95, 0x00, 0, 0, 0},
+           {"L 54=AF", 0xAF, 0x95, 0x80, 0, 0, 0},
+           {"L 54=AF -12", 0xAF, 0x95, 0x80, 12, 0, 0},
+           {"L 80 80", 0x80, 0x80, 0x80, 0, 0, 0},
+           {"L 80 80 -12", 0x80, 0x80, 0x80, 12, 0, 0},
+           {"L AA AA", 0xAA, 0xAA, 0x80, 0, 0, 0},
+           {"L AA 80", 0xAA, 0x80, 0x80, 0, 0, 0},
+           {"L 80 AA", 0x80, 0xAA, 0x80, 0, 0, 0},
+           {"W3 8F 95", 0x8F, 0x95, 0x80, 0, 3, 0},
+           {"W3 95 8F", 0x95, 0x8F, 0x80, 0, 3, 0},
+           {"W3 FF 8F", 0xFF, 0x8F, 0x80, 0, 3, 0},
+           {"W3 8F FF", 0x8F, 0xFF, 0x80, 0, 3, 0},
+           {"W6 8F FF", 0x8F, 0xFF, 0x80, 0, 6, 0},
+           {"W18 0F FF", 0x0F, 0xFF, 0x80, 0, 18, 0},
+           {"L M 160 Hz", 0x8F, 0x95, 0x80, 0, 0, 160},
+           {"L M 2.5 kHz", 0x8F, 0x95, 0x80, 0, 0, 2500},
+           {"L 7F 00", 0x7F, 0x00, 0x80, 0, 0, 0},
+           {"L 00 7F", 0x00, 0x7F, 0x80, 0, 0, 0},
+           {"L 3F 3F", 0x3F, 0x3F, 0x80, 0, 0, 0}};
   u8 reg[S3D_REGS];
   int i, j;
 
@@ -208,6 +213,7 @@ static void add_window(struct s3d_meas *m, const u8 *lim, int base) {
     j = add(m, w[i].name, reg, S3D_STEP, base);
     m->run[j].att = w[i].att;
     m->run[j].drop = w[i].drop;
+    m->run[j].mhz = w[i].mhz;
   }
 }
 
@@ -431,6 +437,7 @@ u32 s3d_begin(struct s3d_meas *m, int i, u32 *rec_frames) {
   u32 t = 0, s;
   int k, side, settle = r->slow ? 300 : 50;
   double a, g, th;
+  u16 hz;
 
   m->cur = i;
   m->nseg = m->nwin = 0;
@@ -483,18 +490,19 @@ u32 s3d_begin(struct s3d_meas *m, int i, u32 *rec_frames) {
   case S3D_STEP:
     // the S tone's level steps where both tones are back at the start of
     // a cycle, so neither jumps in phase
+    hz = r->mhz ? r->mhz : 400;
     g = AMP_M * pow(10.0, -r->att / 20.0);
     a = g * pow(10.0, -12 / 20.0);
     s = t;
-    t = seg_add(m, t, fr(STEP_LOW), 400, g, g, 1000, a, -a, 1);
+    t = seg_add(m, t, fr(STEP_LOW), hz, g, g, 1000, a, -a, 1);
     win_add(m, s + fr(STEP_LOW - 120), 100);
     s = t;
-    t = seg_add(m, t, fr(STEP_HIGH), 400, g, g, 1000, g, -g, 0);
+    t = seg_add(m, t, fr(STEP_HIGH), hz, g, g, 1000, g, -g, 0);
     step_windows(m, s, S3D_COARSE_UP);
     win_add(m, s + fr(STEP_HIGH - 120), 100);
     s = t;
     a = g * pow(10.0, -drop_db(r) / 20.0);
-    t = seg_add(m, t, fr(STEP_DOWN), 400, g, g, 1000, a, -a, 2);
+    t = seg_add(m, t, fr(STEP_DOWN), hz, g, g, 1000, a, -a, 2);
     step_windows(m, s, S3D_COARSE_DN);
     win_add(m, s + fr(STEP_DOWN - 120), 100);
     break;
@@ -1002,34 +1010,63 @@ static void cell_boost(char *out, double v) {
     cell(out, v);
 }
 
+// the values that the plan's runs give a step setting (0 every tone
+// lower, 1 the S after the step down, 2 the M's frequency) other than 0,
+// each once, from low to high, into v: how many
+static int step_values(const struct s3d_meas *m, int which, u16 *v) {
+  int i, j, n = 0;
+  u16 x;
+
+  for (i = 0; i < m->nruns; i++) {
+    x = which == 0   ? m->run[i].att
+        : which == 1 ? m->run[i].drop
+                     : m->run[i].mhz;
+    for (j = 0; j < n && v[j] != x; j++)
+      ;
+    if (!x || j < n)
+      continue;
+    for (j = n++; j > 0 && v[j - 1] > x; j--)
+      v[j] = v[j - 1];
+    v[j] = x;
+  }
+  return n;
+}
+
+// "a, b and c" of n values, each between pre and post, after out
+static void step_list(char *out, const u16 *v, int n, const char *pre,
+                      const char *post) {
+  int i;
+
+  for (i = 0; i < n; i++) {
+    strcat(out, !i ? "" : i < n - 1 ? ", " : " and ");
+    sprintf(out + strlen(out), "%s%u%s", pre, v[i], post);
+  }
+}
+
 // what the step runs of the plan change besides the registers: the
-// level of every tone, and the S after the step down
+// level of every tone, the S after the step down and the M's frequency
 static void step_notes(struct s3d_meas *m) {
   char line[256];
-  int v, i, n = 0, last = 0, drop = 0;
+  u16 v[S3D_MAX_RUNS];
+  int n;
 
-  strcpy(line, "in the runs named with");
-  for (v = 1; v < 100; v++) {
-    for (i = 0; i < m->nruns && m->run[i].att != v; i++)
-      ;
-    if (i < m->nruns) {
-      if (n++)
-        sprintf(line + strlen(line), "%s -%d", n > 2 ? "," : "", last);
-      last = v;
-    }
-  }
-  if (n) {
-    sprintf(line + strlen(line), "%s -%d, every tone is that many dB lower",
-            n > 1 ? " and" : "", last);
+  if ((n = step_values(m, 0, v)) > 0) {
+    strcpy(line, "in the runs named with ");
+    step_list(line, v, n, "-", "");
+    strcat(line, ", every tone is that many dB lower");
     say(m, line);
   }
-  for (i = 0; i < m->nruns; i++)
-    if (m->run[i].drop)
-      drop = m->run[i].drop;
-  if (drop) {
-    sprintf(line,
-            "the W runs step the S back to -%d dB re M after 2 s, not to -12",
-            drop);
+  if ((n = step_values(m, 1, v)) > 0) {
+    strcpy(line, "the runs named ");
+    step_list(line, v, n, "W", "");
+    strcat(line, " step the S back to that many dB under the M after 2 s, "
+                 "instead of 12");
+    say(m, line);
+  }
+  if ((n = step_values(m, 2, v)) > 0) {
+    strcpy(line, "in the runs named L M with a frequency, the M tone is at ");
+    step_list(line, v, n, "", " Hz");
+    strcat(line, " instead of 400 Hz");
     say(m, line);
   }
 }
@@ -1976,7 +2013,8 @@ static void summary_levels(struct s3d_meas *m) {
     runs[0] = 0;
     for (j = i; j < m->nruns; j++) {
       if (done[j] || memcmp(m->run[j].reg, m->run[i].reg, S3D_REGS) ||
-          s3d_limit(m, j, &l) < 0 || !has(l.held))
+          m->run[j].mhz != m->run[i].mhz || s3d_limit(m, j, &l) < 0 ||
+          !has(l.held))
         continue;
       done[j] = 1;
       if (head < 0)
@@ -2028,6 +2066,91 @@ static void summary_levels(struct s3d_meas *m) {
   }
 }
 
+// the higher of run r's 54h and 56h
+static int higher(const struct s3d_run *r) {
+  return r->reg[S3D_R54] > r->reg[S3D_R56] ? r->reg[S3D_R54] : r->reg[S3D_R56];
+}
+
+// the step runs with the limit on and the M at 400 Hz against one model
+// of the level they hold: the higher of 54h and 56h over n times the M,
+// plus a fixed part that follows 5Ah, by least squares on the error in
+// dB; then, where the boost stopped rising short of the level it was held
+// at, how far over 54h's level of the model
+static void summary_fit(struct s3d_meas *m) {
+  const struct s3d_run *r;
+  struct s3d_lim l;
+  char line[256], runs[64];
+  double x, a, b, t, w, saa = 0, sab = 0, sbb = 0, sat = 0, sbt = 0;
+  double det, k, d, e, worst = 0, sum = 0, over = 0;
+  int i, n = 0, nr = 0, at = -1;
+
+  for (i = 0; i < m->nruns; i++) {
+    r = &m->run[i];
+    if (r->mhz || !(r->reg[S3D_R50] & 1) || s3d_limit(m, i, &l) < 0 ||
+        !has(l.held))
+      continue;
+    // the M, the parts of the model and the S out, against the plan's M
+    x = pow(10.0, -r->att / 20.0);
+    a = higher(r) * x;
+    b = r->reg[S3D_R5A];
+    t = x * pow(10.0, l.held / 20);
+    w = 1 / (t * t);
+    saa += w * a * a;
+    sab += w * a * b;
+    sbb += w * b * b;
+    sat += w * a * t;
+    sbt += w * b * t;
+    n++;
+  }
+  det = saa * sbb - sab * sab;
+  if (n < 3 || det <= 1e-6 * saa * sbb)
+    return;
+  k = (sat * sbb - sbt * sab) / det;
+  d = (saa * sbt - sab * sat) / det;
+  if (k <= 0)
+    return;
+  runs[0] = 0;
+  for (i = 0; i < m->nruns; i++) {
+    r = &m->run[i];
+    if (r->mhz || !(r->reg[S3D_R50] & 1) || s3d_limit(m, i, &l) < 0 ||
+        !has(l.held))
+      continue;
+    x = pow(10.0, -r->att / 20.0);
+    e = db((k * higher(r) * x + d * r->reg[S3D_R5A]) / x) - l.held;
+    sum += fabs(e);
+    if (at < 0 || fabs(e) > worst) {
+      worst = fabs(e);
+      at = i;
+    }
+    // where the rise stopped short of the level held
+    if (l.rises_is == 0 && l.rises < l.held - 0.3) {
+      over += l.rises - db((k * r->reg[S3D_R54] * x + d * r->reg[S3D_R5A]) / x);
+      if (strlen(runs) < sizeof(runs) - 8)
+        sprintf(runs + strlen(runs), "%s%d", nr ? ", " : "", i);
+      nr++;
+    }
+  }
+  say(m, "");
+  sprintf(line, "fit: S out held = M x the higher of 54h and 56h / %.1f + ",
+          1 / k);
+  if (d > 0)
+    sprintf(line + strlen(line), "%.1f dBFS x 5Ah / 80h", db(d * 128 * AMP_M));
+  else
+    strcat(line, "nothing fixed");
+  sprintf(line + strlen(line),
+          ", from %d runs: within %.2f dB, %.2f dB on average; the worst is "
+          "run %d (%s)",
+          n, worst, sum / n, at, m->run[at].name);
+  say(m, line);
+  if (nr) {
+    sprintf(line,
+            "rise level: where the boost stopped rising short of the level "
+            "held, it stopped %+.1f dB over 54h's level of the fit (run%s %s)",
+            over / nr, nr > 1 ? "s" : "", runs);
+    say(m, line);
+  }
+}
+
 void s3d_summary(struct s3d_meas *m) {
   summary_runs(m);
   say(m, "");
@@ -2035,4 +2158,5 @@ void s3d_summary(struct s3d_meas *m) {
   summary_ratio_pan(m);
   summary_steps(m);
   summary_levels(m);
+  summary_fit(m);
 }
