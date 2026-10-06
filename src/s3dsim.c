@@ -21,6 +21,14 @@
 #define DETECT 420.0     // the limit's high-pass on the S it follows
 #define FLOOR 0.0045     // and the least gain it leaves, -47 dB
 #define DETECT_1K 1.0844 // and its gain at 1 kHz brought to 0 dB
+#define K_SET 1.643      // a level's part re the M, bit 7 set, +4.3 dB
+#define K_CLEAR 0.228    // and bit 7 clear, -12.8 dB
+#define RISE 1.08        // 54h's level for the rise, 0.67 dB higher
+#define ENV 0.002        // each stage of the envelopes, seconds
+// a level's fixed part for each step of its bits 6:0 with 5Ah at 80h:
+// 0.01116 of the M the card was measured with, -24 dBFS in each channel,
+// as it reaches the effect
+#define D_STEP (0.01116 * 0.0625 * (1 + RIGHT) / 2)
 
 // a first-order section by the bilinear transform: b0 b1 a1
 static void first(double hz, u32 rate, int high, double *c) {
@@ -35,20 +43,27 @@ static double boost_gain(const u8 *reg) {
   return PEAK * pow(10.0, -0.75 * (63 - (reg[1] & 0x3F)) / 20);
 }
 
-void s3dsim_limit(const u8 *reg, double *level, double *fall, double *rise) {
-  double c = 1.77 + 0.00216 * (reg[5] - 0x80);
-  double x = 0.0176 * ((reg[2] & 0x7F) + (reg[3] & 0x7F));
-
-  // 54h and 56h add, in power with a part that 5Ah trims
-  *level = 10 * log10(c * c + x * x);
-  if (!(reg[2] & 0x80) && !(reg[3] & 0x80))
-    *level -= 12.4;
-  // 58h: one step of the gain every bits 3:0 + 1 ticks falling, and
-  // bits 7:4 + 1 times as many rising; 54h bit 7 alone stops the rise
+void s3dsim_speed(const u8 *reg, double *fall, double *rise) {
+  // one step of the gain every bits 3:0 + 1 ticks falling, and bits 7:4
+  // + 1 times as many rising
   *fall = 257.5 / ((reg[4] & 0x0F) + 1);
   *rise = *fall / ((reg[4] >> 4) + 1);
-  if (!(reg[2] & 0x80) && (reg[3] & 0x80))
-    *rise = 0;
+}
+
+// the part of the level of 54h or 56h (v) re the M, and its fixed part,
+// which 5Ah scales
+static double level_k(u8 v) { return v & 0x80 ? K_SET : K_CLEAR; }
+
+static double level_d(u8 v, u8 r5a) { return D_STEP * (v & 0x7F) * r5a / 128; }
+
+void s3dsim_levels(const u8 *reg, double m, double *rise, double *fall) {
+  double mi = m * (1 + RIGHT) / 2, a, b;
+
+  // both levels where the effect compares them, against the M there
+  a = level_k(reg[2]) * mi + level_d(reg[2], reg[5]);
+  b = level_k(reg[3]) * mi + level_d(reg[3], reg[5]);
+  *rise = 20 * log10(a * RISE / mi);
+  *fall = 20 * log10((b > a ? b : a) / mi);
 }
 
 void s3dsim_reset(struct s3dsim *s, u32 rate) {
@@ -62,18 +77,24 @@ void s3dsim_reset(struct s3dsim *s, u32 rate) {
 }
 
 void s3dsim_regs(struct s3dsim *s, const u8 *reg) {
-  double level, fall, rise;
+  double fall, rise;
+  int i;
 
   memcpy(s->reg, reg, sizeof(s->reg));
   // each run on the card started with the boost back
   s->gain = 1;
-  s->env_m = s->env_s = 0;
+  s->env_m[0] = s->env_m[1] = s->env_s[0] = s->env_s[1] = 0;
   first(200, s->rate, 1, s->hb);
   first(1000, s->rate, 0, s->lb);
   s->g = boost_gain(reg);
   first(DETECT, s->rate, 1, s->db);
-  s3dsim_limit(reg, &level, &fall, &rise);
-  s->lim = pow(10.0, level / 20);
+  // the envelopes are means of the absolute value, 2 / pi of a tone's
+  // amplitude
+  for (i = 0; i < 2; i++) {
+    s->k[i] = level_k(reg[2 + i]);
+    s->d[i] = 2 / PI * level_d(reg[2 + i], reg[5]);
+  }
+  s3dsim_speed(reg, &fall, &rise);
   s->f_down = pow(10.0, -fall / s->rate / 20);
   s->f_up = pow(10.0, rise / s->rate / 20);
 }
@@ -95,8 +116,8 @@ static s16 to_s16(double v) {
 
 void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
   int on = (s->reg[0] & 0x0C) == 0x0C, model = s->reg[0] & 2;
-  double k = 1 - exp(-1.0 / (0.01 * s->rate));
-  double l, r, m, sd, x, y, b;
+  double k = 1 - exp(-1.0 / (ENV * s->rate));
+  double l, r, m, sd, x, y, b, lo, hi;
   u16 i;
 
   for (i = 0; i < n; i++) {
@@ -116,17 +137,27 @@ void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
       if (s->reg[0] & 1) {
         // the limit: follow the M in and the S out, this through a
         // high-pass with 0 dB at 1 kHz, and move the boost's gain down
-        // while the S passes the level, and up otherwise
+        // while the S is over both levels, and up while it is under 54h's
+        // made higher
         b *= s->gain;
         x = (model ? sd * KEEP : sd) + b;
         y = s->db[0] * x + s->db[1] * s->dx - s->db[2] * s->dy;
         s->dx = x;
         s->dy = y;
         x = y * DETECT_1K;
-        s->env_m += (fabs(m) - s->env_m) * k;
-        s->env_s += (fabs(x) - s->env_s) * k;
-        // (over -80 dBFS, so that silence doesn't count)
-        s->gain *= s->env_s > s->lim * s->env_m + 1e-4 ? s->f_down : s->f_up;
+        s->env_m[0] += (fabs(m) - s->env_m[0]) * k;
+        s->env_m[1] += (s->env_m[0] - s->env_m[1]) * k;
+        s->env_s[0] += (fabs(x) - s->env_s[0]) * k;
+        s->env_s[1] += (s->env_s[0] - s->env_s[1]) * k;
+        // (each over -80 dBFS, so that silence doesn't count)
+        lo = s->k[0] * s->env_m[1] + s->d[0];
+        hi = s->k[1] * s->env_m[1] + s->d[1];
+        if (hi < lo)
+          hi = lo;
+        if (s->env_s[1] > hi + 1e-4)
+          s->gain *= s->f_down;
+        if (s->env_s[1] < lo * RISE + 1e-4)
+          s->gain *= s->f_up;
         if (s->gain > 1)
           s->gain = 1;
         if (s->gain < FLOOR)

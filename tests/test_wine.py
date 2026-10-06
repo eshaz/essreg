@@ -407,13 +407,14 @@ class WineTest(unittest.TestCase):
         self.assertIn("  1  ess            0C 3F 8F 95 94 80  M>M", text)
         self.assertIn("S>S deg    +46   +36   +21", text)
         self.assertIn("ratio limit: from S/M -24 to +6 dB, S>S at 1 kHz "
-                      "changes by -16.1 dB; it holds S out at +5.4 to +5.4 "
+                      "changes by -16.0 dB; it holds S out at +5.4 to +5.4 "
                       "dB re M", text)
         self.assertIn("pan: 0, 22.5, 45, 67.5 and 90 degrees come out at "
                       "-37, -26, 41, 115, 127", text)
-        # the limit's fall and rise in dB a second, and the S it holds
-        self.assertIn(" 22  step limit     0D 3F 8F 95 94 80      51 -15.6  "
-                      "+0.0    +5.4     20    5.1   +0.0", text)
+        # the limit's fall and rise in dB a second, the S it holds, and
+        # the boost back to its full gain
+        self.assertIn(" 22  step limit     0D 3F 8F 95 94 80      51 -15.5  "
+                      "+0.0     +5.4      0    5.1   +0.0    >+4.3", text)
         self.assertIn(" 24  off again      04 3F 8F 95 94 80     0  no "
                       "change over 0.1 dB", text)
         self.assertIn("\r\n", text)

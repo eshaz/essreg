@@ -21,7 +21,7 @@
  *   comes out, and whether the effect pushes it past a speaker
  * - step runs: the 1 kHz S tone steps from -12 to 0 dB re the M tone and
  *   back, to see how fast the limit holds the boost down, at which level,
- *   and how fast it lets it back up
+ *   and how fast it lets it back up, and where it stops rising
  *
  * Each tone is measured over a whole number of its cycles (100 ms, or 20
  * ms early in step runs), after time for the effect to settle, as the
@@ -43,7 +43,10 @@
  * A tone that is steady gives the same amplitude in both halves of its
  * window. In the runs with the limit off, a window whose halves differ
  * counts as disturbed: the recording or the playback skipped there, and
- * s3d_disturbed lets the program measure the run again.
+ * s3d_disturbed lets the program measure the run again. In a step run the
+ * limit moves the S out by 5.2 dB in 20 ms at most, so a window that
+ * jumps further from the one before counts as disturbed too: the step
+ * came early or late, after a skip.
  *
  * The engine doesn't touch the chip or Windows: the program around it
  * writes each run's registers, plays what s3d_fill gives, hands over what
@@ -76,10 +79,11 @@
 #define S3D_DN (S3D_FINE + S3D_COARSE_DN)
 
 // the plans
-#define S3D_PLAN_FULL 0  // every kind of run below, about 6 minutes
-#define S3D_PLAN_QUICK 1 // each kind once or twice, about 2 minutes
-#define S3D_PLAN_REG 2   // one register from 00h to FFh, with the limit
-#define S3D_PLAN_LIMIT 3 // each bit of 54h-5Ah with the limit, 8 minutes
+#define S3D_PLAN_FULL 0   // every kind of run below, about 6 minutes
+#define S3D_PLAN_QUICK 1  // each kind once or twice, about 2 minutes
+#define S3D_PLAN_REG 2    // one register from 00h to FFh, with the limit
+#define S3D_PLAN_LIMIT 3  // each bit of 54h-5Ah with the limit, 8 minutes
+#define S3D_PLAN_WINDOW 4 // the limit's two levels, 3.5 minutes
 
 // kinds of runs
 #define S3D_SWEEP 0
@@ -104,6 +108,7 @@
 #define S3D_REGS 6
 
 #define S3D_FLOOR (-999.0f) // a value under the noise floor
+#define S3D_AMP_M 0.0625    // the M tone of ratio, band and step runs, -24 dBFS
 
 typedef void (*s3d_out_fn)(void *ctx, const char *line);
 
@@ -135,6 +140,7 @@ struct s3d_run {
   u8 base;   // the run the summary compares it with
   u8 slow;   // the limit is on: longer settling
   u8 att;    // step runs: every tone this many dB lower
+  u8 drop;   // and the S after the step down, dB under the M; 0 for 12
   u8 result; // s3d_end's, 0xFF before the run
   union {
     struct {
@@ -167,6 +173,12 @@ struct s3d_lim {
   // the S out where it holds the boost down, re the M in, dB, or
   // S3D_FLOOR
   float held;
+  // the S out where the boost stopped rising after the step down, re the
+  // M in, dB, or S3D_FLOOR with the limit off; rises_is is -1 where it
+  // didn't rise, so it rises only under this, 1 where it rose all the way
+  // or was still rising, so its levels are over this, and 0 otherwise
+  float rises;
+  int rises_is;
   float fall; // dB a second after the step up, 0 if it holds
   float rise; // dB a second after the step down, 0 if none
   int hold;   // ms after the step down before it rises, -1 if unknown
