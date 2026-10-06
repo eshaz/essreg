@@ -1,0 +1,72 @@
+/*
+ * Resources of ess3d (16-bit Windows resource script).
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
+ * Licensed under GPL Version 3.0
+ */
+
+#include <windows.h>
+#include <ver.h>
+#include "ess3dres.h"
+
+#ifndef DS_3DLOOK
+#define DS_3DLOOK 0x0004L
+#endif
+
+ESS3D ICON "essctl.ico"
+
+/* the tray icon, made by tools/ess3dico.py */
+ICON_ON ICON "ess3don.ico"
+ICON_OFF ICON "ess3doff.ico"
+
+/* the tray icon's panel, its controls come from the catalog (ess3dtr.c) */
+PANEL DIALOG 0, 0, 222, 120
+STYLE WS_POPUP | WS_DLGFRAME
+FONT 8, "MS Sans Serif"
+BEGIN
+END
+
+/* the measurement's window (ess3dms.c) */
+MEASURE DIALOG 0, 0, 236, 98
+STYLE WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | DS_3DLOOK
+CLASS "Ess3dMeasure"
+CAPTION "ES1869 3-D measurement"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "", IDC_M_RUN, 6, 6, 224, 9, SS_NOPREFIX
+    LTEXT           "", IDC_M_INFO, 6, 17, 224, 9, SS_NOPREFIX
+    CONTROL         "", IDC_M_FRAME, "STATIC", SS_BLACKFRAME, 6, 29, 224, 9
+    CONTROL         "", IDC_M_FILL, "STATIC", SS_BLACKRECT, 8, 31, 0, 5
+    LTEXT           "", IDC_M_LEFT, 6, 42, 224, 27, SS_NOPREFIX
+    PUSHBUTTON      "&Open report", IDC_M_OPEN, 6, 78, 60, 14, WS_DISABLED
+    PUSHBUTTON      "Cancel", IDCANCEL, 170, 78, 60, 14
+END
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEFLAGSMASK 0x3F
+FILEFLAGS 0
+FILEOS VOS_DOS_WINDOWS16
+FILETYPE VFT_APP
+FILESUBTYPE 0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4"
+        BEGIN
+            VALUE "FileDescription", "ES1869 3-D effect switch\0"
+            VALUE "FileVersion", "1.0\0"
+            VALUE "InternalName", "ESS3D\0"
+            VALUE "LegalCopyright", "(c) 2026 Ethan Halsall, GPL version 3\0"
+            VALUE "OriginalFilename", "ESS3D.EXE\0"
+            VALUE "ProductName", "essreg\0"
+            VALUE "ProductVersion", "1.0\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1252
+    END
+END

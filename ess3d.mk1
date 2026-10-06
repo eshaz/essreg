@@ -1,0 +1,43 @@
+# Builds ess3d.exe, which switches the ES1869's 3-D effect from the command
+# line (16-bit Windows, large model).
+#
+# Notes:
+#
+# It uses WIN_CFLAGS and the w_ objects of essctl.mk1, so the Makefile
+# includes it after essctl.mk1.
+#
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+
+w_ess3d.obj : src\ess3d.c .AUTODEPEND
+ *wcc src\ess3d.c $(WIN_CFLAGS) -fo=w_ess3d.obj
+
+w_ess3dw.obj : src\win\ess3dw.c .AUTODEPEND
+ *wcc src\win\ess3dw.c $(WIN_CFLAGS) -fo=w_ess3dw.obj
+
+w_ess3dtr.obj : src\win\ess3dtr.c .AUTODEPEND
+ *wcc src\win\ess3dtr.c $(WIN_CFLAGS) -fo=w_ess3dtr.obj
+
+w_ess3dms.obj : src\win\ess3dms.c .AUTODEPEND
+ *wcc src\win\ess3dms.c $(WIN_CFLAGS) -fo=w_ess3dms.obj
+
+# the measurement's floating point keeps off FS and GS (-zfp -zgp): the
+# 8087 emulator of Windows has no fixups for their segment prefixes
+w_s3dmeas.obj : src\s3dmeas.c .AUTODEPEND
+ *wcc src\s3dmeas.c $(WIN_CFLAGS) -zfp -zgp -fo=w_s3dmeas.obj
+
+w_s3dsim.obj : src\s3dsim.c .AUTODEPEND
+ *wcc src\s3dsim.c $(WIN_CFLAGS) -zfp -zgp -fo=w_s3dsim.obj
+
+ess3d.res : src\win\ess3d.rc src\win\ess3dres.h src\win\essctl.ico src\win\ess3don.ico src\win\ess3doff.ico
+ *wrc -q -r -bt=windows -i="$(%watcom)/h;$(%watcom)/h/win;src\win" src\win\ess3d.rc -fo=ess3d.res
+
+ess3d.exe : w_ess3dw.obj w_ess3dtr.obj w_ess3dms.obj w_s3dmeas.obj w_s3dsim.obj w_ess3d.obj w_winio.obj w_esshw.obj w_esscat.obj w_essio.obj w_simhw.obj w_vxdapi.obj w_vxdcall.obj ess3d.res nestamp.exe .AUTODEPEND
+ @%write ess3d.lk1 FIL w_ess3dw.obj,w_ess3dtr.obj,w_ess3dms.obj,w_s3dmeas.obj,w_s3dsim.obj,w_ess3d.obj,w_winio.obj,w_esshw.obj,w_esscat.obj,w_essio.obj,w_simhw.obj,w_vxdapi.obj,w_vxdcall.obj
+ @%append ess3d.lk1 LIBR mmsystem.lib
+ @%append ess3d.lk1 SEGMENT CLASS 'CODE' MOVEABLE DISCARDABLE
+ @%append ess3d.lk1 OPTION DESCRIPTION 'ES1869 3-D'
+ *wlink name ess3d sys windows op m op maxe=10 op q op el op stack=8k op heapsize=1k @ess3d.lk1
+ *wrc -q -bt=windows ess3d.res ess3d.exe
+ nestamp ess3d.exe

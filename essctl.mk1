@@ -1,0 +1,83 @@
+# essctl.exe is the ES1869 control panel for Windows 95 (16-bit Windows,
+# large model) and needs the 16-bit Windows target of Watcom C (h\win,
+# lib286\win)
+# the other makefiles also build the shared sources for DOS, so the objects
+# here get a w_ prefix
+
+WIN_CFLAGS=-i="$(%watcom)/h;$(%watcom)/h/win;src;src\win" -bt=windows -ml -zW -zc -3 -osbhl+kp -w4 -e10 -zq
+
+w_esshw.obj : src\esshw.c .AUTODEPEND
+ *wcc src\esshw.c $(WIN_CFLAGS) -fo=w_esshw.obj
+
+w_esscat.obj : src\esscat.c .AUTODEPEND
+ *wcc src\esscat.c $(WIN_CFLAGS) -fo=w_esscat.obj
+
+w_essio.obj : src\essio.c .AUTODEPEND
+ *wcc src\essio.c $(WIN_CFLAGS) -fo=w_essio.obj
+
+w_profile.obj : src\profile.c .AUTODEPEND
+ *wcc src\profile.c $(WIN_CFLAGS) -fo=w_profile.obj
+
+w_simhw.obj : src\simhw.c .AUTODEPEND
+ *wcc src\simhw.c $(WIN_CFLAGS) -fo=w_simhw.obj
+
+w_vxdapi.obj : src\vxdapi.c .AUTODEPEND
+ *wcc src\vxdapi.c $(WIN_CFLAGS) -fo=w_vxdapi.obj
+
+w_esfmbank.obj : src\esfmbank.c .AUTODEPEND
+ *wcc src\esfmbank.c $(WIN_CFLAGS) -fo=w_esfmbank.obj
+
+w_essctl.obj : src\win\essctl.c .AUTODEPEND
+ *wcc src\win\essctl.c $(WIN_CFLAGS) -fo=w_essctl.obj
+
+w_dlgmain.obj : src\win\dlgmain.c .AUTODEPEND
+ *wcc src\win\dlgmain.c $(WIN_CFLAGS) -fo=w_dlgmain.obj
+
+w_page.obj : src\win\page.c .AUTODEPEND
+ *wcc src\win\page.c $(WIN_CFLAGS) -fo=w_page.obj
+
+w_pagefld.obj : src\win\pagefld.c .AUTODEPEND
+ *wcc src\win\pagefld.c $(WIN_CFLAGS) -fo=w_pagefld.obj
+
+w_pageraw.obj : src\win\pageraw.c .AUTODEPEND
+ *wcc src\win\pageraw.c $(WIN_CFLAGS) -fo=w_pageraw.obj
+
+w_pageinfo.obj : src\win\pageinfo.c .AUTODEPEND
+ *wcc src\win\pageinfo.c $(WIN_CFLAGS) -fo=w_pageinfo.obj
+
+w_pageesfm.obj : src\win\pageesfm.c .AUTODEPEND
+ *wcc src\win\pageesfm.c $(WIN_CFLAGS) -fo=w_pageesfm.obj
+
+w_winio.obj : src\win\winio.c .AUTODEPEND
+ *wcc src\win\winio.c $(WIN_CFLAGS) -fo=w_winio.obj
+
+w_drvcfg.obj : src\win\drvcfg.c .AUTODEPEND
+ *wcc src\win\drvcfg.c $(WIN_CFLAGS) -fo=w_drvcfg.obj
+
+w_esfmlive.obj : src\win\esfmlive.c .AUTODEPEND
+ *wcc src\win\esfmlive.c $(WIN_CFLAGS) -fo=w_esfmlive.obj
+
+w_esfmtest.obj : src\win\esfmtest.c .AUTODEPEND
+ *wcc src\win\esfmtest.c $(WIN_CFLAGS) -fo=w_esfmtest.obj
+
+w_wavelive.obj : src\win\wavelive.c .AUTODEPEND
+ *wcc src\win\wavelive.c $(WIN_CFLAGS) -fo=w_wavelive.obj
+
+w_wavestat.obj : src\wavestat.c .AUTODEPEND
+ *wcc src\wavestat.c $(WIN_CFLAGS) -fo=w_wavestat.obj
+
+w_vxdcall.obj : src\win\vxdcall.asm
+ *wasm src\win\vxdcall.asm -q -fo=w_vxdcall.obj
+
+essctl.res : src\win\essctl.rc src\win\resource.h src\win\essctl.ico
+ *wrc -q -r -bt=windows -i="$(%watcom)/h;$(%watcom)/h/win;src\win" src\win\essctl.rc -fo=essctl.res
+
+essctl.exe : w_essctl.obj w_dlgmain.obj w_page.obj w_pagefld.obj w_pageraw.obj w_pageinfo.obj w_pageesfm.obj w_winio.obj w_drvcfg.obj w_esfmlive.obj w_esfmtest.obj w_wavelive.obj w_wavestat.obj w_esshw.obj w_esscat.obj w_essio.obj w_profile.obj w_simhw.obj w_vxdapi.obj w_esfmbank.obj w_vxdcall.obj essctl.res nestamp.exe .AUTODEPEND
+ @%write essctl.lk1 FIL w_essctl.obj,w_dlgmain.obj,w_page.obj,w_pagefld.obj,w_pageraw.obj,w_pageinfo.obj,w_pageesfm.obj,w_winio.obj,w_drvcfg.obj
+ @%append essctl.lk1 FIL w_esfmlive.obj,w_esfmtest.obj,w_wavelive.obj,w_wavestat.obj,w_esshw.obj,w_esscat.obj,w_essio.obj,w_profile.obj,w_simhw.obj,w_vxdapi.obj,w_esfmbank.obj,w_vxdcall.obj
+ @%append essctl.lk1 LIBR commdlg.lib,toolhelp.lib,mmsystem.lib
+ @%append essctl.lk1 SEGMENT CLASS 'CODE' MOVEABLE DISCARDABLE
+ @%append essctl.lk1 OPTION DESCRIPTION 'ES1869 Control'
+ *wlink name essctl sys windows op m op maxe=10 op q op el op stack=8k op heapsize=4k @essctl.lk1
+ *wrc -q -bt=windows essctl.res essctl.exe
+ nestamp essctl.exe

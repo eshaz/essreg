@@ -1,0 +1,58 @@
+/*
+ * Resources of esfmrec (16-bit Windows resource script).
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
+ * Licensed under GPL Version 3.0
+ */
+
+#include <windows.h>
+#include <ver.h>
+
+#ifndef DS_3DLOOK
+#define DS_3DLOOK 0x0004L
+#endif
+
+ESFMREC ICON "essctl.ico"
+
+ESFMREC DIALOG 0, 0, 220, 78
+STYLE WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | DS_3DLOOK
+CAPTION "ES1869 FM Recorder"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT "", 101, 6, 6, 208, 9, SS_NOPREFIX
+    LTEXT "", 102, 6, 18, 208, 9
+    LTEXT "", 103, 6, 30, 208, 9
+    LTEXT "", 104, 6, 42, 208, 9
+    /* no default button: Enter and Esc don't end a recording by accident */
+    PUSHBUTTON "&Stop", 105, 110, 58, 50, 14
+    PUSHBUTTON "Close", 106, 164, 58, 50, 14
+END
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEFLAGSMASK 0x3F
+FILEFLAGS 0
+FILEOS VOS_DOS_WINDOWS16
+FILETYPE VFT_APP
+FILESUBTYPE 0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4"
+        BEGIN
+            VALUE "FileDescription", "ES1869 FM recorder\0"
+            VALUE "FileVersion", "1.0\0"
+            VALUE "InternalName", "ESFMREC\0"
+            VALUE "LegalCopyright", "(c) 2026 Ethan Halsall, GPL version 3\0"
+            VALUE "OriginalFilename", "ESFMREC.EXE\0"
+            VALUE "ProductName", "essreg\0"
+            VALUE "ProductVersion", "1.0\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1252
+    END
+END
