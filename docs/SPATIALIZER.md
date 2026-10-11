@@ -29,7 +29,9 @@ showed](#what-one-card-showed)):
 * 50h bit 0, the limit, holds the S out under a level, 5.5 dB over the M
   with ESS's values and an M at -24 dBFS. It moves the boost down and up at
   fixed rates in dB a second, 51.5 down and 5.15 up with ESS's values, so it
-  follows the program over a few seconds. It hardly acts under 400 Hz.
+  follows the program over a few seconds. It follows the S out and the M
+  through high-passes near 450 Hz, so it hardly acts on bass, and allows
+  less S where the M is mostly bass.
 * With the limit off, 54h-5Ah change nothing. With it on, they are its
   settings. 54h and 56h each set a level of the S out: the register's value,
   00h to FFh, over 91 times the M, plus a fixed part that 5Ah sets. The
@@ -200,6 +202,13 @@ No document describes these bits and registers. Each item gives the evidence
 for one of them, what one card showed ([What one card
 showed](#what-one-card-showed)), and what is still open.
 
+* **50h bit 3 without bit 2.** The data sheet's bit 3 turns the effect on
+  and bit 2 releases it from reset, and Linux's esssolo1.c writes 08h, which
+  leaves the effect on but in reset. On the card, 08h adds 0.4 dB to the S
+  up to about 250 Hz, less above, and none over 1.5 kHz, as about 5 percent
+  of the S through a low-pass near 550 Hz would. The M and the phases stay
+  as they are. This is too little to hear, so in reset the effect is as good
+  as off.
 * **50h bit 1, the model.** NetBSD names it MONO, and ESS's drivers never
   set it. The data sheet of the Solo-1 (ES1938), which has the same
   processor, says that its Spatializer "also has a mode that generates a
@@ -226,7 +235,10 @@ showed](#what-one-card-showed)), and what is still open.
   keeps more width than loud. The limit follows the S through a high-pass,
   so it hardly acts on bass: with a fast limit it holds the S at +5.3 to
   +5.6 dB from 1 to 2.5 kHz, at +6.6 dB at 630 Hz, +8.4 at 400 Hz and +11.2
-  at 250 Hz, and not at all at 160 Hz and under.
+  at 250 Hz, and not at all at 160 Hz and under. It takes the M through a
+  high-pass too, near 460 Hz: with the M at 160 Hz instead of 400 Hz, it
+  holds the S out 5.1 dB lower, and with the M at 2.5 kHz 3.1 dB higher
+  ([The full plan](#the-full-plan)).
 * **58h, the limit's speed.** AutoSpace follows the program through filters
   with "adjustable rise and fall ballistics". On the card, the limit moves
   the boost in a straight line in dB, down while the S is over the level and
@@ -322,7 +334,7 @@ and *S>M deg* give the phase of a cross path against the direct path of the
 same tone.
 
 A dot is a value under the noise floor, and the M>S and S>M lines are left
-out where every value is. On the card, the right channel is 0.2 dB lower
+out where every value is. On the card, the right channel is 0.2 dB higher
 than the left between the DAC and the effect, which puts M>S and S>M at
 about -38 dB in every run, and the boost raises M>S with it. The summary
 leaves out cross paths under -15 dB for that reason.
@@ -457,7 +469,7 @@ varies, and lines that answer the questions of the readings above:
   c1 s + c0), the shape of the card's boost, and gives its poles, their
   center and Q, its peak and its lag. The effect of /sim, a first-order
   high-pass at 380 Hz and a low-pass at 540 Hz that lag by 4.2 us, gives a
-  center of 449 Hz and a lag of 4.7 us, as near as a band-pass in s comes to
+  center of 449 Hz and a lag of 4.6 us, as near as a band-pass in s comes to
   its digital filters.
 * The *properties* section, last, gives each property of the effect from the
   runs that show it. The full plan has every one, and the other plans give
@@ -466,7 +478,8 @@ varies, and lines that answer the questions of the readings above:
     between the DAC and the ADC, from M>S of *chirp off* from 100 Hz to 1
     kHz, how much later it comes, from the phase of M>S over 1 kHz, and how
     far the path moved by *off again*.
-  * *on*: what 50h at 08h does, and how far M>M moves with the boost on.
+  * *on*: the path that 50h at 08h changes most, by how much and where, and
+    how far M>M moves with the boost on.
   * *boost*: the band-pass with a lag of ESS's setting.
   * *52h*: dB a step, from the boost's peak at each level over -20 dB, how
     far its center and Q move, and its peak at the lowest level.
@@ -485,7 +498,10 @@ varies, and lines that answer the questions of the readings above:
     at most, and the median time after each step before the boost moves.
   * *detector*: the high-pass through which the limit follows the S out,
     fitted to the S held at each tone of the band run with a fast limit, and
-    how far the S held moves with the M at another frequency.
+    how far the S held moves with the M at another frequency. 5Ah's fixed
+    part of the level, from the *levels* line, doesn't follow the M, so the
+    line also gives the part that does, *the M's part*, and the first-order
+    high-pass that fits it.
   * *floor*: the least gain the limit left in a step run.
   * *ratio* and *52h and the limit*: the S out held against S/M, and with
     52h lower.
@@ -524,10 +540,11 @@ two that need no measurement:
 ## What one card showed
 
 The card is an ES1869 under Windows 98 with the rebuilt drivers. It was
-measured six times: with the full plan of an earlier version of ess3d, with
-the limit plan and the full plan of the next, with the limit plan once more,
-with runs added for bit 7, the M's level and the band with a fast limit,
-with the window plan, and with the chirp plan.
+measured seven times: with the full plan of an earlier version of ess3d,
+with the limit plan and the full plan of the next, with the limit plan once
+more, with runs added for bit 7, the M's level and the band with a fast
+limit, with the window plan, with the chirp plan, and with the full plan
+that gives every property.
 
 ### The first measurement
 
@@ -753,6 +770,69 @@ effect and the ADC, one channel comes about 2 us after the other.
 it again, because its M has a delay of its own that changes with the
 frequency, so the glide's timing didn't fit its top windows. A window is now
 compared with the one before it.
+
+### The full plan
+
+The full plan that gives every property took about 8 minutes. Its
+*properties* section agrees with the earlier measurements, and adds three
+findings: the M reaches the limit through a high-pass, 50h at 08h adds a
+little bass to the S, and the model's M>S falls faster with 52h than the
+boost.
+
+**The path.** The right channel comes 0.22 dB over the left and 2.1 us after
+it, and the path moved 0.02 dB over the 8 minutes. The pan runs put a
+centered tone at 49 degrees, a little to the right, which fits: the boost
+raises the S that the louder right channel makes.
+
+**The boost.** The band-pass with a lag has two real poles, at 368 and 551
+Hz, a Q of 0.49 at 451 Hz, +16.8 dB at its peak and a lag of 5.2 us, within
+0.07 dB rms. 52h moves it 0.75 dB a step all the way down, so at 00h its
+peak is -30.7 dB, and its center and Q stay where they are.
+
+**50h at 08h.** It changes S>S by +0.4 dB from 51 to 260 Hz, +0.2 dB at 520
+to 650 Hz and nothing over 1.5 kHz, and leaves the other paths and the
+phases within a degree ([What the undocumented bits and registers
+do](#what-the-undocumented-bits-and-registers-do)).
+
+**The model.** M>S peaks at +13.9 dB at 462 Hz, 2.8 dB under the boost's
+peak, as before. 52h moves it 0.88 dB a step against the boost's 0.75, so
+with 52h at 20h, M>S is about 4 dB lower than the boost's steps give.
+54h-5Ah at FFh moved S>S by 0.4 dB, which is the noise of an S that the
+model leaves 24 to 45 dB down. With the limit on, M>S is held down by up to
+13.2 dB and M>M by up to 9.0 dB.
+
+**The levels.** The higher of 54h's and 56h's value over 91.2 times the M,
+plus 5Ah times 0.00192 of an M at -24 dBFS, fits 35 runs to within 0.19 dB.
+The higher level holds to within 0.09 dB, and the boost rises under 54h's
+level made 0.5 dB higher.
+
+**The speeds.** The fall is 256.0 / (n + 1) dB a second and the rise the
+fall over h + 1, 0.6 and 1.0 percent off at the median of 37 runs. Two runs
+were further off. In *L M 160 Hz*, the S out ends only 0.4 dB over the S
+alone, so a little boost hardly moves it, and the limit hunts around its
+level for the last part of the fall, which read 40 dB a second instead of
+51.5. ess3d now leaves the windows within 1.5 dB of where the S out ends out
+of the fall. In *W18*, the boost rose by about a dB before it stopped, too
+little for its rise of 4.1 dB a second to be exact.
+
+**The detector.** The limit follows the S out through a high-pass at 438 Hz,
+within 0.29 dB at 6 tones. With the M at 160 Hz instead of 400 Hz, it held
+the S out 5.08 dB lower, and with the M at 2.5 kHz 3.05 dB higher. 5Ah's
+fixed part is 13 percent of this level and doesn't follow the M, so the part
+that does moved by -6.2 and +3.4 dB, which a first-order high-pass at about
+460 Hz gives to within 0.2 dB. So the limit takes the M through about the
+same high-pass as the S, and a program whose M is mostly bass gets a lower
+level, and less width.
+
+**The floor and the ratio.** The boost's gain went down to -47.5 dB and no
+lower. From S/M -24 to +6 dB, the limit held the S out at +5.4 to +5.5 dB
+over the M, and with 52h at 30h at +5.5 dB.
+
+**Skips.** ess3d noted a skip from the first window of the S glide in two
+runs with the model on. The model leaves that S 24 to 45 dB down, too weak
+for the glide's timing to be checked, so ess3d now leaves a glide out of the
+check where its path is more than 14 dB under the same path with the effect
+off.
 
 ## Sources
 

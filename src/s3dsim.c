@@ -14,17 +14,20 @@
 
 #define PI 3.14159265358979
 #define GAIN 0.5
-#define RIGHT 0.975       // the right channel's level against the left
+#define RIGHT 1.0257      // the right channel's level against the left
 #define HP_HZ 380.0       // the boost's high-pass
 #define LP_HZ 540.0       // and low-pass, both first order
 #define PEAK 11.79        // and its gain, for 16.8 dB at its peak
 #define LAG 4.2e-6        // and its lag, seconds
-#define SKEW 2.1e-6       // the right channel's lag in the ADC, seconds
+#define SKEW 1.7e-6       // the right channel's lag in the ADC, seconds
 #define MODEL 0.70710678  // the model's S, 3 dB under the boost
 #define KEEP (1.0 / 32)   // the input's S that the model keeps
 #define DETECT 420.0      // the limit's high-pass on the S it follows
 #define FLOOR 0.0045      // and the least gain it leaves, -47 dB
 #define DETECT_1K 1.0844  // and its gain at 1 kHz brought to 0 dB
+#define DETECT_M 460.0    // its high-pass on the M, 0 dB at 400 Hz
+#define RESET_GAIN 0.047  // 50h at 08h: the S's low-pass part, 0.4 dB
+#define RESET_HZ 550.0    // and its corner
 #define K_STEP (1 / 91.2) // a level's part re the M, a step of 54h or 56h
 #define RISE 1.06         // 54h's level for the rise, 0.5 dB higher
 #define ENV 0.002         // each stage of the envelopes, seconds
@@ -69,6 +72,20 @@ static double allpass(double t, u32 rate) {
   return (1 - t * rate) / (1 + t * rate);
 }
 
+// a first-order high-pass's gain at hz
+static double hp_gain(const double *c, u32 rate, double hz) {
+  double w = 2 * PI * hz / rate;
+
+  return c[0] * sqrt((2 - 2 * cos(w)) / (1 + c[2] * c[2] + 2 * c[2] * cos(w)));
+}
+
+double s3dsim_detect_m(u32 rate, double hz) {
+  double c[3];
+
+  first(DETECT_M, rate, 1, c);
+  return hp_gain(c, rate, hz) / hp_gain(c, rate, 400);
+}
+
 void s3dsim_reset(struct s3dsim *s, u32 rate) {
   static const u8 off[6] = {0x04, 0x3F, 0x8F, 0x95, 0x94, 0x80};
 
@@ -93,6 +110,9 @@ void s3dsim_regs(struct s3dsim *s, const u8 *reg) {
   first(LP_HZ, s->rate, 0, s->lb);
   s->g = boost_gain(reg);
   first(DETECT, s->rate, 1, s->db);
+  first(DETECT_M, s->rate, 1, s->mb);
+  s->m_400 = 1 / hp_gain(s->mb, s->rate, 400);
+  first(RESET_HZ, s->rate, 0, s->rb);
   // the envelopes are means of the absolute value, 2 / pi of a tone's
   // amplitude
   for (i = 0; i < 2; i++) {
@@ -130,6 +150,13 @@ void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
     r = in[2 * i + 1] / 32768.0 * RIGHT;
     m = (l + r) / 2;
     sd = (l - r) / 2;
+    if ((s->reg[0] & 0x0C) == 0x08) {
+      // bit 3 without bit 2 adds a little of the S through a low-pass
+      y = s->rb[0] * sd + s->rb[1] * s->rx - s->rb[2] * s->ry;
+      s->rx = sd;
+      s->ry = y;
+      sd += RESET_GAIN * y;
+    }
     if (on) {
       // the boost: high-pass, then low-pass, of the S, or of the M for
       // the model
@@ -155,7 +182,11 @@ void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
         s->dx = x;
         s->dy = y;
         x = y * DETECT_1K;
-        s->env_m[0] += (fabs(m) - s->env_m[0]) * k;
+        // the M through its own high-pass, 0 dB at 400 Hz
+        y = s->mb[0] * m + s->mb[1] * s->mx - s->mb[2] * s->my;
+        s->mx = m;
+        s->my = y;
+        s->env_m[0] += (fabs(y) * s->m_400 - s->env_m[0]) * k;
         s->env_m[1] += (s->env_m[0] - s->env_m[1]) * k;
         s->env_s[0] += (fabs(x) - s->env_s[0]) * k;
         s->env_s[1] += (s->env_s[0] - s->env_s[1]) * k;
@@ -242,6 +273,10 @@ static void path(const u8 *reg, u32 rate, double w, struct z l, struct z r,
   r = z_scale(r, RIGHT);
   m = z_scale(z_add(l, r), 0.5);
   s = z_scale(z_sub(l, r), 0.5);
+  if ((reg[0] & 0x0C) == 0x08) {
+    first(RESET_HZ, rate, 0, lb);
+    s = z_add(s, z_mul(z_scale(at(lb, w), RESET_GAIN), s));
+  }
   if ((reg[0] & 0x0C) == 0x0C) {
     first(HP_HZ, rate, 1, hb);
     first(LP_HZ, rate, 0, lb);

@@ -313,14 +313,18 @@ static void model_pan(int i, double th, double *deg, double *lev) {
 // down stays over the level it rises under
 static void check_limit(int i) {
   struct s3d_lim l;
-  double m, up_at, down_at, fall, rise, after, stop;
+  double m, g, up_at, down_at, fall, rise, after, stop;
   u8 reg[S3D_REGS];
   int bad = 0, drop = run(i)->drop ? run(i)->drop : 12;
 
   CHECK_EQ(s3d_limit(&meas, i, &l), 0);
   s3d_regs(&meas, i, reg);
   m = S3D_AMP_M * pow(10.0, -run(i)->att / 20.0);
-  s3dsim_levels(reg, m, &up_at, &down_at);
+  // an M away from 400 Hz reaches the limit through its high-pass
+  g = run(i)->mhz ? s3dsim_detect_m(S3D_RATE, run(i)->mhz) : 1;
+  s3dsim_levels(reg, m * g, &up_at, &down_at);
+  up_at += 20 * log10(g);
+  down_at += 20 * log10(g);
   s3dsim_speed(reg, &fall, &rise);
   if (has(l.held))
     bad |= fabs(l.held - down_at) > 0.3;
@@ -495,7 +499,7 @@ static void test_quick_plan(void) {
   CHECK(find_line("pan: 0, 22.5, 45, 67.5 and 90 degrees come out at -") > 0);
   CHECK(find_line("limit: the boost's gain in the step runs") > 0);
   CHECK(find_line(" 22  step limit     0D 3F 8F 95 94 80      51 -14.4  +0.0 "
-                  "    +5.4      0    5.1   +0.0    >+3.6") > 0);
+                  "    +5.4      0    5.2   +0.0    >+3.6") > 0);
   check_report_lines();
 }
 
@@ -542,12 +546,14 @@ static void test_full_plan(void) {
   // the glides of the runs by thirds of an octave
   CHECK(strstr(report[find_line("  4  52=20") + 2], "      65  ") != 0);
   CHECK(find_line("properties: ") > 0);
-  // the path: 0.22 dB, and the all-pass's 2.1 us that grow to 2.6 over
+  // the path: 0.22 dB, and the all-pass's 1.7 us that grow to 2.1 over
   // 1 kHz
   check_prop("path: ", "the right channel ", 0.2, 0.24);
-  check_prop("path: ", "under the left, and ", 2.3, 2.9);
+  check_prop("path: ", "over the left, and ", 1.9, 2.3);
   check_prop("path: ", "it moved ", 0, 0.05);
-  check_prop("on: ", "by more than ", 0, 0.05);
+  // 50h at 08h: the S's 0.4 dB of bass
+  check_prop("on: ", "changes S>S by ", 0.35, 0.45);
+  check_prop("on: ", "at most, at ", 40, 60);
   check_prop("on: ", "M>M stays within ", 0, 0.05);
   // the boost: 380 and 540 Hz, 16.8 dB and 4.2 us, as near as a band-pass
   // in s comes to the effect's digital one
@@ -563,7 +569,8 @@ static void test_full_plan(void) {
   check_prop("model: 54h", "more than ", 0, 0.05);
   check_prop("model and limit: ", "up to ", 5, 15);
   // the limit: 91.2, 0.00188, the higher of the two, +0.5 dB, the speeds
-  // of s3dsim_speed, the detector's 420 Hz and the M as it is, the floor
+  // of s3dsim_speed, the detector's 420 Hz on the S and 460 Hz on the M,
+  // the floor
   check_prop("levels: ", "value / ", 90.5, 93);
   check_prop("levels: ", "plus 5Ah x ", 0.0018, 0.0020);
   check_prop("levels: ", "runs within ", 0, 0.25);
@@ -575,7 +582,8 @@ static void test_full_plan(void) {
   CHECK(strstr(report[find_from(find_line("properties: "), "rise: ")],
                "the fall over h + 1") != 0);
   check_prop("detector: the limit", "high-pass at ", 380, 470);
-  check_prop("detector: the S held", "160 Hz ", -0.5, 0.5);
+  check_prop("detector: the S held", "160 Hz ", -5.5, -4.8);
+  check_prop("detector: the S held", "high-pass at ", 440, 500);
   check_prop("floor: ", "down to ", -48, -46);
   check_prop("ratio: ", "S out at ", 5, 6);
   check_prop("52h and the limit: ", "dB re M, with 3Fh at ", 5, 6);
@@ -673,7 +681,7 @@ static void test_window_plan(void) {
                         "-36.4  14, 15") > 0);
   // and the one model for all of them, with the rise 0.5 dB over 54h's
   // level, as in the effect
-  CHECK(find_line("fit: S out held = M x the higher of 54h and 56h / 92.0 + "
+  CHECK(find_line("fit: S out held = M x the higher of 54h and 56h / 91.9 + "
                   "-36.4 dBFS x 5Ah / 80h, from 24 runs: within 0.08 dB") > 0);
   CHECK(find_line("rise level: where the boost stopped rising short of the "
                   "level held, it stopped +0.6 dB over 54h's level of the fit "
