@@ -203,7 +203,8 @@ play or record first.
 
 The full plan takes about 6 minutes, `measure quick` about 2,
 `measure limit` tries each bit of 54h-5Ah with the limit on in about 8,
-`measure window` tests the limit's two levels in about 4, and `measure 58`
+`measure window` tests the limit's two levels in about 4, `measure chirp`
+reads the boost's filters with a gliding tone in about 1, and `measure 58`
 tries one register from 00h to FFh. A window shows the progress, and the
 report goes to `ESS3D.TXT` next to ess3d.exe, or to the `/out=` file. ess3d
 puts the mixer back at the end, and if the measurement is ended by force,

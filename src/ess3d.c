@@ -268,7 +268,7 @@ int ess3d_parse(const char *line, struct ess3d_cmd *c) {
       c->exit = 1;
       continue;
     } else if (!strcmp(word, "measure")) {
-      // the plan is optional: quick, limit, window, or a register
+      // the plan is optional: quick, limit, window, chirp, or a register
       c->measure = 1;
       c->plan = S3D_PLAN_FULL;
       after = next_word(p, arg, sizeof(arg));
@@ -285,6 +285,9 @@ int ess3d_parse(const char *line, struct ess3d_cmd *c) {
           p = after;
         } else if (!strcmp(arg, "window")) {
           c->plan = S3D_PLAN_WINDOW;
+          p = after;
+        } else if (!strcmp(arg, "chirp")) {
+          c->plan = S3D_PLAN_CHIRP;
           p = after;
         } else if (arg[0] && !*end &&
                    (n == 0x54 || n == 0x56 || n == 0x58 || n == 0x5A)) {

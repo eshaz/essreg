@@ -23,6 +23,18 @@
 #define CROSS_MIN -15 // the summary leaves out cross paths under this, dB
 #define OFF_DB -40    // a boost under this is off, dB
 
+// chirp runs: the glide starts at CHIRP_F0 and rises by a twelfth of an
+// octave a piece, after a steady start that lets the effect settle, and
+// before a steady end that takes the fade
+#define CHIRP_F0 50.0
+#define CHIRP_LEAD 4800 // frames at 50 Hz before the glide, 5 cycles
+#define CHIRP_TAIL 960  // and at the top after it
+#define CHIRP_GAP 50    // ms of silence after each glide
+// the pieces of the M glide that time the glide, from 200 to 820 Hz: the
+// pieces after them, in both glides, are placed again by it
+#define CHIRP_TIME_A 24
+#define CHIRP_TIME_B 48
+
 // a step run: the S tone at -12 dB re the M tone, at 0 dB, then at -12 dB
 // again, in ms that are whole cycles of both tones
 #define STEP_LOW 1500
@@ -49,8 +61,11 @@ static const char *const freq_name[S3D_FREQS] = {"100", "160",  "250",  "400",
                                                  "630", "1k",   "1.6k", "2.5k",
                                                  "4k",  "6.3k", "10k"};
 static const char *const path_name[S3D_PATHS] = {"M>M", "S>S", "M>S", "S>M"};
-static const char *const plan_name[5] = {"full", "quick", "one register",
-                                         "limit", "window"};
+static const char *const plan_name[6] = {"full",  "quick",  "one register",
+                                         "limit", "window", "chirp"};
+
+// ess3d keeps the measurement in one segment of Win16's memory
+typedef char s3d_one_segment[sizeof(struct s3d_meas) < 65000L ? 1 : -1];
 
 // what ESS's driver sets when Windows starts (docs/SPATIALIZER.md)
 static const u8 ess_set[S3D_REGS] = {0x0C, 0x3F, 0x8F, 0x95, 0x94, 0x80};
@@ -100,6 +115,9 @@ static int add(struct s3d_meas *m, const char *name, const u8 *reg, int kind,
   r->base = (u8)base;
   r->slow = (u8)(reg[S3D_R50] & 1); // the limit on
   r->result = 0xFF;
+  r->slot = 0xFF;
+  if (kind == S3D_CHIRP && m->nchirp < S3D_MAX_CHIRPS)
+    r->slot = (u8)m->nchirp++;
   return m->nruns++;
 }
 
@@ -250,15 +268,27 @@ void s3d_init(struct s3d_meas *m, int plan, u8 reg, s3d_out_fn out, void *ctx) {
       ri = i;
   if (plan == S3D_PLAN_REG && ri < 0)
     m->plan = plan = S3D_PLAN_QUICK;
-
-  // the reference, the effect off but out of reset, then ESS's setting
+  memcpy(model, ess_set, S3D_REGS);
+  model[S3D_R50] = 0x0E;
   memcpy(r, ess_set, S3D_REGS);
   r[S3D_R50] = 0x04;
+
+  if (plan == S3D_PLAN_CHIRP) {
+    // the glide with the effect off as the reference, then ESS's setting,
+    // a lower level and the model, whose responses the summary fits with
+    // poles and zeros, and the effect off again
+    add(m, "off", r, S3D_CHIRP, 0);
+    ess = add(m, "ess", ess_set, S3D_CHIRP, 0);
+    add_reg(m, "", ess_set, S3D_R52, 0x30, "", S3D_CHIRP, ess);
+    add(m, "model", model, S3D_CHIRP, ess);
+    add(m, "off again", r, S3D_CHIRP, 0);
+    return;
+  }
+
+  // the reference, the effect off but out of reset, then ESS's setting
   add(m, "off", r, S3D_SWEEP, 0);
   ess = add(m, "ess", ess_set, S3D_SWEEP, 0);
   // the model (50h bit 1) and the limit (50h bit 0)
-  memcpy(model, ess_set, S3D_REGS);
-  model[S3D_R50] = 0x0E;
   memcpy(lim, ess_set, S3D_REGS);
   lim[S3D_R50] = 0x0D;
 
@@ -403,6 +433,81 @@ static double traj_mid(int k) { return traj_ms(k) + (k < S3D_FINE ? 10 : 50); }
 // the S of a step run after the step down, dB under the M
 static int drop_db(const struct s3d_run *r) { return r->drop ? r->drop : 12; }
 
+// piece b of a glide: -1 the steady start, 0 to S3D_BINS - 1 a rise by a
+// twelfth of an octave in a straight line, S3D_BINS the steady end; its
+// frames, and the angle a frame at its start and end (radians at
+// S3D_RATE). A rise lasts whole cycles of its middle, 8 at least, and 20
+// ms at least.
+static u32 chirp_piece(int b, double *w0, double *w1) {
+  double f0, f1, n;
+
+  f0 = CHIRP_F0 * pow(2.0, (b < 0 ? 0 : b) / 12.0);
+  f1 = b < 0 || b >= S3D_BINS ? f0 : f0 * pow(2.0, 1 / 12.0);
+  *w0 = 2 * PI * f0 / S3D_RATE;
+  *w1 = 2 * PI * f1 / S3D_RATE;
+  if (b < 0)
+    return CHIRP_LEAD;
+  if (b >= S3D_BINS)
+    return CHIRP_TAIL;
+  n = ceil((f0 + f1) / 2 * 0.02);
+  if (n < 8)
+    n = 8;
+  return (u32)floor(n * S3D_RATE * 2 / (f0 + f1) + 0.5);
+}
+
+double s3d_bin_hz(int k) {
+  return CHIRP_F0 * pow(2.0, k / 12.0) * (1 + pow(2.0, 1 / 12.0)) / 2;
+}
+
+// the frames of a whole glide
+static u32 chirp_frames(void) {
+  double w0, w1;
+  u32 n = 0;
+  int b;
+
+  for (b = -1; b <= S3D_BINS; b++)
+    n += chirp_piece(b, &w0, &w1);
+  return n;
+}
+
+// where a glide is off frames after frame k of its segment (both may have
+// a fraction, and off may be under 0), by the piece that k is in: its
+// phase, the angle from there to the next frame, how much that angle
+// grows a frame, and the frames where the piece starts and ends
+struct glide {
+  double ph, w, a, start, end;
+};
+
+static void chirp_at(double k, double off, struct glide *g) {
+  double ph = 0, start = 0, w0 = 0, w1, a = 0, d;
+  u32 n = 0;
+  int b;
+
+  for (b = -1; b <= S3D_BINS; b++) {
+    n = chirp_piece(b, &w0, &w1);
+    a = (w1 - w0) / n;
+    if (k < start + n || b == S3D_BINS)
+      break;
+    // a piece's phase goes up by w0 + a d from frame d to d + 1
+    ph += n * w0 + a * n * (n - 1.0) / 2;
+    start += n;
+  }
+  d = k + off - start;
+  g->ph = ph + d * w0 + a * d * (d - 1) / 2;
+  g->w = w0 + a * d;
+  g->a = a;
+  g->start = start;
+  g->end = start + n;
+}
+
+// a window of n play frames from pstart, as a glide's pieces have
+static void win_frames(struct s3d_meas *m, u32 pstart, u32 n) {
+  if (m->nwin >= S3D_MAX_WINS)
+    return;
+  win_add(m, pstart, 0);
+  m->win[m->nwin - 1].plen = (u16)n;
+}
+
 int s3d_seconds(const struct s3d_meas *m) {
   long ms = 0;
   int i, tone;
@@ -424,6 +529,9 @@ int s3d_seconds(const struct s3d_meas *m) {
     case S3D_STEP:
       ms += STEP_LOW + STEP_HIGH + STEP_DOWN;
       break;
+    case S3D_CHIRP:
+      ms += 2 * (chirp_frames() / (S3D_RATE / 1000) + CHIRP_GAP);
+      break;
     default:
       ms += 2 * S3D_FREQS * tone;
     }
@@ -434,9 +542,9 @@ int s3d_seconds(const struct s3d_meas *m) {
 
 u32 s3d_begin(struct s3d_meas *m, int i, u32 *rec_frames) {
   struct s3d_run *r = &m->run[i];
-  u32 t = 0, s;
+  u32 t = 0, s, n;
   int k, side, settle = r->slow ? 300 : 50;
-  double a, g, th;
+  double a, g, th, w0, w1;
   u16 hz;
 
   m->cur = i;
@@ -506,6 +614,23 @@ u32 s3d_begin(struct s3d_meas *m, int i, u32 *rec_frames) {
     step_windows(m, s, S3D_COARSE_DN);
     win_add(m, s + fr(STEP_DOWN - 120), 100);
     break;
+  case S3D_CHIRP:
+    // the glide in M, then in S, each piece of it a window, and a little
+    // silence after each, where the effect rings out
+    for (side = 1; side >= -1; side -= 2) {
+      s = t;
+      t = seg_add(m, t, chirp_frames(), (u16)CHIRP_F0, AMP, side * AMP, 0, 0, 0,
+                  3);
+      m->seg[m->nseg - 1].chirp = 1;
+      s += CHIRP_LEAD;
+      for (k = 0; k < S3D_BINS; k++) {
+        n = chirp_piece(k, &w0, &w1);
+        win_frames(m, s, n);
+        s += n;
+      }
+      t = seg_add(m, t, fr(CHIRP_GAP), 0, 0, 0, 0, 0, 0, 0);
+    }
+    break;
   default:
     for (side = 1; side >= -1; side -= 2)
       for (k = 0; k < S3D_FREQS; k++) {
@@ -545,6 +670,7 @@ static const struct s3d_seg *seg_at(const struct s3d_meas *m, u32 pos) {
 
 void s3d_signal(const struct s3d_meas *m, double pos, double *l, double *r) {
   const struct s3d_seg *s;
+  struct glide g;
   double k, v, f;
   int j;
 
@@ -558,7 +684,12 @@ void s3d_signal(const struct s3d_meas *m, double pos, double *l, double *r) {
   f = fade(s, (u32)k);
   for (j = 0; j < 2; j++)
     if (s->t[j].hz) {
-      v = f * sin(2 * PI * s->t[j].hz * k / S3D_RATE);
+      if (!j && s->chirp) {
+        chirp_at(k, 0, &g);
+        v = f * sin(g.ph);
+      } else {
+        v = f * sin(2 * PI * s->t[j].hz * k / S3D_RATE);
+      }
       *l += s->t[j].l * v;
       *r += s->t[j].r * v;
     }
@@ -574,9 +705,25 @@ static s16 to_s16(double v) {
   return (s16)x;
 }
 
+// a glide's phasor at frame k of its segment, its step a frame and how
+// that turns a frame, and the frame where its piece ends
+static void glide_set(double k, double *pc, double *ps, double *wc, double *ws,
+                      double *vc, double *vs, double *end) {
+  struct glide g;
+
+  chirp_at(k, 0, &g);
+  *pc = cos(g.ph);
+  *ps = sin(g.ph);
+  *wc = cos(g.w);
+  *ws = sin(g.w);
+  *vc = cos(g.a);
+  *vs = sin(g.a);
+  *end = g.end;
+}
+
 void s3d_fill(struct s3d_meas *m, s16 *pcm, u16 n) {
   const struct s3d_seg *s = 0;
-  double pc[2], ps[2], wc[2], ws[2], t, l, r, f;
+  double pc[2], ps[2], wc[2], ws[2], t, l, r, f, vc = 1, vs = 0, end = 0;
   u32 k = 0;
   u16 i;
   int j;
@@ -595,6 +742,8 @@ void s3d_fill(struct s3d_meas *m, s16 *pcm, u16 n) {
           pc[j] = cos(t * k);
           ps[j] = sin(t * k);
         }
+        if (s->chirp)
+          glide_set(k, &pc[0], &ps[0], &wc[0], &ws[0], &vc, &vs, &end);
       }
     }
     l = r = 0;
@@ -606,14 +755,27 @@ void s3d_fill(struct s3d_meas *m, s16 *pcm, u16 n) {
           l += s->t[j].l * f * ps[j];
           r += s->t[j].r * f * ps[j];
         }
-        // the next sample's phase
+        // the next sample's phase, and a glide's next step, exact again
+        // at each of its pieces
         t = pc[j] * wc[j] - ps[j] * ws[j];
         ps[j] = ps[j] * wc[j] + pc[j] * ws[j];
         pc[j] = t;
+        if (!j && s->chirp) {
+          if (k + 1 >= end) {
+            glide_set(k + 1, &pc[0], &ps[0], &wc[0], &ws[0], &vc, &vs, &end);
+            continue;
+          }
+          t = wc[0] * vc - ws[0] * vs;
+          ws[0] = ws[0] * vc + wc[0] * vs;
+          wc[0] = t;
+        }
         if ((k & 1023) == 1023) {
           t = 1.0 / sqrt(pc[j] * pc[j] + ps[j] * ps[j]);
           pc[j] *= t;
           ps[j] *= t;
+          t = 1.0 / sqrt(wc[j] * wc[j] + ws[j] * ws[j]);
+          wc[j] *= t;
+          ws[j] *= t;
         }
       }
     }
@@ -624,46 +786,74 @@ void s3d_fill(struct s3d_meas *m, s16 *pcm, u16 n) {
 
 // --- the analysis ----------------------------------------------------------
 
-// the recorded frames of each window, once the onset is known, and the
-// phase the stimulus has where the window starts: its place in the
-// segment, and the part of a frame lost in rounding the start
-static void place_windows(struct s3d_meas *m) {
-  double q = (double)m->rate_rec / m->rate_play, x, rho, hz;
-  const struct s3d_seg *s;
-  struct s3d_win *w;
-  int i, j;
+// the recorded frames of window i once the onset is known, d recorded
+// frames later than the onset puts them, and the phase the stimulus has
+// where the window starts: its place in the segment, and the part of a
+// frame lost in rounding the start. A glide's windows end where the next
+// one starts.
+static void place_window(struct s3d_meas *m, int i, double d) {
+  double q = (double)m->rate_rec / m->rate_play, x, rho, hz, b, c;
+  struct s3d_win *w = &m->win[i];
+  const struct s3d_seg *s = &m->seg[w->seg];
+  struct glide g;
+  int j;
 
-  for (i = 0; i < m->nwin; i++) {
-    w = &m->win[i];
-    s = &m->seg[w->seg];
-    x = (w->pstart - m->psync) * q;
-    w->rstart = m->ron + (u32)floor(x + 0.5);
-    rho = floor(x + 0.5) - x;
+  x = (w->pstart - m->psync) * q + d;
+  w->rstart = m->ron + (u32)floor(x + 0.5);
+  rho = floor(x + 0.5) - x;
+  if (w->plen)
+    w->rlen = (u16)(floor(x + w->plen * q + 0.5) - floor(x + 0.5));
+  else
     w->rlen = (u16)((u32)w->ms * m->rate_rec / 1000);
-    for (j = 0; j < 2; j++) {
-      hz = s->t[j].hz * ((double)m->rate_play / S3D_RATE);
-      w->psi[j] =
-          (float)fmod(2 * PI * s->t[j].hz * (w->pstart - s->start) / S3D_RATE +
-                          2 * PI * hz * rho / m->rate_rec,
-                      2 * PI);
-    }
+  for (j = 0; j < 2; j++) {
+    hz = s->t[j].hz * ((double)m->rate_play / S3D_RATE);
+    w->psi[j] =
+        (float)fmod(2 * PI * s->t[j].hz * (w->pstart - s->start) / S3D_RATE +
+                        2 * PI * hz * rho / m->rate_rec,
+                    2 * PI);
+  }
+  if (s->chirp) {
+    // a glide's phase where the window starts, and its steps in recorded
+    // frames: from there the phase goes up by b r + c r^2 after r of them
+    chirp_at(w->pstart - s->start, rho / q, &g);
+    b = (g.w - g.a / 2) / q;
+    c = g.a / (2 * q * q);
+    w->psi[0] = (float)fmod(g.ph, 2 * PI);
+    w->inc = (float)(b + c);
+    w->glide = (float)(2 * c);
   }
 }
 
+static void place_windows(struct s3d_meas *m) {
+  int i;
+
+  m->dsum = m->dwt = m->dly = 0;
+  m->timed = 0;
+  for (i = 0; i < m->nwin; i++)
+    place_window(m, i, 0);
+}
+
 static void window_start(struct s3d_meas *m) {
-  const struct s3d_seg *s = &m->seg[m->win[m->wcur].seg];
+  const struct s3d_win *w = &m->win[m->wcur];
+  const struct s3d_seg *s = &m->seg[w->seg];
   double t;
   int j;
 
   memset(m->acc, 0, sizeof(m->acc));
+  m->s2[0] = m->s2[1] = 0;
   for (j = 0; j < 2; j++) {
-    // the tone's frequency in the recording
+    // the tone's frequency in the recording, or a glide's first step
     t = 2 * PI * s->t[j].hz * ((double)m->rate_play / S3D_RATE) / m->rate_rec;
+    if (!j && s->chirp)
+      t = w->inc;
     m->wc[j] = cos(t);
     m->ws[j] = sin(t);
     m->pc[j] = 1;
     m->ps[j] = 0;
   }
+  // how a glide's step turns, and none for a steady tone
+  m->vc = cos(w->glide);
+  m->vs = sin(w->glide);
 }
 
 // whether a window's tone is steady, which it is in the runs with the
@@ -703,14 +893,114 @@ static void check_halves(struct s3d_meas *m) {
       m->first_bad = m->wcur;
 }
 
+// the windows of both glides after the ones that time it, placed again d
+// recorded frames later, and the ones just before them cut to end where
+// those start now
+static void chirp_align(struct s3d_meas *m, double d) {
+  struct s3d_win *w;
+  int i;
+
+  m->dly = d;
+  m->timed = 1;
+  for (i = m->wcur + 1; i < m->nwin; i++)
+    if (i % S3D_BINS >= CHIRP_TIME_B + 2)
+      place_window(m, i, d);
+  for (i = m->wcur + 1; i + 1 < m->nwin; i++) {
+    w = &m->win[i];
+    if (i % S3D_BINS == CHIRP_TIME_B + 1 &&
+        w->rstart + w->rlen > m->win[i + 1].rstart)
+      w->rlen = (u16)(m->win[i + 1].rstart - w->rstart);
+  }
+}
+
+// sums v of a tone over n frames (left over cos and sin of the
+// stimulus's phase, then right) without the part that comes from the
+// tone's image at minus its frequency, which c2 and s2, the sums of cos
+// and sin of twice that phase, give. A glide's window, or half of it, is
+// no whole number of cycles, and its image doesn't sum to 0 as a steady
+// tone's does.
+static void unimage(double *v, double c2, double s2, double n) {
+  double den = n * n - c2 * c2 - s2 * s2, vc, vs;
+  int ch;
+
+  if (den <= 0)
+    return;
+  for (ch = 0; ch < 4; ch += 2) {
+    vc = v[ch];
+    vs = v[ch + 1];
+    v[ch] = n * ((n - c2) * vc - s2 * vs) / den;
+    v[ch + 1] = n * ((n + c2) * vs - s2 * vc) / den;
+  }
+}
+
+// a glide's window, whose halves have sums x and y: the turn of the M out
+// of the M glide, or the S out of the S glide, from the first half to the
+// second, which a delay against the stimulus makes, and the amplitude the
+// lock-in loses to it, given back. A window that turns 0.25 more than the
+// glide's timing explains, 0.5 before it is timed, or whose halves differ
+// by 10 percent, counts as disturbed. The M glide's M out, which the
+// effect leaves as it is, times the glide.
+static void chirp_turn(struct s3d_meas *m, const double *x, const double *y) {
+  struct s3d_win *w = &m->win[m->wcur];
+  double n = w->rlen, nh = w->rlen / 2, sg = m->wcur < S3D_BINS ? 1 : -1;
+  double u[2], v[2], a1, a2, t, f, want = 0, tol = 0.5, noise;
+  int k, ch, bin = m->wcur % S3D_BINS;
+
+  for (k = 0; k < 2; k++) {
+    u[k] = (x[k] + sg * x[k + 2]) / nh;
+    v[k] = (y[k] + sg * y[k + 2]) / (n - nh);
+  }
+  a1 = sqrt(u[0] * u[0] + u[1] * u[1]);
+  a2 = sqrt(v[0] * v[0] + v[1] * v[1]);
+  t = atan2(u[1] * v[0] - u[0] * v[1], u[0] * v[0] + u[1] * v[1]);
+  // the turn a frame is -glide d, where d is how late the tone comes
+  if (m->timed) {
+    tol = 0.25;
+    if (bin <= CHIRP_TIME_B + 1)
+      want = -w->glide * m->dly * n / 2;
+  }
+  noise = 2 * m->sigma / sqrt(nh);
+  if (a1 + a2 >= 60 * noise &&
+      (fabs(a1 - a2) > 0.1 * (a1 + a2) / 2 || fabs(t - want) > tol))
+    if (!m->disturbed++)
+      m->first_bad = m->wcur;
+  // a tone that turns by 2t / n a frame sums to n sin(t / n) / sin(t) of
+  // what a steady one would
+  if (fabs(t) > 1e-9 && fabs(t) < 1.5) {
+    f = n * sin(t / n) / sin(t);
+    for (ch = 0; ch < 2; ch++) {
+      w->zr[0][ch] = (float)(w->zr[0][ch] * f);
+      w->zi[0][ch] = (float)(w->zi[0][ch] * f);
+    }
+  }
+  if (m->wcur < S3D_BINS && bin >= CHIRP_TIME_A && bin <= CHIRP_TIME_B) {
+    m->dsum += 2 * t / n * w->glide;
+    m->dwt += (double)w->glide * w->glide;
+    if (bin == CHIRP_TIME_B && m->dwt > 0 &&
+        fabs(m->dsum / m->dwt) < 0.01 * m->rate_rec)
+      chirp_align(m, -m->dsum / m->dwt);
+  }
+}
+
 // A sin(wn + p) gives sums of A n/2 cos(p) over sin(wn) and A n/2 sin(p)
 // over cos(wn): A e^(jp), turned back by the stimulus's own phase
 static void window_end(struct s3d_meas *m) {
   struct s3d_win *w = &m->win[m->wcur];
-  double g = 2.0 / w->rlen, a, b, c, s;
-  int j, ch;
+  double g = 2.0 / w->rlen, a, b, c, s, x[4], y[4];
+  int j, ch, chirp = m->seg[w->seg].chirp;
 
   check_halves(m);
+  if (chirp) {
+    // the halves and the whole without the glide's image
+    for (j = 0; j < 4; j++) {
+      x[j] = m->half[j];
+      y[j] = m->acc[0][j] - m->half[j];
+    }
+    unimage(x, m->s2h[0], m->s2h[1], w->rlen / 2);
+    unimage(y, m->s2[0] - m->s2h[0], m->s2[1] - m->s2h[1],
+            w->rlen - w->rlen / 2);
+    unimage(m->acc[0], m->s2[0], m->s2[1], w->rlen);
+  }
   for (j = 0; j < 2; j++) {
     c = cos(w->psi[j]);
     s = sin(w->psi[j]);
@@ -721,6 +1011,8 @@ static void window_end(struct s3d_meas *m) {
       w->zi[j][ch] = (float)(b * c - a * s);
     }
   }
+  if (chirp)
+    chirp_turn(m, x, y);
 }
 
 // the median of n block powers
@@ -841,17 +1133,32 @@ int s3d_take(struct s3d_meas *m, const s16 *pcm, u16 n) {
         m->acc[j][1] += l * m->ps[j];
         m->acc[j][2] += r * m->pc[j];
         m->acc[j][3] += r * m->ps[j];
+        if (!j && s->chirp) {
+          m->s2[0] += m->pc[0] * m->pc[0] - m->ps[0] * m->ps[0];
+          m->s2[1] += 2 * m->pc[0] * m->ps[0];
+        }
         t = m->pc[j] * m->wc[j] - m->ps[j] * m->ws[j];
         m->ps[j] = m->ps[j] * m->wc[j] + m->pc[j] * m->ws[j];
         m->pc[j] = t;
+        if (!j && m->vs != 0) {
+          t = m->wc[0] * m->vc - m->ws[0] * m->vs;
+          m->ws[0] = m->ws[0] * m->vc + m->wc[0] * m->vs;
+          m->wc[0] = t;
+        }
         if ((m->wn & 1023) == 1023) {
           t = 1.0 / sqrt(m->pc[j] * m->pc[j] + m->ps[j] * m->ps[j]);
           m->pc[j] *= t;
           m->ps[j] *= t;
+          t = 1.0 / sqrt(m->wc[j] * m->wc[j] + m->ws[j] * m->ws[j]);
+          m->wc[j] *= t;
+          m->ws[j] *= t;
         }
       }
-      if (++m->wn == m->win[m->wcur].rlen / 2)
+      if (++m->wn == m->win[m->wcur].rlen / 2) {
         memcpy(m->half, m->acc[0], sizeof(m->half));
+        m->s2h[0] = m->s2[0];
+        m->s2h[1] = m->s2[1];
+      }
       if (m->wn >= m->win[m->wcur].rlen) {
         window_end(m);
         m->wn = 0;
@@ -1100,6 +1407,11 @@ static void table_head(struct s3d_meas *m, int kind) {
     for (k = 0; k < S3D_PANS; k++)
       sprintf(line + strlen(line), "%6.1f", 22.5 * k);
     break;
+  case S3D_CHIRP:
+    say(m, "chirp runs: a tone that glides from 50 Hz to 12.8 kHz in M, then "
+           "in S, read by twelfths of an octave as a sweep run's tones are");
+    strcat(line, "      Hz   M>M   S>S   deg   M>S   deg   S>M   deg");
+    break;
   case S3D_STEP:
     say(m, "step runs: 1 kHz in S steps from -12 to 0 dB re 400 Hz in M at 0 "
            "ms, and back after 2 s; the boost's own gain in dB (0 is as with "
@@ -1149,7 +1461,8 @@ void s3d_header(struct s3d_meas *m, u32 rate_play, u32 rate_rec,
          "S>M deg are against the direct path of the same tone");
   say(m, ". is under the noise floor; M>S and S>M are left out where every "
          "value is");
-  table_head(m, S3D_SWEEP);
+  if (m->run[0].kind == S3D_SWEEP)
+    table_head(m, S3D_SWEEP);
 }
 
 // a row of n values: dB, degrees (ROW_DEG) or the boost (ROW_BOOST)
@@ -1239,6 +1552,29 @@ static void step_lines(struct s3d_meas *m, int i) {
   say(m, line);
 }
 
+// a chirp run: a line for each twelfth of an octave
+static void chirp_lines(struct s3d_meas *m, int i) {
+  const struct s3d_chirp *c;
+  char line[256];
+  int k, p;
+
+  run_head(m, i, line);
+  line[strlen(line) - 2] = 0;
+  say(m, line);
+  if (m->run[i].slot >= S3D_MAX_CHIRPS)
+    return;
+  c = &m->chirp[m->run[i].slot];
+  for (k = 0; k < S3D_BINS; k++) {
+    sprintf(line, "%39s%8.0f", "", s3d_bin_hz(k));
+    cell(line, c->db[0][k]);
+    for (p = 1; p < S3D_PATHS; p++) {
+      cell(line, c->db[p][k]);
+      cell_deg(line, c->ph[p - 1][k]);
+    }
+    say(m, line);
+  }
+}
+
 static void ratio_lines(struct s3d_meas *m, int i) {
   struct s3d_run *r = &m->run[i];
   float b[5];
@@ -1305,6 +1641,53 @@ static int sweep_end(struct s3d_meas *m, struct s3d_run *r) {
     r->u.sw.ph[2][k] = has(r->u.sw.db[3][k]) && has(r->u.sw.db[1][k])
                            ? (float)wrap(z_deg(mo_s) - z_deg(so_s))
                            : S3D_FLOOR;
+  }
+  return S3D_OK;
+}
+
+// a chirp run, by twelfths of an octave: the windows of the glide in M,
+// then of the one in S, read as a sweep run's tones are, against the
+// first chirp run (run 0 of the chirp plan)
+static int chirp_end(struct s3d_meas *m, struct s3d_run *r) {
+  const struct s3d_win *wm, *ws;
+  struct s3d_chirp *c;
+  struct cx mo_m, so_m, mo_s, so_s;
+  double fl, turn;
+  int k;
+
+  if (r->slot >= S3D_MAX_CHIRPS || m->nwin < 2 * S3D_BINS)
+    return S3D_OK;
+  c = &m->chirp[r->slot];
+  for (k = 0; k < S3D_BINS; k++) {
+    wm = &m->win[k];
+    ws = &m->win[S3D_BINS + k];
+    mo_m = z_mid(wm, 0);
+    so_m = z_side(wm, 0);
+    mo_s = z_mid(ws, 0);
+    so_s = z_side(ws, 0);
+    turn = wrap(z_deg(so_s) - z_deg(mo_m));
+    if (r->slot == 0) {
+      if (z_abs(mo_m) / AMP < 1e-3 || z_abs(so_s) / AMP < 1e-3)
+        return S3D_NOSIGNAL;
+      m->cref_mm[k] = (float)(z_abs(mo_m) / AMP);
+      m->cref_ss[k] = (float)(z_abs(so_s) / AMP);
+      m->cref_ph[k] = (float)turn;
+    }
+    fl = floor_db(m, wm->rlen, AMP * m->cref_mm[k]);
+    c->db[0][k] = rel(z_abs(mo_m) / AMP, m->cref_mm[k], fl);
+    c->db[2][k] = rel(z_abs(so_m) / AMP, m->cref_mm[k], fl);
+    fl = floor_db(m, ws->rlen, AMP * m->cref_ss[k]);
+    c->db[1][k] = rel(z_abs(so_s) / AMP, m->cref_ss[k], fl);
+    c->db[3][k] = rel(z_abs(mo_s) / AMP, m->cref_ss[k], fl);
+    c->ph[0][k] = has(c->db[1][k]) && has(c->db[0][k])
+                      ? (float)wrap(turn - m->cref_ph[k])
+                      : S3D_FLOOR;
+    c->ph[1][k] = has(c->db[2][k]) && has(c->db[0][k])
+                      ? (float)wrap(z_deg(so_m) - z_deg(mo_m))
+                      : S3D_FLOOR;
+    c->ph[2][k] = has(c->db[3][k]) && has(c->db[1][k])
+                      ? (float)wrap(z_deg(mo_s) - z_deg(so_s))
+                      : S3D_FLOOR;
   }
   return S3D_OK;
 }
@@ -1458,6 +1841,9 @@ int s3d_end(struct s3d_meas *m) {
     case S3D_STEP:
       step_end(m, r);
       break;
+    case S3D_CHIRP:
+      res = chirp_end(m, r);
+      break;
     default:
       res = sweep_end(m, r);
     }
@@ -1486,6 +1872,9 @@ int s3d_end(struct s3d_meas *m) {
     break;
   case S3D_STEP:
     step_lines(m, m->cur);
+    break;
+  case S3D_CHIRP:
+    chirp_lines(m, m->cur);
     break;
   default:
     sweep_lines(m, m->cur);
@@ -1533,20 +1922,54 @@ static int counts(double v, int p) {
   return has(v) && (p < 2 || v > CROSS_MIN);
 }
 
-// the largest change of sweep or band run a from run b where both have a
-// value, on the paths in mask (bit p for path p), its path and frequency;
-// 0 if there's none
-static int biggest(const struct s3d_run *a, const struct s3d_run *b, int mask,
+// a sweep, band or chirp run's values: dB by path and phases by path,
+// each over n frequencies
+struct vals {
+  const float *db, *ph;
+  int n;
+};
+
+#define DB(v, p, k) ((v)->db[(p) * (v)->n + (k)])
+#define PH(v, q, k) ((v)->ph[(q) * (v)->n + (k)])
+
+static int vals_of(const struct s3d_meas *m, const struct s3d_run *r,
+                   struct vals *v) {
+  if (r->kind == S3D_CHIRP) {
+    if (r->slot >= S3D_MAX_CHIRPS)
+      return 0;
+    v->db = &m->chirp[r->slot].db[0][0];
+    v->ph = &m->chirp[r->slot].ph[0][0];
+    v->n = S3D_BINS;
+  } else {
+    v->db = &r->u.sw.db[0][0];
+    v->ph = &r->u.sw.ph[0][0];
+    v->n = S3D_FREQS;
+  }
+  return 1;
+}
+
+// frequency k of values v, after out
+static void freq_text(const struct vals *v, int k, char *out) {
+  if (v->n == S3D_FREQS)
+    strcat(out, freq_name[k]);
+  else
+    sprintf(out + strlen(out), "%.0f Hz", s3d_bin_hz(k));
+}
+
+// the largest change of values a from b where both have a value, on the
+// paths in mask (bit p for path p), its path and frequency; 0 if there's
+// none
+static int biggest(const struct vals *a, const struct vals *b, int mask,
                    double *change, int *path, int *f) {
   int p, k, found = 0;
   double d;
 
   for (p = 0; p < S3D_PATHS; p++)
-    for (k = 0; k < S3D_FREQS; k++) {
-      if (!(mask & (1 << p)) || !counts(a->u.sw.db[p][k], p) ||
-          !counts(b->u.sw.db[p][k], p))
+    for (k = 0; k < a->n; k++) {
+      if (!(mask & (1 << p)) || !counts(DB(a, p, k), p) ||
+          !counts(DB(b, p, k), p))
         continue;
-      d = a->u.sw.db[p][k] - b->u.sw.db[p][k];
+      d = DB(a, p, k) - DB(b, p, k);
       if (!found || fabs(d) > fabs(*change)) {
         *change = d;
         *path = p;
@@ -1557,19 +1980,18 @@ static int biggest(const struct s3d_run *a, const struct s3d_run *b, int mask,
   return found;
 }
 
-// the largest change of phase q (0 S>S, 1 M>S, 2 S>M) of run a from run
-// b, and its frequency; 0 if there's none
-static int biggest_turn(const struct s3d_run *a, const struct s3d_run *b, int q,
+// the largest change of phase q (0 S>S, 1 M>S, 2 S>M) of values a from b,
+// and its frequency; 0 if there's none
+static int biggest_turn(const struct vals *a, const struct vals *b, int q,
                         double *turn, int *f) {
   int k, found = 0;
   double d;
 
-  for (k = 0; k < S3D_FREQS; k++) {
-    if (!has(a->u.sw.ph[q][k]) || !has(b->u.sw.ph[q][k]) ||
-        !counts(a->u.sw.db[q + 1][k], q + 1) ||
-        !counts(b->u.sw.db[q + 1][k], q + 1))
+  for (k = 0; k < a->n; k++) {
+    if (!has(PH(a, q, k)) || !has(PH(b, q, k)) ||
+        !counts(DB(a, q + 1, k), q + 1) || !counts(DB(b, q + 1, k), q + 1))
       continue;
-    d = wrap(a->u.sw.ph[q][k] - b->u.sw.ph[q][k]);
+    d = wrap(PH(a, q, k) - PH(b, q, k));
     if (!found || fabs(d) > fabs(*turn)) {
       *turn = d;
       *f = k;
@@ -1579,23 +2001,22 @@ static int biggest_turn(const struct s3d_run *a, const struct s3d_run *b, int q,
   return found;
 }
 
-// a path that comes up from the floor in run a (appears), or goes under
-// it: ", M>S appears, up to +3.5" or nothing
-static void new_path(const struct s3d_run *a, const struct s3d_run *b,
-                     char *out) {
+// a path that comes up from the floor in values a (appears), or goes
+// under it: ", M>S appears, up to +3.5" or nothing
+static void new_path(const struct vals *a, const struct vals *b, char *out) {
   int p, k, up, down;
   double most;
 
   for (p = 0; p < S3D_PATHS; p++) {
     up = down = 0;
     most = S3D_FLOOR;
-    for (k = 0; k < S3D_FREQS; k++) {
-      if (counts(a->u.sw.db[p][k], p) && !counts(b->u.sw.db[p][k], p)) {
+    for (k = 0; k < a->n; k++) {
+      if (counts(DB(a, p, k), p) && !counts(DB(b, p, k), p)) {
         up = 1;
-        if (a->u.sw.db[p][k] > most)
-          most = a->u.sw.db[p][k];
+        if (DB(a, p, k) > most)
+          most = DB(a, p, k);
       }
-      down |= !counts(a->u.sw.db[p][k], p) && counts(b->u.sw.db[p][k], p);
+      down |= !counts(DB(a, p, k), p) && counts(DB(b, p, k), p);
     }
     if (up)
       sprintf(out + strlen(out), ", %s appears, up to %+.1f", path_name[p],
@@ -1606,12 +2027,13 @@ static void new_path(const struct s3d_run *a, const struct s3d_run *b,
   }
 }
 
-// the sweep and band runs against the run each varies
+// the sweep, band and chirp runs against the run each varies
 static void summary_runs(struct s3d_meas *m) {
   char line[256];
   double change, turn;
   int i, p, k;
   const struct s3d_run *r, *b;
+  struct vals va, vb;
 
   say(m, "");
   say(m, "summary: the biggest change of each run from the run it varies, "
@@ -1621,23 +2043,26 @@ static void summary_runs(struct s3d_meas *m) {
   for (i = 1; i < m->nruns; i++) {
     r = &m->run[i];
     b = &m->run[r->base];
-    if ((r->kind != S3D_SWEEP && r->kind != S3D_BAND) || r->base == i ||
-        b->kind != r->kind || !ok(r) || !ok(b))
+    if ((r->kind != S3D_SWEEP && r->kind != S3D_BAND && r->kind != S3D_CHIRP) ||
+        r->base == i || b->kind != r->kind || !ok(r) || !ok(b) ||
+        !vals_of(m, r, &va) || !vals_of(m, b, &vb))
       continue;
     run_head(m, i, line);
     sprintf(line + strlen(line), "%4d  ", r->base);
-    if (!biggest(r, b, 15, &change, &p, &k))
+    if (!biggest(&va, &vb, 15, &change, &p, &k)) {
       strcat(line, "no value over the floor in both");
-    else if (fabs(change) < 0.1)
+    } else if (fabs(change) < 0.1) {
       strcat(line, "no change over 0.1 dB");
-    else
-      sprintf(line + strlen(line), "%s  %+6.1f  %s", path_name[p], tidy(change),
-              freq_name[k]);
-    if (biggest_turn(r, b, 0, &turn, &k) && fabs(turn) >= 5)
-      sprintf(line + strlen(line), ", S>S phase %+.0f at %s", turn,
-              freq_name[k]);
-    if (r->kind == S3D_SWEEP)
-      new_path(r, b, line);
+    } else {
+      sprintf(line + strlen(line), "%s  %+6.1f  ", path_name[p], tidy(change));
+      freq_text(&va, k, line);
+    }
+    if (biggest_turn(&va, &vb, 0, &turn, &k) && fabs(turn) >= 5) {
+      sprintf(line + strlen(line), ", S>S phase %+.0f at ", turn);
+      freq_text(&va, k, line);
+    }
+    if (r->kind != S3D_BAND)
+      new_path(&va, &vb, line);
     say(m, line);
   }
 }
@@ -1648,16 +2073,18 @@ static void summary_model(struct s3d_meas *m) {
   double change, turn, most = 0, most_turn = 0;
   int i, p, k, first = -1, last = -1;
   const struct s3d_run *r, *b;
+  struct vals va, vb;
 
   for (i = 1; i < m->nruns; i++) {
     r = &m->run[i];
     b = &m->run[r->base];
-    if (strncmp(r->name, "M ", 2) || !ok(r) || !ok(b) ||
-        !biggest(r, b, 4, &change, &p, &k))
+    if (strncmp(r->name, "M ", 2) || !ok(r) || !ok(b) || r->kind != S3D_SWEEP ||
+        b->kind != S3D_SWEEP || !vals_of(m, r, &va) || !vals_of(m, b, &vb) ||
+        !biggest(&va, &vb, 4, &change, &p, &k))
       continue;
     if (fabs(change) > most)
       most = fabs(change);
-    if (biggest_turn(r, b, 1, &turn, &k) && fabs(turn) > most_turn)
+    if (biggest_turn(&va, &vb, 1, &turn, &k) && fabs(turn) > most_turn)
       most_turn = fabs(turn);
     if (first < 0)
       first = i;
@@ -2151,6 +2578,389 @@ static void summary_fit(struct s3d_meas *m) {
   }
 }
 
+// --- the filters -----------------------------------------------------------
+
+// Each chirp run's boost is fitted with poles and zeros, as a filter
+// N(s) / D(s) in s = j f / 1 kHz with D(0) = 1, by the iterations of
+// Sanathanan and Koerner: each is a least-squares fit of N(s) - B D(s)
+// divided by the last iteration's D(s), which Givens rotations solve one
+// row at a time. The error counts in the dB and degrees of the path the
+// boost is part of: S>S = 1 + B, or M>S = B with the model on.
+
+#define FIT_MAX 4    // the most zeros or poles of a fit
+#define FIT_ITER 12  // its iterations
+#define FIT_ORDERS 8 // the fits each run gets, by zeros and poles
+#define FIT_FAR 50.0 // roots over 50 kHz are only counted
+
+static const u8 fit_order[FIT_ORDERS][2] = {{0, 1}, {1, 1}, {1, 2}, {2, 2},
+                                            {2, 3}, {3, 3}, {3, 4}, {4, 4}};
+
+// what is fitted: n frequencies, f / 1 kHz, the boost at each, and
+// whether the path is 1 + B or B
+static struct {
+  int n, plus;
+  float w[S3D_BINS], br[S3D_BINS], bi[S3D_BINS];
+} fd;
+
+struct fit {
+  int nz, np;
+  double num[FIT_MAX + 1], den[FIT_MAX + 1]; // from s^0 up
+  double rms, db, deg; // the error: rms (a radian as 8.69 dB), worst
+};
+
+// s^i for s = j w, i from 0 to FIT_MAX
+static void s_pow(double w, double *pr, double *pi) {
+  int i;
+
+  pr[0] = 1;
+  pi[0] = 0;
+  for (i = 1; i <= FIT_MAX; i++) {
+    pr[i] = -w * pi[i - 1];
+    pi[i] = w * pr[i - 1];
+  }
+}
+
+// a polynomial with n + 1 coefficients at s, from the powers of s
+static void poly_at(const double *c, int n, const double *pr, const double *pi,
+                    double *re, double *im) {
+  int i;
+
+  *re = *im = 0;
+  for (i = 0; i <= n; i++) {
+    *re += c[i] * pr[i];
+    *im += c[i] * pi[i];
+  }
+}
+
+// row r, p unknowns and then the right side, into the triangle t
+static void givens(double *t, double *r, int p) {
+  double a, b, h, c, s, x;
+  int i, j;
+
+  for (i = 0; i < p; i++) {
+    b = r[i];
+    if (b == 0)
+      continue;
+    a = t[i * (p + 1) + i];
+    h = sqrt(a * a + b * b);
+    c = a / h;
+    s = b / h;
+    for (j = i; j <= p; j++) {
+      x = t[i * (p + 1) + j];
+      t[i * (p + 1) + j] = c * x + s * r[j];
+      r[j] = c * r[j] - s * x;
+    }
+  }
+}
+
+// the unknowns from the triangle; 0 if it is singular
+static int solve(const double *t, int p, double *x) {
+  double v, big = 0;
+  int i, j;
+
+  for (i = 0; i < p; i++)
+    if (fabs(t[i * (p + 1) + i]) > big)
+      big = fabs(t[i * (p + 1) + i]);
+  for (i = p - 1; i >= 0; i--) {
+    if (fabs(t[i * (p + 1) + i]) <= 1e-13 * big)
+      return 0;
+    v = t[i * (p + 1) + p];
+    for (j = i + 1; j < p; j++)
+      v -= t[i * (p + 1) + j] * x[j];
+    x[i] = v / t[i * (p + 1) + i];
+  }
+  return 1;
+}
+
+// the fit's error at each frequency, in the dB and degrees of its path
+static void fit_error(struct fit *f) {
+  double pr[FIT_MAX + 1], pi[FIT_MAX + 1], nr, ni, dr, di, d, mr, mi, br, bi;
+  double hr, hi, qr, qi, db, deg, sum = 0;
+  int k;
+
+  f->db = f->deg = 0;
+  for (k = 0; k < fd.n; k++) {
+    s_pow(fd.w[k], pr, pi);
+    poly_at(f->num, f->nz, pr, pi, &nr, &ni);
+    poly_at(f->den, f->np, pr, pi, &dr, &di);
+    d = dr * dr + di * di;
+    mr = (nr * dr + ni * di) / d;
+    mi = (ni * dr - nr * di) / d;
+    br = fd.br[k];
+    bi = fd.bi[k];
+    // the model's path over the measured one
+    hr = (fd.plus ? 1 : 0) + br;
+    hi = bi;
+    d = hr * hr + hi * hi;
+    qr = 1 + ((mr - br) * hr + (mi - bi) * hi) / d;
+    qi = ((mi - bi) * hr - (mr - br) * hi) / d;
+    db = 10 * log10(qr * qr + qi * qi);
+    deg = atan2(qi, qr) * 180 / PI;
+    if (fabs(db) > f->db)
+      f->db = fabs(db);
+    if (fabs(deg) > f->deg)
+      f->deg = fabs(deg);
+    sum += db * db + (deg * 8.686 * PI / 180) * (deg * 8.686 * PI / 180);
+  }
+  f->rms = sqrt(sum / fd.n);
+}
+
+// a fit with nz zeros and np poles to the boost; 0 if it fails
+static int fit_one(int nz, int np, struct fit *f) {
+  double t[(2 * FIT_MAX + 1) * (2 * FIT_MAX + 2)], r[2 * FIT_MAX + 2];
+  double x[2 * FIT_MAX + 1], pr[FIT_MAX + 1], pi[FIT_MAX + 1];
+  double br, bi, dr, di, g, hr, cr, ci;
+  int p = nz + 1 + np, it, k, i, part;
+
+  memset(f, 0, sizeof(*f));
+  f->nz = nz;
+  f->np = np;
+  f->den[0] = 1;
+  for (it = 0; it < FIT_ITER; it++) {
+    memset(t, 0, sizeof(t));
+    for (k = 0; k < fd.n; k++) {
+      br = fd.br[k];
+      bi = fd.bi[k];
+      s_pow(fd.w[k], pr, pi);
+      poly_at(f->den, np, pr, pi, &dr, &di);
+      // each frequency counts by the dB of its path
+      hr = sqrt(((fd.plus ? 1 : 0) + br) * ((fd.plus ? 1 : 0) + br) + bi * bi);
+      g = 1 / (hr * sqrt(dr * dr + di * di));
+      for (part = 0; part < 2; part++) {
+        for (i = 0; i <= nz; i++)
+          r[i] = g * (part ? pi[i] : pr[i]);
+        for (i = 1; i <= np; i++) {
+          cr = br * pr[i] - bi * pi[i];
+          ci = br * pi[i] + bi * pr[i];
+          r[nz + i] = -g * (part ? ci : cr);
+        }
+        r[p] = g * (part ? bi : br);
+        givens(t, r, p);
+      }
+    }
+    if (!solve(t, p, x))
+      return 0;
+    for (i = 0; i <= nz; i++)
+      f->num[i] = x[i];
+    for (i = 1; i <= np; i++)
+      f->den[i] = x[nz + i];
+  }
+  fit_error(f);
+  return 1;
+}
+
+// the roots of c[0] + c[1] x + ... + c[n] x^n, by the iterations of
+// Durand and Kerner; returns how many
+static int roots(const double *c, int n, double *rr, double *ri) {
+  double a[FIT_MAX + 1], br, bi, nr, ni, pr, pi, dr, di, t, d, rad = 0;
+  int i, j, it;
+
+  while (n > 0 && c[n] == 0)
+    n--;
+  for (i = 0; i <= n; i++)
+    a[i] = c[i] / c[n];
+  for (i = 0; i < n; i++)
+    if (fabs(a[i]) > rad)
+      rad = fabs(a[i]);
+  rad = 1 + rad;
+  for (i = 0; i < n; i++) {
+    rr[i] = rad * cos(2 * PI * i / n + 0.4);
+    ri[i] = rad * sin(2 * PI * i / n + 0.4);
+  }
+  for (it = 0; it < 500; it++)
+    for (i = 0; i < n; i++) {
+      // the polynomial at root i, by Horner
+      pr = 1;
+      pi = 0;
+      for (j = n - 1; j >= 0; j--) {
+        t = pr * rr[i] - pi * ri[i] + a[j];
+        pi = pr * ri[i] + pi * rr[i];
+        pr = t;
+      }
+      // over the product of its distances to the others
+      dr = 1;
+      di = 0;
+      for (j = 0; j < n; j++) {
+        if (j == i)
+          continue;
+        br = rr[i] - rr[j];
+        bi = ri[i] - ri[j];
+        t = dr * br - di * bi;
+        di = dr * bi + di * br;
+        dr = t;
+      }
+      d = dr * dr + di * di;
+      if (d == 0)
+        continue;
+      nr = (pr * dr + pi * di) / d;
+      ni = (pi * dr - pr * di) / d;
+      rr[i] -= nr;
+      ri[i] -= ni;
+    }
+  return n;
+}
+
+// the roots of a fit's numerator or denominator in words, in Hz: real
+// ones as their frequency, pairs as their frequency and Q, and those over
+// FIT_FAR kHz only counted. Each root under 10 Hz, far under the lowest
+// frequency measured, counts as a real one. "right half" marks one with a
+// positive real part, except with a Q over 50, where the side is too
+// close to tell.
+static void roots_text(const double *c, int n, char *out) {
+  double rr[FIT_MAX], ri[FIT_MAX], mag, q;
+  int i, k, over = 0, any = 0;
+
+  k = roots(c, n, rr, ri);
+  for (i = 0; i < k; i++) {
+    mag = sqrt(rr[i] * rr[i] + ri[i] * ri[i]);
+    q = 0;
+    if (mag > FIT_FAR) {
+      over++;
+      continue;
+    }
+    if (mag >= 0.01 && ri[i] < -1e-6 * mag)
+      continue; // the pair's other half
+    sprintf(out + strlen(out), "%s%.0f Hz", any++ ? ", " : " ", mag * 1000);
+    if (mag < 0.01)
+      continue;
+    if (ri[i] > 1e-6 * mag) {
+      q = fabs(rr[i]) > mag / 100 ? mag / (2 * fabs(rr[i])) : 50;
+      if (q < 50)
+        sprintf(out + strlen(out), " Q %.2f", q);
+      else
+        strcat(out, " Q over 50");
+    }
+    if (rr[i] > 1e-6 * mag && q < 50)
+      strcat(out, " right half");
+  }
+  if (over)
+    sprintf(out + strlen(out), "%s%d over %.0f kHz", any ? ", " : " ", over,
+            FIT_FAR);
+  else if (!any)
+    strcat(out, " none");
+}
+
+// where a fit's boost is highest, in 48ths of an octave over the
+// frequencies measured
+static void fit_peak(const struct fit *f, double *db, double *hz) {
+  double pr[FIT_MAX + 1], pi[FIT_MAX + 1], nr, ni, dr, di, g, x;
+  int k;
+
+  *db = -999;
+  *hz = 0;
+  for (k = 0; k < 4 * S3D_BINS; k++) {
+    x = s3d_bin_hz(0) * pow(2.0, k / 48.0);
+    s_pow(x / 1000, pr, pi);
+    poly_at(f->num, f->nz, pr, pi, &nr, &ni);
+    poly_at(f->den, f->np, pr, pi, &dr, &di);
+    g = 10 * log10((nr * nr + ni * ni) / (dr * dr + di * di));
+    if (g > *db) {
+      *db = g;
+      *hz = x;
+    }
+  }
+}
+
+// a fit's line: its order and its error
+static void fit_line(struct s3d_meas *m, const struct fit *f, int chosen) {
+  char line[256];
+
+  sprintf(line,
+          "     %d zero%s, %d pole%s: rms %.2f dB, at most %.2f dB and %.1f "
+          "degrees%s",
+          f->nz, f->nz == 1 ? "" : "s", f->np, f->np == 1 ? "" : "s", f->rms,
+          f->db, f->deg, chosen ? " (chosen)" : "");
+  say(m, line);
+}
+
+// and its peak, zeros and poles
+static void fit_roots(struct s3d_meas *m, const struct fit *f) {
+  char line[256];
+  double db, hz;
+
+  fit_peak(f, &db, &hz);
+  sprintf(line, "     peak %+.1f dB at %.0f Hz; zeros", db, hz);
+  roots_text(f->num, f->nz, line);
+  strcat(line, "; poles");
+  roots_text(f->den, f->np, line);
+  say(m, line);
+}
+
+// the boost of chirp run i to fit: S>S - 1, or M>S with the model on, each
+// against the run's own M>M; 0 if it has too little
+static int fit_data(const struct s3d_meas *m, int i) {
+  const struct s3d_run *r = &m->run[i];
+  const struct s3d_chirp *c;
+  double g, a;
+  int k, model = r->reg[S3D_R50] & 2, p = model ? 2 : 1, q = model ? 1 : 0;
+
+  fd.n = 0;
+  fd.plus = !model;
+  if (r->slot >= S3D_MAX_CHIRPS || !ok(r) || (r->reg[S3D_R50] & 0x0C) != 0x0C)
+    return 0;
+  c = &m->chirp[r->slot];
+  for (k = 0; k < S3D_BINS; k++) {
+    if (!has(c->db[p][k]) || !has(c->ph[q][k]) ||
+        (model && c->db[p][k] < CROSS_MIN))
+      continue;
+    g = pow(10.0, (c->db[p][k] - (has(c->db[0][k]) ? c->db[0][k] : 0)) / 20);
+    a = c->ph[q][k] * PI / 180;
+    fd.w[fd.n] = (float)(s3d_bin_hz(k) / 1000);
+    fd.br[fd.n] = (float)(g * cos(a) - (model ? 0 : 1));
+    fd.bi[fd.n] = (float)(g * sin(a));
+    fd.n++;
+  }
+  return fd.n >= 4 * FIT_MAX;
+}
+
+// the poles and zeros of each chirp run's boost at each order, and the
+// lowest order within 20 percent of the best; Windows runs between the
+// fits
+static void summary_filters(struct s3d_meas *m) {
+  static struct fit fits[FIT_ORDERS];
+  char line[256];
+  double low = 0;
+  int i, o, pick, any = 0, ok_o[FIT_ORDERS];
+
+  for (i = 1; i < m->nruns; i++) {
+    if (m->run[i].kind != S3D_CHIRP || !fit_data(m, i))
+      continue;
+    if (!any++) {
+      say(m, "");
+      say(m, "filters: each chirp run's boost fitted with poles and zeros in "
+             "s = j f: B = S>S - 1, or M>S with the model on, with the error "
+             "in dB and degrees of S>S or M>S, 1 radian counted as 8.69 dB");
+    }
+    run_head(m, i, line);
+    sprintf(line + strlen(line), "%s, %d frequencies",
+            fd.plus ? "B = S>S - 1" : "M>S", fd.n);
+    say(m, line);
+    pick = -1;
+    for (o = 0; o < FIT_ORDERS; o++) {
+      ok_o[o] = fit_one(fit_order[o][0], fit_order[o][1], &fits[o]);
+      if (ok_o[o] && (pick < 0 || fits[o].rms < low)) {
+        low = fits[o].rms;
+        pick = o;
+      }
+      if (m->idle)
+        m->idle(m->ctx);
+    }
+    if (pick < 0) {
+      say(m, "     no fit");
+      continue;
+    }
+    for (o = 0; o < FIT_ORDERS; o++)
+      if (ok_o[o] && fits[o].rms <= 1.2 * low + 0.02) {
+        pick = o;
+        break;
+      }
+    for (o = 0; o < FIT_ORDERS; o++)
+      if (ok_o[o])
+        fit_line(m, &fits[o], o == pick);
+    fit_roots(m, &fits[pick]);
+  }
+}
+
 void s3d_summary(struct s3d_meas *m) {
   summary_runs(m);
   say(m, "");
@@ -2159,4 +2969,5 @@ void s3d_summary(struct s3d_meas *m) {
   summary_steps(m);
   summary_levels(m);
   summary_fit(m);
+  summary_filters(m);
 }

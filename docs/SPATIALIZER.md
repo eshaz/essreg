@@ -384,6 +384,20 @@ runs that have the limit on:
   through a filter.
 * 54h and 56h at 7Fh and 00h, at 00h and 7Fh, and at 3Fh each.
 
+`ess3d measure chirp` measures the boost's filters in about a minute. Each
+of its runs plays a tone that glides from 50 Hz to 12.8 kHz, first in M and
+then in S, and reads it in 96 twelfths of an octave as a sweep run reads its
+11 tones, with the same paths and phases. The runs are the effect off, ESS's
+setting, 52h at 30h, the model, and the effect off again. Within each
+twelfth of an octave the glide rises in a straight line, and each twelfth is
+a window, read against the glide's own phase. The start of the recording is
+known only to the millisecond, which would cost the top of the glide about 2
+dB, so the M glide's tone from 200 to 820 Hz gives how late the glide comes,
+and the later windows are placed again by it. The response and its phase in
+this detail show the order of each filter: the sweep runs suggest a
+first-order high-pass near 200 Hz, while the patent describes one of 18 dB
+an octave near 300 Hz.
+
 `ess3d measure quick` runs each kind once or twice in about 2 minutes, and
 `ess3d measure 58` runs 58h from 00h to FFh in steps of 10h with the limit
 on. `ess3d measure quick /sim` shows what a report looks like without the
@@ -418,16 +432,31 @@ varies, and lines that answer the questions of the readings above:
   and how close the model comes to the runs. The *rise level* line gives
   where the boost stopped rising short of the level it was held at, against
   54h's level of the fit.
+* The *filters* section fits the boost of each chirp run with the effect on,
+  B = S>S - 1, or M>S with the model on, with a filter of poles and zeros in
+  s = j f, at eight orders from no zero and one pole to four of each. Each
+  line gives the error of one order, in the dB and degrees of S>S or M>S,
+  with a radian counted as 8.69 dB, and the chosen order is the lowest
+  within 20 percent of the best. The last line gives the boost's peak and
+  the zeros and poles of the chosen fit, in Hz: a real one as its corner
+  frequency, and a pair as its frequency and Q. Roots over 50 kHz only shape
+  the top of the band, so they are only counted. A zero in the right half,
+  with a pole at about the same frequency, is what a delay in the boost's
+  path would look like. The effect of /sim, a first-order high-pass at 200
+  Hz and a low-pass at 1 kHz, gives poles at 200 and 1003 Hz and a zero at 0
+  Hz, with a pair of zeros near 26 kHz from its digital low-pass.
 
 Every run with the limit off also checks that each of its tones gives the
 same amplitude and phase in both halves of its window. A window whose halves
 differ means that the recording or the playback skipped there. In a step
 run, the limit moves the S out by at most 5.2 dB in 20 ms, so a window that
 jumps further from the one before means that the step came early or late,
-after a skip. ess3d measures such a run again, logs it in `ESS3D.LOG`, and
-if it skips again, the report says from which window on its values may be
-off. One run of the card's second measurement and one of its third had such
-a skip, before these checks existed.
+after a skip. In a chirp run, a window counts the same way when its tone
+turns more than the glide's timing explains, or its halves differ by 10
+percent. ess3d measures such a run again, logs it in `ESS3D.LOG`, and if it
+skips again, the report says from which window on its values may be off. One
+run of the card's second measurement and one of its third had such a skip,
+before these checks existed.
 
 The same steps are in [TESTING.md](TESTING.md#h-ess3d), step 8, along with
 two that need no measurement:
@@ -445,8 +474,8 @@ two that need no measurement:
    then try each register from 00h to FFh with `ess3d reg` or the tray
    panel's sliders, and note what changes. `ess3d defaults` puts ESS's
    values back.
-4. Measure with `ess3d measure`, `ess3d measure limit` and
-   `ess3d measure window`, and keep the reports.
+4. Measure with `ess3d measure`, `ess3d measure limit`,
+   `ess3d measure window` and `ess3d measure chirp`, and keep the reports.
 
 ## What one card showed
 

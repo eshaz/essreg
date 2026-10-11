@@ -759,6 +759,220 @@ static void test_no_signal(void) {
   CHECK_EQ(s3d_end(&meas), S3D_NOSIGNAL);
 }
 
+// the numbers in Hz after "; poles" or "; zeros" in a report line, up
+// to n of them, and before the next ";"
+static int hz_list(const char *line, const char *what, double *hz, int n) {
+  const char *p = strstr(line, what), *stop;
+  int k = 0, len;
+
+  if (!p)
+    return 0;
+  p += strlen(what);
+  stop = strchr(p, ';');
+  while (k < n && *p && (!stop || p < stop)) {
+    while (*p == ' ' || *p == ',')
+      p++;
+    if (sscanf(p, "%lf%n", &hz[k], &len) != 1 || strncmp(p + len, " Hz", 3))
+      break;
+    k++;
+    p = strchr(p, ',');
+    if (!p)
+      break;
+  }
+  return k;
+}
+
+// the line of run i's chosen fit and its roots, after the filters line
+static int fit_lines(int i, int *chosen, int *roots) {
+  char head[8];
+  int at = find_line("filters:");
+
+  sprintf(head, "%3d  ", i);
+  at = find_from(at, head);
+  *chosen = find_from(at, "     ");
+  while (*chosen >= 0 && !strstr(report[*chosen], "(chosen)"))
+    (*chosen)++;
+  *roots = *chosen >= 0 ? find_from(*chosen, "     peak ") : -1;
+  return at >= 0 && *chosen >= 0 && *roots >= 0;
+}
+
+// the chirp plan: each twelfth of an octave against the effect's own
+// response, and the filters the summary fits: the boost's high-pass at
+// 200 Hz and low-pass at 1 kHz, with a zero at 0 Hz
+static void test_chirp_plan(void) {
+  const struct s3d_chirp *c;
+  int i, k, p, q, n = 0, chosen, roots;
+  double want, got, worst[S3D_PATHS] = {0}, worst_deg[3] = {0}, hz[4];
+
+  s3d_init(&meas, S3D_PLAN_CHIRP, 0, out, 0);
+  CHECK_EQ(s3d_count(&meas), 5);
+  CHECK(s3d_seconds(&meas) >= 40 && s3d_seconds(&meas) <= 70);
+  // ess3d holds it in one segment of Win16's memory
+  CHECK(sizeof(meas) < 65000);
+  run_plan(S3D_PLAN_CHIRP, 0, 0);
+  for (i = 1; i < s3d_count(&meas); i++) {
+    c = &meas.chirp[run(i)->slot];
+    for (k = 0; k < S3D_BINS; k++) {
+      for (p = 0; p < S3D_PATHS; p++) {
+        want = model_db(i, p, s3d_bin_hz(k));
+        got = c->db[p][k];
+        if (p >= 2 && want < -15)
+          continue;
+        CHECK(has(got));
+        n++;
+        if (has(got) && fabs(got - want) > worst[p])
+          worst[p] = fabs(got - want);
+      }
+      for (q = 0; q < 3; q++) {
+        got = c->ph[q][k];
+        if (!has(got) || (q >= 1 && model_db(i, q + 1, s3d_bin_hz(k)) < -15))
+          continue;
+        want = model_deg(i, q, s3d_bin_hz(k));
+        if (fabs(wrap(got - want)) > worst_deg[q])
+          worst_deg[q] = fabs(wrap(got - want));
+      }
+    }
+  }
+  printf("  chirp plan: %d values, within %.3f dB and %.2f degrees\n", n,
+         worst[0] > worst[1] ? worst[0] : worst[1],
+         worst_deg[0] > worst_deg[1] ? worst_deg[0] : worst_deg[1]);
+  CHECK(n > 800);
+  for (p = 0; p < S3D_PATHS; p++)
+    CHECK(worst[p] < 0.05);
+  for (q = 0; q < 3; q++)
+    CHECK(worst_deg[q] < 0.5);
+  // the chirp runs in the summary, at a frequency of their own
+  CHECK(find_line("  2  52=30          0C 30 8F 95 94 80     1  S>S") >= 0);
+  // the fits: ESS's boost, the lower level and the model's M>S each find
+  // the poles at 200 Hz and 1 kHz and the zero at 0 Hz
+  for (i = 1; i <= 3; i++) {
+    CHECK(fit_lines(i, &chosen, &roots));
+    if (roots < 0)
+      continue;
+    CHECK_EQ(hz_list(report[roots], "; poles", hz, 4), 2);
+    CHECK(fabs(hz[0] - 200) < 4 && fabs(hz[1] - 1000) < 20);
+    CHECK(hz_list(report[roots], "; zeros", hz, 4) >= 1);
+    CHECK(hz[0] < 2);
+    CHECK(strstr(report[chosen], "rms 0.0") != 0);
+  }
+  CHECK(fit_lines(1, &chosen, &roots));
+  if (roots >= 0)
+    CHECK(!strncmp(report[roots], "     peak +16.7 dB at 4", 23));
+}
+
+// set chirp run i's results to a boost B = num(s) / den(s), s = j f / 1
+// kHz, each with n + 1 coefficients from s^0 up
+static void set_boost(int i, const double *num, int nn, const double *den,
+                      int nd) {
+  struct s3d_chirp *c = &meas.chirp[meas.run[i].slot];
+  double w, pr, pi, t, nr, ni, dr, di, d, hr, hi;
+  int k, j;
+
+  meas.run[i].result = S3D_OK;
+  for (k = 0; k < S3D_BINS; k++) {
+    w = s3d_bin_hz(k) / 1000;
+    nr = ni = dr = di = 0;
+    pr = 1;
+    pi = 0;
+    for (j = 0; j <= (nn > nd ? nn : nd); j++) {
+      if (j <= nn) {
+        nr += num[j] * pr;
+        ni += num[j] * pi;
+      }
+      if (j <= nd) {
+        dr += den[j] * pr;
+        di += den[j] * pi;
+      }
+      // times s = j w
+      t = -w * pi;
+      pi = w * pr;
+      pr = t;
+    }
+    d = dr * dr + di * di;
+    hr = 1 + (nr * dr + ni * di) / d;
+    hi = (ni * dr - nr * di) / d;
+    c->db[0][k] = 0;
+    c->db[1][k] = (float)(10 * log10(hr * hr + hi * hi));
+    c->db[2][k] = c->db[3][k] = -40;
+    c->ph[0][k] = (float)(atan2(hi, hr) * 180 / PI);
+    c->ph[1][k] = c->ph[2][k] = 0;
+  }
+}
+
+// the fit on a boost given exactly: a resonance with its Q, and the
+// patent's high-pass of 18 dB an octave at 300 Hz under a low-pass at 2
+// kHz
+static void test_filter_fit(void) {
+  // 3 s / (s^2 + s / 4 + 1 / 4): a pair at 500 Hz with a Q of 2
+  static const double num1[2] = {0, 3}, den1[3] = {0.25, 0.25, 1};
+  // 3 s^3 / ((s + 0.3) (s^2 + 0.3 s + 0.09) (1 + s / 2)): Butterworth at
+  // 300 Hz
+  static const double num2[4] = {0, 0, 0, 3};
+  static const double den2[5] = {0.027, 0.1935, 0.69, 1.3, 0.5};
+  // 8.2 s / ((s + 0.2) (s + 1)): ESS's boost, as the effect of /sim has it
+  static const double num3[2] = {0, 8.2}, den3[3] = {0.2, 1.2, 1};
+  int chosen, roots, k;
+  double hz[4];
+
+  nlines = 0;
+  s3d_init(&meas, S3D_PLAN_CHIRP, 0, out, 0);
+  meas.run[0].result = S3D_OK;
+  set_boost(1, num1, 1, den1, 2);
+  set_boost(2, num2, 3, den2, 4);
+  // ESS's boost with the noise of a measurement, 0.05 dB and 0.3 degrees
+  meas.run[3].reg[S3D_R50] = 0x0C;
+  set_boost(3, num3, 1, den3, 2);
+  for (k = 0; k < S3D_BINS; k++) {
+    meas.chirp[meas.run[3].slot].db[1][k] += (float)(0.05 * sin(k * 1.7));
+    meas.chirp[meas.run[3].slot].ph[0][k] += (float)(0.3 * cos(k * 2.3));
+  }
+  meas.run[4].result = 0xFF;
+  s3d_summary(&meas);
+  CHECK(fit_lines(1, &chosen, &roots));
+  if (roots >= 0) {
+    CHECK(strstr(report[chosen], "1 zero, 2 poles: rms 0.00 dB") != 0);
+    CHECK(strstr(report[roots], "; poles 500 Hz Q 2.00") != 0);
+    CHECK_EQ(hz_list(report[roots], "; zeros", hz, 4), 1);
+    CHECK(hz[0] < 1);
+  }
+  CHECK(fit_lines(2, &chosen, &roots));
+  if (roots >= 0) {
+    CHECK(strstr(report[chosen], "3 zeros, 4 poles: rms 0.00 dB") != 0);
+    CHECK_EQ(hz_list(report[roots], "; zeros", hz, 4), 3);
+    CHECK(hz[0] < 1 && hz[1] < 1 && hz[2] < 1);
+    CHECK_EQ(hz_list(report[roots], "; poles", hz, 4), 3);
+    CHECK(strstr(report[roots], "300 Hz Q 1.00") != 0);
+    CHECK(strstr(report[roots], "2000 Hz") != 0);
+  }
+  // the noise doesn't take a higher order
+  CHECK(fit_lines(3, &chosen, &roots));
+  if (roots >= 0) {
+    CHECK(strstr(report[chosen], "1 zero, 2 poles: rms 0.0") != 0);
+    CHECK_EQ(hz_list(report[roots], "; poles", hz, 4), 2);
+    CHECK(fabs(hz[0] - 200) < 4 && fabs(hz[1] - 1000) < 20);
+  }
+  // the runs with the effect off have nothing to fit
+  CHECK(find_line("  4  off again") < 0);
+}
+
+// a chirp run whose recording skips, before the glide is timed and after
+static void test_chirp_skip(void) {
+  static const u32 at[2] = {80000, 175000};
+  int i;
+
+  for (i = 0; i < 2; i++) {
+    nlines = 0;
+    s3d_init(&meas, S3D_PLAN_CHIRP, 0, out, 0);
+    s3dsim_reset(&sim, S3D_RATE);
+    s3d_header(&meas, S3D_RATE, S3D_RATE, 0);
+    CHECK_EQ(run_sim(0, 2000), S3D_OK);
+    skip_at = at[i];
+    run_sim(1, 2000);
+    CHECK(s3d_disturbed(&meas) > 0);
+    skip_at = 0;
+  }
+}
+
 int main(int argc, char **argv) {
   verbose = argc > 1 && !strcmp(argv[1], "-v");
   test_quick_plan();
@@ -771,5 +985,8 @@ int main(int argc, char **argv) {
   test_skip();
   test_stall();
   test_no_signal();
+  test_chirp_plan();
+  test_filter_fit();
+  test_chirp_skip();
   return CHECK_DONE("t_s3dmeas");
 }

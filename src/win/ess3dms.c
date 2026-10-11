@@ -4,7 +4,7 @@
  * the recording; this is the program around it.
  *
  * Usage:
- *   `ess3d measure [quick | limit | window | 54 | 56 | 58 | 5A]
+ *   `ess3d measure [quick | limit | window | chirp | 54 | 56 | 58 | 5A]
  *   [/out=file] [/sim]`
  *
  *   quick      each kind of run once or twice, about 2 minutes, instead
@@ -13,6 +13,9 @@
  *   window     the limit's two levels: against the M's level and its
  *              frequency, with 5Ah, and the S back to just under where it
  *              was held, about 4 minutes
+ *   chirp      the boost's filters: a tone that glides from 50 Hz to 12.8
+ *              kHz, read with its phase in twelfths of an octave and
+ *              fitted with poles and zeros, about 1 minute
  *   54 ... 5A  one register from 00h to FFh in steps of 10h, with the
  *              limit on
  *   /out=file  the report, ESS3D.TXT in ess3d's directory if left out
@@ -145,6 +148,12 @@ static u32 boot_time(void) { return (u32)time(0) - GetTickCount() / 1000; }
 static const char *marker_name(void) {
   // /sim's own, so a test never puts back a real measurement's mixer
   return cmd->sim ? "ESS3DSIM.RST" : "ESS3D.RST";
+}
+
+// the summary's fits take a while: Windows runs between them
+static void let_run(void *ctx) {
+  (void)ctx;
+  Yield();
 }
 
 static void out_line(void *ctx, const char *line) {
@@ -929,6 +938,7 @@ static void start(void) {
     return;
   }
   s3d_init(meas, cmd->plan, cmd->plan_reg, out_line, 0);
+  meas->idle = let_run;
   s3dsim_reset(&sim, S3D_RATE);
   ess3d_path(cmd->out[0] ? cmd->out : "ESS3D.TXT", rep_path, sizeof(rep_path));
   tmp_name(rep_path, rep_tmp, sizeof(rep_tmp));

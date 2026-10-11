@@ -704,6 +704,10 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
      [SPATIALIZER.md](SPATIALIZER.md#what-the-undocumented-bits-and-registers-do)
      describes, its *fit* line comes within about 0.25 dB of every run, and
      its *W3 8F FF* run ends with the boost where it was held.
+   * Run `C:\ESSREG\ESS3D.EXE measure chirp /out=C:\ESSREG\CHIRP.TXT`, about
+     1 minute, and keep `CHIRP.TXT`. Its *off again* run is within 0.1 dB of
+     *off*, and its *filters* section gives the poles and zeros of the
+     boost, each chosen fit within a few tenths of a dB.
    * Check that the mixer is as it was: the master volume, the Windows
      mixer's levels and the 3-D setting are back.
    * Run `ess3d measure quick` and end it with Ctrl+Alt+Del in the middle.

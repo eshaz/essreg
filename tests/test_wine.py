@@ -33,7 +33,8 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   and "ess3d exit" closes it
 - ess3d measure: the quick plan against the effect of /sim writes its
   report and puts the mixer back, and the next ess3d puts back the
-  mixer of a measurement that was ended by force
+  mixer of a measurement that was ended by force; the chirp plan finds
+  the poles and the zero of the effect's boost
 - esfmrec: /sim records the test tone for /t= seconds into a WAV file at
   the music DAC's rate, and /raw writes the samples alone
 - esfmrec ended by force: the header it saved every 5 s holds the
@@ -446,6 +447,22 @@ class WineTest(unittest.TestCase):
             f.write("boot=1000\r\n50=0F\r\n")
         self.ess3d("/sim", "/q", "/log=E3M.LOG", "show")
         self.assertFalse(os.path.exists(self.path("ESS3DSIM.RST")))
+
+    def test_ess3d_chirp(self):
+        # the chirp plan against /sim: its response in twelfths of an
+        # octave, and the filters the summary fits to it
+        for name in ("C.TXT", "C.$$$"):
+            if os.path.exists(self.path(name)):
+                os.remove(self.path(name))
+        self.wine("ess3d.exe", "measure", "chirp", "/sim", "/q",
+                  "/log=E3C.LOG", "/out=C.TXT")
+        text = read(self.path("C.TXT")).decode("latin-1")
+        self.assertIn("plan: chirp, 5 runs", text)
+        self.assertIn("  1  ess            0C 3F 8F 95 94 80\r\n", text)
+        self.assertIn("filters: each chirp run's boost fitted", text)
+        self.assertIn("     peak +16.7 dB at 449 Hz; zeros 0 Hz, ", text)
+        self.assertIn("; poles 200 Hz, 1003 Hz, 1 over 50 kHz", text)
+        self.assertFalse(os.path.exists(self.path("C.$$$")))
 
     def test_ess3d_display(self):
         def start(*args):

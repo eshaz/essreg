@@ -22,10 +22,23 @@
  * - step runs: the 1 kHz S tone steps from -12 to 0 dB re the M tone and
  *   back, to see how fast the limit holds the boost down, at which level,
  *   and how fast it lets it back up, and where it stops rising
+ * - chirp runs: a tone that glides from 50 Hz to 12.8 kHz in M, then in S,
+ *   for the response and its phase in twelfths of an octave, which the
+ *   summary fits with poles and zeros to find the filters
  *
  * Each tone is measured over a whole number of its cycles (100 ms, or 20
  * ms early in step runs), after time for the effect to settle, as the
  * complex amplitude of each output channel at its frequency (lock-in).
+ * The glide of a chirp run is made of pieces that each rise by a twelfth
+ * of an octave in a straight line, over 8 cycles or 20 ms at least, and
+ * each piece is a window whose lock-in follows the glide's own phase,
+ * without the part that the glide's image at minus its frequency adds.
+ * The onset is known only to the millisecond, and a glide that comes half
+ * a millisecond late turns against its lock-in, which then loses about 2
+ * dB at the top. So each window's turn from its first half to its second
+ * gives back what the lock-in lost, the turns of the M glide from 200 to
+ * 820 Hz time the glide, and the later windows of both glides are placed
+ * again by that.
  * The phases count from the onset, so tones of one run can be compared:
  * the S out of an S tone against the M out of an M tone at the same
  * frequency gives the phase the effect adds to S, which a coefficient
@@ -68,7 +81,9 @@
 #define S3D_FREQS 11
 #define S3D_MAX_RUNS 64
 #define S3D_MAX_SEGS 32
-#define S3D_MAX_WINS 96
+#define S3D_MAX_WINS 200
+#define S3D_BINS 96      // chirp runs: twelfths of an octave from 50 Hz
+#define S3D_MAX_CHIRPS 5 // and the chirp runs a plan can have
 #define S3D_PATHS 4      // M>M, S>S, M>S, S>M
 #define S3D_PANS 5       // pan runs: 0, 22.5, 45, 67.5 and 90 degrees
 #define S3D_FINE 25      // step runs: 20 ms windows over the first 500 ms
@@ -84,6 +99,7 @@
 #define S3D_PLAN_REG 2    // one register from 00h to FFh, with the limit
 #define S3D_PLAN_LIMIT 3  // each bit of 54h-5Ah with the limit, 8 minutes
 #define S3D_PLAN_WINDOW 4 // the limit's two levels, 4 minutes
+#define S3D_PLAN_CHIRP 5  // the filters, in chirp runs, 1 minute
 
 // kinds of runs
 #define S3D_SWEEP 0
@@ -91,6 +107,7 @@
 #define S3D_STEP 2
 #define S3D_PAN 3
 #define S3D_BAND 4
+#define S3D_CHIRP 5
 
 // s3d_end
 #define S3D_OK 0
@@ -111,6 +128,7 @@
 #define S3D_AMP_M 0.0625    // the M tone of ratio, band and step runs, -24 dBFS
 
 typedef void (*s3d_out_fn)(void *ctx, const char *line);
+typedef void (*s3d_idle_fn)(void *ctx);
 
 struct s3d_tone {
   u16 hz;     // 0 for none
@@ -120,16 +138,20 @@ struct s3d_tone {
 struct s3d_seg {
   u32 start, len; // play frames
   struct s3d_tone t[2];
-  u8 ramp; // 5 ms fades: bit 0 at the start, bit 1 at the end
+  u8 ramp;  // 5 ms fades: bit 0 at the start, bit 1 at the end
+  u8 chirp; // tone 0 glides as a chirp run's does
 };
 
 struct s3d_win {
   u32 pstart; // play frame where it starts
   u32 rstart; // recorded frame, set at the onset
   u16 rlen;   // recorded frames
-  u16 ms;     // length
+  u16 ms;     // length, or 0
+  u16 plen;   // or its play frames
   u8 seg;
   float psi[2];             // [tone] phase of the stimulus at the start
+  float inc, glide;         // a glide's first step a recorded frame, and
+                            // how much each step grows
   float zr[2][2], zi[2][2]; // [tone][left, right], A e^(j phase)
 };
 
@@ -142,6 +164,7 @@ struct s3d_run {
   u8 att;    // step runs: every tone this many dB lower
   u8 drop;   // and the S after the step down, dB under the M; 0 for 12
   u16 mhz;   // and the M tone's frequency, 0 for 400 Hz
+  u8 slot;   // chirp runs: where their results are in chirp[], or 0xFF
   u8 result; // s3d_end's, 0xFF before the run
   union {
     struct {
@@ -167,6 +190,13 @@ struct s3d_run {
   } u;
 };
 
+// a chirp run's results by twelfths of an octave: dB relative to run 0,
+// S3D_FLOOR under the floor, and the phases as in a sweep run's
+struct s3d_chirp {
+  float db[S3D_PATHS][S3D_BINS];
+  float ph[3][S3D_BINS];
+};
+
 // what the limit does in a step run, from the boost's gain in dB
 struct s3d_lim {
   // steady: before the step, at 0 dB S/M, and after
@@ -188,11 +218,17 @@ struct s3d_lim {
 struct s3d_meas {
   s3d_out_fn out;
   void *ctx;
+  // called between the summary's fits, which take a while, or 0
+  s3d_idle_fn idle;
   int plan, nruns;
   struct s3d_run run[S3D_MAX_RUNS];
   u32 rate_play, rate_rec;
   float ref_mm[S3D_FREQS], ref_ss[S3D_FREQS]; // run 0's gains
   float ref_ph[S3D_FREQS]; // run 0's phase of S against M, degrees
+  // the same for chirp runs, by twelfths of an octave, and their results
+  float cref_mm[S3D_BINS], cref_ss[S3D_BINS], cref_ph[S3D_BINS];
+  struct s3d_chirp chirp[S3D_MAX_CHIRPS];
+  int nchirp;
   // the run being measured
   int cur;
   struct s3d_seg seg[S3D_MAX_SEGS];
@@ -214,10 +250,16 @@ struct s3d_meas {
   u32 ron; // recorded frame of the onset
   int wcur;
   u32 wn;
-  double acc[2][4]; // [tone]: I and Q of the left, then of the right
-  double half[4];   // tone 0's in the first half of the window
-  int disturbed;    // windows whose halves differ
-  int first_bad;    // the first of them
+  double acc[2][4];     // [tone]: I and Q of the left, then of the right
+  double half[4];       // tone 0's in the first half of the window
+  double s2[2], s2h[2]; // a glide's image: cos and sin of twice its phase
+  double vc, vs;        // how a glide's step turns each recorded frame
+  // a glide's timing: its turns that tell how late it comes, and that,
+  // in recorded frames, once its windows have been placed again by it
+  double dsum, dwt, dly;
+  int timed;
+  int disturbed; // windows whose halves differ
+  int first_bad; // the first of them
   double pc[2], ps[2], wc[2], ws[2];
   u16 peak;
 };
@@ -270,5 +312,8 @@ int s3d_limit(const struct s3d_meas *m, int i, struct s3d_lim *l);
 // the stimulus of the current run at play frame pos (pos may have a
 // fraction), full scale 1
 void s3d_signal(const struct s3d_meas *m, double pos, double *l, double *r);
+
+// the middle frequency of chirp bin k, Hz
+double s3d_bin_hz(int k);
 
 #endif /* S3DMEAS_H */
