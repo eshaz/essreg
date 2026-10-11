@@ -8,14 +8,15 @@
  * Notes:
  *
  * The right channel comes in 0.2 dB lower than the left, as on the card,
- * which puts a little of the M into the S. With 50h bits 3 and 2 set, the
- * S of the input, (L - R) / 2, gets a boost B through a first-order
- * high-pass at 380 Hz and a first-order low-pass at 540 Hz, the poles that
- * the card's chirp runs gave, 16.8 dB at its peak at 453 Hz with 52h at
- * 3Fh and 0.75 dB less for each step below. The card's boost also lags
- * by about 4 us, which this one doesn't. 50h bit 1,
- * the model, makes the S from the M through the same boost, 3 dB lower,
- * and keeps only a 32nd of the input's own S.
+ * which puts a little of the M into the S, and reaches the ADC 2.1 us
+ * after the left, which puts more of it there at high frequencies. With 50h
+ * bits 3 and 2 set, the S of the input, (L - R) / 2, gets a boost B through a
+ * first-order high-pass at 380 Hz and a first-order low-pass at 540 Hz, the
+ * poles that the card's chirp runs gave, 16.8 dB at its peak at 453 Hz with 52h
+ * at 3Fh and 0.75 dB less for each step below, and lagging by 4.2 us, through a
+ * first-order all-pass, as the card's does. 50h bit 1, the model, makes the S
+ * from the M through the same boost, 3 dB lower, and keeps only a 32nd of the
+ * input's own S.
  *
  * 50h bit 0, the limit, compares the S out with a level from 54h and one
  * from 56h. Each is the register's value, 00h to FFh, over 91.2 times the
@@ -57,6 +58,8 @@ struct s3dsim {
   double gain;               // the boost's gain the limit leaves
   double k[2], d[2];         // its levels from 54h and 56h: K, and D as a mean
   double f_down, f_up;       // its steps a frame
+  double lag[3];             // the boost's lag, an all-pass: a, x and y
+  double skew[3];            // the right channel's lag in the ADC, the same
   s16 dl[2][S3DSIM_DELAY];
   int dpos;
   u32 seed;

@@ -7,8 +7,9 @@
  *   `ess3d measure [quick | limit | window | chirp | 54 | 56 | 58 | 5A]
  *   [/out=file] [/sim]`
  *
- *   quick      each kind of run once or twice, about 2 minutes, instead
- *              of every kind, about 6 minutes
+ *              without a plan, every property of the effect, about 8
+ *              minutes: the report ends with them
+ *   quick      each kind of run once or twice, about 2 minutes
  *   limit      each bit of 54h-5Ah with the limit on, about 8 minutes
  *   window     the limit's two levels: against the M's level and its
  *              frequency, with 5Ah, and the S back to just under where it
@@ -110,7 +111,7 @@ struct buf {
 static const struct ess3d_cmd *cmd;
 static HINSTANCE inst;
 static HWND dlg;
-static HGLOBAL meas_mem;
+static HGLOBAL meas_mem, chirp_mem;
 static struct s3d_meas *meas;
 static struct s3dsim sim;
 static HWAVEIN hwi;
@@ -939,6 +940,17 @@ static void start(void) {
   }
   s3d_init(meas, cmd->plan, cmd->plan_reg, out_line, 0);
   meas->idle = let_run;
+  // the chirp runs' results, in a block of their own
+  if (s3d_chirps(meas)) {
+    chirp_mem = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT,
+                            (DWORD)s3d_chirps(meas) * sizeof(struct s3d_chirp));
+    if (!chirp_mem) {
+      finish("Not enough memory for the measurement.");
+      return;
+    }
+    s3d_chirp_mem(meas, (struct s3d_chirp *)GlobalLock(chirp_mem),
+                  s3d_chirps(meas));
+  }
   s3dsim_reset(&sim, S3D_RATE);
   ess3d_path(cmd->out[0] ? cmd->out : "ESS3D.TXT", rep_path, sizeof(rep_path));
   tmp_name(rep_path, rep_tmp, sizeof(rep_tmp));
@@ -1099,6 +1111,10 @@ int measure_main(const struct ess3d_cmd *c, HINSTANCE hinst) {
   if (meas_mem) {
     GlobalUnlock(meas_mem);
     GlobalFree(meas_mem);
+  }
+  if (chirp_mem) {
+    GlobalUnlock(chirp_mem);
+    GlobalFree(chirp_mem);
   }
   return code;
 }

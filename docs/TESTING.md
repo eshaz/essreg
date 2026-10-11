@@ -692,22 +692,20 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
      5A. `ess3d defaults` puts ESS's values back.
    * Close every program that plays or records, then run
      `C:\ESSREG\ESS3D.EXE measure` from Start > *Run*. A window counts the
-     runs for about 6 minutes, and the speakers play the tones only faintly.
+     runs for about 8 minutes, and the speakers play the tones only faintly.
      If a run fails, keep `C:\ESSREG\ESS3D.LOG` too. At the end it says
-     "Done" and where the report is. Keep `C:\ESSREG\ESS3D.TXT`.
-   * Run `C:\ESSREG\ESS3D.EXE measure limit /out=C:\ESSREG\LIMIT.TXT`, about
-     8 minutes, and keep `LIMIT.TXT`. `ESS3D.LOG` has a line for each run
-     whose mixer was set late or changed, and for each run measured again
-     after a skip.
-   * Run `C:\ESSREG\ESS3D.EXE measure window /out=C:\ESSREG\WINDOW.TXT`,
-     about 4 minutes, and keep `WINDOW.TXT`. If the limit works as
+     "Done" and where the report is, and *Open report* opens it in WordPad.
+     Keep `C:\ESSREG\ESS3D.TXT`. Its last part, *properties*, gives each
+     property of the effect. If the effect works as
      [SPATIALIZER.md](SPATIALIZER.md#what-the-undocumented-bits-and-registers-do)
-     describes, its *fit* line comes within about 0.25 dB of every run, and
-     its *W3 8F FF* run ends with the boost where it was held.
-   * Run `C:\ESSREG\ESS3D.EXE measure chirp /out=C:\ESSREG\CHIRP.TXT`, about
-     1 minute, and keep `CHIRP.TXT`. Its *off again* run is within 0.1 dB of
-     *off*, and its *filters* section gives the poles and zeros of the
-     boost, each chosen fit within a few tenths of a dB.
+     describes, the *levels* line comes within about 0.25 dB of every run,
+     the *fall* and *rise* lines within a few percent, and *off again*
+     within 0.1 dB of *chirp off*. `ESS3D.LOG` has a line for each run whose
+     mixer was set late or changed, and for each run measured again after a
+     skip.
+   * To look closer at one part, `measure limit` (8 minutes),
+     `measure window` (4) and `measure chirp` (1) repeat parts of the full
+     plan in more detail, each with `/out=` to a file of its own.
    * Check that the mixer is as it was: the master volume, the Windows
      mixer's levels and the 3-D setting are back.
    * Run `ess3d measure quick` and end it with Ctrl+Alt+Del in the middle.

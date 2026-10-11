@@ -198,17 +198,19 @@ it measures how much of a tone in both channels (M) and of a tone in
 opposite phase (S) comes out as M and as S, and in which phase, at 11
 frequencies from 100 Hz to 10 kHz. Other runs show the level at which the
 limit holds the effect, where panned sounds come out, and how fast the limit
-moves, in dB a second. It needs ESS's wave devices, so close programs that
-play or record first.
+moves, in dB a second. Glides from 50 Hz to 12.8 kHz give the response and
+its phase in detail, and step runs show how the limit moves. The report ends
+with every property of the effect that this shows. It needs ESS's wave
+devices, so close programs that play or record first.
 
-The full plan takes about 6 minutes, `measure quick` about 2,
-`measure limit` tries each bit of 54h-5Ah with the limit on in about 8,
-`measure window` tests the limit's two levels in about 4, `measure chirp`
-reads the boost's filters with a gliding tone in about 1, and `measure 58`
-tries one register from 00h to FFh. A window shows the progress, and the
-report goes to `ESS3D.TXT` next to ess3d.exe, or to the `/out=` file. ess3d
-puts the mixer back at the end, and if the measurement is ended by force,
-the next ess3d puts it back.
+`ess3d measure` takes about 8 minutes and `measure quick` about 2. Parts of
+the full plan in more detail: `measure limit` tries each bit of 54h-5Ah with
+the limit on in about 8, `measure window` tests the limit's two levels in
+about 4, `measure chirp` reads the boost's filters with gliding tones in
+about 1, and `measure 58` tries one register from 00h to FFh. A window shows
+the progress, and the report goes to `ESS3D.TXT` next to ess3d.exe, or to
+the `/out=` file. ess3d puts the mixer back at the end, and if the
+measurement is ended by force, the next ess3d puts it back.
 [docs/SPATIALIZER.md](docs/SPATIALIZER.md#measuring-on-the-card) explains
 the report, and what one card showed: the boost is a band-pass with a zero
 at 0 Hz and poles near 380 and 540 Hz, 52h sets it in steps of 0.75 dB, and

@@ -327,37 +327,39 @@ than the left between the DAC and the effect, which puts M>S and S>M at
 about -38 dB in every run, and the boost raises M>S with it. The summary
 leaves out cross paths under -15 dB for that reason.
 
-The full plan has these runs, in about 6 minutes:
-1. Run 0, *off*, and run 1, *ess*, which is ESS's setting (50h 0Ch, 52h 3Fh
-   and 54h-5Ah 8Fh, 95h, 94h and 80h).
-2. The level 52h from 00h to 38h.
-3. *model*, *limit*, and both bits together.
-4. 54h-5Ah at 00h and FFh, with the limit off, and with the model on. The
-   runs with the model on have names that start with *M*.
-5. *ratio* and *ratio limit*: 400 Hz in M and 1 kHz in S, with the S from
-   -24 to +6 dB relative to the M, which shows the level that the limit
-   holds. The *boost* line gives the boost's own gain, 0 dB where the limit
-   leaves it as it is.
-6. *band* and *band limit*: S at each of the 11 frequencies over 400 Hz in
-   M. With ESS's 58h the limit is slow, so each tone carries the last one's
-   limit, and *band L 58=00* shows each frequency with a fast limit.
-7. *pan* and *pan limit*: 1 kHz panned in five steps from the left (0
-   degrees) to the right (90 degrees). *out deg* is where it comes out, from
-   the parts of the two channels in phase with the stronger one, so a value
-   under 0 or over 90 degrees is past a speaker, where the far channel plays
-   in opposite phase. *level* is its level against run 0.
-8. *step* and *step limit*: the 1 kHz S tone steps from -12 to 0 dB relative
+`ess3d measure` without a plan measures every property of the effect that
+this way of measuring shows, in about 8 minutes, and its report ends with a
+*properties* section that gives each of them. Its runs:
+1. *off*, tones with the effect off, the reference of the tone, ratio, band
+   and step runs, and *chirp off*, a glide with the effect off, the
+   reference of the glides (chirp runs, below).
+2. Glides with ESS's setting, *ess* (50h 0Ch, 52h 3Fh and 54h-5Ah 8Fh, 95h,
+   94h and 80h), with 52h at 30h, 20h and 00h, with 50h at 08h, which sets
+   bit 3 without bit 2, and with 54h-5Ah all at 00h and all at FFh with the
+   limit off.
+3. Glides with the model, alone, with 52h at 20h and with 54h-5Ah at FFh,
+   and the model without and with the limit in tones, *model tones* and
+   *model+limit*.
+4. *ratio limit*: 400 Hz in M and 1 kHz in S, with the S from -24 to +6 dB
+   relative to the M, which shows the level that the limit holds. The
+   *boost* line gives the boost's own gain, 0 dB where the limit leaves it
+   as it is.
+5. *band* and *band L 58=00*: S at each of the 11 frequencies over 400 Hz in
+   M, without the limit and with a fast one, which shows the limit's level
+   at each frequency.
+6. *step* and *step limit*: the 1 kHz S tone steps from -12 to 0 dB relative
    to the M at 0 ms and back after 2 s. The lines give the boost's own gain
    every 20 ms for 500 ms and then every 100 ms, to 1.8 s after the step up
    and 3 s after the step down, with *off* for a boost under -50 dB. The
-   runs whose names start with *L* have the limit on and one register at 00h
-   or FFh, or the level at 20h.
-9. The vector runs, *vec neg*, *vec /2*, *vec x2*, *vec rot* and *vec swap*,
-   which change 54h, 56h and 58h together, with the limit on. *vec neg*
-   clears the three sign bits, *vec /2* and *vec x2* halve and double the
-   length, *vec rot* gives 54h 56h's value, 56h 58h's and 58h 54h's, and
-   *vec swap* exchanges 54h and 56h.
-10. *off again*.
+   other step runs have the limit on: 52h at 30h, the runs of the window
+   plan (below), which give the levels and the rise level, 58h at ten values
+   from 00h to FFh, and *L floor*, whose levels the S alone is over, so that
+   the boost falls as far as the limit lets it.
+7. *off again*, a glide.
+
+The glides other than *chirp off*, *ess* and *model* get a line for each
+third of an octave in the report. The report is bigger than Notepad can
+open, so the *Open report* button opens it in WordPad.
 
 `ess3d measure limit` has each bit of 54h-5Ah flipped from ESS's value, and
 each of them at 00h and FFh, in step runs with the limit on, with the ratio
@@ -402,11 +404,16 @@ this detail show the order of each filter, which settled that the boost's
 high-pass is of the first order, not of 18 dB an octave as in the patent
 ([The chirp plan](#the-chirp-plan)).
 
-`ess3d measure quick` runs each kind once or twice in about 2 minutes, and
-`ess3d measure 58` runs 58h from 00h to FFh in steps of 10h with the limit
-on. `ess3d measure quick /sim` shows what a report looks like without the
-card, from an effect in `src/s3dsim.c` that follows this card's measurement
-and is made up in between.
+`ess3d measure quick` runs each kind once or twice in about 2 minutes, with
+*pan* and *pan limit*: 1 kHz panned in five steps from the left (0 degrees)
+to the right (90 degrees). *out deg* is where it comes out, from the parts
+of the two channels in phase with the stronger one, so a value under 0 or
+over 90 degrees is past a speaker, where the far channel plays in opposite
+phase, and *level* is its level against run 0. `ess3d measure 58` runs 58h
+from 00h to FFh in steps of 10h with the limit on.
+`ess3d measure quick /sim` shows what a report looks like without the card,
+from an effect in `src/s3dsim.c` that follows this card's measurement and is
+made up in between.
 
 The summary at the end gives each run's biggest change from the run it
 varies, and lines that answer the questions of the readings above:
@@ -446,9 +453,42 @@ varies, and lines that answer the questions of the readings above:
   frequency, and a pair as its frequency and Q. Roots over 50 kHz only shape
   the top of the band, so they are only counted. A real zero in the right
   half, far over the band, turns the phase as a lag would, and the line
-  gives that lag. The effect of /sim, a first-order high-pass at 380 Hz and
-  a low-pass at 540 Hz, gives poles at 381 and 541 Hz and a zero at 0 Hz,
-  with a pair of zeros near 26 kHz from its digital low-pass.
+  gives that lag. The *band-pass with a lag* line fits K s e^(-sT) / (s^2 +
+  c1 s + c0), the shape of the card's boost, and gives its poles, their
+  center and Q, its peak and its lag. The effect of /sim, a first-order
+  high-pass at 380 Hz and a low-pass at 540 Hz that lag by 4.2 us, gives a
+  center of 449 Hz and a lag of 4.7 us, as near as a band-pass in s comes to
+  its digital filters.
+* The *properties* section, last, gives each property of the effect from the
+  runs that show it. The full plan has every one, and the other plans give
+  what their runs show:
+  * *path*: how much lower or higher the right channel is than the left
+    between the DAC and the ADC, from M>S of *chirp off* from 100 Hz to 1
+    kHz, how much later it comes, from the phase of M>S over 1 kHz, and how
+    far the path moved by *off again*.
+  * *on*: what 50h at 08h does, and how far M>M moves with the boost on.
+  * *boost*: the band-pass with a lag of ESS's setting.
+  * *52h*: dB a step, from the boost's peak at each level over -20 dB, how
+    far its center and Q move, and its peak at the lowest level.
+  * *limit off* and the second *model* line: the most that these registers
+    at other values move a path.
+  * *model*: the peak of M>S against the boost's, M>M and S>S at their
+    lowest and highest, and dB a step of 52h.
+  * *model and limit*: how far the limit holds M>S and M>M down with the
+    model on.
+  * *levels*, *which* and *rise level*: the model of the levels, as in the
+    *fit* line, whether the higher of 54h's and 56h's level holds, and the
+    rise level.
+  * *fall* and *rise*: the speeds as a / (n + 1) and b / (n + 1) / (h + 1)
+    dB a second, n and h the low and high four bits of 58h, from every step
+    run with the limit on, how far the runs are from them at the median and
+    at most, and the median time after each step before the boost moves.
+  * *detector*: the high-pass through which the limit follows the S out,
+    fitted to the S held at each tone of the band run with a fast limit, and
+    how far the S held moves with the M at another frequency.
+  * *floor*: the least gain the limit left in a step run.
+  * *ratio* and *52h and the limit*: the S out held against S/M, and with
+    52h lower.
 
 Every run with the limit off also checks that each of its tones gives the
 same amplitude and phase in both halves of its window. A window whose halves
@@ -478,8 +518,8 @@ two that need no measurement:
    then try each register from 00h to FFh with `ess3d reg` or the tray
    panel's sliders, and note what changes. `ess3d defaults` puts ESS's
    values back.
-4. Measure with `ess3d measure`, `ess3d measure limit`,
-   `ess3d measure window` and `ess3d measure chirp`, and keep the reports.
+4. Measure with `ess3d measure`, and keep the report. `ess3d measure limit`,
+   `window` and `chirp` repeat parts of it in more detail.
 
 ## What one card showed
 

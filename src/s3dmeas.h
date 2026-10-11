@@ -8,7 +8,8 @@
  *
  * A measurement is a list of runs, each with its own values of mixer 50h
  * and 52h-5Ah. Run 0 has the effect off and is the reference for the
- * others. Each run plays this at 48 kHz:
+ * others, and the first chirp run, with the effect off too, for the chirp
+ * runs. Each run plays this at 48 kHz:
  * - 250 ms of silence, then a 40 ms burst of 1 kHz in both channels, which
  *   marks the start in the recording (the onset)
  * - sweep runs: a tone in both channels (M), then in opposite phase (S),
@@ -53,6 +54,13 @@
  * Every plan ends with the effect off again, which shows how much the
  * path from the DAC to the ADC moved during the measurement.
  *
+ * The full plan has every run that a property of the effect needs, and
+ * the summary ends with the properties, each from the runs that show it:
+ * the path's channels, 50h's bits, the boost as a band-pass with a lag,
+ * 52h, 54h-5Ah with the limit off, the model with and without the limit,
+ * and the limit's levels, rise level, speeds, detector, delay and floor.
+ * Other plans give the properties that their runs show.
+ *
  * A tone that is steady gives the same amplitude in both halves of its
  * window. In the runs with the limit off, a window whose halves differ
  * counts as disturbed: the recording or the playback skipped there, and
@@ -82,19 +90,19 @@
 #define S3D_MAX_RUNS 64
 #define S3D_MAX_SEGS 32
 #define S3D_MAX_WINS 200
-#define S3D_BINS 96      // chirp runs: twelfths of an octave from 50 Hz
-#define S3D_MAX_CHIRPS 5 // and the chirp runs a plan can have
-#define S3D_PATHS 4      // M>M, S>S, M>S, S>M
-#define S3D_PANS 5       // pan runs: 0, 22.5, 45, 67.5 and 90 degrees
-#define S3D_FINE 25      // step runs: 20 ms windows over the first 500 ms
-#define S3D_COARSE_UP 13 // then 100 ms windows to 1.8 s after the step up
-#define S3D_COARSE_DN 25 // and to 3 s after the step down
-#define S3D_QUIET 64     // 1 ms blocks the noise floor comes from
+#define S3D_BINS 96       // chirp runs: twelfths of an octave from 50 Hz
+#define S3D_MAX_CHIRPS 16 // and the chirp runs a plan has at most
+#define S3D_PATHS 4       // M>M, S>S, M>S, S>M
+#define S3D_PANS 5        // pan runs: 0, 22.5, 45, 67.5 and 90 degrees
+#define S3D_FINE 25       // step runs: 20 ms windows over the first 500 ms
+#define S3D_COARSE_UP 13  // then 100 ms windows to 1.8 s after the step up
+#define S3D_COARSE_DN 25  // and to 3 s after the step down
+#define S3D_QUIET 64      // 1 ms blocks the noise floor comes from
 #define S3D_UP (S3D_FINE + S3D_COARSE_UP)
 #define S3D_DN (S3D_FINE + S3D_COARSE_DN)
 
 // the plans
-#define S3D_PLAN_FULL 0   // every kind of run below, about 6 minutes
+#define S3D_PLAN_FULL 0   // everything that can be measured, 10 minutes
 #define S3D_PLAN_QUICK 1  // each kind once or twice, about 2 minutes
 #define S3D_PLAN_REG 2    // one register from 00h to FFh, with the limit
 #define S3D_PLAN_LIMIT 3  // each bit of 54h-5Ah with the limit, 8 minutes
@@ -164,7 +172,8 @@ struct s3d_run {
   u8 att;    // step runs: every tone this many dB lower
   u8 drop;   // and the S after the step down, dB under the M; 0 for 12
   u16 mhz;   // and the M tone's frequency, 0 for 400 Hz
-  u8 slot;   // chirp runs: where their results are in chirp[], or 0xFF
+  u8 slot;   // chirp runs: where their results are in chirp[]
+  u8 brief;  // and a line in the report for each third of an octave only
   u8 result; // s3d_end's, 0xFF before the run
   union {
     struct {
@@ -213,6 +222,7 @@ struct s3d_lim {
   float fall; // dB a second after the step up, 0 if it holds
   float rise; // dB a second after the step down, 0 if none
   int hold;   // ms after the step down before it rises, -1 if unknown
+  int delay;  // ms after the step up before it falls, -1 if unknown
 };
 
 struct s3d_meas {
@@ -227,8 +237,8 @@ struct s3d_meas {
   float ref_ph[S3D_FREQS]; // run 0's phase of S against M, degrees
   // the same for chirp runs, by twelfths of an octave, and their results
   float cref_mm[S3D_BINS], cref_ss[S3D_BINS], cref_ph[S3D_BINS];
-  struct s3d_chirp chirp[S3D_MAX_CHIRPS];
-  int nchirp;
+  struct s3d_chirp *chirp; // in memory of the program's (s3d_chirp_mem)
+  int nchirp, max_chirp;
   // the run being measured
   int cur;
   struct s3d_seg seg[S3D_MAX_SEGS];
@@ -268,6 +278,12 @@ struct s3d_meas {
 // a plan; reg is the register (54h, 56h, 58h or 5Ah) of S3D_PLAN_REG
 // report lines go to out, without line ends
 void s3d_init(struct s3d_meas *m, int plan, u8 reg, s3d_out_fn out, void *ctx);
+
+// the plan's chirp runs, and room for their results from the program, n
+// of them, which stays until the measurement ends; without it the chirp
+// runs have no results
+int s3d_chirps(const struct s3d_meas *m);
+void s3d_chirp_mem(struct s3d_meas *m, struct s3d_chirp *c, int n);
 
 // the runs, the values of run i's registers (S3D_R50 to S3D_R5A) and its
 // name

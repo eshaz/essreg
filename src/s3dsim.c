@@ -18,6 +18,8 @@
 #define HP_HZ 380.0       // the boost's high-pass
 #define LP_HZ 540.0       // and low-pass, both first order
 #define PEAK 11.79        // and its gain, for 16.8 dB at its peak
+#define LAG 4.2e-6        // and its lag, seconds
+#define SKEW 2.1e-6       // the right channel's lag in the ADC, seconds
 #define MODEL 0.70710678  // the model's S, 3 dB under the boost
 #define KEEP (1.0 / 32)   // the input's S that the model keeps
 #define DETECT 420.0      // the limit's high-pass on the S it follows
@@ -61,11 +63,19 @@ void s3dsim_levels(const u8 *reg, double m, double *rise, double *fall) {
   *fall = 20 * log10((b > a ? b : a) / mi);
 }
 
+// a first-order all-pass (a + z^-1) / (1 + a z^-1) that delays by t
+// seconds at low frequencies: its a
+static double allpass(double t, u32 rate) {
+  return (1 - t * rate) / (1 + t * rate);
+}
+
 void s3dsim_reset(struct s3dsim *s, u32 rate) {
   static const u8 off[6] = {0x04, 0x3F, 0x8F, 0x95, 0x94, 0x80};
 
   memset(s, 0, sizeof(*s));
   s->rate = rate;
+  s->lag[0] = allpass(LAG, rate);
+  s->skew[0] = allpass(SKEW, rate);
   s->seed = 12345;
   s->gain = 1;
   s3dsim_regs(s, off);
@@ -129,6 +139,11 @@ void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
       s->ly = s->lb[0] * y + s->lb[1] * s->hy - s->lb[2] * s->ly;
       s->hy = y;
       b = s->g * s->ly * (model ? MODEL : 1);
+      // its lag
+      y = s->lag[0] * b + s->lag[1] - s->lag[0] * s->lag[2];
+      s->lag[1] = b;
+      s->lag[2] = y;
+      b = y;
       if (s->reg[0] & 1) {
         // the limit: follow the M in and the S out, this through a
         // high-pass with 0 dB at 1 kHz, and move the boost's gain down
@@ -162,55 +177,107 @@ void s3dsim_run(struct s3dsim *s, const s16 *in, s16 *out, u16 n) {
       }
       sd = (model ? sd * KEEP : sd) + b;
     }
-    // the path's gain and delay, then the recording's noise
+    // the path's gain, the right channel's lag and the delay, then the
+    // recording's noise
+    x = GAIN * (m - sd);
+    y = s->skew[0] * x + s->skew[1] - s->skew[0] * s->skew[2];
+    s->skew[1] = x;
+    s->skew[2] = y;
     out[2 * i] = s->dl[0][s->dpos];
     out[2 * i + 1] = s->dl[1][s->dpos];
     s->dl[0][s->dpos] = to_s16(GAIN * (m + sd) + noise(s));
-    s->dl[1][s->dpos] = to_s16(GAIN * (m - sd) + noise(s));
+    s->dl[1][s->dpos] = to_s16(y + noise(s));
     s->dpos = (s->dpos + 1) % S3DSIM_DELAY;
   }
 }
 
-// b0 + b1 z^-1 over 1 + a1 z^-1 at z = e^(jw)
-static void at(const double *c, double w, double *re, double *im) {
-  double nr = c[0] + c[1] * cos(w), ni = -c[1] * sin(w);
-  double dr = 1 + c[2] * cos(w), di = -c[2] * sin(w), d = dr * dr + di * di;
+struct z {
+  double re, im;
+};
 
-  *re = (nr * dr + ni * di) / d;
-  *im = (ni * dr - nr * di) / d;
+static struct z z_of(double re, double im) {
+  struct z v;
+
+  v.re = re;
+  v.im = im;
+  return v;
+}
+
+static struct z z_add(struct z a, struct z b) {
+  return z_of(a.re + b.re, a.im + b.im);
+}
+
+static struct z z_sub(struct z a, struct z b) {
+  return z_of(a.re - b.re, a.im - b.im);
+}
+
+static struct z z_mul(struct z a, struct z b) {
+  return z_of(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
+}
+
+static struct z z_div(struct z a, struct z b) {
+  double d = b.re * b.re + b.im * b.im;
+
+  return z_of((a.re * b.re + a.im * b.im) / d, (a.im * b.re - a.re * b.im) / d);
+}
+
+static struct z z_scale(struct z a, double k) {
+  return z_of(a.re * k, a.im * k);
+}
+
+// b0 + b1 z^-1 over 1 + a1 z^-1 at z = e^(jw)
+static struct z at(const double *c, double w) {
+  return z_div(z_of(c[0] + c[1] * cos(w), -c[1] * sin(w)),
+               z_of(1 + c[2] * cos(w), -c[2] * sin(w)));
+}
+
+// the M and S out at w of l and r in, with these registers and the limit
+// off
+static void path(const u8 *reg, u32 rate, double w, struct z l, struct z r,
+                 struct z *mo, struct z *so) {
+  double hb[3], lb[3], ap[3];
+  struct z m, s, b, lo, ro;
+  int model = reg[0] & 2;
+
+  r = z_scale(r, RIGHT);
+  m = z_scale(z_add(l, r), 0.5);
+  s = z_scale(z_sub(l, r), 0.5);
+  if ((reg[0] & 0x0C) == 0x0C) {
+    first(HP_HZ, rate, 1, hb);
+    first(LP_HZ, rate, 0, lb);
+    ap[0] = ap[2] = allpass(LAG, rate);
+    ap[1] = 1;
+    b = z_mul(z_mul(at(hb, w), at(lb, w)), at(ap, w));
+    b = z_mul(z_scale(b, boost_gain(reg) * (model ? MODEL : 1)), model ? m : s);
+    s = z_add(model ? z_scale(s, KEEP) : s, b);
+  }
+  ap[0] = ap[2] = allpass(SKEW, rate);
+  ap[1] = 1;
+  lo = z_add(m, s);
+  ro = z_mul(z_sub(m, s), at(ap, w));
+  *mo = z_scale(z_add(lo, ro), 0.5);
+  *so = z_scale(z_sub(lo, ro), 0.5);
 }
 
 void s3dsim_response(const u8 *reg, u32 rate, double hz, double *re,
                      double *im) {
-  double hb[3], lb[3], w = 2 * PI * hz / rate, hr, hi, lr, li, br, bi;
-  double mi = (1 + RIGHT) / 2, cross = (1 - RIGHT) / 2;
+  static const u8 off[6] = {0x04, 0x3F, 0x8F, 0x95, 0x94, 0x80};
+  struct z one = z_of(1, 0), mm, ms, sm, ss, mm0, ss0, x, v[4];
+  double w = 2 * PI * hz / rate;
   int i;
 
-  // the M and S that reach the effect from an M in and an S in, against
-  // the M that an M in brings with the effect off
-  for (i = 0; i < 4; i++)
-    im[i] = 0;
-  re[0] = re[1] = 1;
-  re[2] = re[3] = cross / mi;
-  if ((reg[0] & 0x0C) != 0x0C)
-    return;
-  first(HP_HZ, rate, 1, hb);
-  first(LP_HZ, rate, 0, lb);
-  at(hb, w, &hr, &hi);
-  at(lb, w, &lr, &li);
-  br = boost_gain(reg) * (hr * lr - hi * li);
-  bi = boost_gain(reg) * (hr * li + hi * lr);
-  if (reg[0] & 2) {
-    // the model: the S from the M, and a 32nd of the input's S
-    re[1] = KEEP + MODEL * br * cross / mi;
-    im[1] = MODEL * bi * cross / mi;
-    re[2] = KEEP * cross / mi + MODEL * br;
-    im[2] = MODEL * bi;
-  } else {
-    // S out is S in plus its boost
-    re[1] = 1 + br;
-    im[1] = bi;
-    re[2] = cross / mi * (1 + br);
-    im[2] = cross / mi * bi;
+  // the M and S out of an M in and of an S in, with the registers and
+  // with the effect off, and M>M, S>S, M>S and S>M as ess3d measures them
+  path(reg, rate, w, one, one, &mm, &ms);
+  path(reg, rate, w, one, z_scale(one, -1), &sm, &ss);
+  path(off, rate, w, one, one, &mm0, &x);
+  path(off, rate, w, one, z_scale(one, -1), &x, &ss0);
+  v[0] = z_div(mm, mm0);
+  v[1] = z_div(ss, ss0);
+  v[2] = z_div(ms, mm0);
+  v[3] = z_div(sm, ss0);
+  for (i = 0; i < 4; i++) {
+    re[i] = v[i].re;
+    im[i] = v[i].im;
   }
 }

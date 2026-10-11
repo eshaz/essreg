@@ -414,10 +414,12 @@ class WineTest(unittest.TestCase):
                       "-37, -25, 41, 114, 127", text)
         # the limit's fall and rise in dB a second, the S it holds, and
         # the boost back to its full gain
-        self.assertIn(" 22  step limit     0D 3F 8F 95 94 80      51 -14.5  "
+        self.assertIn(" 22  step limit     0D 3F 8F 95 94 80      51 -14.4  "
                       "+0.0     +5.4      0    5.1   +0.0    >+3.6", text)
         self.assertIn(" 24  off again      04 3F 8F 95 94 80     0  no "
                       "change over 0.1 dB", text)
+        # the properties that the quick plan's runs show
+        self.assertIn("\r\nfall: 257.5 / (n + 1) dB a second", text)
         self.assertIn("\r\n", text)
         # the mixer is back and the restore file gone
         self.assertFalse(os.path.exists(self.path("ESS3DSIM.RST")))

@@ -26,10 +26,11 @@
 #include "s3dsim.h"
 
 #define BLOCK 4096
-#define MAX_LINES 1000
+#define MAX_LINES 1500
 #define PI 3.14159265358979
 
 static struct s3d_meas meas;
+static struct s3d_chirp chirps[S3D_MAX_CHIRPS];
 static struct s3dsim sim;
 static s16 play[2 * BLOCK], rec[2 * BLOCK];
 static char report[MAX_LINES][240];
@@ -51,6 +52,13 @@ static void out(void *ctx, const char *line) {
     strncpy(report[nlines], line, sizeof(report[0]) - 1);
     nlines++;
   }
+}
+
+// a plan, with room for every chirp run's results
+static void init_meas(int plan, u8 reg, s3d_out_fn fn, void *ctx) {
+  s3d_init(&meas, plan, reg, fn, ctx);
+  CHECK(s3d_chirps(&meas) <= S3D_MAX_CHIRPS);
+  s3d_chirp_mem(&meas, chirps, S3D_MAX_CHIRPS);
 }
 
 // the first line from line from that starts with start, or -1
@@ -164,7 +172,7 @@ static void run_plan(int plan, u8 reg, const char *info) {
 
   nlines = 0;
   report_bytes = 0;
-  s3d_init(&meas, plan, reg, out, 0);
+  init_meas(plan, reg, out, 0);
   s3dsim_reset(&sim, S3D_RATE);
   s3d_header(&meas, S3D_RATE, S3D_RATE, info);
   for (i = 0; i < s3d_count(&meas); i++)
@@ -346,7 +354,16 @@ static void check_limit(int i) {
            l.rises, down_at, fall, rise, up_at);
 }
 
+static void check_report_width(void);
+
 static void check_report_lines(void) {
+  check_report_width();
+  // Notepad opens it on Windows 98 (64 KB at most)
+  CHECK(report_bytes < 62000);
+}
+
+// every line under 200 characters
+static void check_report_width(void) {
   int i;
 
   for (i = 0; i < nlines; i++) {
@@ -354,8 +371,6 @@ static void check_report_lines(void) {
     if (strlen(report[i]) >= 200)
       printf("  too long: %s\n", report[i]);
   }
-  // Notepad opens it on Windows 98 (64 KB at most)
-  CHECK(report_bytes < 62000);
 }
 
 static void test_quick_plan(void) {
@@ -364,7 +379,7 @@ static void test_quick_plan(void) {
   int step, steplim, line;
   double deg, lev;
 
-  s3d_init(&meas, S3D_PLAN_QUICK, 0, out, 0);
+  init_meas(S3D_PLAN_QUICK, 0, out, 0);
   CHECK_EQ(s3d_count(&meas), 25);
   CHECK(s3d_seconds(&meas) > 100 && s3d_seconds(&meas) < 180);
   run_plan(S3D_PLAN_QUICK, 0, "host test");
@@ -479,42 +494,94 @@ static void test_quick_plan(void) {
                   "by -15.3 dB; it holds S out at +5.4 to +5.4 dB re M") > 0);
   CHECK(find_line("pan: 0, 22.5, 45, 67.5 and 90 degrees come out at -") > 0);
   CHECK(find_line("limit: the boost's gain in the step runs") > 0);
-  CHECK(find_line(" 22  step limit     0D 3F 8F 95 94 80      51 -14.5  +0.0 "
+  CHECK(find_line(" 22  step limit     0D 3F 8F 95 94 80      51 -14.4  +0.0 "
                   "    +5.4      0    5.1   +0.0    >+3.6") > 0);
   check_report_lines();
 }
 
+// the number right after text in the line of the properties that starts
+// with start; 0 if there's none
+static int num_after(const char *start, const char *text, double *v) {
+  int i = find_from(find_line("properties: "), start);
+  const char *p = i >= 0 ? strstr(report[i], text) : 0;
+
+  if (p && sscanf(p + strlen(text), "%lf", v) == 1)
+    return 1;
+  printf("  no \"%s\" after \"%s\"\n", text, start);
+  return 0;
+}
+
+// a property's value within lo and hi
+static void check_prop(const char *start, const char *text, double lo,
+                       double hi) {
+  double v = 0;
+
+  CHECK(num_after(start, text, &v) && v >= lo && v <= hi);
+  if (v < lo || v > hi)
+    printf("  %s %s %g, not %g to %g\n", start, text, v, lo, hi);
+}
+
+// the full plan: each property of the effect of /sim found again, in the
+// summary's last part
 static void test_full_plan(void) {
-  int i, line;
+  int i;
 
-  s3d_init(&meas, S3D_PLAN_FULL, 0, out, 0);
-  CHECK_EQ(s3d_count(&meas), 53);
-  CHECK(s3d_seconds(&meas) > 280 && s3d_seconds(&meas) < 400);
-  CHECK(run_named("M 56=FF") > 0 && run_named("vec swap") > 0);
-  CHECK(run_named("band L 58=00") > 0 && run_named("L 52=20") > 0);
+  init_meas(S3D_PLAN_FULL, 0, out, 0);
+  CHECK_EQ(s3d_count(&meas), 58);
+  CHECK_EQ(s3d_chirps(&meas), 12);
+  CHECK(s3d_seconds(&meas) > 420 && s3d_seconds(&meas) < 540);
+  CHECK(run_named("chirp off") == 1 && run_named("L floor") > 0);
+  CHECK(run_named("50=08") > 0 && run_named("M 54-5A=FF") > 0);
   run_plan(S3D_PLAN_FULL, 0, 0);
-  // the model's registers: none of them changes the model
-  line = find_line("model: with 50h bit 1 set");
-  CHECK(line > 0 && strstr(report[line], "by 0.0 dB and 0 degrees at most"));
-  // each 52h level
-  for (i = 0; i < 8; i++) {
-    char name[8];
-
-    sprintf(name, "52=%02X", i * 8);
-    check_path(run_named(name), 1, 0.15);
-  }
-  // the limit in each step run
+  // the limit in each step run but the floor's, which the effect's
+  // levels don't give
   for (i = 0; i < s3d_count(&meas); i++)
-    if (run(i)->kind == S3D_STEP && (run(i)->reg[0] & 1))
+    if (run(i)->kind == S3D_STEP && (run(i)->reg[0] & 1) &&
+        i != run_named("L floor"))
       check_limit(i);
-  i = find_line("fall: from 16 dB/s (run ");
-  CHECK(i > 0 && strstr(report[i], "to 258 dB/s (run 42, L 58=00)"));
-  CHECK(find_line("held: S out from -6.6 dB re M (run 47, vec neg) to +9.6 dB "
-                  "(run 39, L 54=FF)") > 0);
-  // one model for the level of every step run
-  CHECK(find_line("fit: S out held = M x the higher of 54h and 56h / 91.7 + "
-                  "-36.5 dBFS x 5Ah / 80h, from 14 runs: within 0.12 dB") > 0);
-  check_report_lines();
+  // the glides of the runs by thirds of an octave
+  CHECK(strstr(report[find_line("  4  52=20") + 2], "      65  ") != 0);
+  CHECK(find_line("properties: ") > 0);
+  // the path: 0.22 dB, and the all-pass's 2.1 us that grow to 2.6 over
+  // 1 kHz
+  check_prop("path: ", "the right channel ", 0.2, 0.24);
+  check_prop("path: ", "under the left, and ", 2.3, 2.9);
+  check_prop("path: ", "it moved ", 0, 0.05);
+  check_prop("on: ", "by more than ", 0, 0.05);
+  check_prop("on: ", "M>M stays within ", 0, 0.05);
+  // the boost: 380 and 540 Hz, 16.8 dB and 4.2 us, as near as a band-pass
+  // in s comes to the effect's digital one
+  check_prop("boost: ", "Q ", 0.45, 0.55);
+  check_prop("boost: ", "peak ", 16.6, 17.0);
+  check_prop("boost: ", "lag ", 3.5, 5.5);
+  check_prop("52h: ", "the boost moves ", 0.74, 0.76);
+  check_prop("52h: ", "it peaks at ", -31, -30);
+  check_prop("limit off: ", "more than ", 0, 0.05);
+  check_prop("model: M>S", "M>S peaks at ", 13.6, 14.0);
+  check_prop("model: M>S", "Hz, ", 2.8, 3.2);
+  check_prop("model: M>S", "52h moves M>S ", 0.74, 0.76);
+  check_prop("model: 54h", "more than ", 0, 0.05);
+  check_prop("model and limit: ", "up to ", 5, 15);
+  // the limit: 91.2, 0.00188, the higher of the two, +0.5 dB, the speeds
+  // of s3dsim_speed, the detector's 420 Hz and the M as it is, the floor
+  check_prop("levels: ", "value / ", 90.5, 93);
+  check_prop("levels: ", "plus 5Ah x ", 0.0018, 0.0020);
+  check_prop("levels: ", "runs within ", 0, 0.25);
+  check_prop("which: ", "hold within ", 0, 0.15);
+  check_prop("rise level: ", "level ", 0.3, 0.8);
+  check_prop("fall: ", "fall: ", 250, 265);
+  check_prop("fall: ", "runs, ", 0, 2);
+  check_prop("rise: ", "rise: ", 250, 265);
+  CHECK(strstr(report[find_from(find_line("properties: "), "rise: ")],
+               "the fall over h + 1") != 0);
+  check_prop("detector: the limit", "high-pass at ", 380, 470);
+  check_prop("detector: the S held", "160 Hz ", -0.5, 0.5);
+  check_prop("floor: ", "down to ", -48, -46);
+  check_prop("ratio: ", "S out at ", 5, 6);
+  check_prop("52h and the limit: ", "dB re M, with 3Fh at ", 5, 6);
+  check_prop("52h and the limit: ", "30h the limit holds the S out at ", 5, 6);
+  // too big for Notepad: ess3d opens it in WordPad
+  check_report_width();
   if (verbose)
     printf("full report: %d lines, %ld bytes\n", nlines, report_bytes);
 }
@@ -523,7 +590,7 @@ static void test_limit_plan(void) {
   struct s3d_lim a, b;
   int i, n = 0;
 
-  s3d_init(&meas, S3D_PLAN_LIMIT, 0, out, 0);
+  init_meas(S3D_PLAN_LIMIT, 0, out, 0);
   CHECK_EQ(s3d_count(&meas), 62);
   CHECK(s3d_seconds(&meas) > 420 && s3d_seconds(&meas) < 540);
   CHECK(run_named("L 54=0F b7") > 0 && run_named("L 5A=81 b0") > 0);
@@ -558,7 +625,7 @@ static void test_window_plan(void) {
   struct s3d_lim l;
   int i, n = 0, line;
 
-  s3d_init(&meas, S3D_PLAN_WINDOW, 0, out, 0);
+  init_meas(S3D_PLAN_WINDOW, 0, out, 0);
   CHECK_EQ(s3d_count(&meas), 31);
   CHECK(s3d_seconds(&meas) > 210 && s3d_seconds(&meas) < 280);
   CHECK(run(run_named("L -18 dB"))->att == 18);
@@ -597,7 +664,7 @@ static void test_window_plan(void) {
   line = find_line("levels: ");
   CHECK(line > 0);
   CHECK(find_from(line, "  3  step limit     0D 3F 8F 95 94 80     +4.2   "
-                        "-36.3  3, 4, 5, 6, 19") > 0);
+                        "-36.4  3, 4, 5, 6, 19") > 0);
   CHECK(find_from(line, "  7  L 5A=00        0D 3F 8F 95 94 00     +4.2       "
                         "-  7, 8") > 0);
   CHECK(find_from(line, " 12  L 54=AF        0D 3F AF 95 94 80     +5.6   "
@@ -607,7 +674,7 @@ static void test_window_plan(void) {
   // and the one model for all of them, with the rise 0.5 dB over 54h's
   // level, as in the effect
   CHECK(find_line("fit: S out held = M x the higher of 54h and 56h / 92.0 + "
-                  "-36.3 dBFS x 5Ah / 80h, from 25 runs: within 0.09 dB") > 0);
+                  "-36.4 dBFS x 5Ah / 80h, from 24 runs: within 0.08 dB") > 0);
   CHECK(find_line("rise level: where the boost stopped rising short of the "
                   "level held, it stopped +0.6 dB over 54h's level of the fit "
                   "(runs 23, 24)") > 0);
@@ -627,7 +694,7 @@ static void test_one_register(void) {
   int i;
 
   nlines = 0;
-  s3d_init(&meas, S3D_PLAN_REG, 0x58, out, 0);
+  init_meas(S3D_PLAN_REG, 0x58, out, 0);
   CHECK_EQ(s3d_count(&meas), 27);
   CHECK(run_named("58=00") == 2 && run_named("58=FF") == 3);
   CHECK(run_named("M 58=FF") == 6 && run_named("step limit") == 8);
@@ -637,7 +704,7 @@ static void test_one_register(void) {
     check_limit(i);
   check_report_lines();
   // a register that isn't one of 54h-5Ah gives the quick plan
-  s3d_init(&meas, S3D_PLAN_REG, 0x50, out, 0);
+  init_meas(S3D_PLAN_REG, 0x50, out, 0);
   CHECK_EQ(s3d_count(&meas), 25);
 }
 
@@ -651,7 +718,7 @@ static int record_at(double rate, u32 rate_rec) {
   u16 n;
 
   nlines = 0;
-  s3d_init(&meas, S3D_PLAN_QUICK, 0, out, 0);
+  init_meas(S3D_PLAN_QUICK, 0, out, 0);
   s3d_header(&meas, S3D_RATE, rate_rec, 0);
   s3d_begin(&meas, 0, &rec_frames);
   // the recording starts 70 ms before the playback
@@ -692,7 +759,7 @@ static void test_click(void) {
 
   nlines = 0;
   click = 1;
-  s3d_init(&meas, S3D_PLAN_QUICK, 0, out, 0);
+  init_meas(S3D_PLAN_QUICK, 0, out, 0);
   s3dsim_reset(&sim, S3D_RATE);
   s3d_header(&meas, S3D_RATE, S3D_RATE, 0);
   for (i = 0; i < 2; i++)
@@ -708,7 +775,7 @@ static void test_skip(void) {
   int line;
 
   nlines = 0;
-  s3d_init(&meas, S3D_PLAN_QUICK, 0, out, 0);
+  init_meas(S3D_PLAN_QUICK, 0, out, 0);
   s3dsim_reset(&sim, S3D_RATE);
   s3d_header(&meas, S3D_RATE, S3D_RATE, 0);
   CHECK_EQ(run_sim(0, 2000), S3D_OK);
@@ -734,7 +801,7 @@ static void test_stall(void) {
   int i, line;
 
   nlines = 0;
-  s3d_init(&meas, S3D_PLAN_QUICK, 0, out, 0);
+  init_meas(S3D_PLAN_QUICK, 0, out, 0);
   s3dsim_reset(&sim, S3D_RATE);
   s3d_header(&meas, S3D_RATE, S3D_RATE, 0);
   CHECK_EQ(run_sim(0, 2000), S3D_OK);
@@ -759,7 +826,7 @@ static void test_no_signal(void) {
   int full = 0;
 
   nlines = 0;
-  s3d_init(&meas, S3D_PLAN_QUICK, 0, out, 0);
+  init_meas(S3D_PLAN_QUICK, 0, out, 0);
   s3d_header(&meas, S3D_RATE, S3D_RATE, 0);
   s3d_begin(&meas, 0, &rec_frames);
   memset(rec, 0, sizeof(rec));
@@ -828,7 +895,7 @@ static void test_chirp_plan(void) {
   int i, k, p, q, n = 0, chosen, roots;
   double want, got, worst[S3D_PATHS] = {0}, worst_deg[3] = {0}, hz[4];
 
-  s3d_init(&meas, S3D_PLAN_CHIRP, 0, out, 0);
+  init_meas(S3D_PLAN_CHIRP, 0, out, 0);
   CHECK_EQ(s3d_count(&meas), 5);
   CHECK(s3d_seconds(&meas) >= 40 && s3d_seconds(&meas) <= 70);
   // ess3d holds it in one segment of Win16's memory
@@ -867,21 +934,27 @@ static void test_chirp_plan(void) {
     CHECK(worst_deg[q] < 0.5);
   // the chirp runs in the summary, at a frequency of their own
   CHECK(find_line("  2  52=30          0C 30 8F 95 94 80     1  S>S") >= 0);
-  // the fits: ESS's boost, the lower level and the model's M>S each find
-  // the poles at 380 and 540 Hz and the zero at 0 Hz
+  // the fits: ESS's boost, the lower level and the model's M>S each come
+  // within 0.1 dB, and the boost as a band-pass finds the center of the
+  // poles at 380 and 540 Hz, 453 Hz, and the lag of 4.2 us, as near as a
+  // band-pass in s comes to the effect's digital one
   for (i = 1; i <= 3; i++) {
     CHECK(fit_lines(i, &chosen, &roots));
     if (roots < 0)
       continue;
-    CHECK_EQ(hz_list(report[roots], "; poles", hz, 4), 2);
-    CHECK(fabs(hz[0] - 380) < 8 && fabs(hz[1] - 540) < 10);
+    CHECK(strstr(report[chosen], "rms 0.0") != 0);
     CHECK(hz_list(report[roots], "; zeros", hz, 4) >= 1);
     CHECK(hz[0] < 2);
-    CHECK(strstr(report[chosen], "rms 0.0") != 0);
+    if (i < 3) {
+      CHECK(sscanf(strstr(report[roots + 1], "at ") + 3, "%lf", &hz[0]) == 1);
+      CHECK(fabs(hz[0] - 452) < 6);
+      CHECK(sscanf(strstr(report[roots + 1], "lag ") + 4, "%lf", &hz[0]) == 1);
+      CHECK(hz[0] > 3.5 && hz[0] < 5.5);
+    }
   }
   CHECK(fit_lines(1, &chosen, &roots));
   if (roots >= 0)
-    CHECK(!strncmp(report[roots], "     peak +16.8 dB at 45", 24));
+    CHECK(!strncmp(report[roots], "     peak +16.8 dB at 4", 23));
   // the runs with the effect off have nothing to fit
   CHECK(find_from(find_line("filters:"), "  4  off again") < 0);
 }
@@ -943,7 +1016,7 @@ static void test_filter_fit(void) {
   double hz[4];
 
   nlines = 0;
-  s3d_init(&meas, S3D_PLAN_CHIRP, 0, out, 0);
+  init_meas(S3D_PLAN_CHIRP, 0, out, 0);
   meas.run[0].result = S3D_OK;
   set_boost(1, num1, 1, den1, 2);
   set_boost(2, num2, 3, den2, 4);
@@ -1002,7 +1075,7 @@ static void test_chirp_m_delay(void) {
   int k;
 
   nlines = 0;
-  s3d_init(&meas, S3D_PLAN_CHIRP, 0, out, 0);
+  init_meas(S3D_PLAN_CHIRP, 0, out, 0);
   s3dsim_reset(&sim, S3D_RATE);
   s3d_header(&meas, S3D_RATE, S3D_RATE, 0);
   CHECK_EQ(run_sim(0, 2000), S3D_OK);
@@ -1026,7 +1099,7 @@ static void test_chirp_skip(void) {
 
   for (i = 0; i < 2; i++) {
     nlines = 0;
-    s3d_init(&meas, S3D_PLAN_CHIRP, 0, out, 0);
+    init_meas(S3D_PLAN_CHIRP, 0, out, 0);
     s3dsim_reset(&sim, S3D_RATE);
     s3d_header(&meas, S3D_RATE, S3D_RATE, 0);
     CHECK_EQ(run_sim(0, 2000), S3D_OK);

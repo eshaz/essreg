@@ -25,7 +25,7 @@ w_ess3dms.obj : src\win\ess3dms.c .AUTODEPEND
 # the measurement's floating point keeps off FS and GS (-zfp -zgp): the
 # 8087 emulator of Windows has no fixups for their segment prefixes
 w_s3dmeas.obj : src\s3dmeas.c .AUTODEPEND
- *wcc src\s3dmeas.c $(WIN_CFLAGS) -zfp -zgp -fo=w_s3dmeas.obj
+ *wcc src\s3dmeas.c $(WIN_CFLAGS) -zfp -zgp -zm -fo=w_s3dmeas.obj
 
 w_s3dsim.obj : src\s3dsim.c .AUTODEPEND
  *wcc src\s3dsim.c $(WIN_CFLAGS) -zfp -zgp -fo=w_s3dsim.obj

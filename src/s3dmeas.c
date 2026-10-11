@@ -115,8 +115,7 @@ static int add(struct s3d_meas *m, const char *name, const u8 *reg, int kind,
   r->base = (u8)base;
   r->slow = (u8)(reg[S3D_R50] & 1); // the limit on
   r->result = 0xFF;
-  r->slot = 0xFF;
-  if (kind == S3D_CHIRP && m->nchirp < S3D_MAX_CHIRPS)
+  if (kind == S3D_CHIRP)
     r->slot = (u8)m->nchirp++;
   return m->nruns++;
 }
@@ -252,11 +251,79 @@ static void add_limit_bits(struct s3d_meas *m, const u8 *lim, int base) {
   }
 }
 
+// 54h-5Ah all at v, from registers from
+static int add_ends(struct s3d_meas *m, const char *prefix, const u8 *from,
+                    u8 v, int base) {
+  u8 reg[S3D_REGS];
+  char name[24];
+
+  memcpy(reg, from, S3D_REGS);
+  memset(reg + S3D_R54, v, S3D_REGS - S3D_R54);
+  sprintf(name, "%s54-5A=%02X", prefix, v);
+  return add(m, name, reg, S3D_CHIRP, base);
+}
+
+// every property of the effect that the measurement can find, in one
+// plan: glides for the path, the boost, 52h, 50h's bits, 54h-5Ah with the
+// limit off and the model; tones for the model with the limit, the S out
+// that the limit holds against S/M and at each frequency; and step runs
+// for its levels, its rise level, 58h's speeds, its detector and its floor
+static void plan_all(struct s3d_meas *m, const u8 *off, const u8 *model,
+                     const u8 *lim) {
+  static const u8 speed[10] = {0x00, 0x90, 0x95, 0x96, 0x9C,
+                               0x84, 0xB4, 0xD4, 0x14, 0xFF};
+  u8 reg[S3D_REGS];
+  int ref, ess, mod, band, step, slim, i;
+
+  // the references, tones and a glide with the effect off
+  add(m, "off", off, S3D_SWEEP, 0);
+  ref = add(m, "chirp off", off, S3D_CHIRP, m->nruns);
+  // the boost: ESS's setting, 52h lower, 50h's bit 3 without bit 2, and
+  // 54h-5Ah at their ends with the limit off
+  ess = add(m, "ess", ess_set, S3D_CHIRP, ref);
+  add_reg(m, "", ess_set, S3D_R52, 0x30, "", S3D_CHIRP, ess);
+  add_reg(m, "", ess_set, S3D_R52, 0x20, "", S3D_CHIRP, ess);
+  add_reg(m, "", ess_set, S3D_R52, 0x00, "", S3D_CHIRP, ess);
+  add_reg(m, "", off, S3D_R50, 0x08, "", S3D_CHIRP, ref);
+  add_ends(m, "", ess_set, 0x00, ess);
+  add_ends(m, "", ess_set, 0xFF, ess);
+  // the model, with 52h lower and 54h-5Ah at FFh, and with the limit in
+  // tones, as the earlier plans have it
+  mod = add(m, "model", model, S3D_CHIRP, ess);
+  add_reg(m, "M ", model, S3D_R52, 0x20, "", S3D_CHIRP, mod);
+  add_ends(m, "M ", model, 0xFF, mod);
+  i = add(m, "model tones", model, S3D_SWEEP, 0);
+  memcpy(reg, model, S3D_REGS);
+  reg[S3D_R50] = 0x0F;
+  add(m, "model+limit", reg, S3D_SWEEP, i);
+  // the limit: the S out it holds against S/M, and at each frequency
+  // where it gets there fast
+  add(m, "ratio limit", lim, S3D_RATIO, 0);
+  band = add(m, "band", ess_set, S3D_BAND, m->nruns);
+  add_reg(m, "band L ", lim, S3D_R58, 0x00, "", S3D_BAND, band);
+  // and in step runs: 52h lower, the levels and the window between them,
+  // the speeds that 58h sets, and the floor, with levels that the S in
+  // alone is over
+  step = add(m, "step", ess_set, S3D_STEP, m->nruns);
+  slim = add(m, "step limit", lim, S3D_STEP, step);
+  add_reg(m, "L ", lim, S3D_R52, 0x30, "", S3D_STEP, slim);
+  add_window(m, lim, slim);
+  for (i = 0; i < 10; i++)
+    add_reg(m, "L ", lim, S3D_R58, speed[i], "", S3D_STEP, slim);
+  memcpy(reg, lim, S3D_REGS);
+  reg[S3D_R54] = reg[S3D_R56] = 0x40;
+  reg[S3D_R58] = reg[S3D_R5A] = 0x00;
+  add(m, "L floor", reg, S3D_STEP, slim);
+  add(m, "off again", off, S3D_CHIRP, ref);
+  // the glides that vary another, by thirds of an octave in the report
+  for (i = 0; i < m->nruns; i++)
+    m->run[i].brief =
+        (u8)(m->run[i].kind == S3D_CHIRP && i != ref && i != ess && i != mod);
+}
+
 void s3d_init(struct s3d_meas *m, int plan, u8 reg, s3d_out_fn out, void *ctx) {
-  static const u8 levels[8] = {0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38};
   u8 r[S3D_REGS], model[S3D_REGS], lim[S3D_REGS];
-  int i, ess, mod, band, blim, step, slim, pan, ri = -1;
-  int full = plan == S3D_PLAN_FULL;
+  int i, ess, mod, band, step, slim, pan, ri = -1;
 
   memset(m, 0, sizeof(*m));
   m->out = out;
@@ -285,12 +352,17 @@ void s3d_init(struct s3d_meas *m, int plan, u8 reg, s3d_out_fn out, void *ctx) {
     return;
   }
 
+  // the limit (50h bit 0)
+  memcpy(lim, ess_set, S3D_REGS);
+  lim[S3D_R50] = 0x0D;
+  if (plan == S3D_PLAN_FULL) {
+    plan_all(m, r, model, lim);
+    return;
+  }
+
   // the reference, the effect off but out of reset, then ESS's setting
   add(m, "off", r, S3D_SWEEP, 0);
   ess = add(m, "ess", ess_set, S3D_SWEEP, 0);
-  // the model (50h bit 1) and the limit (50h bit 0)
-  memcpy(lim, ess_set, S3D_REGS);
-  lim[S3D_R50] = 0x0D;
 
   if (plan == S3D_PLAN_LIMIT) {
     // the limit, where 54h-5Ah act on the card; 52=20 gives the B of its
@@ -328,9 +400,9 @@ void s3d_init(struct s3d_meas *m, int plan, u8 reg, s3d_out_fn out, void *ctx) {
     for (i = 0; i <= 0x100; i += 0x10)
       add_reg(m, "L ", lim, ri, (u8)(i > 0xFF ? 0xFF : i), "", S3D_STEP, slim);
   } else {
-    for (i = 0; i < 8; i++)
-      if (full || levels[i] == 0x00 || levels[i] == 0x20)
-        add_reg(m, "", ess_set, S3D_R52, levels[i], "", S3D_SWEEP, ess);
+    // the quick plan: each kind once or twice
+    add_reg(m, "", ess_set, S3D_R52, 0x00, "", S3D_SWEEP, ess);
+    add_reg(m, "", ess_set, S3D_R52, 0x20, "", S3D_SWEEP, ess);
     mod = add(m, "model", model, S3D_SWEEP, ess);
     add(m, "limit", lim, S3D_SWEEP, ess);
     r[S3D_R50] = 0x0F;
@@ -340,30 +412,18 @@ void s3d_init(struct s3d_meas *m, int plan, u8 reg, s3d_out_fn out, void *ctx) {
       add_reg(m, "", ess_set, i, 0x00, "", S3D_SWEEP, ess);
       add_reg(m, "", ess_set, i, 0xFF, "", S3D_SWEEP, ess);
     }
-    for (i = S3D_R54; full && i <= S3D_R5A; i++) {
-      add_reg(m, "M ", model, i, 0x00, "", S3D_SWEEP, mod);
-      add_reg(m, "M ", model, i, 0xFF, "", S3D_SWEEP, mod);
-    }
     // whether the gain follows the program, in which band, where a panned
     // tone comes out, and how the limit moves, with each register at its
     // ends
     add(m, "ratio", ess_set, S3D_RATIO, ess);
     add(m, "ratio limit", lim, S3D_RATIO, ess);
     band = add(m, "band", ess_set, S3D_BAND, ess);
-    blim = add(m, "band limit", lim, S3D_BAND, band);
-    if (full)
-      add_reg(m, "band L ", lim, S3D_R58, 0x00, "", S3D_BAND, blim);
+    add(m, "band limit", lim, S3D_BAND, band);
     pan = add(m, "pan", ess_set, S3D_PAN, ess);
     add(m, "pan limit", lim, S3D_PAN, pan);
     step = add(m, "step", ess_set, S3D_STEP, ess);
     slim = add(m, "step limit", lim, S3D_STEP, step);
-    for (i = S3D_R54; full && i <= S3D_R5A; i++) {
-      add_reg(m, "L ", lim, i, 0x00, "", S3D_STEP, slim);
-      add_reg(m, "L ", lim, i, 0xFF, "", S3D_STEP, slim);
-    }
-    if (full)
-      add_reg(m, "L ", lim, S3D_R52, 0x20, "", S3D_STEP, slim);
-    add_vecs(m, lim, full, slim);
+    add_vecs(m, lim, 0, slim);
   }
   // the path again, for how much it moved
   memcpy(r, ess_set, S3D_REGS);
@@ -372,6 +432,21 @@ void s3d_init(struct s3d_meas *m, int plan, u8 reg, s3d_out_fn out, void *ctx) {
 }
 
 int s3d_count(const struct s3d_meas *m) { return m->nruns; }
+
+int s3d_chirps(const struct s3d_meas *m) { return m->nchirp; }
+
+void s3d_chirp_mem(struct s3d_meas *m, struct s3d_chirp *c, int n) {
+  m->chirp = c;
+  m->max_chirp = n;
+}
+
+// chirp run r's results, or 0 where there's no room for them
+static struct s3d_chirp *chirp_of(const struct s3d_meas *m,
+                                  const struct s3d_run *r) {
+  return r->kind == S3D_CHIRP && m->chirp && r->slot < m->max_chirp
+             ? &m->chirp[r->slot]
+             : 0;
+}
 
 void s3d_regs(const struct s3d_meas *m, int i, u8 *reg) {
   memcpy(reg, m->run[i].reg, S3D_REGS);
@@ -1219,40 +1294,76 @@ static int ok(const struct s3d_run *r) {
   return r->result != 0xFF && !(r->result & (S3D_NOSIGNAL | S3D_SHORT));
 }
 
+// chirp run r's S>S against its own M>M at hz, as a complex H, from the
+// twelfths of an octave on either side; 0 where it has no values there
+static int chirp_h(const struct s3d_meas *m, const struct s3d_run *r, double hz,
+                   double *re, double *im) {
+  const struct s3d_chirp *c = chirp_of(m, r);
+  double x, g[2], p[2], a;
+  int k, j;
+
+  if (!c || !ok(r) || hz <= 0)
+    return 0;
+  x = 12 * log(hz / s3d_bin_hz(0)) / log(2.0);
+  k = (int)floor(x);
+  if (k < 0 || k >= S3D_BINS - 1)
+    return 0;
+  x -= k;
+  for (j = 0; j < 2; j++) {
+    if (!has(c->db[1][k + j]) || !has(c->ph[0][k + j]))
+      return 0;
+    g[j] = c->db[1][k + j] - (has(c->db[0][k + j]) ? c->db[0][k + j] : 0);
+    p[j] = c->ph[0][k + j];
+  }
+  a = (p[0] + wrap(p[1] - p[0]) * x) * PI / 180;
+  x = pow(10.0, (g[0] + (g[1] - g[0]) * x) / 20);
+  *re = x * cos(a);
+  *im = x * sin(a);
+  return 1;
+}
+
 // the boost at 1 kHz with the limit off, B in S>S = 1 + B, from the sweep
-// run with the same registers but 50h bit 0, or else one with the same
-// 50h and 52h, since on the card 54h-5Ah don't change it with the limit
-// off; 0 if there's none
+// or chirp run with the same registers but 50h bit 0, or else one with
+// the same 50h and 52h, since on the card 54h-5Ah don't change it with
+// the limit off; 0 if there's none
 static int boost_ref(const struct s3d_meas *m, const struct s3d_run *r,
                      float *re, float *im) {
   const struct s3d_run *s;
   u8 r50 = (u8)(r->reg[S3D_R50] & ~1);
-  double g, ph;
-  int i, best = -1;
+  double g, ph, hr, hi;
+  int i, best = -1, same;
 
   *re = *im = 0;
   if ((r50 & 0x0C) != 0x0C)
     return 0;
   for (i = 0; i < m->nruns; i++) {
     s = &m->run[i];
-    if (s->kind != S3D_SWEEP || !ok(s) || s->reg[S3D_R50] != r50 ||
-        s->reg[S3D_R52] != r->reg[S3D_R52] || !has(s->u.sw.db[1][F1K]) ||
-        !has(s->u.sw.ph[0][F1K]))
+    if (!ok(s) || s->reg[S3D_R50] != r50 || s->reg[S3D_R52] != r->reg[S3D_R52])
       continue;
-    if (!memcmp(s->reg + S3D_R54, r->reg + S3D_R54, S3D_REGS - S3D_R54)) {
-      best = i;
-      break;
+    if (s->kind == S3D_SWEEP) {
+      if (!has(s->u.sw.db[1][F1K]) || !has(s->u.sw.ph[0][F1K]))
+        continue;
+    } else if (!chirp_h(m, s, 1000, &hr, &hi)) {
+      continue;
     }
-    if (best < 0)
+    same = !memcmp(s->reg + S3D_R54, r->reg + S3D_R54, S3D_REGS - S3D_R54);
+    if (best < 0 || (same && memcmp(m->run[best].reg + S3D_R54,
+                                    r->reg + S3D_R54, S3D_REGS - S3D_R54)))
       best = i;
   }
   if (best < 0)
     return 0;
   s = &m->run[best];
-  g = pow(10.0, s->u.sw.db[1][F1K] / 20);
-  ph = s->u.sw.ph[0][F1K] * PI / 180;
-  *re = (float)(g * cos(ph) - 1);
-  *im = (float)(g * sin(ph));
+  if (s->kind == S3D_SWEEP) {
+    g = pow(10.0, s->u.sw.db[1][F1K] / 20);
+    ph = s->u.sw.ph[0][F1K] * PI / 180;
+    hr = g * cos(ph);
+    hi = g * sin(ph);
+  } else {
+    chirp_h(m, s, 1000, &hr, &hi);
+  }
+  *re = (float)(hr - 1);
+  *im = (float)hi;
   return 1;
 }
 
@@ -1568,10 +1679,10 @@ static void chirp_lines(struct s3d_meas *m, int i) {
   run_head(m, i, line);
   line[strlen(line) - 2] = 0;
   say(m, line);
-  if (m->run[i].slot >= S3D_MAX_CHIRPS)
+  c = chirp_of(m, &m->run[i]);
+  if (!c)
     return;
-  c = &m->chirp[m->run[i].slot];
-  for (k = 0; k < S3D_BINS; k++) {
+  for (k = 0; k < S3D_BINS; k += m->run[i].brief ? 4 : 1) {
     sprintf(line, "%39s%8.0f", "", s3d_bin_hz(k));
     cell(line, c->db[0][k]);
     for (p = 1; p < S3D_PATHS; p++) {
@@ -1662,9 +1773,9 @@ static int chirp_end(struct s3d_meas *m, struct s3d_run *r) {
   double fl, turn;
   int k;
 
-  if (r->slot >= S3D_MAX_CHIRPS || m->nwin < 2 * S3D_BINS)
+  c = chirp_of(m, r);
+  if (!c || m->nwin < 2 * S3D_BINS)
     return S3D_OK;
-  c = &m->chirp[r->slot];
   for (k = 0; k < S3D_BINS; k++) {
     wm = &m->win[k];
     ws = &m->win[S3D_BINS + k];
@@ -1945,10 +2056,10 @@ struct vals {
 static int vals_of(const struct s3d_meas *m, const struct s3d_run *r,
                    struct vals *v) {
   if (r->kind == S3D_CHIRP) {
-    if (r->slot >= S3D_MAX_CHIRPS)
+    if (!chirp_of(m, r))
       return 0;
-    v->db = &m->chirp[r->slot].db[0][0];
-    v->ph = &m->chirp[r->slot].ph[0][0];
+    v->db = &chirp_of(m, r)->db[0][0];
+    v->ph = &chirp_of(m, r)->ph[0][0];
     v->n = S3D_BINS;
   } else {
     v->db = &r->u.sw.db[0][0];
@@ -2255,7 +2366,7 @@ int s3d_limit(const struct s3d_meas *m, int i, struct s3d_lim *l) {
   int k0, k1, ok_fit;
 
   memset(l, 0, sizeof(*l));
-  l->hold = -1;
+  l->hold = l->delay = -1;
   if (r->kind != S3D_STEP || !ok(r) || (r->u.st.b_re == 0 && r->u.st.b_im == 0))
     return -1;
   to_boost(r->u.st.up, S3D_UP, r->u.st.b_re, r->u.st.b_im, up);
@@ -2275,8 +2386,12 @@ int s3d_limit(const struct s3d_meas *m, int i, struct s3d_lim *l) {
   // a dB, and 1.5 dB short of where it ends
   from = gain_or_off(st[0]);
   k1 = reach(up, 0, S3D_UP, -1, &to);
-  if (to < from - 6 && ramp(up, 0, k1, from, to, &sl, &at0) && sl < -0.1)
+  if (to < from - 6 && ramp(up, 0, k1, from, to, &sl, &at0) && sl < -0.1) {
     l->fall = (float)-sl;
+    // where the line through the fall leaves the level before the step
+    if (st[0] > -1)
+      l->delay = (int)floor((from - at0) / sl * 1000 + 0.5);
+  }
   // the rise, the same way, from the first window after the step down that
   // isn't off. The gain can't jump at the step, so it starts where it was
   // before it, or else where the first three windows put it, since the
@@ -2513,18 +2628,37 @@ static int higher(const struct s3d_run *r) {
 // plus a fixed part that follows 5Ah, by least squares on the error in
 // dB; then, where the boost stopped rising short of the level it was held
 // at, how far over 54h's level of the model
-static void summary_fit(struct s3d_meas *m) {
+// the model of the levels: n times the M per step of the higher of 54h
+// and 56h, d per step of 5Ah, from n runs, its worst and mean error in dB
+// and where the worst is, and the rise level over 54h's, from nr runs
+struct lfit {
+  double k, d, worst, sum, over;
+  int n, nr, at;
+  char runs[64];
+};
+
+// a step run that the model takes: the limit on, the M at 400 Hz, and
+// the boost held at 0 dB S/M, or at -12 dB without going off at 0 dB,
+// where it would come back up only to the rise level
+static int level_run(const struct s3d_meas *m, int i, struct s3d_lim *l) {
+  const struct s3d_run *r = &m->run[i];
+
+  return !r->mhz && (r->reg[S3D_R50] & 1) && s3d_limit(m, i, l) >= 0 &&
+         has(l->held) && has(l->high) && l->high > OFF_DB;
+}
+
+static int level_fit(const struct s3d_meas *m, struct lfit *f) {
   const struct s3d_run *r;
   struct s3d_lim l;
-  char line[256], runs[64];
   double x, a, b, t, w, saa = 0, sab = 0, sbb = 0, sat = 0, sbt = 0;
-  double det, k, d, e, worst = 0, sum = 0, over = 0;
-  int i, n = 0, nr = 0, at = -1;
+  double det, e;
+  int i;
 
+  memset(f, 0, sizeof(*f));
+  f->at = -1;
   for (i = 0; i < m->nruns; i++) {
     r = &m->run[i];
-    if (r->mhz || !(r->reg[S3D_R50] & 1) || s3d_limit(m, i, &l) < 0 ||
-        !has(l.held))
+    if (!level_run(m, i, &l))
       continue;
     // the M, the parts of the model and the S out, against the plan's M
     x = pow(10.0, -r->att / 20.0);
@@ -2537,53 +2671,62 @@ static void summary_fit(struct s3d_meas *m) {
     sbb += w * b * b;
     sat += w * a * t;
     sbt += w * b * t;
-    n++;
+    f->n++;
   }
   det = saa * sbb - sab * sab;
-  if (n < 3 || det <= 1e-6 * saa * sbb)
-    return;
-  k = (sat * sbb - sbt * sab) / det;
-  d = (saa * sbt - sab * sat) / det;
-  if (k <= 0)
-    return;
-  runs[0] = 0;
+  if (f->n < 3 || det <= 1e-6 * saa * sbb)
+    return 0;
+  f->k = (sat * sbb - sbt * sab) / det;
+  f->d = (saa * sbt - sab * sat) / det;
+  if (f->k <= 0)
+    return 0;
   for (i = 0; i < m->nruns; i++) {
     r = &m->run[i];
-    if (r->mhz || !(r->reg[S3D_R50] & 1) || s3d_limit(m, i, &l) < 0 ||
-        !has(l.held))
+    if (!level_run(m, i, &l))
       continue;
     x = pow(10.0, -r->att / 20.0);
-    e = db((k * higher(r) * x + d * r->reg[S3D_R5A]) / x) - l.held;
-    sum += fabs(e);
-    if (at < 0 || fabs(e) > worst) {
-      worst = fabs(e);
-      at = i;
+    e = db((f->k * higher(r) * x + f->d * r->reg[S3D_R5A]) / x) - l.held;
+    f->sum += fabs(e);
+    if (f->at < 0 || fabs(e) > f->worst) {
+      f->worst = fabs(e);
+      f->at = i;
     }
     // where the rise stopped short of the level held
     if (l.rises_is == 0 && l.rises < l.held - 0.3) {
-      over += l.rises - db((k * r->reg[S3D_R54] * x + d * r->reg[S3D_R5A]) / x);
-      if (strlen(runs) < sizeof(runs) - 8)
-        sprintf(runs + strlen(runs), "%s%d", nr ? ", " : "", i);
-      nr++;
+      f->over += l.rises -
+                 db((f->k * r->reg[S3D_R54] * x + f->d * r->reg[S3D_R5A]) / x);
+      if (strlen(f->runs) < sizeof(f->runs) - 8)
+        sprintf(f->runs + strlen(f->runs), "%s%d", f->nr ? ", " : "", i);
+      f->nr++;
     }
   }
+  return 1;
+}
+
+static void summary_fit(struct s3d_meas *m) {
+  struct lfit f;
+  char line[256];
+
+  if (!level_fit(m, &f))
+    return;
   say(m, "");
   sprintf(line, "fit: S out held = M x the higher of 54h and 56h / %.1f + ",
-          1 / k);
-  if (d > 0)
-    sprintf(line + strlen(line), "%.1f dBFS x 5Ah / 80h", db(d * 128 * AMP_M));
+          1 / f.k);
+  if (f.d > 0)
+    sprintf(line + strlen(line), "%.1f dBFS x 5Ah / 80h",
+            db(f.d * 128 * AMP_M));
   else
     strcat(line, "nothing fixed");
   sprintf(line + strlen(line),
           ", from %d runs: within %.2f dB, %.2f dB on average; the worst is "
           "run %d (%s)",
-          n, worst, sum / n, at, m->run[at].name);
+          f.n, f.worst, f.sum / f.n, f.at, m->run[f.at].name);
   say(m, line);
-  if (nr) {
+  if (f.nr) {
     sprintf(line,
             "rise level: where the boost stopped rising short of the level "
             "held, it stopped %+.1f dB over 54h's level of the fit (run%s %s)",
-            over / nr, nr > 1 ? "s" : "", runs);
+            f.over / f.nr, f.nr > 1 ? "s" : "", f.runs);
     say(m, line);
   }
 }
@@ -2911,9 +3054,9 @@ static int fit_data(const struct s3d_meas *m, int i) {
 
   fd.n = 0;
   fd.plus = !model;
-  if (r->slot >= S3D_MAX_CHIRPS || !ok(r) || (r->reg[S3D_R50] & 0x0C) != 0x0C)
+  c = chirp_of(m, r);
+  if (!c || !ok(r) || (r->reg[S3D_R50] & 0x0C) != 0x0C)
     return 0;
-  c = &m->chirp[r->slot];
   for (k = 0; k < S3D_BINS; k++) {
     if (!has(c->db[p][k]) || !has(c->ph[q][k]) ||
         (model && c->db[p][k] < CROSS_MIN))
@@ -2928,14 +3071,204 @@ static int fit_data(const struct s3d_meas *m, int i) {
   return fd.n >= 4 * FIT_MAX;
 }
 
+// A band-pass with a lag, B = K s e^(-sT) / (s^2 + c1 s + c0) in the same
+// s, with T 2 pi 1 kHz times the lag in seconds: the shape that the
+// card's boost has, fitted directly by Levenberg and Marquardt's
+// iterations from the fit with a zero and two poles.
+
+struct bp {
+  double p[4];         // K, c1, c0, T
+  double rms, db, deg; // the error, as a fit's
+};
+
+// the model's error at frequency k, against the path of the boost
+static void bp_res(const double *p, int k, double *er, double *ei) {
+  double w = fd.w[k], c = cos(w * p[3]), sn = -sin(w * p[3]);
+  double nr = -p[0] * w * sn, ni = p[0] * w * c;
+  double dr = p[2] - w * w, di = p[1] * w, d = dr * dr + di * di;
+  double mr = (nr * dr + ni * di) / d, mi = (ni * dr - nr * di) / d;
+  double hr = (fd.plus ? 1 : 0) + fd.br[k], hi = fd.bi[k], h;
+  double xr = mr - fd.br[k], xi = mi - fd.bi[k];
+
+  h = hr * hr + hi * hi;
+  *er = (xr * hr + xi * hi) / h;
+  *ei = (xi * hr - xr * hi) / h;
+}
+
+static double bp_cost(const double *p) {
+  double er, ei, sum = 0;
+  int k;
+
+  for (k = 0; k < fd.n; k++) {
+    bp_res(p, k, &er, &ei);
+    sum += er * er + ei * ei;
+  }
+  return sum;
+}
+
+// x from the 4 by 4 system a, with the right side in its last column; 0
+// if it is singular
+static int solve4(double a[4][5], double *x) {
+  double t;
+  int i, j, k, piv;
+
+  for (i = 0; i < 4; i++) {
+    piv = i;
+    for (j = i + 1; j < 4; j++)
+      if (fabs(a[j][i]) > fabs(a[piv][i]))
+        piv = j;
+    if (fabs(a[piv][i]) < 1e-30)
+      return 0;
+    for (k = 0; k < 5; k++) {
+      t = a[i][k];
+      a[i][k] = a[piv][k];
+      a[piv][k] = t;
+    }
+    for (j = i + 1; j < 4; j++) {
+      t = a[j][i] / a[i][i];
+      for (k = i; k < 5; k++)
+        a[j][k] -= t * a[i][k];
+    }
+  }
+  for (i = 3; i >= 0; i--) {
+    t = a[i][4];
+    for (k = i + 1; k < 4; k++)
+      t -= a[i][k] * x[k];
+    x[i] = t / a[i][i];
+  }
+  return 1;
+}
+
+// the iterations from f's parameters, then its error; 0 if it fails
+static int bp_fit(struct bp *f) {
+  double a[4][5], m[4][5], jr[4], ji[4], q[4], d[4], er, ei, h;
+  double lam = 1e-3, cost = bp_cost(f->p), c2, sum = 0, db, deg;
+  int it, k, i, j, done;
+
+  for (it = 0; it < 60; it++) {
+    memset(a, 0, sizeof(a));
+    for (k = 0; k < fd.n; k++) {
+      bp_res(f->p, k, &er, &ei);
+      for (i = 0; i < 4; i++) {
+        memcpy(q, f->p, sizeof(q));
+        h = 1e-6 * (fabs(q[i]) > 1e-3 ? fabs(q[i]) : 1e-3);
+        q[i] += h;
+        bp_res(q, k, &jr[i], &ji[i]);
+        jr[i] = (jr[i] - er) / h;
+        ji[i] = (ji[i] - ei) / h;
+      }
+      for (i = 0; i < 4; i++) {
+        for (j = 0; j < 4; j++)
+          a[i][j] += jr[i] * jr[j] + ji[i] * ji[j];
+        a[i][4] -= jr[i] * er + ji[i] * ei;
+      }
+    }
+    for (done = 0; !done && lam < 1e9;) {
+      memcpy(m, a, sizeof(m));
+      for (i = 0; i < 4; i++)
+        m[i][i] *= 1 + lam;
+      if (!solve4(m, d))
+        return 0;
+      for (i = 0; i < 4; i++)
+        q[i] = f->p[i] + d[i];
+      c2 = q[2] > 0 ? bp_cost(q) : cost * 2;
+      if (c2 < cost) {
+        done = cost - c2 < 1e-12 * cost ? 2 : 1;
+        memcpy(f->p, q, sizeof(q));
+        cost = c2;
+        lam /= 3;
+      } else {
+        lam *= 4;
+      }
+    }
+    if (done != 1)
+      break;
+  }
+  f->db = f->deg = 0;
+  for (k = 0; k < fd.n; k++) {
+    bp_res(f->p, k, &er, &ei);
+    db = 10 * log10((1 + er) * (1 + er) + ei * ei);
+    deg = atan2(ei, 1 + er) * 180 / PI;
+    if (fabs(db) > f->db)
+      f->db = fabs(db);
+    if (fabs(deg) > f->deg)
+      f->deg = fabs(deg);
+    sum += db * db + (deg * 8.686 * PI / 180) * (deg * 8.686 * PI / 180);
+  }
+  f->rms = sqrt(sum / fd.n);
+  return f->p[2] > 0 && f->p[1] > 0;
+}
+
+// the band-pass of chirp run i's boost, from fd as fit_data leaves it,
+// from the fit with a zero and two poles, with no lag and with one of 4
+// us; 0 if it fails
+static int boost_bp(struct bp *f) {
+  struct fit s;
+  struct bp g;
+  int t, ok_f = 0;
+
+  memset(f, 0, sizeof(*f));
+  for (t = 0; t < 2; t++) {
+    g.p[0] = 5;
+    g.p[1] = 0.9;
+    g.p[2] = 0.2;
+    if (fit_one(1, 2, &s) && s.den[2] > 0 && s.den[1] > 0) {
+      g.p[0] = s.num[1] / s.den[2];
+      g.p[1] = s.den[1] / s.den[2];
+      g.p[2] = 1 / s.den[2];
+    }
+    g.p[3] = t * 2 * PI * 1000 * 4e-6;
+    if (bp_fit(&g) && (!ok_f || g.rms < f->rms)) {
+      *f = g;
+      ok_f = 1;
+    }
+  }
+  return ok_f;
+}
+
+// a band-pass's poles, its peak and its lag in words, after out
+static void bp_text(const struct bp *f, char *out) {
+  double c1 = f->p[1], c0 = f->p[2], disc = c1 * c1 - 4 * c0;
+
+  if (disc >= 0)
+    sprintf(out + strlen(out), "poles %.0f and %.0f Hz, ",
+            (c1 - sqrt(disc)) / 2 * 1000, (c1 + sqrt(disc)) / 2 * 1000);
+  else
+    strcat(out, "a pair of poles, ");
+  sprintf(out + strlen(out), "Q %.2f at %.0f Hz, peak %+.1f dB, lag %.1f us",
+          sqrt(c0) / c1, sqrt(c0) * 1000, db(fabs(f->p[0]) / c1),
+          f->p[3] / (2 * PI * 1000) * 1e6);
+}
+
+// a chirp run's boost at its peak: the most of |S>S / M>M - 1| over its
+// twelfths of an octave, in dB, and where; 0 if it has no values
+static int boost_peak(const struct s3d_meas *m, const struct s3d_run *r,
+                      double *peak, double *hz) {
+  double re, im, v;
+  int k, found = 0;
+
+  for (k = 0; k < S3D_BINS; k++) {
+    if (!chirp_h(m, r, s3d_bin_hz(k), &re, &im))
+      continue;
+    v = db(sqrt((re - 1) * (re - 1) + im * im));
+    if (!found++ || v > *peak) {
+      *peak = v;
+      *hz = s3d_bin_hz(k);
+    }
+  }
+  return found;
+}
+
 // the poles and zeros of each chirp run's boost at each order, and the
-// lowest order within 20 percent of the best; Windows runs between the
-// fits
+// lowest order within 20 percent of the best, then the band-pass with a
+// lag; a run with a line by thirds of an octave gets the band-pass only.
+// Windows runs between the fits.
 static void summary_filters(struct s3d_meas *m) {
   static struct fit fits[FIT_ORDERS];
+  struct bp f;
   char line[256];
-  double low = 0;
-  int i, o, pick, any = 0, ok_o[FIT_ORDERS];
+  double low = 0, most;
+  int i, k, o, pick, any = 0, ok_o[FIT_ORDERS];
 
   for (i = 1; i < m->nruns; i++) {
     if (m->run[i].kind != S3D_CHIRP || !fit_data(m, i))
@@ -2950,8 +3283,15 @@ static void summary_filters(struct s3d_meas *m) {
     sprintf(line + strlen(line), "%s, %d frequencies",
             fd.plus ? "B = S>S - 1" : "M>S", fd.n);
     say(m, line);
+    for (k = 0, most = 0; k < fd.n; k++)
+      if (fd.br[k] * fd.br[k] + fd.bi[k] * fd.bi[k] > most)
+        most = fd.br[k] * fd.br[k] + fd.bi[k] * fd.bi[k];
+    if (fd.plus && most < 0.01) {
+      say(m, "     the boost is under -20 dB: no fit");
+      continue;
+    }
     pick = -1;
-    for (o = 0; o < FIT_ORDERS; o++) {
+    for (o = 0; o < FIT_ORDERS && !m->run[i].brief; o++) {
       ok_o[o] = fit_one(fit_order[o][0], fit_order[o][1], &fits[o]);
       if (ok_o[o] && (pick < 0 || fits[o].rms < low)) {
         low = fits[o].rms;
@@ -2960,20 +3300,701 @@ static void summary_filters(struct s3d_meas *m) {
       if (m->idle)
         m->idle(m->ctx);
     }
-    if (pick < 0) {
-      say(m, "     no fit");
+    if (pick >= 0) {
+      for (o = 0; o < FIT_ORDERS; o++)
+        if (ok_o[o] && fits[o].rms <= 1.2 * low + 0.02) {
+          pick = o;
+          break;
+        }
+      for (o = 0; o < FIT_ORDERS; o++)
+        if (ok_o[o])
+          fit_line(m, &fits[o], o == pick);
+      fit_roots(m, &fits[pick]);
+    }
+    // the shape of the card's boost; M>S over M>M isn't one
+    if (fd.plus && boost_bp(&f)) {
+      strcpy(line, "     band-pass with a lag: ");
+      bp_text(&f, line);
+      sprintf(line + strlen(line),
+              "; rms %.2f dB, at most %.2f dB and %.1f degrees", f.rms, f.db,
+              f.deg);
+      say(m, line);
+    }
+    if (m->idle)
+      m->idle(m->ctx);
+  }
+}
+
+// --- the properties --------------------------------------------------------
+
+// The last part of the summary takes each property of the effect from the
+// runs that show it, where the plan has them: the full plan has every one.
+
+// the first run of a kind with registers reg, at the plan's levels and
+// with the M at 400 Hz, or -1
+static int find_run(const struct s3d_meas *m, int kind, const u8 *reg) {
+  int i;
+
+  for (i = 0; i < m->nruns; i++)
+    if (m->run[i].kind == kind && ok(&m->run[i]) && !m->run[i].att &&
+        !m->run[i].drop && !m->run[i].mhz &&
+        !memcmp(m->run[i].reg, reg, S3D_REGS))
+      return i;
+  return -1;
+}
+
+// the largest change of run a from run b on the paths in mask, in dB, and
+// of the phase of S>S, in degrees; 0 if they can't be compared
+static int change_of(const struct s3d_meas *m, int a, int b, int mask,
+                     double *change, double *turn) {
+  struct vals va, vb;
+  int p, k;
+
+  *change = *turn = 0;
+  if (a < 0 || b < 0 || m->run[a].kind != m->run[b].kind ||
+      !vals_of(m, &m->run[a], &va) || !vals_of(m, &m->run[b], &vb) ||
+      !biggest(&va, &vb, mask, change, &p, &k))
+    return 0;
+  biggest_turn(&va, &vb, 0, turn, &k);
+  return 1;
+}
+
+static void prop(struct s3d_meas *m, const char *line) { say(m, line); }
+
+// the path: how the channels differ between the DAC and the ADC, from the
+// M>S of the glide with the effect off, x = (L - R) / (L + R) of an M:
+// (1 - x) / (1 + x) is the right channel against the left, its level from
+// 100 Hz to 1 kHz, and its phase over 1 kHz, by least squares, minus 2 pi
+// f t for a right channel t late; and how far the path moved by the end
+static void prop_path(struct s3d_meas *m, const u8 *off) {
+  const struct s3d_chirp *c;
+  char line[256];
+  double f, rr, ri, g, a, d, qr, qi, lev = 0, n1 = 0, sx = 0, sy = 0;
+  double sxx = 0, sxy = 0, n2 = 0, t, change, turn, prev = 0;
+  int ref = find_run(m, S3D_CHIRP, off), last = -1, i, k;
+
+  c = ref >= 0 ? chirp_of(m, &m->run[ref]) : 0;
+  if (!c)
+    return;
+  for (k = 0; k < S3D_BINS; k++) {
+    if (!has(c->db[2][k]) || !has(c->ph[1][k]))
+      continue;
+    f = s3d_bin_hz(k);
+    g = pow(10.0, c->db[2][k] / 20);
+    a = c->ph[1][k] * PI / 180;
+    rr = g * cos(a);
+    ri = g * sin(a);
+    d = (1 + rr) * (1 + rr) + ri * ri;
+    qr = ((1 - rr) * (1 + rr) - ri * ri) / d;
+    qi = (-ri * (1 + rr) - (1 - rr) * ri) / d;
+    if (f >= 100 && f <= 1000) {
+      lev += db(sqrt(qr * qr + qi * qi));
+      n1++;
+    }
+    if (f >= 1000) {
+      // the phase, kept from turning a whole turn from one to the next
+      a = atan2(qi, qr);
+      if (n2)
+        a = prev + atan2(sin(a - prev), cos(a - prev));
+      prev = a;
+      sx += 2 * PI * f;
+      sy += a;
+      sxx += 2 * PI * f * 2 * PI * f;
+      sxy += 2 * PI * f * a;
+      n2++;
+    }
+  }
+  strcpy(line, "path: ");
+  if (n1)
+    sprintf(line + strlen(line), "the right channel %.2f dB %s the left",
+            fabs(lev / n1), lev < 0 ? "under" : "over");
+  else
+    strcat(line, "the channels within the floor of each other");
+  if (n2 > 2 && n2 * sxx - sx * sx > 0) {
+    t = -(n2 * sxy - sx * sy) / (n2 * sxx - sx * sx) * 1e6;
+    if (fabs(t) < 0.2)
+      strcat(line, ", and at the same time");
+    else
+      sprintf(line + strlen(line), ", and %.1f us %s it", fabs(t),
+              t > 0 ? "after" : "before");
+  }
+  sprintf(line + strlen(line), " (run %d)", ref);
+  for (i = ref + 1; i < m->nruns; i++)
+    if (m->run[i].kind == S3D_CHIRP && ok(&m->run[i]) &&
+        !memcmp(m->run[i].reg, off, S3D_REGS))
+      last = i;
+  if (change_of(m, last, ref, 3, &change, &turn))
+    sprintf(line + strlen(line), "; it moved %.2f dB by run %d", fabs(change),
+            last);
+  prop(m, line);
+}
+
+// 50h's bits 3 and 2, and the M with the boost on
+static void prop_on(struct s3d_meas *m, const u8 *off) {
+  const struct s3d_chirp *c;
+  char line[256];
+  double change, turn, most = 0;
+  u8 reg[S3D_REGS];
+  int ref = find_run(m, S3D_CHIRP, off), r, k;
+
+  memcpy(reg, off, S3D_REGS);
+  reg[S3D_R50] = 0x08;
+  r = find_run(m, S3D_CHIRP, reg);
+  line[0] = 0;
+  if (change_of(m, r, ref, 15, &change, &turn))
+    sprintf(line,
+            "on: 50h at 08h, bit 3 without bit 2, moves no path by more than "
+            "%.2f dB from off",
+            fabs(change));
+  r = find_run(m, S3D_CHIRP, ess_set);
+  c = r >= 0 ? chirp_of(m, &m->run[r]) : 0;
+  if (c) {
+    for (k = 0; k < S3D_BINS; k++)
+      if (has(c->db[0][k]) && fabs(c->db[0][k]) > most)
+        most = fabs(c->db[0][k]);
+    sprintf(line + strlen(line),
+            "%swith the boost on, M>M stays within %.2f dB",
+            line[0] ? "; " : "on: ", most);
+  }
+  if (line[0])
+    prop(m, line);
+}
+
+// the boost with ESS's setting, as a band-pass with a lag
+static void prop_boost(struct s3d_meas *m, struct bp *f) {
+  char line[256];
+  int r = find_run(m, S3D_CHIRP, ess_set);
+
+  if (r < 0 || !fit_data(m, r) || !boost_bp(f)) {
+    f->p[2] = 0;
+    return;
+  }
+  strcpy(line, "boost: a band-pass with a lag, K s e^(-sT) / (s^2 + c1 s + "
+               "c0): ");
+  bp_text(f, line);
+  sprintf(line + strlen(line), "; within %.2f dB rms (run %d)", f->rms, r);
+  prop(m, line);
+}
+
+// 52h: the boost's peak against 52h by least squares, where it is over
+// -20 dB, and how far its shape moves
+static void prop_level(struct s3d_meas *m, const struct bp *ref) {
+  struct bp f;
+  char line[256];
+  double x[8], y[8], hz, peak, sx = 0, sy = 0, sxx = 0, sxy = 0, k, c;
+  double worst = 0, df = 0, dq = 0, low = 0;
+  int i, n = 0, nf = 0, at_low = -1;
+  u8 reg[S3D_REGS];
+
+  for (i = 0; i < m->nruns && n < 8; i++) {
+    memcpy(reg, m->run[i].reg, S3D_REGS);
+    reg[S3D_R52] = ess_set[S3D_R52];
+    if (m->run[i].kind != S3D_CHIRP || memcmp(reg, ess_set, S3D_REGS) ||
+        !boost_peak(m, &m->run[i], &peak, &hz))
+      continue;
+    if (peak < -20) {
+      if (at_low < 0 || m->run[i].reg[S3D_R52] < m->run[at_low].reg[S3D_R52]) {
+        at_low = i;
+        low = peak;
+      }
       continue;
     }
-    for (o = 0; o < FIT_ORDERS; o++)
-      if (ok_o[o] && fits[o].rms <= 1.2 * low + 0.02) {
-        pick = o;
-        break;
-      }
-    for (o = 0; o < FIT_ORDERS; o++)
-      if (ok_o[o])
-        fit_line(m, &fits[o], o == pick);
-    fit_roots(m, &fits[pick]);
+    x[n] = m->run[i].reg[S3D_R52] & 0x3F;
+    y[n++] = peak;
+    if (ref->p[2] > 0 && peak > 0 && fit_data(m, i) && boost_bp(&f)) {
+      c = fabs(sqrt(f.p[2]) / sqrt(ref->p[2]) - 1) * 100;
+      if (c > df)
+        df = c;
+      c = fabs(sqrt(f.p[2]) / f.p[1] - sqrt(ref->p[2]) / ref->p[1]);
+      if (c > dq)
+        dq = c;
+      nf++;
+    }
   }
+  if (n < 2)
+    return;
+  for (i = 0; i < n; i++) {
+    sx += x[i];
+    sy += y[i];
+    sxx += x[i] * x[i];
+    sxy += x[i] * y[i];
+  }
+  if (n * sxx - sx * sx <= 0)
+    return;
+  k = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+  c = (sy - k * sx) / n;
+  for (i = 0; i < n; i++)
+    if (fabs(c + k * x[i] - y[i]) > worst)
+      worst = fabs(c + k * x[i] - y[i]);
+  sprintf(line, "52h: the boost moves %.2f dB a step (%d runs, within %.2f dB)",
+          k, n, worst);
+  if (nf > 1)
+    sprintf(line + strlen(line),
+            ", its center by %.1f percent and its Q by %.2f at most", df, dq);
+  if (at_low >= 0)
+    sprintf(line + strlen(line), "; at %02Xh it peaks at %.1f dB",
+            m->run[at_low].reg[S3D_R52], low);
+  prop(m, line);
+}
+
+// 54h-5Ah with the limit off: the runs with ESS's 50h and 52h and other
+// values there, against ESS's setting
+static void prop_off_regs(struct s3d_meas *m, const u8 *base, const char *what,
+                          int mask) {
+  char line[256];
+  double change, turn, most = 0, most_turn = 0;
+  int b = find_run(m, S3D_CHIRP, base), i, n = 0;
+
+  for (i = 0; i < m->nruns; i++) {
+    if (i == b || m->run[i].kind != S3D_CHIRP ||
+        memcmp(m->run[i].reg, base, S3D_R54) ||
+        !change_of(m, i, b, mask, &change, &turn))
+      continue;
+    if (fabs(change) > most)
+      most = fabs(change);
+    if (fabs(turn) > most_turn)
+      most_turn = fabs(turn);
+    n++;
+  }
+  if (!n)
+    return;
+  sprintf(line,
+          "%s: 54h-5Ah at other values (%d run%s) move no path by more than "
+          "%.2f dB and %.1f degrees",
+          what, n, n > 1 ? "s" : "", most, most_turn);
+  prop(m, line);
+}
+
+// the model: its M>S against the boost, M>M and S>S, and 52h
+static void prop_model(struct s3d_meas *m, const u8 *model) {
+  const struct s3d_chirp *c;
+  char line[256];
+  double peak = -999, at = 0, bpeak, bhz, mlo = 999, mhi = -999, slo = 999;
+  double shi = -999, p2, v;
+  int r = find_run(m, S3D_CHIRP, model), i, k;
+  u8 reg[S3D_REGS];
+
+  c = r >= 0 ? chirp_of(m, &m->run[r]) : 0;
+  if (!c)
+    return;
+  for (k = 0; k < S3D_BINS; k++) {
+    if (has(c->db[2][k]) && c->db[2][k] > peak) {
+      peak = c->db[2][k];
+      at = s3d_bin_hz(k);
+    }
+    if (has(c->db[0][k])) {
+      if (c->db[0][k] < mlo)
+        mlo = c->db[0][k];
+      if (c->db[0][k] > mhi)
+        mhi = c->db[0][k];
+    }
+    if (has(c->db[1][k])) {
+      if (c->db[1][k] < slo)
+        slo = c->db[1][k];
+      if (c->db[1][k] > shi)
+        shi = c->db[1][k];
+    }
+  }
+  if (peak < -900)
+    return;
+  sprintf(line, "model: M>S peaks at %+.1f dB at %.0f Hz", tidy(peak), at);
+  i = find_run(m, S3D_CHIRP, ess_set);
+  if (i >= 0 && boost_peak(m, &m->run[i], &bpeak, &bhz))
+    sprintf(line + strlen(line), ", %.1f dB under the boost's peak",
+            bpeak - peak);
+  if (mhi > -900)
+    sprintf(line + strlen(line), "; M>M from %+.1f to %+.1f dB", tidy(mlo),
+            tidy(mhi));
+  if (shi > -900)
+    sprintf(line + strlen(line), ", S>S from %+.1f to %+.1f dB", tidy(slo),
+            tidy(shi));
+  // 52h: the peak of M>S at a lower 52h
+  for (i = 0; i < m->nruns; i++) {
+    memcpy(reg, m->run[i].reg, S3D_REGS);
+    reg[S3D_R52] = model[S3D_R52];
+    c = chirp_of(m, &m->run[i]);
+    if (i == r || !c || !ok(&m->run[i]) || memcmp(reg, model, S3D_REGS))
+      continue;
+    for (k = 0, p2 = -999; k < S3D_BINS; k++)
+      if (has(c->db[2][k]) && c->db[2][k] > p2)
+        p2 = c->db[2][k];
+    v = (model[S3D_R52] & 0x3F) - (m->run[i].reg[S3D_R52] & 0x3F);
+    if (p2 > -900 && v > 0)
+      sprintf(line + strlen(line), "; 52h moves M>S %.2f dB a step",
+              (peak - p2) / v);
+    break;
+  }
+  prop(m, line);
+  prop_off_regs(m, model, "model", 15);
+}
+
+// the model with the limit, in tones: how far the limit holds M>S and M>M
+static void prop_model_limit(struct s3d_meas *m, const u8 *model) {
+  char line[256];
+  double ms, mm, turn;
+  u8 reg[S3D_REGS];
+  int a, b;
+
+  memcpy(reg, model, S3D_REGS);
+  reg[S3D_R50] |= 1;
+  a = find_run(m, S3D_SWEEP, reg);
+  b = find_run(m, S3D_SWEEP, model);
+  if (!change_of(m, a, b, 4, &ms, &turn) || !change_of(m, a, b, 1, &mm, &turn))
+    return;
+  sprintf(line,
+          "model and limit: the limit holds M>S down by up to %.1f dB and "
+          "M>M by up to %.1f dB (run %d)",
+          ms < 0 ? -ms : 0.0, mm < 0 ? -mm : 0.0, a);
+  prop(m, line);
+}
+
+// the limit's levels, which of them holds, and the rise level
+static void prop_levels(struct s3d_meas *m) {
+  static const u8 pair[3][2] = {{0xAA, 0x80}, {0x80, 0xAA}, {0xAA, 0xAA}};
+  struct lfit f;
+  struct s3d_lim l;
+  char line[256];
+  double lo = 999, hi = -999;
+  u8 reg[S3D_REGS];
+  int i, j, n = 0;
+
+  if (!level_fit(m, &f))
+    return;
+  sprintf(line,
+          "levels: the higher of 54h's and 56h's value / %.1f x M, plus 5Ah x "
+          "%.5f of an M at -24 dBFS (%.1f dBFS at 80h): %d runs within %.2f "
+          "dB",
+          1 / f.k, f.d, db(f.d * 128 * AMP_M), f.n, f.worst);
+  prop(m, line);
+  // AAh with 80h, the other way round, and both at AAh
+  for (j = 0; j < 3; j++) {
+    memcpy(reg, ess_set, S3D_REGS);
+    reg[S3D_R50] |= 1;
+    reg[S3D_R54] = pair[j][0];
+    reg[S3D_R56] = pair[j][1];
+    i = find_run(m, S3D_STEP, reg);
+    if (i < 0 || s3d_limit(m, i, &l) < 0 || !has(l.held))
+      continue;
+    if (l.held < lo)
+      lo = l.held;
+    if (l.held > hi)
+      hi = l.held;
+    n++;
+  }
+  if (n == 3) {
+    sprintf(line,
+            "which: 54h at AAh with 56h at 80h, the other way round and both "
+            "at AAh hold within %.2f dB of each other: the higher level holds",
+            hi - lo);
+    prop(m, line);
+  }
+  if (f.nr) {
+    sprintf(line,
+            "rise level: the boost rises under 54h's level %+.1f dB (run%s %s)",
+            f.over / f.nr, f.nr > 1 ? "s" : "", f.runs);
+    prop(m, line);
+  }
+}
+
+// the median of n values, which it sorts
+static double mid_of(double *v, int n) {
+  double t;
+  int i, j;
+
+  for (i = 1; i < n; i++)
+    for (j = i; j > 0 && v[j - 1] > v[j]; j--) {
+      t = v[j];
+      v[j] = v[j - 1];
+      v[j - 1] = t;
+    }
+  return n ? v[n / 2] : 0;
+}
+
+// 58h: the fall as a / (n + 1) dB a second and the rise as b / (n + 1) /
+// (h + 1), each a geometric mean over the runs, how far the runs are from
+// them, at the median and at most, and the delay before the fall and the
+// hold before the rise, at the median
+static void prop_speed(struct s3d_meas *m) {
+  static double dev[2][S3D_MAX_RUNS], wait[2][S3D_MAX_RUNS];
+  struct s3d_lim l;
+  char line[256];
+  double sf = 0, sr = 0, a, b;
+  int i, nf = 0, nr = 0, n, h, nd = 0, nh = 0;
+
+  for (i = 0; i < m->nruns; i++) {
+    if (!(m->run[i].reg[S3D_R50] & 1) || s3d_limit(m, i, &l) < 0)
+      continue;
+    n = (m->run[i].reg[S3D_R58] & 0x0F) + 1;
+    h = (m->run[i].reg[S3D_R58] >> 4) + 1;
+    if (l.fall > 0) {
+      sf += log(l.fall * n);
+      nf++;
+    }
+    if (l.rise > 0) {
+      sr += log(l.rise * n * h);
+      nr++;
+    }
+    if (l.delay >= 0)
+      wait[0][nd++] = l.delay;
+    if (l.rise > 0 && l.hold >= 0)
+      wait[1][nh++] = l.hold;
+  }
+  if (!nf)
+    return;
+  a = exp(sf / nf);
+  b = nr ? exp(sr / nr) : 0;
+  nf = nr = 0;
+  for (i = 0; i < m->nruns; i++) {
+    if (!(m->run[i].reg[S3D_R50] & 1) || s3d_limit(m, i, &l) < 0)
+      continue;
+    n = (m->run[i].reg[S3D_R58] & 0x0F) + 1;
+    h = (m->run[i].reg[S3D_R58] >> 4) + 1;
+    if (l.fall > 0)
+      dev[0][nf++] = fabs(l.fall * n / a - 1) * 100;
+    if (l.rise > 0)
+      dev[1][nr++] = fabs(l.rise * n * h / b - 1) * 100;
+  }
+  sprintf(line,
+          "fall: %.1f / (n + 1) dB a second, n = 58h bits 3:0 (%d runs, %.1f "
+          "percent off at the median",
+          a, nf, mid_of(dev[0], nf));
+  sprintf(line + strlen(line), ", %.1f at most)", dev[0][nf - 1]);
+  if (nd)
+    sprintf(line + strlen(line), "; it starts %.0f ms after the step up",
+            mid_of(wait[0], nd));
+  prop(m, line);
+  if (!nr)
+    return;
+  sprintf(line,
+          "rise: %.1f / (n + 1) / (h + 1) dB a second, h = 58h bits 7:4 (%d "
+          "runs, %.1f percent off at the median",
+          b, nr, mid_of(dev[1], nr));
+  sprintf(line + strlen(line), ", %.1f at most)", dev[1][nr - 1]);
+  if (fabs(b / a - 1) < 0.03)
+    strcat(line, ", the fall over h + 1");
+  if (nh)
+    sprintf(line + strlen(line), "; it starts %.0f ms after the step down",
+            mid_of(wait[1], nh));
+  prop(m, line);
+}
+
+// the detector: the S out held at each tone of a band run with a fast
+// limit, where it holds the boost down but not off, fitted as a level seen
+// through a first-order high-pass; and the M at other frequencies
+static void prop_detector(struct s3d_meas *m) {
+  static const double hz[S3D_FREQS] = {100,  160,  250,  400,  630,  1000,
+                                       1600, 2500, 4000, 6300, 10000};
+  const struct s3d_run *r = 0;
+  struct s3d_lim l, l0;
+  char line[256];
+  double held[S3D_FREQS], f[S3D_FREQS], fc, t, e, best = -1, bfc = 0, worst;
+  double re, im, g;
+  u8 reg[S3D_REGS];
+  int i, j, k, n = 0, at = -1;
+
+  // a band run with a limit fast enough to get to its level at each tone,
+  // 58h at 00h or 10h
+  for (i = 0; i < m->nruns; i++)
+    if (m->run[i].kind == S3D_BAND && ok(&m->run[i]) &&
+        (m->run[i].reg[S3D_R50] & 1) && m->run[i].reg[S3D_R58] < 0x20 &&
+        !(m->run[i].reg[S3D_R58] & 0x0F) && !r) {
+      r = &m->run[i];
+      at = i;
+    }
+  // the boost without the limit at each tone, from tones with the same
+  // registers, or else from a glide
+  memcpy(reg, r ? r->reg : ess_set, S3D_REGS);
+  reg[S3D_R50] &= (u8)~1;
+  j = find_run(m, S3D_SWEEP, reg);
+  if (j < 0)
+    j = find_run(m, S3D_CHIRP, reg);
+  if (j < 0) {
+    memcpy(reg + S3D_R54, ess_set + S3D_R54, S3D_REGS - S3D_R54);
+    if ((j = find_run(m, S3D_SWEEP, reg)) < 0)
+      j = find_run(m, S3D_CHIRP, reg);
+  }
+  for (k = 0; r && j >= 0 && k < S3D_FREQS; k++) {
+    if (!has(r->u.sw.db[1][k]))
+      continue;
+    if (m->run[j].kind == S3D_SWEEP) {
+      if (!has(m->run[j].u.sw.db[1][k]) || !has(m->run[j].u.sw.ph[0][k]))
+        continue;
+      g = pow(10.0, m->run[j].u.sw.db[1][k] / 20);
+      re = g * cos(m->run[j].u.sw.ph[0][k] * PI / 180);
+      im = g * sin(m->run[j].u.sw.ph[0][k] * PI / 180);
+    } else if (!chirp_h(m, &m->run[j], hz[k], &re, &im)) {
+      continue;
+    }
+    g = boost_db(r->u.sw.db[1][k], re - 1, im);
+    if (!has(g) || g > -1 || g < OFF_DB)
+      continue;
+    f[n] = hz[k];
+    held[n++] = r->u.sw.db[1][k];
+  }
+  if (n >= 3) {
+    for (fc = 50; fc < 5000; fc *= 1.01) {
+      for (k = 0, t = 0; k < n; k++)
+        t += held[k] - 10 * log10(1 + (fc / f[k]) * (fc / f[k]));
+      t /= n;
+      for (k = 0, e = 0; k < n; k++) {
+        g = t + 10 * log10(1 + (fc / f[k]) * (fc / f[k])) - held[k];
+        e += g * g;
+      }
+      if (best < 0 || e < best) {
+        best = e;
+        bfc = fc;
+      }
+    }
+    for (k = 0, t = 0; k < n; k++)
+      t += held[k] - 10 * log10(1 + (bfc / f[k]) * (bfc / f[k]));
+    t /= n;
+    for (k = 0, worst = 0; k < n; k++) {
+      g = fabs(t + 10 * log10(1 + (bfc / f[k]) * (bfc / f[k])) - held[k]);
+      if (g > worst)
+        worst = g;
+    }
+    sprintf(line,
+            "detector: the limit follows the S out through a high-pass at %.0f "
+            "Hz (run %d, %d tones, within %.2f dB)",
+            bfc, at, n, worst);
+    prop(m, line);
+  } else if (r && j >= 0) {
+    prop(m, "detector: the band run has too few tones where the limit acts");
+  }
+  // the M at other frequencies against the same run at 400 Hz
+  line[0] = 0;
+  for (i = 0; i < m->nruns; i++) {
+    if (!m->run[i].mhz || s3d_limit(m, i, &l) < 0 || !has(l.held))
+      continue;
+    for (j = 0; j < m->nruns; j++)
+      if (m->run[j].kind == S3D_STEP && !m->run[j].mhz &&
+          m->run[j].att == m->run[i].att && m->run[j].drop == m->run[i].drop &&
+          !memcmp(m->run[j].reg, m->run[i].reg, S3D_REGS) &&
+          s3d_limit(m, j, &l0) >= 0 && has(l0.held))
+        break;
+    if (j >= m->nruns)
+      continue;
+    sprintf(line + strlen(line), "%s%u Hz %+.2f dB",
+            line[0] ? ", " : "detector: the S held with the M at ",
+            m->run[i].mhz, l.held - l0.held);
+  }
+  if (line[0]) {
+    strcat(line, " against 400 Hz");
+    prop(m, line);
+  }
+}
+
+// the least gain the limit leaves: the lowest steady gain of a step run
+static void prop_floor(struct s3d_meas *m) {
+  struct s3d_lim l;
+  char line[256];
+  double low = 0;
+  int i, at = -1;
+
+  for (i = 0; i < m->nruns; i++)
+    if ((m->run[i].reg[S3D_R50] & 1) && s3d_limit(m, i, &l) >= 0 &&
+        has(l.high) && (at < 0 || l.high < low)) {
+      low = l.high;
+      at = i;
+    }
+  if (at < 0 || low > OFF_DB)
+    return;
+  if (low <= -59.5)
+    sprintf(line, "floor: the boost's gain goes under -60 dB (run %d, %s)", at,
+            m->run[at].name);
+  else
+    sprintf(
+        line,
+        "floor: the boost's gain goes down to %.1f dB and no lower (run %d, "
+        "%s)",
+        low, at, m->run[at].name);
+  prop(m, line);
+}
+
+// the ratio run with the limit: the S out held, and the boost off where
+// the S in alone is over it; and the step run with 52h lower
+static void prop_ratio(struct s3d_meas *m) {
+  const struct s3d_run *r;
+  struct s3d_lim l, l0;
+  char line[256];
+  float b[5];
+  double v, lo = 0, hi = 0;
+  u8 reg[S3D_REGS];
+  int i, k, held, s0, s1;
+
+  for (i = 0; i < m->nruns; i++) {
+    r = &m->run[i];
+    if (r->kind != S3D_RATIO || !ok(r) || !(r->reg[S3D_R50] & 1))
+      continue;
+    to_boost(r->u.ra.ss, 5, r->u.ra.b_re, r->u.ra.b_im, b);
+    for (k = held = 0; k < 5; k++) {
+      if (!has(b[k]) || b[k] > -1 || b[k] < OFF_DB)
+        continue;
+      v = r->u.ra.ss[k] + ratio_db[k];
+      if (!held++ || v < lo)
+        lo = v;
+      if (held == 1 || v > hi)
+        hi = v;
+    }
+    if (!held)
+      continue;
+    sprintf(line,
+            "ratio: from S/M -24 to +6 dB the limit holds the S out at %+.1f "
+            "to %+.1f dB re M",
+            tidy(lo), tidy(hi));
+    if (has(b[4]) && b[4] < OFF_DB)
+      strcat(line, ", and turns the boost off where the S in alone is over "
+                   "that");
+    prop(m, line);
+    break;
+  }
+  memcpy(reg, ess_set, S3D_REGS);
+  reg[S3D_R50] |= 1;
+  s0 = find_run(m, S3D_STEP, reg);
+  for (i = 0; s0 >= 0 && i < m->nruns; i++) {
+    memcpy(reg, m->run[i].reg, S3D_REGS);
+    reg[S3D_R52] = ess_set[S3D_R52];
+    reg[S3D_R50] = (u8)(ess_set[S3D_R50] | 1);
+    s1 = i;
+    if (s1 == s0 || m->run[i].kind != S3D_STEP ||
+        m->run[i].reg[S3D_R50] != reg[S3D_R50] || m->run[i].att ||
+        m->run[i].drop || m->run[i].mhz ||
+        memcmp(reg, m->run[s0].reg, S3D_REGS) || s3d_limit(m, s1, &l) < 0 ||
+        s3d_limit(m, s0, &l0) < 0 || !has(l.held) || !has(l0.held))
+      continue;
+    sprintf(line,
+            "52h and the limit: with 52h at %02Xh the limit holds the S out at "
+            "%+.1f dB re M, with %02Xh at %+.1f",
+            m->run[s1].reg[S3D_R52], tidy(l.held), ess_set[S3D_R52],
+            tidy(l0.held));
+    prop(m, line);
+    break;
+  }
+}
+
+static void summary_props(struct s3d_meas *m) {
+  struct bp f;
+  u8 off[S3D_REGS], model[S3D_REGS];
+
+  memcpy(off, ess_set, S3D_REGS);
+  off[S3D_R50] = 0x04;
+  memcpy(model, ess_set, S3D_REGS);
+  model[S3D_R50] = 0x0E;
+  say(m, "");
+  say(m, "properties: what this measurement gives of each part of the 3-D "
+         "effect (docs/SPATIALIZER.md)");
+  prop_path(m, off);
+  prop_on(m, off);
+  prop_boost(m, &f);
+  prop_level(m, &f);
+  prop_off_regs(m, ess_set, "limit off", 3);
+  prop_model(m, model);
+  prop_model_limit(m, model);
+  prop_levels(m);
+  prop_speed(m);
+  prop_detector(m);
+  prop_floor(m);
+  prop_ratio(m);
 }
 
 void s3d_summary(struct s3d_meas *m) {
@@ -2985,4 +4006,5 @@ void s3d_summary(struct s3d_meas *m) {
   summary_levels(m);
   summary_fit(m);
   summary_filters(m);
+  summary_props(m);
 }
