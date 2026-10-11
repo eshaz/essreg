@@ -288,15 +288,18 @@ once it stops. The text field takes 54h, 56h and 5Ah in hex and the others
 in decimal, and writes the value when you press Enter or leave the field.
 Every setting has a tip that says what it does, which shows when the mouse
 rests on it. Under the groups:
-* *Show graph* shows or hides the graph left of the groups. It is shown at
-  first, and ess3d keeps the choice in `ESS3D.INI` next to `ESS3D.EXE`, as
-  `Graph=` in its `[Tray]` section.
+* *Hide graph* hides the graph left of the groups and makes the panel
+  narrower, and *Show graph* brings it back. The graph is shown at first,
+  and ess3d keeps the choice in `ESS3D.INI` next to `ESS3D.EXE`, as `Graph=`
+  in its `[Tray]` section.
 * *Driver defaults* sets what ESS's driver sets when Windows starts.
 * *Close tray icon* removes the icon, as `ess3d exit` does.
 
 Left of the groups, a graph shows what the setting does to the sound, from
 the effect of `/sim`, which follows one card's measurements. It follows each
-change, and a slider while you drag it, up to 25 times a second:
+change, and a slider while you drag it: up to 25 times a second, and on a
+slow PC less often, so that drawing it takes at most a quarter of the time
+and the slider keeps up with the mouse. It has two panes:
 * *Width by frequency* is what the effect does to the S at each frequency,
   in dB: the program's own stereo with *Stereo*, or the S made from the mono
   sum with *Mono*. With the automatic level on, a dotted curve shows the
@@ -305,8 +308,9 @@ change, and a slider while you drag it, up to 25 times a second:
   the measurement's: an M at -24 dBFS and an S as loud for 2 seconds, and
   then the S 12 dB lower. With the automatic level on, it shows the effect
   lowered at the lower speed down to the *Lower above* level, and raised
-  again at the raise speed, with the two levels dotted, red for lower and
-  green for raise.
+  again at the raise speed, with the two levels dashed, red for lower and
+  green for raise. Where the two are at the same height, their dashes take
+  turns.
 
 The panel closes when you click somewhere else, click the icon again or
 press Esc. Every change is read back once it is made, so the panel shows
@@ -323,6 +327,11 @@ folder. A second `ess3d tray` opens the panel of the icon that is already
 there, so the same command also works on a key. The tray icon needs Windows
 95 or later, because ess3d is a 16-bit program and reaches the tray through
 Windows 95's 32-bit shell.
+
+Close the icon with *Close tray icon* or `ess3d exit` before you copy a new
+`ESS3D.EXE` over the old one, and start it again afterwards. While the icon
+runs, Windows starts every ess3d from the copy that is already loaded, and
+not from the new file, so a second `ess3d tray` would open the old panel.
 
 ## [`esfmrec.exe`](build)
 

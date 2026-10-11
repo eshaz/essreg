@@ -332,8 +332,9 @@ void s3dsim_response(const u8 *reg, u32 rate, double hz, double *re,
 // --- what ess3d's tray panel plots ------------------------------------------
 
 #define PLOT_RATE 48000UL
-#define STEP_M 0.0630957 // the measurement's M, -24 dBFS
-#define STEP_LATE 4      // the limit's detector, about 4 ms late
+#define STEP_M 0.0630957    // the measurement's M, -24 dBFS
+#define STEP_DROP 0.0630957 // the S after t1, 12 dB lower, as a power
+#define STEP_LATE 4         // the limit's detector, about 4 ms late
 
 static double mag(struct z a) { return sqrt(a.re * a.re + a.im * a.im); }
 
@@ -398,10 +399,11 @@ void s3dsim_step(const u8 *reg, double t1, double dt, int n, float *out,
                  double *held, double *rise, double *fall) {
   struct z zero = z_of(0, 0), one = z_of(1, 0), s0, s1, m0, m1;
   double w1 = 2 * PI * 1000 / PLOT_RATE, w4 = 2 * PI * 400 / PLOT_RATE;
-  double c[3], hp4, f, r, down, up, lo, hi, g = 1, s, a, b, x, sum;
-  double seen[STEP_LATE];
+  double c[3], hp4, f, r, down, up, lo, hi, g = 1, ga = -1, s, a, a1 = 0;
+  double b = 0, x, sum, seen[STEP_LATE];
   int i, k, ms = (int)(dt * 1000 + 0.5), t = 0, t1ms = (int)(t1 * 1000);
   int limit = (reg[0] & 0x0D) == 0x0D;
+  unsigned late = 0;
 
   if (ms < 1)
     ms = 1;
@@ -423,30 +425,50 @@ void s3dsim_step(const u8 *reg, double t1, double dt, int n, float *out,
   down = pow(10.0, -f / 1000 / 20);
   up = pow(10.0, r / 1000 / 20);
   *held = 0;
+  if (!limit) {
+    // the gain stays at 1, so each step is the two powers of the S in
+    // proportion to its milliseconds before t1 and after
+    s1 = z_add(s0, s1);
+    m1 = z_add(m0, m1);
+    a = s1.re * s1.re + s1.im * s1.im;
+    b = m1.re * m1.re + m1.im * m1.im;
+    for (i = 0; i < n; i++) {
+      t = i ? 1 + (i - 1) * ms : 0;
+      k = i ? ms : 1;
+      x = t1ms - t < 0 ? 0 : t1ms - t > k ? k : t1ms - t;
+      sum = (x * (a + b) + (k - x) * (a * STEP_DROP + b)) / k;
+      out[i] = (float)(sum > 1e-12 ? 10 * log10(sum) : -120);
+    }
+    return;
+  }
   for (k = 0; k < STEP_LATE; k++)
     seen[k] = 0;
   for (i = 0; i < n; i++) {
     // the mean power of the S out over each step, where a fast limit
     // hunts around its level
     for (k = 0, sum = 0; k < (i ? ms : 1); k++, t++) {
+      // the powers at the gain, worked out again when it moved
+      if (g != ga) {
+        x = s0.re + g * s1.re;
+        a1 = x * x;
+        x = s0.im + g * s1.im;
+        a1 += x * x;
+        x = m0.re + g * m1.re;
+        b = x * x;
+        x = m0.im + g * m1.im;
+        b += x * x;
+        ga = g;
+      }
       // the S at 0 dB against the M until t1, then 12 dB lower
-      s = t < t1ms ? 1 : 0.0630957;
-      x = s0.re + g * s1.re;
-      a = x * x;
-      x = s0.im + g * s1.im;
-      a = (a + x * x) * s;
-      x = m0.re + g * m1.re;
-      b = x * x;
-      x = m0.im + g * m1.im;
-      b += x * x;
+      s = t < t1ms ? 1 : STEP_DROP;
+      a = a1 * s;
       sum += a + b;
       if (t == t1ms)
         *held = db_of(g);
-      if (!limit)
-        continue;
       // the limit follows what it saw a few milliseconds ago
-      seen[t % STEP_LATE] = a + b * hp4;
-      x = seen[(t + 1) % STEP_LATE];
+      seen[late] = a + b * hp4;
+      late = (late + 1) % STEP_LATE;
+      x = seen[late];
       if (x > hi)
         g *= down;
       if (x < lo)

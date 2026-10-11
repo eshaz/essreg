@@ -650,6 +650,24 @@ static void test_plot(void) {
   s3dsim_step(reg, 2.0, 0.05, 161, out, &held, &rise, &fall);
   CHECK(held == 0 && fabs(out[39] - out[0]) < 0.01 &&
         fabs(out[41] - out[0] + 12) < 0.05);
+  // and its powers are the S out of the S at 1 kHz and of the M at 400 Hz,
+  // as s3dsim_curve has them, before the drop and after, for off, reset,
+  // stereo and mono
+  for (i = 0; i < 4; i++) {
+    static const u8 r50[4] = {0x04, 0x08, 0x0C, 0x0E};
+    double s1k, m400, before, after;
+
+    reg[0] = r50[i];
+    s3dsim_curve(reg, 1000, 0, &s1k, &ms);
+    s3dsim_curve(reg, 400, 0, &ss, &m400);
+    before = 10 * log10(pow(10, s1k / 10) + pow(10, m400 / 10));
+    after = 10 * log10(pow(10, s1k / 10) * 0.0630957 + pow(10, m400 / 10));
+    s3dsim_step(reg, 2.0, 0.05, 161, out, &held, &rise, &fall);
+    CHECK(fabs(out[0] - before) < 0.01 && fabs(out[39] - before) < 0.01);
+    CHECK(fabs(out[41] - after) < 0.01 && fabs(out[160] - after) < 0.01);
+    // the step that holds the drop has a fiftieth of it
+    CHECK(out[40] < before && out[40] > before - 0.5);
+  }
   // with 54h, 56h and 5Ah at 00h there is no level, and the boost falls
   // to its floor
   memcpy(reg, ess, 6);

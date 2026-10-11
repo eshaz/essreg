@@ -40,11 +40,13 @@
  * is the width over time in a step of the measurement: an M at -24 dBFS
  * and an S as loud, which drops 12 dB after 2 s. It shows the S out
  * against the M as the automatic level lowers the effect to its level and
- * raises it again, with the two levels dotted. The graph follows the
- * setting, and a slider while it moves, at most every G_EVERY ms. It is
- * drawn into a bitmap and then onto the screen at once, and drawn right
- * away, as a slider's tracking lets no WM_PAINT through. Show graph hides
- * it, and ESS3D.INI keeps that.
+ * raises it again, with the two levels dashed. Its text is in the panel's
+ * font. The graph follows the setting, and a slider while it moves: at
+ * most every G_EVERY ms, and on a slow PC less often, so that drawing it
+ * takes at most a quarter of the time, and what it skipped when the slider
+ * rests (GRAPH_TIMER). It is drawn into a bitmap and then onto the screen
+ * at once, and drawn right away, as a slider's tracking lets no WM_PAINT
+ * through. Hide graph hides it, and ESS3D.INI keeps that.
  *
  * While a slider moves, only its field is written, and its row and the
  * graph follow it. The rest of the panel, the icon's tooltip and the log
@@ -74,6 +76,7 @@
 #include <windows.h>
 
 #include <math.h>
+#include <mmsystem.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -97,9 +100,10 @@
 #define ADD_MS 2000
 #define TIP_TIMER 4 // the mouse rests on a setting: its tip
 #define TIP_MS 600
-#define TIP_W 240 // a tip's width in pixels
+#define GRAPH_TIMER 5 // a slider rests: the graph that was skipped
+#define TIP_W 240     // a tip's width in pixels
 #define TIP_CLASS "ess3dTip"
-#define INI_NAME "ESS3D.INI" // Show graph, in [Tray] Graph=
+#define INI_NAME "ESS3D.INI" // the graph shown or not, [Tray] Graph=
 
 // Shell_NotifyIcon
 #define NIM_ADD 0
@@ -170,7 +174,9 @@ typedef DWORD(FAR PASCAL *CALL32_2)(DWORD, DWORD, DWORD, DWORD, DWORD);
 #define G_W 150
 #define G_NT 161
 #define G_T1 2.0
-#define G_EVERY 40 // ms between drawings while a slider moves
+#define G_EVERY 40  // ms between drawings while a slider moves, at least
+#define G_SHARE 3   // and 3 times as long as the last one took
+#define G_MOST 1000 // and 1 s at most
 
 // the rows, named for what they do to the sound, with the words at the
 // ends of their sliders as ES938 Controls has Min and Max, and their tips
@@ -228,13 +234,14 @@ static const struct {
                      "effect on at 63, the automatic level off, and 8Fh, "
                      "95h, 94h and 80h in 54h-5Ah."},
     {IDC_P_CLOSE, "Removes the tray icon, as ess3d exit does."},
-    {IDC_P_SHOWGRAPH, "Shows or hides the graph of what the setting does."},
+    {IDC_P_SHOWGRAPH, "Hides or shows the graph of what the setting does. "
+                      "ESS3D.INI keeps the choice."},
     {IDC_P_GRAPH, "What the setting does, from the effect of /sim, which "
                   "follows one card's measurements. Top: the width by "
                   "frequency, dotted where the automatic level holds it. "
                   "Bottom: the S against the M over time, with an S as loud "
                   "as the M for 2 s and then 12 dB lower, and the two "
-                  "levels dotted."}};
+                  "levels dashed."}};
 
 static struct {
   LOADLIB32 load;
@@ -265,11 +272,13 @@ static UINT panel_fg;              // the window in front while the panel is up
 static DWORD hidden_at;            // GetTickCount() when the panel last hid
 static int moving = -1;            // a slider written alone while it moves
 static HWND graph;
-static HFONT graph_font;
-static int graph_on = 1; // Show graph
-static int graph_laid;   // the controls are laid out right of the graph
-static int graph_ok;     // plot holds the curves of plot.reg
-static DWORD graph_at;   // GetTickCount() when it was last drawn
+static int graph_on = 1;           // Hide graph and Show graph
+static int graph_laid;             // the controls are right of the graph
+static int graph_ok;               // plot holds the curves of plot.reg
+static DWORD graph_at;             // timeGetTime() when it was last drawn
+static DWORD graph_wait = G_EVERY; // and the ms to the next while moving
+static int graph_skip;             // a slider's value it hasn't drawn
+static int skip_row, skip_value;   // and which
 static HWND tip;
 static int tip_id;          // the control the mouse rests on
 static const char *tip_now; // and its tip
@@ -494,10 +503,11 @@ static void edit_show(int row, int force) {
 // --- the graph ----------------------------------------------------------
 
 // the graph of the setting, with a row's field at value while its slider
-// moves (row -1 for none); while it moves, at most every G_EVERY ms, and
-// what it skipped once the slider stops
+// moves (row -1 for none); while it moves, after graph_wait ms, and what
+// it skipped once the slider rests
 static void graph_update(int row, int value, int moving_now) {
   static const u8 addr[4] = {0x54, 0x56, 0x58, 0x5A};
+  DWORD now;
   u8 reg[6];
   int i, j;
 
@@ -517,20 +527,39 @@ static void graph_update(int row, int value, int moving_now) {
   for (j = 0; row >= 0 && row_reg[row] >= 0 && j < 4; j++)
     if (ess3d_reg_addr(row_reg[row]) == addr[j])
       reg[2 + j] = row_byte(row, value);
-  if (graph_ok && !memcmp(reg, plot.reg, sizeof(reg)))
+  if (graph_ok && !memcmp(reg, plot.reg, sizeof(reg))) {
+    graph_skip = 0;
     return;
-  if (moving_now && GetTickCount() - graph_at < G_EVERY)
+  }
+  now = timeGetTime();
+  if (moving_now && now - graph_at < graph_wait) {
+    // drawn at a later step, or when the slider rests
+    if (!graph_skip && !SetTimer(tray, GRAPH_TIMER, (UINT)graph_wait, 0))
+      tray_log("no timer left for the graph");
+    graph_skip = 1;
+    skip_row = row;
+    skip_value = value;
     return;
+  }
+  graph_skip = 0;
   memcpy(plot.reg, reg, sizeof(reg));
   s3dsim_step(plot.reg, G_T1, 0.05, G_NT, plot.width, &plot.held, &plot.rise,
               &plot.fall);
   s3dsim_curves(plot.reg, 0, plot.ss, plot.ms);
-  s3dsim_curves(plot.reg, plot.held, plot.ss_held, plot.ms_held);
+  // the curve where the limit holds the effect, drawn only with the limit
+  if ((plot.reg[0] & 0x0D) == 0x0D)
+    s3dsim_curves(plot.reg, plot.held, plot.ss_held, plot.ms_held);
   graph_ok = 1;
   // drawn now, as a slider's tracking lets no WM_PAINT through
   InvalidateRect(graph, 0, FALSE);
   UpdateWindow(graph);
-  graph_at = GetTickCount();
+  // while a slider moves, the slider keeps most of the time
+  graph_at = timeGetTime();
+  graph_wait = (graph_at - now) * G_SHARE;
+  if (graph_wait < G_EVERY)
+    graph_wait = G_EVERY;
+  if (graph_wait > G_MOST)
+    graph_wait = G_MOST;
 }
 
 // a pane of the graph: the plot's rectangle in pixels, x from x0 at its
@@ -578,46 +607,71 @@ static void curve(HDC dc, const struct pane *p, const float *v, int n,
   Polyline(dc, pt, n);
 }
 
-// the pane between top and bottom, with room for its title and labels:
-// its grid every ystep with a label every other one, the lines at the
-// x of xs labeled xl, and its title
+static int text_w(HDC dc, const char *s) {
+  return LOWORD(GetTextExtent(dc, s, strlen(s)));
+}
+
+// the pane between top and bottom, with room for its title, and for its
+// labels lw pixels wide on the left and th high: its grid every ystep
+// with a label every other one, the lines at the x of xs labeled xl, and
+// its title
 static void pane_grid(HDC dc, struct pane *p, const RECT *client, int top,
-                      int bottom, int th, double ystep, const double *xs,
-                      const char *const *xl, int nx, const char *title,
-                      HPEN light, HPEN dark) {
+                      int bottom, int th, int lw, double ystep,
+                      const double *xs, const char *const *xl, int nx,
+                      const char *title, HPEN light, HPEN dark) {
+  COLORREF gray = RGB(96, 96, 96);
   char s[8];
   double y;
-  int i, k;
+  int i, k, x, w;
 
-  SetRect(&p->rc, client->left + 3 * th, top + th + 3, client->right - 6,
-          bottom - th - 3);
+  // under the title, by half of the top label
+  SetRect(&p->rc, client->left + lw + 6, top + th + th / 2 + 3,
+          client->right - 4, bottom - th - 4);
   for (y = p->y0, k = 0; y <= p->y1 + 0.01; y += ystep, k++) {
     SelectObject(dc, y > -0.01 && y < 0.01 ? dark : light);
     MoveTo(dc, p->rc.left, py(p, y));
     LineTo(dc, p->rc.right, py(p, y));
     if (k % 2 == 0) {
       sprintf(s, y > 0.01 ? "+%.0f" : "%.0f", y);
-      text(dc, p->rc.left - 2, py(p, y) - th / 2, TA_RIGHT | TA_TOP,
-           RGB(96, 96, 96), s);
+      text(dc, p->rc.left - 4, py(p, y) - th / 2, TA_RIGHT | TA_TOP, gray, s);
     }
   }
   for (i = 0; i < nx; i++) {
+    x = px(p, xs[i]);
     SelectObject(dc, light);
-    MoveTo(dc, px(p, xs[i]), p->rc.top);
-    LineTo(dc, px(p, xs[i]), p->rc.bottom);
-    text(dc, px(p, xs[i]), p->rc.bottom + 1, TA_CENTER | TA_TOP,
-         RGB(96, 96, 96), xl[i]);
+    MoveTo(dc, x, p->rc.top);
+    LineTo(dc, x, p->rc.bottom);
+    // under its line, clear of the labels on the left, inside the graph
+    w = text_w(dc, xl[i]);
+    x -= w / 2;
+    if (x < p->rc.left - 1)
+      x = p->rc.left - 1;
+    if (x + w > client->right - 2)
+      x = client->right - 2 - w;
+    text(dc, x, p->rc.bottom + 2, TA_LEFT | TA_TOP, gray, xl[i]);
   }
   SelectObject(dc, dark);
   MoveTo(dc, p->rc.left, p->rc.top);
   LineTo(dc, p->rc.left, p->rc.bottom);
-  text(dc, client->left + 3, top + 1, TA_LEFT | TA_TOP, RGB(0, 0, 0), title);
+  text(dc, client->left + 4, top + 2, TA_LEFT | TA_TOP, RGB(0, 0, 0), title);
 }
 
 // a key at the right of a pane's title row, right to left from *x
 static void key(HDC dc, int *x, int y, COLORREF color, const char *s) {
   text(dc, *x, y, TA_RIGHT | TA_TOP, color, s);
-  *x -= LOWORD(GetTextExtent(dc, s, strlen(s))) + 6;
+  *x -= text_w(dc, s) + 8;
+}
+
+// a level across the pane in dashes, 4 pixels of every 8 from x0, so that
+// two levels at the same height show both colors
+static void level(HDC dc, const struct pane *p, double y, int x0, HPEN pen) {
+  int x, at = py(p, y);
+
+  SelectObject(dc, pen);
+  for (x = p->rc.left + x0; x < p->rc.right; x += 8) {
+    MoveTo(dc, x, at);
+    LineTo(dc, x + 4 < p->rc.right ? x + 4 : p->rc.right, at);
+  }
 }
 
 static void graph_paint(HDC dc, const RECT *client) {
@@ -628,18 +682,21 @@ static void graph_paint(HDC dc, const RECT *client) {
   COLORREF blue = RGB(0, 0, 192), red = RGB(192, 0, 0);
   COLORREF green = RGB(0, 128, 0), main;
   HPEN light, dark, solid, dotted, fall, rise, old;
-  HFONT oldf = 0;
+  HFONT font = (HFONT)SendMessage(panel, WM_GETFONT, 0, 0);
+  HGDIOBJ oldf = 0;
   TEXTMETRIC tm;
   struct pane p;
   RECT rc = *client;
   int on = (plot.reg[0] & 0x0C) == 0x0C, mono = on && (plot.reg[0] & 2);
-  int limit = on && (plot.reg[0] & 1), th, h, x;
+  int limit = on && (plot.reg[0] & 1), th, lw, h, x;
 
   FillRect(dc, &rc, GetStockObject(WHITE_BRUSH));
-  if (graph_font)
-    oldf = SelectObject(dc, graph_font);
+  // the panel's font, which the raster fonts of Windows 98 draw clearly
+  if (font)
+    oldf = SelectObject(dc, font);
   GetTextMetrics(dc, &tm);
   th = tm.tmHeight;
+  lw = text_w(dc, "+40"); // as wide as the widest label
   h = (rc.bottom - rc.top) / 2;
   SetBkMode(dc, TRANSPARENT);
   main = mono ? red : blue;
@@ -647,8 +704,8 @@ static void graph_paint(HDC dc, const RECT *client) {
   dark = CreatePen(PS_SOLID, 1, RGB(128, 128, 128));
   solid = CreatePen(PS_SOLID, 1, main);
   dotted = CreatePen(PS_DOT, 1, main);
-  fall = CreatePen(PS_DOT, 1, red);
-  rise = CreatePen(PS_DOT, 1, green);
+  fall = CreatePen(PS_SOLID, 1, red);
+  rise = CreatePen(PS_SOLID, 1, green);
   old = SelectObject(dc, light);
 
   // the width by frequency: S>S, or M>S with mono, over 8 octaves
@@ -656,39 +713,35 @@ static void graph_paint(HDC dc, const RECT *client) {
   p.x1 = 8;
   p.y0 = -40;
   p.y1 = 20;
-  pane_grid(dc, &p, &rc, rc.top, rc.top + h, th, 10, fx, fl, 3,
+  pane_grid(dc, &p, &rc, rc.top, rc.top + h, th, lw, 10, fx, fl, 3,
             "Width by frequency, dB", light, dark);
-  x = rc.right - 6;
+  x = rc.right - 4;
   if (limit) {
     curve(dc, &p, mono ? plot.ms_held : plot.ss_held, S3DSIM_CURVE_N, 0,
           1.0 / 6, dotted);
-    key(dc, &x, rc.top + 1, main, "held");
+    key(dc, &x, rc.top + 2, main, "held");
   }
   curve(dc, &p, mono ? plot.ms : plot.ss, S3DSIM_CURVE_N, 0, 1.0 / 6, solid);
-  key(dc, &x, rc.top + 1, main, mono ? "from mono" : "stereo");
+  key(dc, &x, rc.top + 2, main, mono ? "from mono" : "stereo");
 
   // the width over time: the S out against the M, with the levels
   p.x0 = 0;
   p.x1 = 8;
   p.y0 = -20;
   p.y1 = 20;
-  pane_grid(dc, &p, &rc, rc.top + h, rc.bottom, th, 10, tx, tl, 5,
+  pane_grid(dc, &p, &rc, rc.top + h, rc.bottom, th, lw, 10, tx, tl, 5,
             "Width over time, dB", light, dark);
-  x = rc.right - 6;
+  x = rc.right - 4;
   if (limit) {
-    SelectObject(dc, fall);
-    MoveTo(dc, p.rc.left, py(&p, plot.fall));
-    LineTo(dc, p.rc.right, py(&p, plot.fall));
-    SelectObject(dc, rise);
-    MoveTo(dc, p.rc.left, py(&p, plot.rise));
-    LineTo(dc, p.rc.right, py(&p, plot.rise));
-    key(dc, &x, rc.top + h + 1, green, "raise");
-    key(dc, &x, rc.top + h + 1, red, "lower");
+    level(dc, &p, plot.fall, 0, fall);
+    level(dc, &p, plot.rise, 4, rise);
+    key(dc, &x, rc.top + h + 2, green, "raise");
+    key(dc, &x, rc.top + h + 2, red, "lower");
   }
   curve(dc, &p, plot.width, G_NT, 0, 0.05, solid);
-  // where the S drops 12 dB
-  text(dc, px(&p, G_T1) + 2, p.rc.bottom - th, TA_LEFT | TA_TOP,
-       RGB(96, 96, 96), "S -12 dB");
+  // where the S drops 12 dB, at the top, which the drop leaves clear
+  text(dc, px(&p, G_T1) + 3, p.rc.top + 1, TA_LEFT | TA_TOP, RGB(96, 96, 96),
+       "S -12 dB");
 
   SelectObject(dc, old);
   DeleteObject(light);
@@ -709,12 +762,6 @@ LRESULT CALLBACK __export graph_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
   HDC dc, mem;
 
   switch (msg) {
-  case WM_CREATE:
-    graph_font =
-        CreateFont(-10, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET,
-                   OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
-                   VARIABLE_PITCH | FF_SWISS, "Small Fonts");
-    return 0;
   case WM_ERASEBKGND:
     return 1; // the painting covers it all
   case WM_PAINT:
@@ -738,9 +785,6 @@ LRESULT CALLBACK __export graph_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     EndPaint(w, &ps);
     return 0;
   case WM_DESTROY:
-    if (graph_font)
-      DeleteObject(graph_font);
-    graph_font = 0;
     graph = 0;
     return 0;
   }
@@ -936,12 +980,13 @@ static void panel_scroll(HWND sb, int code, int pos) {
 }
 
 // the controls right of the graph, or moved left over its place, and the
-// panel as wide as that, its right edge where it was
+// panel as wide as that, its right edge where it was; and the button
 static void graph_layout(int show) {
   RECT rc;
   HWND c;
   int dx;
 
+  SetDlgItemText(panel, IDC_P_SHOWGRAPH, show ? "Hide &graph" : "Show &graph");
   if (show == graph_laid)
     return;
   SetRect(&rc, 0, 0, G_W, 0);
@@ -964,7 +1009,8 @@ static void graph_layout(int show) {
   graph_laid = show;
 }
 
-// Show graph: the layout, the graph drawn again, and ESS3D.INI
+// Hide graph and Show graph: the layout, the graph drawn again, and
+// ESS3D.INI
 static void graph_toggle(int show) {
   char ini[144];
 
@@ -974,7 +1020,7 @@ static void graph_toggle(int show) {
   graph_update(-1, 0, 0);
   ess3d_path(INI_NAME, ini, sizeof(ini));
   if (!WritePrivateProfileString("Tray", "Graph", show ? "1" : "0", ini))
-    tray_log("Show graph wasn't kept in ESS3D.INI");
+    tray_log("the graph's setting wasn't kept in ESS3D.INI");
 }
 
 // --- the tips -------------------------------------------------------------
@@ -1197,8 +1243,8 @@ static void panel_build(void) {
   y += 12;
   add("BUTTON", "Driver &defaults", WS_GROUP | WS_TABSTOP | BS_PUSHBUTTON, 6, y,
       68, 14, IDC_P_DEFAULTS);
-  add("BUTTON", "Show &graph", WS_TABSTOP | BS_AUTOCHECKBOX, 82, y + 2, 60, 10,
-      IDC_P_SHOWGRAPH);
+  add("BUTTON", "Hide &graph", WS_TABSTOP | BS_PUSHBUTTON, (P_W - 68) / 2, y,
+      68, 14, IDC_P_SHOWGRAPH);
   add("BUTTON", "&Close tray icon", WS_TABSTOP | BS_PUSHBUTTON, P_W - 74, y, 68,
       14, IDC_P_CLOSE);
   // the graph left of the controls, as tall as they are
@@ -1215,11 +1261,10 @@ static void panel_build(void) {
   AdjustWindowRect(&rc, GetWindowLong(panel, GWL_STYLE), FALSE);
   SetWindowPos(panel, 0, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-  // Show graph as ESS3D.INI keeps it, shown unless it says 0
+  // the graph as ESS3D.INI keeps it, shown unless it says 0
   graph_laid = 1;
   ess3d_path(INI_NAME, ini, sizeof(ini));
   graph_on = GetPrivateProfileInt("Tray", "Graph", 1, ini) != 0;
-  CheckDlgButton(panel, IDC_P_SHOWGRAPH, graph_on && graph);
   if (!graph)
     EnableWindow(item(IDC_P_SHOWGRAPH), FALSE);
   graph_layout(graph_on && graph);
@@ -1324,7 +1369,7 @@ BOOL CALLBACK __export panel_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
     } else if (id == IDC_P_DEFAULTS) {
       do_action(ESS3D_DEFAULTS);
     } else if (id == IDC_P_SHOWGRAPH && code == BN_CLICKED) {
-      graph_toggle(IsDlgButtonChecked(dlg, id));
+      graph_toggle(!graph_on);
     } else if (id == IDC_P_CLOSE) {
       DestroyWindow(tray);
     } else if (id >= IDC_P_EDIT && id < IDC_P_EDIT + nsliders &&
@@ -1396,6 +1441,12 @@ LRESULT CALLBACK __export tray_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
       tip_show();
       return 0;
     }
+    if (wp == GRAPH_TIMER) {
+      KillTimer(w, GRAPH_TIMER);
+      if (graph_skip)
+        graph_update(skip_row, skip_value, 0);
+      return 0;
+    }
     // with the register interface, reading has no side effects
     old = cur;
     read_setting();
@@ -1412,6 +1463,7 @@ LRESULT CALLBACK __export tray_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     KillTimer(w, PANEL_TIMER);
     KillTimer(w, ADD_TIMER);
     KillTimer(w, TIP_TIMER);
+    KillTimer(w, GRAPH_TIMER);
     if (shown)
       notify(NIM_DELETE);
     if (panel)
