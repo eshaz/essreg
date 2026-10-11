@@ -406,16 +406,16 @@ class WineTest(unittest.TestCase):
         self.assertTrue(text.startswith("ess3d measure: the 3-D effect"))
         self.assertIn("plan: quick, 25 runs", text)
         self.assertIn("  1  ess            0C 3F 8F 95 94 80  M>M", text)
-        self.assertIn("S>S deg    +46   +36   +21", text)
+        self.assertIn("S>S deg    +50   +42   +27", text)
         self.assertIn("ratio limit: from S/M -24 to +6 dB, S>S at 1 kHz "
-                      "changes by -16.0 dB; it holds S out at +5.4 to +5.4 "
+                      "changes by -15.3 dB; it holds S out at +5.4 to +5.4 "
                       "dB re M", text)
         self.assertIn("pan: 0, 22.5, 45, 67.5 and 90 degrees come out at "
-                      "-37, -26, 41, 115, 127", text)
+                      "-37, -25, 41, 114, 127", text)
         # the limit's fall and rise in dB a second, the S it holds, and
         # the boost back to its full gain
-        self.assertIn(" 22  step limit     0D 3F 8F 95 94 80      51 -15.5  "
-                      "+0.0     +5.4      0    5.1   +0.0    >+4.3", text)
+        self.assertIn(" 22  step limit     0D 3F 8F 95 94 80      51 -14.5  "
+                      "+0.0     +5.4      0    5.1   +0.0    >+3.6", text)
         self.assertIn(" 24  off again      04 3F 8F 95 94 80     0  no "
                       "change over 0.1 dB", text)
         self.assertIn("\r\n", text)
@@ -460,8 +460,9 @@ class WineTest(unittest.TestCase):
         self.assertIn("plan: chirp, 5 runs", text)
         self.assertIn("  1  ess            0C 3F 8F 95 94 80\r\n", text)
         self.assertIn("filters: each chirp run's boost fitted", text)
-        self.assertIn("     peak +16.7 dB at 449 Hz; zeros 0 Hz, ", text)
-        self.assertIn("; poles 200 Hz, 1003 Hz, 1 over 50 kHz", text)
+        self.assertIn("     peak +16.8 dB at 456 Hz; zeros 0 Hz, ", text)
+        # Watcom's floating point may round the last digit the other way
+        self.assertRegex(text, r"; poles 38\d Hz, 54\d Hz, 1 over 50 kHz")
         self.assertFalse(os.path.exists(self.path("C.$$$")))
 
     def test_ess3d_display(self):

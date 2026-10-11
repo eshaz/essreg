@@ -210,13 +210,14 @@ report goes to `ESS3D.TXT` next to ess3d.exe, or to the `/out=` file. ess3d
 puts the mixer back at the end, and if the measurement is ended by force,
 the next ess3d puts it back.
 [docs/SPATIALIZER.md](docs/SPATIALIZER.md#measuring-on-the-card) explains
-the report, and what one card showed: 52h sets the boost in steps of 0.75
-dB, and the model makes the stereo image from the mono sum. With the limit
-on, 54h and 56h each set a level of the S out, the register's value over 91
-times the M, plus a fixed part that 5Ah sets: the limit lowers the boost
-while the S out is over both levels and raises it while it is under 54h's.
-58h sets how fast the limit lowers the boost and how much slower it raises
-it again. With the limit off, 54h-5Ah do nothing.
+the report, and what one card showed: the boost is a band-pass with a zero
+at 0 Hz and poles near 380 and 540 Hz, 52h sets it in steps of 0.75 dB, and
+the model makes the stereo image from the mono sum. With the limit on, 54h
+and 56h each set a level of the S out, the register's value over 91 times
+the M, plus a fixed part that 5Ah sets: the limit lowers the boost while the
+S out is over both levels and raises it while it is under 54h's. 58h sets
+how fast the limit lowers the boost and how much slower it raises it again.
+With the limit off, 54h-5Ah do nothing.
 
 ### Putting ess3d on a key
 

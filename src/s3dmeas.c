@@ -936,14 +936,16 @@ static void unimage(double *v, double c2, double s2, double n) {
 // a glide's window, whose halves have sums x and y: the turn of the M out
 // of the M glide, or the S out of the S glide, from the first half to the
 // second, which a delay against the stimulus makes, and the amplitude the
-// lock-in loses to it, given back. A window that turns 0.25 more than the
-// glide's timing explains, 0.5 before it is timed, or whose halves differ
-// by 10 percent, counts as disturbed. The M glide's M out, which the
-// effect leaves as it is, times the glide.
+// lock-in loses to it, given back. The delay is the window's place against
+// the tone and the effect's own delay at that frequency, which changes
+// little from one twelfth of an octave to the next: a window that turns
+// 0.25 more than the window before it explains, or whose halves differ by
+// 10 percent, counts as disturbed. The M glide's M out, which the effect
+// leaves as it is without the model, times the glide.
 static void chirp_turn(struct s3d_meas *m, const double *x, const double *y) {
   struct s3d_win *w = &m->win[m->wcur];
   double n = w->rlen, nh = w->rlen / 2, sg = m->wcur < S3D_BINS ? 1 : -1;
-  double u[2], v[2], a1, a2, t, f, want = 0, tol = 0.5, noise;
+  double u[2], v[2], a1, a2, t, f, want, noise;
   int k, ch, bin = m->wcur % S3D_BINS;
 
   for (k = 0; k < 2; k++) {
@@ -953,17 +955,22 @@ static void chirp_turn(struct s3d_meas *m, const double *x, const double *y) {
   a1 = sqrt(u[0] * u[0] + u[1] * u[1]);
   a2 = sqrt(v[0] * v[0] + v[1] * v[1]);
   t = atan2(u[1] * v[0] - u[0] * v[1], u[0] * v[0] + u[1] * v[1]);
-  // the turn a frame is -glide d, where d is how late the tone comes
-  if (m->timed) {
-    tol = 0.25;
-    if (bin <= CHIRP_TIME_B + 1)
-      want = -w->glide * m->dly * n / 2;
-  }
+  // the turn a frame is -glide d, where d is how late the tone comes in
+  // recorded frames: as late as in the window before, and the timing's
+  // frames earlier where the windows were placed again
+  if (bin == 0)
+    m->late = m->timed ? m->dly : 0;
+  else if (bin == CHIRP_TIME_B + 2 && m->timed)
+    m->late -= m->dly;
+  want = -w->glide * m->late * n / 2;
   noise = 2 * m->sigma / sqrt(nh);
-  if (a1 + a2 >= 60 * noise &&
-      (fabs(a1 - a2) > 0.1 * (a1 + a2) / 2 || fabs(t - want) > tol))
-    if (!m->disturbed++)
+  if (a1 + a2 >= 60 * noise) {
+    if ((fabs(a1 - a2) > 0.1 * (a1 + a2) / 2 || fabs(t - want) > 0.25) &&
+        !m->disturbed++)
       m->first_bad = m->wcur;
+    if (w->glide > 0)
+      m->late = -2 * t / (n * w->glide);
+  }
   // a tone that turns by 2t / n a frame sums to n sin(t / n) / sin(t) of
   // what a steady one would
   if (fabs(t) > 1e-9 && fabs(t) < 1.5) {
@@ -1804,6 +1811,9 @@ static void disturbed_line(struct s3d_meas *m) {
             k >= W_DOWN ? "down" : "up");
   else if (r->kind == S3D_PAN)
     sprintf(line + strlen(line), "of the pan at %.1f degrees", 22.5 * k);
+  else if (r->kind == S3D_CHIRP)
+    sprintf(line + strlen(line), "of the %s glide at %.0f Hz",
+            k < S3D_BINS ? "M" : "S", s3d_bin_hz(k % S3D_BINS));
   else
     sprintf(line + strlen(line), "of the %s tone at %s",
             k < S3D_FREQS ? "M" : "S", freq_name[k % S3D_FREQS]);
@@ -2805,8 +2815,9 @@ static int roots(const double *c, int n, double *rr, double *ri) {
 // FIT_FAR kHz only counted. Each root under 10 Hz, far under the lowest
 // frequency measured, counts as a real one. "right half" marks one with a
 // positive real part, except with a Q over 50, where the side is too
-// close to tell.
-static void roots_text(const double *c, int n, char *out) {
+// close to tell. A zero there over twice the band turns the phase in the
+// band as a lag of 1 / (2 pi f) would, which it gives.
+static void roots_text(const double *c, int n, int zeros, char *out) {
   double rr[FIT_MAX], ri[FIT_MAX], mag, q;
   int i, k, over = 0, any = 0;
 
@@ -2830,8 +2841,12 @@ static void roots_text(const double *c, int n, char *out) {
       else
         strcat(out, " Q over 50");
     }
-    if (rr[i] > 1e-6 * mag && q < 50)
+    if (rr[i] > 1e-6 * mag && q < 50) {
       strcat(out, " right half");
+      if (zeros && !q && mag > 2 * s3d_bin_hz(S3D_BINS - 1) / 1000)
+        sprintf(out + strlen(out), ", as a lag of %.1f us",
+                1000 / (2 * PI * mag));
+    }
   }
   if (over)
     sprintf(out + strlen(out), "%s%d over %.0f kHz", any ? ", " : " ", over,
@@ -2880,9 +2895,9 @@ static void fit_roots(struct s3d_meas *m, const struct fit *f) {
 
   fit_peak(f, &db, &hz);
   sprintf(line, "     peak %+.1f dB at %.0f Hz; zeros", db, hz);
-  roots_text(f->num, f->nz, line);
+  roots_text(f->num, f->nz, 1, line);
   strcat(line, "; poles");
-  roots_text(f->den, f->np, line);
+  roots_text(f->den, f->np, 0, line);
   say(m, line);
 }
 

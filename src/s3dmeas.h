@@ -258,6 +258,7 @@ struct s3d_meas {
   // in recorded frames, once its windows have been placed again by it
   double dsum, dwt, dly;
   int timed;
+  double late;   // how late the window before had the tone, recorded frames
   int disturbed; // windows whose halves differ
   int first_bad; // the first of them
   double pc[2], ps[2], wc[2], ws[2];

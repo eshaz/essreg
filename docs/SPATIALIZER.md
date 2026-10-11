@@ -19,11 +19,13 @@ setting called *3D Limit*, and NetBSD calls 50h bit 1 *MONO*.
 `ess3d measure` measured them on a card ([What one card
 showed](#what-one-card-showed)):
 * The effect adds to the S, the difference of the two channels, a band-pass
-  copy of it, up to about +17 dB at 400 Hz, and leaves the M, their sum, as
-  it is. 52h sets this boost in steps of 0.75 dB.
-* 50h bit 1, the model, makes the S from the M through the same band-pass
-  and drops the program's own S: a stereo effect made from mono, as the
-  Solo-1's data sheet describes.
+  copy of it, up to about +17 dB at 450 Hz, and leaves the M, their sum, as
+  it is. The band-pass has a zero at 0 Hz and two poles near 380 and 540 Hz.
+  52h sets this boost in steps of 0.75 dB and leaves its shape as it is.
+* 50h bit 1, the model, makes the S from the M through about the same
+  band-pass and drops the program's own S: a stereo effect made from mono,
+  as the Solo-1's data sheet describes. It changes the M too, by up to 1.3
+  dB.
 * 50h bit 0, the limit, holds the S out under a level, 5.5 dB over the M
   with ESS's values and an M at -24 dBFS. It moves the boost down and up at
   fixed rates in dB a second, 51.5 down and 5.15 up with ESS's values, so it
@@ -204,9 +206,11 @@ showed](#what-one-card-showed)), and what is still open.
   stereo effect given a mono input", and the ES1946's data sheet calls 50h
   the "3-D Enable and Mode" register. On the card, the bit makes the S out
   of the M, through nearly the same band-pass as the boost and about 3 dB
-  lower, and drops the program's own S to between -24 and -44 dB. What you
-  hear is the effect's own image of the space, made from the mono sum, in
-  place of the program's stereo, and none of 54h-5Ah changes it. With the
+  lower, and drops the program's own S to between -24 and -44 dB. It also
+  changes the M by up to 1.3 dB, and the phase of its S against the M runs
+  the other way from the boost's ([The chirp plan](#the-chirp-plan)). What
+  you hear is the effect's own image of the space, made from the mono sum,
+  in place of the program's stereo, and none of 54h-5Ah changes it. With the
   limit on as well, the limit holds this S down too, and the M around 400 Hz
   drops by up to 9 dB with it, so in this mode part of the M also comes
   through the processed path.
@@ -394,9 +398,9 @@ a window, read against the glide's own phase. The start of the recording is
 known only to the millisecond, which would cost the top of the glide about 2
 dB, so the M glide's tone from 200 to 820 Hz gives how late the glide comes,
 and the later windows are placed again by it. The response and its phase in
-this detail show the order of each filter: the sweep runs suggest a
-first-order high-pass near 200 Hz, while the patent describes one of 18 dB
-an octave near 300 Hz.
+this detail show the order of each filter, which settled that the boost's
+high-pass is of the first order, not of 18 dB an octave as in the patent
+([The chirp plan](#the-chirp-plan)).
 
 `ess3d measure quick` runs each kind once or twice in about 2 minutes, and
 `ess3d measure 58` runs 58h from 00h to FFh in steps of 10h with the limit
@@ -440,11 +444,11 @@ varies, and lines that answer the questions of the readings above:
   within 20 percent of the best. The last line gives the boost's peak and
   the zeros and poles of the chosen fit, in Hz: a real one as its corner
   frequency, and a pair as its frequency and Q. Roots over 50 kHz only shape
-  the top of the band, so they are only counted. A zero in the right half,
-  with a pole at about the same frequency, is what a delay in the boost's
-  path would look like. The effect of /sim, a first-order high-pass at 200
-  Hz and a low-pass at 1 kHz, gives poles at 200 and 1003 Hz and a zero at 0
-  Hz, with a pair of zeros near 26 kHz from its digital low-pass.
+  the top of the band, so they are only counted. A real zero in the right
+  half, far over the band, turns the phase as a lag would, and the line
+  gives that lag. The effect of /sim, a first-order high-pass at 380 Hz and
+  a low-pass at 540 Hz, gives poles at 381 and 541 Hz and a zero at 0 Hz,
+  with a pair of zeros near 26 kHz from its digital low-pass.
 
 Every run with the limit off also checks that each of its tones gives the
 same amplitude and phase in both halves of its window. A window whose halves
@@ -452,7 +456,7 @@ differ means that the recording or the playback skipped there. In a step
 run, the limit moves the S out by at most 5.2 dB in 20 ms, so a window that
 jumps further from the one before means that the step came early or late,
 after a skip. In a chirp run, a window counts the same way when its tone
-turns more than the glide's timing explains, or its halves differ by 10
+turns more than the window before it explains, or its halves differ by 10
 percent. ess3d measures such a run again, logs it in `ESS3D.LOG`, and if it
 skips again, the report says from which window on its values may be off. One
 run of the card's second measurement and one of its third had such a skip,
@@ -480,10 +484,10 @@ two that need no measurement:
 ## What one card showed
 
 The card is an ES1869 under Windows 98 with the rebuilt drivers. It was
-measured five times: with the full plan of an earlier version of ess3d, with
+measured six times: with the full plan of an earlier version of ess3d, with
 the limit plan and the full plan of the next, with the limit plan once more,
-with runs added for bit 7, the M's level and the band with a fast limit, and
-with the window plan.
+with runs added for bit 7, the M's level and the band with a fast limit,
+with the window plan, and with the chirp plan.
 
 ### The first measurement
 
@@ -498,9 +502,10 @@ measurements confirm these values.
 **The boost.** With ESS's setting, S>S rises from +10.9 dB at 100 Hz to
 +17.9 dB at 400 Hz and falls to +0.5 dB at 10 kHz, and its phase goes from
 +50 degrees to -54. Taken apart, the boost added to the S is a band-pass of
-about 6 dB per octave on each side, with corners near 200 Hz and 1 kHz,
-+16.7 dB at its peak and turning from +65 degrees at 100 Hz to -104 at 10
-kHz. M>M stays at 0 dB, so the M passes as it is.
+about 6 dB per octave on each side, +16.7 dB at its peak and turning from
++65 degrees at 100 Hz to -104 at 10 kHz. These 11 tones put its corners near
+200 Hz and 1 kHz, and the chirp plan later put them at about 380 and 540 Hz.
+M>M stays at 0 dB, so the M passes as it is.
 
 **52h, the level.** The boost grows by 6 dB for every 8 steps of 52h, 0.75
 dB a step: at 400 Hz it is -24.5 dB at 08h, -12.7 at 18h, -0.4 at 28h, +11.4
@@ -660,6 +665,54 @@ between two windows than the limit can move it, which ess3d measured again.
 
 The plan now also has the M tone at 160 Hz and 2.5 kHz, and two runs that
 step the S back far enough to show the rise level.
+
+### The chirp plan
+
+The chirp plan read the effect in 96 twelfths of an octave from 51 Hz to
+12.4 kHz. Its *off again* run came within 0.1 dB of *off* at every
+frequency.
+
+**The boost.** With ESS's setting, S>S rises from +6.2 dB at 51 Hz to +18.0
+dB at 412 to 462 Hz and falls to -0.4 dB at 12.4 kHz, and its phase goes
+from +49 degrees through 0 at about 450 Hz to -55 at 2.6 to 3.3 kHz and back
+to -32. The fit takes the boost B = S>S - 1 as a band-pass with a zero at 0
+Hz and two real poles, at 376 and 542 Hz with ESS's setting and at 384 and
+533 Hz with 52h at 30h. That is a first-order high-pass and a first-order
+low-pass, both near 450 Hz, with a Q of 0.49 for the pair. A double pole at
+453 Hz, a Q of 0.5, fits nearly as well, so the two poles may be one. Under
+the poles the boost rises at 6 dB an octave, not at the 18 dB of the
+patent's high-pass.
+
+**A lag.** Both fits also have a zero in the right half, at 37 and 38 kHz,
+which turns the phase in the band as a lag of about 4 us would. Fitted with
+a lag of its own, the band-pass with two poles comes within 0.1 dB rms of
+both runs with a lag of 4 to 5 us. It is the reason that S>S falls under 0
+dB at the top: B turns past -90 degrees there, against the S that passes
+straight through.
+
+**52h.** With 52h at 30h, 15 steps under 3Fh, the peak of B is +5.6 dB
+against +16.8, 0.75 dB a step, and the poles stay where they are: 52h only
+scales the boost.
+
+**The model.** M>S has the boost's shape, its peak +14.0 dB at 412 to 490
+Hz, 2.8 dB under the boost's, and S>S falls to between -24 and -45 dB. M>M
+moves as well, from -1.3 dB at 51 Hz to +1.1 dB at 440 Hz and -1.0 dB over 4
+kHz, and the phase of M>S against M>M goes from -66 degrees at 51 Hz through
+0 at 450 Hz to +59 at 4 kHz, the other way from the boost's own. So the
+model adds some of the boosted M to the M as well. One reading, with the M
+out at -0.80 M + 0.29 B(M) and the S out at 0.74 B(M), comes within 0.9 dB
+and 14 degrees, so it is close but not exact. The fit for this run is of M>S
+over M>M, and its poles aren't the boost's.
+
+**The path.** M>S and S>M of the runs with the effect off are -38 dB under 1
+kHz and rise by about 6 dB an octave to -21.6 dB at 12.4 kHz, with their
+phase turning toward +90 degrees: between the DAC and the effect, or the
+effect and the ADC, one channel comes about 2 us after the other.
+
+**Skips.** ess3d counted 31 windows of the model run as skipped and measured
+it again, because its M has a delay of its own that changes with the
+frequency, so the glide's timing didn't fit its top windows. A window is now
+compared with the one before it.
 
 ## Sources
 

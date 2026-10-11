@@ -10,8 +10,10 @@
  * The right channel comes in 0.2 dB lower than the left, as on the card,
  * which puts a little of the M into the S. With 50h bits 3 and 2 set, the
  * S of the input, (L - R) / 2, gets a boost B through a first-order
- * high-pass at 200 Hz and a first-order low-pass at 1 kHz, 16.7 dB at its
- * peak with 52h at 3Fh and 0.75 dB less for each step below. 50h bit 1,
+ * high-pass at 380 Hz and a first-order low-pass at 540 Hz, the poles that
+ * the card's chirp runs gave, 16.8 dB at its peak at 453 Hz with 52h at
+ * 3Fh and 0.75 dB less for each step below. The card's boost also lags
+ * by about 4 us, which this one doesn't. 50h bit 1,
  * the model, makes the S from the M through the same boost, 3 dB lower,
  * and keeps only a 32nd of the input's own S.
  *

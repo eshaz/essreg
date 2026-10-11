@@ -15,7 +15,9 @@
 #define PI 3.14159265358979
 #define GAIN 0.5
 #define RIGHT 0.975       // the right channel's level against the left
-#define PEAK 8.2          // the boost's gain for 16.7 dB at its peak
+#define HP_HZ 380.0       // the boost's high-pass
+#define LP_HZ 540.0       // and low-pass, both first order
+#define PEAK 11.79        // and its gain, for 16.8 dB at its peak
 #define MODEL 0.70710678  // the model's S, 3 dB under the boost
 #define KEEP (1.0 / 32)   // the input's S that the model keeps
 #define DETECT 420.0      // the limit's high-pass on the S it follows
@@ -77,8 +79,8 @@ void s3dsim_regs(struct s3dsim *s, const u8 *reg) {
   // each run on the card started with the boost back
   s->gain = 1;
   s->env_m[0] = s->env_m[1] = s->env_s[0] = s->env_s[1] = 0;
-  first(200, s->rate, 1, s->hb);
-  first(1000, s->rate, 0, s->lb);
+  first(HP_HZ, s->rate, 1, s->hb);
+  first(LP_HZ, s->rate, 0, s->lb);
   s->g = boost_gain(reg);
   first(DETECT, s->rate, 1, s->db);
   // the envelopes are means of the absolute value, 2 / pi of a tone's
@@ -192,8 +194,8 @@ void s3dsim_response(const u8 *reg, u32 rate, double hz, double *re,
   re[2] = re[3] = cross / mi;
   if ((reg[0] & 0x0C) != 0x0C)
     return;
-  first(200, rate, 1, hb);
-  first(1000, rate, 0, lb);
+  first(HP_HZ, rate, 1, hb);
+  first(LP_HZ, rate, 0, lb);
   at(hb, w, &hr, &hi);
   at(lb, w, &lr, &li);
   br = boost_gain(reg) * (hr * lr - hi * li);

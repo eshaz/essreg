@@ -39,6 +39,8 @@ static int verbose;
 static int click;    // a DAC's click and its settling in the first 50 ms
 static u32 skip_at;  // a recorded frame where the recording skips, or 0
 static u32 stall_at; // a played frame where the playback stalls, or 0
+static int allpass;  // the M recorded through an all-pass at 300 Hz
+static double ap_x, ap_y;
 
 static void out(void *ctx, const char *line) {
   (void)ctx;
@@ -81,6 +83,26 @@ static void add_click(s16 *pcm, u16 n, u32 fed) {
   }
 }
 
+// the M of n recorded frames through a first-order all-pass at 300 Hz,
+// which keeps its level but delays it by 1 ms at the lowest frequencies
+// and hardly at all over 5 kHz, as an effect whose M has a delay of its
+// own would
+static void allpass_m(s16 *pcm, u16 n) {
+  double a = (tan(PI * 300 / S3D_RATE) - 1) / (tan(PI * 300 / S3D_RATE) + 1);
+  double m, s, y;
+  u16 k;
+
+  for (k = 0; k < n; k++) {
+    m = (pcm[2 * k] + pcm[2 * k + 1]) / 2.0;
+    s = (pcm[2 * k] - pcm[2 * k + 1]) / 2.0;
+    y = a * m + ap_x - a * ap_y;
+    ap_x = m;
+    ap_y = y;
+    pcm[2 * k] = (s16)floor(y + s + 0.5);
+    pcm[2 * k + 1] = (s16)floor(y - s + 0.5);
+  }
+}
+
 // run i through the effect: lead frames of silence come first, as a
 // recording that starts before the playback
 static int run_sim(int i, u32 lead) {
@@ -116,6 +138,8 @@ static int run_sim(int i, u32 lead) {
       played += n;
     }
     s3dsim_run(&sim, play, rec, n);
+    if (allpass)
+      allpass_m(rec, n);
     add_click(rec, n, fed);
     if (skip_at && fed <= skip_at && skip_at < fed + n) {
       // the recording loses 1000 frames, 21 ms
@@ -452,11 +476,11 @@ static void test_quick_plan(void) {
   CHECK(strstr(report[find_from(line, "  4  model")], "M>S appears"));
   CHECK(strstr(report[find_from(line, " 24  off again")], "no change"));
   CHECK(find_line("ratio limit: from S/M -24 to +6 dB, S>S at 1 kHz changes "
-                  "by -16.0 dB; it holds S out at +5.4 to +5.4 dB re M") > 0);
+                  "by -15.3 dB; it holds S out at +5.4 to +5.4 dB re M") > 0);
   CHECK(find_line("pan: 0, 22.5, 45, 67.5 and 90 degrees come out at -") > 0);
   CHECK(find_line("limit: the boost's gain in the step runs") > 0);
-  CHECK(find_line(" 22  step limit     0D 3F 8F 95 94 80      51 -15.5  +0.0 "
-                  "    +5.4      0    5.1   +0.0    >+4.3") > 0);
+  CHECK(find_line(" 22  step limit     0D 3F 8F 95 94 80      51 -14.5  +0.0 "
+                  "    +5.4      0    5.1   +0.0    >+3.6") > 0);
   check_report_lines();
 }
 
@@ -488,7 +512,7 @@ static void test_full_plan(void) {
   CHECK(find_line("held: S out from -6.6 dB re M (run 47, vec neg) to +9.6 dB "
                   "(run 39, L 54=FF)") > 0);
   // one model for the level of every step run
-  CHECK(find_line("fit: S out held = M x the higher of 54h and 56h / 91.6 + "
+  CHECK(find_line("fit: S out held = M x the higher of 54h and 56h / 91.7 + "
                   "-36.5 dBFS x 5Ah / 80h, from 14 runs: within 0.12 dB") > 0);
   check_report_lines();
   if (verbose)
@@ -573,17 +597,17 @@ static void test_window_plan(void) {
   line = find_line("levels: ");
   CHECK(line > 0);
   CHECK(find_from(line, "  3  step limit     0D 3F 8F 95 94 80     +4.2   "
-                        "-36.4  3, 4, 5, 6, 19") > 0);
+                        "-36.3  3, 4, 5, 6, 19") > 0);
   CHECK(find_from(line, "  7  L 5A=00        0D 3F 8F 95 94 00     +4.2       "
                         "-  7, 8") > 0);
   CHECK(find_from(line, " 12  L 54=AF        0D 3F AF 95 94 80     +5.6   "
-                        "-36.3  12, 13") > 0);
+                        "-36.4  12, 13") > 0);
   CHECK(find_from(line, " 14  L 80 80        0D 3F 80 80 94 80     +2.9   "
                         "-36.4  14, 15") > 0);
   // and the one model for all of them, with the rise 0.5 dB over 54h's
   // level, as in the effect
-  CHECK(find_line("fit: S out held = M x the higher of 54h and 56h / 91.9 + "
-                  "-36.4 dBFS x 5Ah / 80h, from 25 runs: within 0.08 dB") > 0);
+  CHECK(find_line("fit: S out held = M x the higher of 54h and 56h / 92.0 + "
+                  "-36.3 dBFS x 5Ah / 80h, from 25 runs: within 0.09 dB") > 0);
   CHECK(find_line("rise level: where the boost stopped rising short of the "
                   "level held, it stopped +0.6 dB over 54h's level of the fit "
                   "(runs 23, 24)") > 0);
@@ -798,7 +822,7 @@ static int fit_lines(int i, int *chosen, int *roots) {
 
 // the chirp plan: each twelfth of an octave against the effect's own
 // response, and the filters the summary fits: the boost's high-pass at
-// 200 Hz and low-pass at 1 kHz, with a zero at 0 Hz
+// 380 Hz and low-pass at 540 Hz, with a zero at 0 Hz
 static void test_chirp_plan(void) {
   const struct s3d_chirp *c;
   int i, k, p, q, n = 0, chosen, roots;
@@ -844,20 +868,22 @@ static void test_chirp_plan(void) {
   // the chirp runs in the summary, at a frequency of their own
   CHECK(find_line("  2  52=30          0C 30 8F 95 94 80     1  S>S") >= 0);
   // the fits: ESS's boost, the lower level and the model's M>S each find
-  // the poles at 200 Hz and 1 kHz and the zero at 0 Hz
+  // the poles at 380 and 540 Hz and the zero at 0 Hz
   for (i = 1; i <= 3; i++) {
     CHECK(fit_lines(i, &chosen, &roots));
     if (roots < 0)
       continue;
     CHECK_EQ(hz_list(report[roots], "; poles", hz, 4), 2);
-    CHECK(fabs(hz[0] - 200) < 4 && fabs(hz[1] - 1000) < 20);
+    CHECK(fabs(hz[0] - 380) < 8 && fabs(hz[1] - 540) < 10);
     CHECK(hz_list(report[roots], "; zeros", hz, 4) >= 1);
     CHECK(hz[0] < 2);
     CHECK(strstr(report[chosen], "rms 0.0") != 0);
   }
   CHECK(fit_lines(1, &chosen, &roots));
   if (roots >= 0)
-    CHECK(!strncmp(report[roots], "     peak +16.7 dB at 4", 23));
+    CHECK(!strncmp(report[roots], "     peak +16.8 dB at 45", 24));
+  // the runs with the effect off have nothing to fit
+  CHECK(find_from(find_line("filters:"), "  4  off again") < 0);
 }
 
 // set chirp run i's results to a boost B = num(s) / den(s), s = j f / 1
@@ -909,8 +935,10 @@ static void test_filter_fit(void) {
   // 300 Hz
   static const double num2[4] = {0, 0, 0, 3};
   static const double den2[5] = {0.027, 0.1935, 0.69, 1.3, 0.5};
-  // 8.2 s / ((s + 0.2) (s + 1)): ESS's boost, as the effect of /sim has it
-  static const double num3[2] = {0, 8.2}, den3[3] = {0.2, 1.2, 1};
+  // 6.365 s / ((s + 0.38) (s + 0.54)): ESS's boost, as the card's chirp
+  // runs gave it
+  static const double num3[2] = {0, 6.365}, den3[3] = {0.2052, 0.92, 1};
+  static const double num4[3] = {0, 6.365, -6.365 / 37};
   int chosen, roots, k;
   double hz[4];
 
@@ -926,7 +954,10 @@ static void test_filter_fit(void) {
     meas.chirp[meas.run[3].slot].db[1][k] += (float)(0.05 * sin(k * 1.7));
     meas.chirp[meas.run[3].slot].ph[0][k] += (float)(0.3 * cos(k * 2.3));
   }
-  meas.run[4].result = 0xFF;
+  // the same with a zero in the right half at 37 kHz, as the card's fit
+  // has it
+  meas.run[4].reg[S3D_R50] = 0x0C;
+  set_boost(4, num4, 2, den3, 2);
   s3d_summary(&meas);
   CHECK(fit_lines(1, &chosen, &roots));
   if (roots >= 0) {
@@ -949,10 +980,43 @@ static void test_filter_fit(void) {
   if (roots >= 0) {
     CHECK(strstr(report[chosen], "1 zero, 2 poles: rms 0.0") != 0);
     CHECK_EQ(hz_list(report[roots], "; poles", hz, 4), 2);
-    CHECK(fabs(hz[0] - 200) < 4 && fabs(hz[1] - 1000) < 20);
+    CHECK(fabs(hz[0] - 380) < 8 && fabs(hz[1] - 540) < 10);
   }
-  // the runs with the effect off have nothing to fit
-  CHECK(find_line("  4  off again") < 0);
+  // and the zero in the right half as the lag that it makes
+  CHECK(fit_lines(4, &chosen, &roots));
+  if (roots >= 0) {
+    CHECK(strstr(report[chosen], "2 zeros, 2 poles: rms 0.00 dB") != 0);
+    CHECK(strstr(report[roots], "; zeros 0 Hz, 37000 Hz right half, as a "
+                                "lag of 4.3 us; poles ") != 0 ||
+          strstr(report[roots], "; zeros 37000 Hz right half, as a lag of "
+                                "4.3 us, 0 Hz; poles ") != 0);
+  }
+}
+
+// a chirp run whose M has a delay of its own, which changes with the
+// frequency and times the glide differently from the reference: no
+// window counts as disturbed, and M>M stays at 0 dB
+static void test_chirp_m_delay(void) {
+  const struct s3d_chirp *c;
+  double worst = 0;
+  int k;
+
+  nlines = 0;
+  s3d_init(&meas, S3D_PLAN_CHIRP, 0, out, 0);
+  s3dsim_reset(&sim, S3D_RATE);
+  s3d_header(&meas, S3D_RATE, S3D_RATE, 0);
+  CHECK_EQ(run_sim(0, 2000), S3D_OK);
+  allpass = 1;
+  ap_x = ap_y = 0;
+  CHECK_EQ(run_sim(1, 2100), S3D_OK);
+  allpass = 0;
+  c = &meas.chirp[run(1)->slot];
+  for (k = 0; k < S3D_BINS; k++)
+    if (fabs(c->db[0][k]) > worst)
+      worst = fabs(c->db[0][k]);
+  CHECK(worst < 0.05);
+  if (worst >= 0.05)
+    printf("  chirp with the M delayed: M>M off by %.3f dB\n", worst);
 }
 
 // a chirp run whose recording skips, before the glide is timed and after
@@ -987,6 +1051,7 @@ int main(int argc, char **argv) {
   test_no_signal();
   test_chirp_plan();
   test_filter_fit();
+  test_chirp_m_delay();
   test_chirp_skip();
   return CHECK_DONE("t_s3dmeas");
 }
