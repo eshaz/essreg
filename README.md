@@ -142,9 +142,10 @@ level +N, -N      up or down N steps, stopping at 0 and 63
 up [N], down [N]  up or down N steps, 4 if N is left out
 reset             reset the effect, keeping on/off and the level
 hold              hold the effect in reset (on or reset releases it)
-limit on, off, toggle   the 3-D limit (mixer 50h bit 0, undocumented)
-model on, off, toggle   the 3-D model (mixer 50h bit 1, undocumented),
-                  also called mono
+limit on, off, toggle   the limit on the width (mixer 50h bit 0,
+                  undocumented)
+mono on, off, toggle    the mono mode, stereo made from the mono sum
+                  (mixer 50h bit 1, undocumented), also called model
 reg XX YY         Spatializer register XX (54, 56, 58 or 5A) to YY, in hex
 defaults          what ESS's driver sets when Windows starts: 3-D on,
                   level 63, limit off, 54h-5Ah 8Fh, 95h, 94h and 80h
@@ -249,13 +250,41 @@ changes.
 `ess3d tray` puts an icon in the taskbar's tray, next to the clock. The icon
 shows a green *3D* while the effect is heard and turns gray while the effect
 is off or held in reset, and its tooltip shows the setting. A click on the
-icon, with either button, opens a small panel with every 3-D setting:
-* Check boxes switch 3-D on, release it from reset, and set the model and
-  limit bits. *Reset* resets the effect.
-* The level and each Spatializer register have a text field with a slider to
-  its right, which moves in steps of one. The text field takes the level in
-  decimal and the registers in hex, and writes the value when you press
-  Enter or leave the field.
+icon, with either button, opens a small panel with every 3-D setting. It is
+laid out like ESS's own 3-D panel, *ES938 Controls* in ESS's OS/2 drivers,
+with a group for each stage that the sound goes through:
+* *Spatializer*, the effect itself, with a switch for each bit of mixer 50h,
+  so that every value can be set. *On* (bit 3) turns it on, and *Hold in
+  reset* (bit 2 clear) keeps it in reset, which is as good as off. *Stereo*
+  widens the program's own stereo: it adds a band-pass copy of the S, the
+  difference of the two channels. *Mono* (bit 1) makes a stereo effect from
+  the mono sum instead: the S comes from the M through the same band-pass,
+  and the program's own S is dropped. *Effect* (52h) sets how much, up to
+  +16.8 dB near 450 Hz at 63, 0.75 dB less for each step under it. *Reset*
+  resets the effect.
+* *Automatic effect level* (50h bit 0, ESS's *3D Limit*). With it *On*, the
+  effect lowers its own boost while the S that it makes is over a level set
+  against the M, and raises it again once the S is under, as a compressor
+  would on the effect alone. A program that is already wide then gets less
+  effect, and a narrow one the full effect. Its rows are, as one card
+  measured them ([docs/SPATIALIZER.md](docs/SPATIALIZER.md)):
+  * *Lower above* (56h): the effect is lowered while its S is over this
+    level and the raise level, M +4.3 dB at 95h.
+  * *Raise below* (54h): the effect is raised while its S is under this
+    level, M +3.9 dB at 8Fh. The S is held at the higher of the two.
+  * *Fixed level* (5Ah): a level added to both, -36.3 dBFS at 80h, so that
+    quiet sound keeps the full effect.
+  * *Lower speed* (58h bits 3:0, n): 257.5 / (n + 1) dB a second, 51.5 at 4.
+  * *Raise speed* (58h bits 7:4, h): the lower speed over h + 1, 5.15 dB a
+    second at 9.
+
+Each row has a text field and a slider to its right over the whole range of
+the field, in steps of one, with a word at each end of the slider and what
+the value does after it, which follows the slider as it moves. With the
+rebuilt `ES1869.VXD`, the value is written as the slider moves, and with
+ESS's own only when you let go of it. The text field takes 54h, 56h and 5Ah
+in hex and the others in decimal, and writes the value when you press Enter
+or leave the field. Under the groups:
 * *Driver defaults* sets what ESS's driver sets when Windows starts.
 * *Close tray icon* removes the icon, as `ess3d exit` does.
 
@@ -263,9 +292,10 @@ The panel closes when you click somewhere else, click the icon again or
 press Esc. Every change is written and read back, so the panel shows what
 the chip returned. The icon follows ess3d's commands and essctl's 3-D
 settings, and with the rebuilt `ES1869.VXD` it also reads the setting every
-3 seconds, so it follows the Windows mixer too. The panel has every
-Spatializer register in essctl's list, so a register found later appears in
-the panel, in `ess3d reg` and in essctl.
+3 seconds, so it follows the Windows mixer too. The panel has every field of
+the Spatializer registers in essctl's list, so one found later appears in
+the panel, in `ess3d reg` and in essctl. `ess3d reg 58 94` still sets the
+whole of 58h, both speeds at once.
 
 To have the icon at every start of Windows, put a shortcut with the command
 line `C:\ESSREG\ESS3D.EXE tray` in the Start menu's *Programs* > *StartUp*

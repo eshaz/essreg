@@ -240,10 +240,13 @@ static void show_edit(struct row *r, int pos, int force) {
   SetWindowText(r->edit, text);
 }
 
-// next to the text field: the decoded value, or the range
+// next to the text field: what the value does in its units, the decoded
+// value, or the range
 static void range_text(const struct row *r, u8 raw, char *text, unsigned size) {
   const struct ess_field *f = &ess_fields[r->field];
 
+  if (cat_unit(f, raw, text, size))
+    return;
   if (f->fmt != FMT_NONE)
     cat_format(f, raw, text, size);
   else if (f->kind == K_HEX)
@@ -666,7 +669,11 @@ void fields_hscroll(int code, int pos, HWND ctl) {
   if (code == SB_THUMBTRACK && !winio_can_poll()) {
     // direct I/O with ES1869.VXD, only write when the thumb is released
     drag_row = i;
-    range_text(r, cat_set(f, 0, slider_value(f, cur)), text, sizeof(text));
+    // the other fields of the register as the chip has them, for the
+    // 3-D rise, which is the fall over h + 1
+    range_text(r,
+               cat_set(f, (u8)(r->raw >= 0 ? r->raw : 0), slider_value(f, cur)),
+               text, sizeof(text));
     SetWindowText(r->val, text);
     return;
   }

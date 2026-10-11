@@ -41,8 +41,16 @@ showed](#what-one-card-showed)):
   of 58h set how fast the boost falls, and its high four bits how much
   slower it rises.
 
-essctl, `ess3d` and the tray panel can set every one of these registers, and
-call 54h-5Ah the limit's rise, fall, speed and offset.
+essctl, `ess3d` and the tray panel can set every one of these registers.
+essctl and the panel show each value with what it does, from the card's
+measurements: 52h as the boost's peak in dB, 54h and 56h as the limit's rise
+and fall levels against the M, the two halves of 58h as its rise and fall
+speeds in dB a second, and 5Ah as its fixed level in dBFS. The fixed level
+is in dBFS of the tones that ess3d plays, with the mixer as it measures.
+`ess3d` and the panel call 50h bit 1 *mono*, as NetBSD does, and keep ESS's
+name for bit 0, the *limit*; the panel shows the limit as the *automatic
+effect level*, which is what it does. The measurement's runs still call bit
+1 the model.
 
 ## Where it comes from
 
@@ -162,6 +170,15 @@ Each item names a driver and says what it writes to 50h, to 52h and to
 * **Linux esssolo1.c (OSS, Solo-1).** It writes the level to 52h, and 08h or
   00h to 50h, which leaves bit 2 clear, so the effect stays in reset. It
   never writes 54h-5Ah.
+
+ESS's ES1869 drivers for Windows 3.1 (ES1869WN.DRV 4.17.07), NT 4.0 and
+Windows 95, in `driver/es1869f`, give the Windows mixer only two of these
+controls: *Spatial Enable* and *Spatial Effect*, which Windows 95's driver
+calls *3D Effect Enable* and *3D Effect*, that is 50h bit 3 and 52h. Their
+OS/2 drivers add *ES938 Controls* (`OS2/INSTALL/ES938.EXE`), a panel for an
+ES938 beside the chip, with a *Tone Controls* group of Bass and Treble
+sliders and a *Spatializer* group of Off, Min, Mid and Max, the four
+settings of the ES938's register 5. ess3d's tray panel follows its layout.
 
 ESS's drivers and Linux write the same four values, and Linux calls them
 "recommended values", which suggests that they come from ESS's own
@@ -530,7 +547,7 @@ two that need no measurement:
    `ess3d reg 54 FF`, and read each value back. Bits that stay 0 don't
    exist.
 3. Listen. Play music with a wide stereo image, and a mono voice. Try
-   `ess3d model toggle` and `ess3d limit toggle` with the 3-D level high,
+   `ess3d mono toggle` and `ess3d limit toggle` with the 3-D level high,
    then try each register from 00h to FFh with `ess3d reg` or the tray
    panel's sliders, and note what changes. `ess3d defaults` puts ESS's
    values back.
@@ -540,11 +557,11 @@ two that need no measurement:
 ## What one card showed
 
 The card is an ES1869 under Windows 98 with the rebuilt drivers. It was
-measured seven times: with the full plan of an earlier version of ess3d,
+measured eight times: with the full plan of an earlier version of ess3d,
 with the limit plan and the full plan of the next, with the limit plan once
 more, with runs added for bit 7, the M's level and the band with a fast
-limit, with the window plan, with the chirp plan, and with the full plan
-that gives every property.
+limit, with the window plan, with the chirp plan, and twice with the full
+plan that gives every property.
 
 ### The first measurement
 
@@ -827,6 +844,16 @@ level, and less width.
 **The floor and the ratio.** The boost's gain went down to -47.5 dB and no
 lower. From S/M -24 to +6 dB, the limit held the S out at +5.4 to +5.5 dB
 over the M, and with 52h at 30h at +5.5 dB.
+
+**The second run.** The full plan run again with the fixes above agreed to
+within 0.2 dB, 1 Hz and 2 percent: poles at 368 and 552 Hz, +16.8 dB, a lag
+of 5.2 us, 52h 0.75 dB a step down to -30.8 dB at 00h, the levels as the
+value over 91.1 times the M plus -36.2 dBFS at 5Ah 80h, and the floor at
+-47.6 dB. The fall of every run now came within 2.4 percent of 258.0 / (n
++ 1) dB a second, *L M 160 Hz* included. With 5Ah's part taken out, the M
+  reached the limit through a high-pass at 464 Hz, within 0.25 dB, and the
+  model's runs with 54h-5Ah at other values moved no path by more than 0.02
+  dB. 50h at 08h added 0.44 dB to S>S at 55 Hz, and no run noted a skip.
 
 **Skips.** ess3d noted a skip from the first window of the S glide in two
 runs with the model on. The model leaves that S 24 to 45 dB down, too weak

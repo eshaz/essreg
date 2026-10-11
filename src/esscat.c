@@ -141,11 +141,112 @@ int cat_adc_offset(u8 raw) {
   return 64 * (raw & 0x0F);
 }
 
+// the 3-D effect as one card measured it (docs/SPATIALIZER.md): the boost
+// at 52h 3Fh and its step, in hundredths of a dB; 54h's and 56h's
+// levels, the value over 91.2 times the M; the fall, 257.5 dB a second
+// over n + 1, in hundredths; and 5Ah's fixed level at 80h, in hundredths
+// of a dBFS
+#define BOOST_TOP 1680
+#define BOOST_STEP 75
+#define LEVEL_TENTHS 912
+#define FALL_TOP 25750UL
+#define FIXED_80 -3630
+
+// 20 log10(num / den) in thousandths of a dB, without floating point
+static long db_milli(u16 num, u16 den) {
+  // 20 log10(1 + k / 16)
+  static const int tab[17] = {0,    527,  1023, 1493, 1938, 2362,
+                              2766, 3152, 3522, 3876, 4217, 4545,
+                              4861, 5166, 5460, 5745, 6021};
+  u32 q;
+  long r = 0;
+  unsigned k, x;
+
+  if (!num || !den)
+    return -999999L;
+  // num / den with 15 bits of fraction, then into 1 to 2, 6.021 dB an
+  // octave
+  q = ((u32)num << 15) / den;
+  for (; q >= 0x10000UL; q >>= 1)
+    r += 6021;
+  for (; q < 0x8000UL; q <<= 1)
+    r -= 6021;
+  x = (unsigned)(q - 0x8000UL);
+  k = x >> 11;
+  x &= 0x7FF;
+  return r + tab[k] + ((long)(tab[k + 1] - tab[k]) * (long)x + 1024) / 2048;
+}
+
+// hundredths as text with one decimal, or two under 10 if fine is set
+static void put_hundredths(char *out, long v, int sign, int fine) {
+  unsigned long a = (unsigned long)(v < 0 ? -v : v);
+  int two = fine && a < 995UL;
+  unsigned long r = two ? a : (a + 5) / 10; // hundredths, or tenths
+  const char *s = v < 0 && r ? "-" : sign ? "+" : "";
+
+  if (two)
+    sprintf(out, "%s%lu.%02lu", s, r / 100, r % 100);
+  else
+    sprintf(out, "%s%lu.%lu", s, r / 10, r % 10);
+}
+
+int cat_unit(const struct ess_field *f, u8 raw, char *buf, unsigned size) {
+  char tmp[32];
+  u8 v = cat_get(f, raw);
+  unsigned long n = (raw & 0x0F) + 1UL, h = (raw >> 4) + 1UL;
+
+  switch (f->fmt) {
+  case FMT_3D_BOOST:
+    put_hundredths(tmp, BOOST_TOP - BOOST_STEP * (long)(cat_max(f) - v), 1, 0);
+    strcat(tmp, " dB");
+    break;
+  case FMT_3D_LEVEL:
+    if (!v) {
+      strcpy(tmp, "none");
+      break;
+    }
+    strcpy(tmp, "M ");
+    put_hundredths(tmp + 2, db_milli((u16)(v * 10), LEVEL_TENTHS) / 10, 1, 0);
+    strcat(tmp, " dB");
+    break;
+  case FMT_3D_FALL:
+    put_hundredths(tmp, (long)((FALL_TOP + n / 2) / n), 0, 1);
+    strcat(tmp, " dB/s");
+    break;
+  case FMT_3D_RISE:
+    put_hundredths(tmp, (long)((FALL_TOP + n * h / 2) / (n * h)), 0, 1);
+    strcat(tmp, " dB/s");
+    break;
+  case FMT_3D_FIXED:
+    if (!v) {
+      strcpy(tmp, "none");
+      break;
+    }
+    put_hundredths(tmp, FIXED_80 + db_milli(v, 0x80) / 10, 1, 0);
+    strcat(tmp, " dBFS");
+    break;
+  default:
+    if (size)
+      buf[0] = 0;
+    return 0;
+  }
+  strncpy(buf, tmp, size - 1);
+  buf[size - 1] = 0;
+  return 1;
+}
+
 void cat_format(const struct ess_field *f, u8 raw, char *buf, unsigned size) {
   char tmp[64];
   u8 v = cat_get(f, raw);
   const char *text;
 
+  if (cat_unit(f, raw, tmp, sizeof(tmp))) {
+    // and the value itself, as for the rates
+    sprintf(tmp + strlen(tmp), f->kind == K_HEX ? " (%02Xh)" : " (%u)", v);
+    strncpy(buf, tmp, size - 1);
+    buf[size - 1] = 0;
+    return;
+  }
   switch (f->fmt) {
   case FMT_RATE_A1:
     sprintf(tmp, "%lu Hz (%02Xh)", (unsigned long)cat_rate_a1(v), v);

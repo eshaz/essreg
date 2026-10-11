@@ -652,22 +652,34 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
 7. Start the tray icon with `C:\ESSREG\ESS3D.EXE tray` from Start > *Run*.
    * A *3D* icon appears next to the clock, green if 3-D is on and gray if
      it's off. When you point at it, the tooltip shows the setting.
-   * Right-click the icon. A panel opens above it with *3-D effect*, *3-D
-     released from reset*, *3-D model (undocumented)*, *3-D limit
-     (undocumented)*, a *Reset* button, *3-D level* and the registers
-     54h-5Ah. A left click opens the panel too.
-   * Switch *3-D effect* on and click the arrows of the level slider. The
-     icon turns green, the music changes, and the text field counts in steps
-     of one. Type 30 in the level's text field and press Enter, and the
-     slider moves.
+   * Right-click the icon. A panel opens above it with a *Spatializer* group
+     (*On*, *Hold in reset*, *Stereo* and *Mono*, *Reset* and the *Effect*
+     slider) and an *Automatic effect level* group (*On*, then *Lower
+     above*, *Raise below*, *Fixed level*, *Lower speed* and *Raise speed*),
+     as ESS's *ES938 Controls* has its groups. A left click opens the panel
+     too.
+   * Check *On* and click the arrows of the *Effect* slider. The icon turns
+     green, the music changes, and the text field counts in steps of one.
+     Type 30 in its text field and press Enter, and the slider moves. Drag
+     the slider, and with the rebuilt `ES1869.VXD` the music follows as it
+     moves.
+   * Click *Mono* with a stereo recording. The stereo of the recording goes,
+     and a width made from the mono sum takes its place. Click *Stereo* to
+     have it back.
    * The panel closes when you click the desktop, when you click the icon
      again, and when you press Esc. Try each one.
-   * Run `ess3d off` from a shortcut key, and the icon turns gray. Change
-     *3-D effect* in essctl, and the icon follows.
+   * Run `ess3d off` from a shortcut key, and the icon turns gray and the
+     panel's *On* clears. Change *3-D effect* in essctl, and the icon
+     follows.
+   * Run `ess3d hold`, and *Hold in reset* is checked. Clear it, and the
+     effect is heard again.
    * With the extended driver, change 3-D in the Windows mixer. The icon
      follows within 3 seconds.
-   * Click *Driver defaults*. The panel shows 3-D on, level 63, the limit
-     off, and 8Fh, 95h, 94h and 80h in 54h-5Ah.
+   * Click *Driver defaults*. The panel shows *On* and *Stereo*, the effect
+     at 63 and +16.8 dB, the automatic effect level off, the levels at 95h
+     and 8Fh, M +4.3 dB and M +3.9 dB, the fixed level at 80h, -36.3 dBFS,
+     and the speeds at 4 and 9, 51.5 and 5.15 dB a second. Move the lower
+     speed's slider, and the raise speed's dB a second follows it.
    * A second `ess3d tray` opens the panel. *Close tray icon* removes the
      icon. Start it again with `ess3d tray`, then run `ess3d exit`, and the
      icon goes too.
@@ -687,7 +699,7 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
      the *Raw registers* page and read it back, then do the same with 00h.
      Note which bits stay.
    * With music playing, once with a wide stereo image and once with a mono
-     voice, try `ess3d model toggle` and `ess3d limit toggle` at level 63,
+     voice, try `ess3d mono toggle` and `ess3d limit toggle` at level 63,
      then `ess3d reg 54 00`, `ess3d reg 54 FF` and the same for 56, 58 and
      5A. `ess3d defaults` puts ESS's values back.
    * Close every program that plays or records, then run

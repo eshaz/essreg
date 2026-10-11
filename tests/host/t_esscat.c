@@ -160,9 +160,53 @@ static void test_formulas(void) {
   cat_format(field("fx.3d.enable"), 0x08, buf, sizeof(buf));
   CHECK(strcmp(buf, "on") == 0);
   cat_format(field("fx.3d.level"), 0x2A, buf, sizeof(buf));
-  CHECK(strcmp(buf, "42 / 63") == 0);
+  CHECK(strcmp(buf, "+1.1 dB (42)") == 0);
   cat_format(field("rec.source"), 0x06, buf, sizeof(buf));
   CHECK(strcmp(buf, "Line") == 0);
+}
+
+// the 3-D fields in their units, as one card measured them
+static void test_units(void) {
+  static const struct {
+    const char *key;
+    u8 raw;
+    const char *text;
+  } want[] = {{"fx.3d.level", 0x3F, "+16.8 dB"},
+              {"fx.3d.level", 0x00, "-30.5 dB"},
+              {"fx.3d.reg54", 0x8F, "M +3.9 dB"},
+              {"fx.3d.reg56", 0x95, "M +4.3 dB"},
+              {"fx.3d.reg56", 0xFF, "M +8.9 dB"},
+              {"fx.3d.reg54", 0x5B, "M +0.0 dB"},
+              {"fx.3d.reg54", 0x0F, "M -15.7 dB"},
+              {"fx.3d.reg54", 0x01, "M -39.2 dB"},
+              {"fx.3d.reg54", 0x00, "none"},
+              {"fx.3d.speed.fall", 0x94, "51.5 dB/s"},
+              {"fx.3d.speed.fall", 0x00, "257.5 dB/s"},
+              {"fx.3d.speed.fall", 0x0F, "16.1 dB/s"},
+              {"fx.3d.speed.rise", 0x94, "5.15 dB/s"},
+              {"fx.3d.speed.rise", 0x04, "51.5 dB/s"},
+              {"fx.3d.speed.rise", 0xFF, "1.01 dB/s"},
+              {"fx.3d.reg5a", 0x80, "-36.3 dBFS"},
+              {"fx.3d.reg5a", 0x40, "-42.3 dBFS"},
+              {"fx.3d.reg5a", 0xFF, "-30.3 dBFS"},
+              {"fx.3d.reg5a", 0x00, "none"}};
+  char buf[32];
+  unsigned i;
+
+  for (i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+    CHECK(cat_unit(field(want[i].key), want[i].raw, buf, sizeof(buf)));
+    CHECK(strcmp(buf, want[i].text) == 0);
+    if (strcmp(buf, want[i].text))
+      printf("  %s at %02Xh: %s, not %s\n", want[i].key, want[i].raw, buf,
+             want[i].text);
+  }
+  // and the value after it
+  cat_format(field("fx.3d.reg54"), 0x8F, buf, sizeof(buf));
+  CHECK(strcmp(buf, "M +3.9 dB (8Fh)") == 0);
+  cat_format(field("fx.3d.speed.rise"), 0x94, buf, sizeof(buf));
+  CHECK(strcmp(buf, "5.15 dB/s (9)") == 0);
+  // a field without units
+  CHECK(!cat_unit(field("fx.3d.enable"), 0x08, buf, sizeof(buf)) && !buf[0]);
 }
 
 static void test_parse(void) {
@@ -308,6 +352,7 @@ int main(void) {
   test_tables();
   test_get_set();
   test_formulas();
+  test_units();
   test_parse();
   test_tiers();
   test_essio();

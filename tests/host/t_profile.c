@@ -176,6 +176,28 @@ static void test_bad_entries(void) {
   CHECK_EQ(simhw.mixer[0x70], 0); // the expert key was not applied
 }
 
+// a profile from before 58h was two fields loads into both, and one
+// field's own key wins over the register's
+static void test_split_key(void) {
+  struct prof_report rep;
+
+  chip();
+  nini = 0;
+  mem_put(0, PROF_FIELDS, "fx.3d.reg58", "148");
+  CHECK_EQ(prof_load(&io, &rep), 0);
+  CHECK_EQ(simhw.mixer[0x58], 0x94);
+  nini = 0;
+  mem_put(0, PROF_FIELDS, "fx.3d.speed.fall", "2");
+  mem_put(0, PROF_FIELDS, "fx.3d.reg58", "3Ch");
+  CHECK_EQ(prof_load(&io, &rep), 0);
+  CHECK_EQ(simhw.mixer[0x58], 0x32);
+  nini = 0;
+  mem_put(0, PROF_FIELDS, "fx.3d.reg58", "300");
+  prof_load(&io, &rep);
+  CHECK_EQ(rep.invalid, 1);
+  CHECK_EQ(rep.unknown, 0);
+}
+
 static void test_dsp_busy(void) {
   struct prof_report rep;
 
@@ -214,6 +236,7 @@ static void test_save_busy(void) {
 int main(void) {
   test_round_trip();
   test_bad_entries();
+  test_split_key();
   test_dsp_busy();
   test_save_busy();
   return CHECK_DONE("t_profile");

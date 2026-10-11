@@ -38,7 +38,9 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   (SYSTEM.INI, and the Audio 2 mode after every mixer reset), `fixdata.asm`
   (their data) and `fix.inc` (constants and ESS's device fields).
 * `driver/` holds ESS's original drivers, the reference for the
-  byte-identical rebuilds, and `build/` the committed binaries.
+  byte-identical rebuilds, with ESS's ES1869F driver sets for Windows 3.1,
+  NT 4.0, Windows 95 and OS/2 in `driver/es1869f/`, and `build/` the
+  committed binaries.
 * `tools/` holds the builders, the RE tools, `guard.py`, `wineshot.sh` and
   `dualwav.py`, which makes 4-channel files for dual playback. `tests/`
   holds the Python tests (`esfmemu.py`, `vxdemu.py` and `drvemu.py` run the
@@ -178,7 +180,9 @@ tools/wineshot.sh run ess3d.exe /sim tray
   `fx.3d.*` field on `PG_EFFECTS`, and essctl, `ess3d reg` and the tray
   panel pick it up from there (`ess3d_regs()` in `src/ess3d.c`), up to
   `ESS3D_MAX_REGS`. Its value at Windows start goes in `driver_regs`, for
-  `ess3d defaults`.
+  `ess3d defaults`. What its value does goes in `cat_unit()`
+  (`src/esscat.c`), with an `FMT_3D_*` format, so that essctl and the panel
+  show it next to the slider.
 * **Ranged settings** (levels, and signed and raw values) are a text field
   with a slider on its right, in steps of one, in essctl, in its bit editor
   and in the tray panel.

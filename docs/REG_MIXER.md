@@ -346,25 +346,26 @@ DS p.62.
 * **2 3-D released from reset** (`fx.3d.run`, bit, caution, driver sets it).
   Active-low reset of the 3-D effect: 1 = release from reset, 0 = reset (DS
   p.62).
-* **1 3-D model (undocumented)** (`fx.3d.mono`, bit, caution, profile,
-  driver sets it). Reserved in the data sheet (write 0). Measured: the
-  effect makes its S from the mono sum through its band-pass and drops the
-  program's own S, a stereo effect made from mono. NetBSD calls it MONO (DS
+* **1 3-D mono mode** (`fx.3d.mono`, bit, caution, profile, driver sets it).
+  Reserved in the data sheet (write 0); NetBSD calls it MONO. Measured: the
+  effect makes its S from the mono sum through the boost's band-pass, 3 dB
+  lower, and drops the program's own S, a stereo effect made from mono (DS
   p.62, docs/SPATIALIZER.md).
-* **0 3-D limit (undocumented)** (`fx.3d.limit`, bit, caution, profile,
-  driver sets it). Reserved in the data sheet (write 0); ESS's drivers set
-  it from their 3D Limit setting, 0 by default. Measured: moves the boost
-  down while the S out is over the levels of 54h and 56h, and up while it is
-  under 54h's, at the rates of 58h (DS p.62, docs/SPATIALIZER.md).
+* **0 3-D limit** (`fx.3d.limit`, bit, caution, profile, driver sets it).
+  Reserved in the data sheet (write 0); ESS's drivers set it from their 3D
+  Limit setting, 0 by default. Measured: a limit on the width that holds the
+  S out at the higher of the levels of 54h and 56h against the M, moving the
+  boost at the speeds of 58h (DS p.62, docs/SPATIALIZER.md).
 
 ### 52h 3-D level
 
 DS p.62.
 
 * **5:0 3-D level** (`fx.3d.level`, level, safe, profile, driver sets it).
-  Amount of 3-D effect: 0 = minimum, 3Fh = maximum, in steps of 0.75 dB
-  (measured, about +17 dB at 400 Hz at 3Fh); the space control bits of ESS's
-  ES938. Reset to zero by hardware reset (DS p.62, docs/SPATIALIZER.md).
+  Amount of 3-D effect, the space control bits of ESS's ES938. Measured: the
+  boost added to the S peaks at +16.8 dB near 450 Hz at 3Fh, and 0.75 dB
+  lower for each step under it, -30.5 dB at 0. Reset to zero by hardware
+  reset (DS p.62, docs/SPATIALIZER.md).
 
 ### 54h 3-D limit rise level (undocumented)
 
@@ -375,41 +376,46 @@ Not in the data sheet.
 > them as "recommended values". ESS's Windows 98 driver leaves them alone.
 > No data sheet describes them (docs/SPATIALIZER.md).
 
-* **7:0 3-D limit rise** (`fx.3d.reg54`, value, caution, profile, driver
-  sets it). Undocumented; ESS's drivers and Linux write 8Fh. Measured with
-  the limit on: the boost rises while the S out is under this level, and
-  falls while it is over this and 56h's. The level is the value over 91
-  times the M, +3.9 dB at 8Fh, plus 5Ah's fixed part (docs/SPATIALIZER.md).
+* **7:0 3-D limit rise level** (`fx.3d.reg54`, value, caution, profile,
+  driver sets it). Undocumented; ESS's drivers and Linux write 8Fh. Measured
+  with the limit on: the boost rises while the S out is under this level
+  made 0.5 dB higher. The level is the value over 91.2 times the M, M +3.9
+  dB at 8Fh, plus 5Ah's fixed level (docs/SPATIALIZER.md).
 
 ### 56h 3-D limit fall level (undocumented)
 
 Not in the data sheet.
 
-* **7:0 3-D limit fall** (`fx.3d.reg56`, value, caution, profile, driver
-  sets it). Undocumented; ESS's drivers and Linux write 95h. Measured with
-  the limit on: the boost falls while the S out is over this level and
-  54h's. The level is the value over 91 times the M, +4.3 dB at 95h, plus
-  5Ah's fixed part (docs/SPATIALIZER.md).
+* **7:0 3-D limit fall level** (`fx.3d.reg56`, value, caution, profile,
+  driver sets it). Undocumented; ESS's drivers and Linux write 95h. Measured
+  with the limit on: the boost falls while the S out is over this level and
+  54h's, so it holds the S out at the higher of the two. The level is the
+  value over 91.2 times the M, M +4.3 dB at 95h, plus 5Ah's fixed level
+  (docs/SPATIALIZER.md).
 
 ### 58h 3-D limit speed (undocumented)
 
 Not in the data sheet.
 
-* **7:0 3-D limit speed** (`fx.3d.reg58`, value, caution, profile, driver
-  sets it). Undocumented; ESS's drivers and Linux write 94h. Measured with
-  the limit on: the boost falls at 257.5/(n+1) dB a second, n = bits 3:0,
-  and rises h+1 times slower, h = bits 7:4: 51.5 and 5.15 dB a second at 94h
+* **7:4 3-D limit rise speed** (`fx.3d.speed.rise`, level, caution, profile,
+  driver sets it). Undocumented, h; ESS's drivers and Linux write 9.
+  Measured with the limit on: the boost rises h + 1 times slower than it
+  falls, 5.15 dB a second at 94h (docs/SPATIALIZER.md).
+* **3:0 3-D limit fall speed** (`fx.3d.speed.fall`, level, caution, profile,
+  driver sets it). Undocumented, n; ESS's drivers and Linux write 4.
+  Measured with the limit on: the boost falls at 257.5 / (n + 1) dB a
+  second, 51.5 at 4, while the S out is over the levels
   (docs/SPATIALIZER.md).
 
 ### 5Ah 3-D limit offset (undocumented)
 
 Not in the data sheet.
 
-* **7:0 3-D limit offset** (`fx.3d.reg5a`, value, caution, profile, driver
-  sets it). Undocumented; ESS's drivers and Linux write 80h. Measured with
-  the limit on: a fixed part of both limit levels, in proportion to the
-  value and about -36 dBFS at 80h, so quiet sound keeps more width; none at
-  00h. Nothing with the limit off (docs/SPATIALIZER.md).
+* **7:0 3-D limit fixed level** (`fx.3d.reg5a`, value, caution, profile,
+  driver sets it). Undocumented; ESS's drivers and Linux write 80h. Measured
+  with the limit on: a level added to those of 54h and 56h, in proportion to
+  the value, -36.3 dBFS at 80h and none at 00h, so quiet sound keeps its
+  width. Nothing with the limit off (docs/SPATIALIZER.md).
 
 ### 60h Left master volume and mute
 

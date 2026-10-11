@@ -101,7 +101,13 @@ enum ess_fmt {
   FMT_FILTER,  // filter clock from A2h / 72h
   FMT_ADCOFF,  // ADC offset code (sign-magnitude, 64 per step)
   FMT_PORTHI,  // I/O base bits 11:8
-  FMT_PORTLO   // I/O base bits 7:0
+  FMT_PORTLO,  // I/O base bits 7:0
+  // the 3-D effect, as one card measured it (docs/SPATIALIZER.md)
+  FMT_3D_BOOST, // 52h: the boost's peak in dB
+  FMT_3D_LEVEL, // 54h, 56h: a limit level against the M, in dB
+  FMT_3D_FALL,  // 58h bits 3:0: the limit's fall in dB a second
+  FMT_3D_RISE,  // 58h bits 7:4: its rise, from both halves of 58h
+  FMT_3D_FIXED  // 5Ah: the limit's fixed level in dBFS
 };
 
 // register, field and enum ids
@@ -194,6 +200,11 @@ const char *cat_enum_text(u8 enum_id, u8 value);
 
 // format a field value (of register byte raw) for display
 void cat_format(const struct ess_field *f, u8 raw, char *buf, unsigned size);
+
+// what a field value (of register byte raw) does, in its units, such as
+// "M +3.9 dB" or "51.5 dB/s": 1, or 0 with buf empty for a field without
+// units
+int cat_unit(const struct ess_field *f, u8 raw, char *buf, unsigned size);
 
 // parse "12", "0x0c", "-128" (K_SMAG) or an enum text, 0 on success
 int cat_parse(const struct ess_field *f, const char *text, u8 *value);

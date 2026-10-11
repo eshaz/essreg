@@ -36,6 +36,40 @@ static void note(struct prof_report *rep, const char *what, const char *key) {
   }
 }
 
+// keys of whole registers that the catalog later split into fields, so
+// that older profiles still load: 58h is now the limit's rise and fall
+static const struct {
+  const char *key;
+  u8 reg;
+} split_keys[] = {{"fx.3d.reg58", R_MX58}};
+
+// each field of a split register from the register's value: 1, 0 if key
+// isn't one, -1 if its value isn't a byte; a field's own key wins
+static int split_key(const struct prof_io *io, const char *key) {
+  struct ess_field whole;
+  char value[40];
+  unsigned i, n = sizeof(split_keys) / sizeof(split_keys[0]);
+  int f;
+  u8 v;
+
+  for (i = 0; i < n && strcmp(key, split_keys[i].key); i++)
+    ;
+  if (i == n)
+    return 0;
+  memset(&whole, 0, sizeof(whole));
+  whole.width = 8;
+  whole.kind = K_UINT;
+  if (io->get(io->ctx, PROF_FIELDS, key, value, sizeof(value)) <= 0 ||
+      cat_parse(&whole, value, &v) != 0)
+    return -1;
+  for (f = 0; f < F_COUNT; f++)
+    if (ess_fields[f].reg == split_keys[i].reg && !want[f]) {
+      want[f] = 1;
+      want_value[f] = cat_get(&ess_fields[f], v);
+    }
+  return 1;
+}
+
 void prof_value_text(int field, u8 value, char *buf, unsigned size) {
   const struct ess_field *f = &ess_fields[field];
   const char *text = 0;
@@ -164,7 +198,7 @@ static void apply_register(int reg, struct prof_report *rep) {
 int prof_parse(const struct prof_io *io, struct prof_report *rep) {
   char value[40];
   const char *key;
-  int len;
+  int len, split;
   u8 v;
 
   memset(rep, 0, sizeof(*rep));
@@ -177,6 +211,13 @@ int prof_parse(const struct prof_io *io, struct prof_report *rep) {
   }
   for (key = keybuf; len > 0 && *key; key += strlen(key) + 1) {
     int f = cat_find_key(key);
+    if (f < 0 && (split = split_key(io, key)) != 0) {
+      if (split < 0) {
+        rep->invalid++;
+        note(rep, "invalid value for ", key);
+      }
+      continue;
+    }
     if (f < 0) {
       rep->unknown++;
       note(rep, "unknown setting ", key);

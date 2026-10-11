@@ -491,7 +491,8 @@ mixer-state restore write these registers:
 * **50h, 52h, 54h, 56h, 58h, 5Ah** (3:48C0-3:4936). The driver writes these
   only with Enable ES938. It sets 50h to 00h and then to 0Ch with bit 0 = 3D
   Limit, 52h to 3Fh, and 54h-5Ah to 8Fh, 95h, 94h and 80h (undocumented,
-  `fx.3d.reg54` to `fx.3d.reg5a` in essctl).
+  `fx.3d.reg54`, `fx.3d.reg56`, `fx.3d.speed.rise` and `fx.3d.speed.fall`
+  for the two halves of 58h, and `fx.3d.reg5a` in essctl).
 * **7Dh** (3:485B, 3:4884). The driver writes 06h (MONO_OUT = record mono
   mix, MONO_IN direct off), then sets bit 3 from Disable Mic Preamp.
 * **1Ch** (3:4890). The driver writes 05h (record mixer, record mute off).

@@ -11,14 +11,26 @@
  * LoadLibraryEx32W (513), GetProcAddress32W (515) and CallProc32W (517).
  * On Windows 9x a 16-bit window or icon handle is also the 32-bit one.
  *
- * The panel is built from the catalog like essctl's pages: a check box for
- * each 3-D bit (on, run, and the undocumented model and limit), and a text
- * field with a slider on its right for the level
- * and for each Spatializer register (ess3d_reg_field). A register added to
- * the catalog shows up here too. The sliders move in steps of one over the
- * field's range, the text field takes decimal for the level and hex for
- * the registers, and a value is written on Enter or when the field loses
- * the focus.
+ * The panel is laid out like ESS's own 3-D panel, ES938 Controls of its
+ * OS/2 drivers (driver/es1869f/OS2/INSTALL/ES938.EXE): a group box for each
+ * stage of the sound, a row of its switches, and rows of a name and a
+ * slider with a word at each end. Every bit has its own control, so every
+ * value of the registers can be set. The Spatializer group has the effect
+ * on (50h bit 3), held in reset (bit 2 clear), widening the stereo (the
+ * program's S) or mono (an S made from the mono sum, bit 1), and its
+ * effect, 52h. The automatic effect level group has the limit (bit 0,
+ * ESS's 3D Limit), which lowers the effect while its S is over a level
+ * against the M and raises it again once it is under, and its fields of
+ * 54h-5Ah (ess3d_reg_field), named by what each does to the effect. A field
+ * added to the catalog gets a row in that group with its catalog name.
+ *
+ * Each row has a text field and a slider on its right, in steps of one
+ * over the field's range: decimal, or hex for a whole register, written on
+ * Enter or when the field loses the focus. Right of the slider is what the
+ * value does, as one card measured it (cat_unit): the boost in dB, a level
+ * against the M, a speed in dB a second or a level in dBFS. It follows the
+ * slider as it moves, and the rise follows the fall, since the rise is the
+ * fall over h + 1.
  *
  * The panel closes when another window comes to the front, like the
  * tray's menus, or on a second click on the icon. It watches the
@@ -87,25 +99,50 @@ typedef DWORD(FAR PASCAL *CALL32_0)(DWORD, DWORD, DWORD);
 typedef DWORD(FAR PASCAL *CALL32_1)(DWORD, DWORD, DWORD, DWORD);
 typedef DWORD(FAR PASCAL *CALL32_2)(DWORD, DWORD, DWORD, DWORD, DWORD);
 
-// panel controls: the check boxes and buttons, then a row of each slider
-#define IDC_P_ON 101
-#define IDC_P_RUN 102
-#define IDC_P_LIMIT 103
-#define IDC_P_RESET 104
-#define IDC_P_DEFAULTS 105
-#define IDC_P_CLOSE 106
-#define IDC_P_STATUS 107
-#define IDC_P_MONO 108
+// panel controls: the switches and buttons, then a row of each slider:
+// its name, text field, end words, slider and units
+#define IDC_P_ON 101     // 50h bit 3
+#define IDC_P_HOLD 102   // bit 2 clear
+#define IDC_P_STEREO 103 // bit 1 clear, or set for mono
+#define IDC_P_MONO 104
+#define IDC_P_LIMIT 105 // bit 0
+#define IDC_P_RESET 106
+#define IDC_P_DEFAULTS 107
+#define IDC_P_CLOSE 108
+#define IDC_P_STATUS 109
+#define IDC_P_GROUP 110 // + 0 and 1: the group boxes
 #define IDC_P_LABEL 200 // + row
 #define IDC_P_SLIDER 300
 #define IDC_P_EDIT 400
 #define IDC_P_RANGE 500
+#define IDC_P_LO 600
+#define IDC_P_HI 700
 #define MAX_SLIDERS (1 + ESS3D_MAX_REGS)
 
-// panel layout in dialog units
-#define P_W 222
+// panel layout in dialog units: a group's radio buttons, then its rows of
+// name, text field, end word, slider, end word and units
+#define P_W 270
 #define P_ROW 14
-#define P_TOP 59 // first slider row
+#define P_RADIO 11 // a group's switches, under its top
+#define P_ROWS 26  // and its first row
+#define P_NAME 10
+#define P_EDIT 58
+#define P_LO 82
+#define P_SLIDER 104
+#define P_HI 186
+#define P_UNIT 208
+
+// the rows, named for what they do to the sound, with the words at the
+// ends of their sliders as ES938 Controls has Min and Max
+static const struct {
+  int field;
+  const char *name, *lo, *hi;
+} names[] = {{F_3D_LEVEL, "Effect:", "Min", "Max"},
+             {F_3D_R56, "Lower above:", "Low", "High"},
+             {F_3D_R54, "Raise below:", "Low", "High"},
+             {F_3D_R5A, "Fixed level:", "None", "High"},
+             {F_3D_FALL, "Lower speed:", "Fast", "Slow"},
+             {F_3D_RISE, "Raise speed:", "Fast", "Slow"}};
 
 static struct {
   LOADLIB32 load;
@@ -127,10 +164,13 @@ static struct ess3d_state cur; // the setting as the chip returned it
 static int cur_err;            // reading or writing it failed
 static UINT taskbar_created;   // Explorer restarted: add the icon again
 static int nsliders;
-static int shown;       // the shell has the icon
-static int drag = -1;   // slider held without writing (direct I/O)
-static UINT panel_fg;   // the window in front while the panel is up
-static DWORD hidden_at; // GetTickCount() when the panel last hid
+static int row_field[MAX_SLIDERS]; // a row's field
+static int row_reg[MAX_SLIDERS];   // its ess3d_reg_field index, -1 for 52h
+static int row_name[MAX_SLIDERS];  // its entry in names, -1 if none
+static int shown;                  // the shell has the icon
+static int drag = -1;              // slider held without writing (direct I/O)
+static UINT panel_fg;              // the window in front while the panel is up
+static DWORD hidden_at;            // GetTickCount() when the panel last hid
 
 HWND tray_window(void) { return FindWindow(TRAY_CLASS, 0); }
 
@@ -239,16 +279,38 @@ static void icon_update(void) {
 
 // --- the panel --------------------------------------------------------------
 
-static int slider_field(int row) {
-  return row == 0 ? F_3D_LEVEL : ess3d_reg_field(row - 1);
-}
+static int slider_field(int row) { return row_field[row]; }
 
 static int slider_value(int row) {
-  return row == 0 ? cur.level : cur.reg[row - 1];
+  return row_reg[row] < 0 ? cur.level : cur.reg[row_reg[row]];
 }
 
 static int is_hex(int row) {
   return ess_fields[slider_field(row)].kind == K_HEX;
+}
+
+// the rows in the order of names, then the fields that names doesn't have
+static void rows_find(void) {
+  unsigned j;
+  int i, r;
+
+  nsliders = 0;
+  for (j = 0; j < sizeof(names) / sizeof(names[0]); j++)
+    for (i = -1; i < ess3d_regs(); i++)
+      if ((i < 0 ? F_3D_LEVEL : ess3d_reg_field(i)) == names[j].field) {
+        row_field[nsliders] = names[j].field;
+        row_reg[nsliders] = i;
+        row_name[nsliders++] = (int)j;
+      }
+  for (i = 0; i < ess3d_regs() && nsliders < MAX_SLIDERS; i++) {
+    for (r = 0; r < nsliders && row_reg[r] != i; r++)
+      ;
+    if (r == nsliders) {
+      row_field[nsliders] = ess3d_reg_field(i);
+      row_reg[nsliders] = i;
+      row_name[nsliders++] = -1;
+    }
+  }
 }
 
 static HWND item(int id) { return GetDlgItem(panel, id); }
@@ -269,6 +331,32 @@ static HWND add(const char *cls, const char *text, DWORD style, int x, int y,
   return ctl;
 }
 
+// the byte of a row's register with the row's field at value, the other
+// fields of it as the chip has them
+static u8 row_byte(int row, int value) {
+  u8 raw = row_reg[row] < 0 ? 0 : (u8)ess3d_reg_byte(&cur, row_reg[row]);
+
+  return cat_set(&ess_fields[slider_field(row)], raw, (u8)value);
+}
+
+// right of the slider: what the value does, or else its range; each row
+// of the same register too, as the rise follows the fall of 58h
+static void unit_show(int row, int value) {
+  const struct ess_field *f;
+  char text[24];
+  u8 raw = row_byte(row, value);
+  int r;
+
+  for (r = 0; r < nsliders; r++) {
+    f = &ess_fields[slider_field(r)];
+    if (f->reg != ess_fields[slider_field(row)].reg)
+      continue;
+    if (!cat_unit(f, raw, text, sizeof(text)))
+      sprintf(text, f->kind == K_HEX ? "00h-%02Xh" : "of %d", cat_max(f));
+    SetDlgItemText(panel, IDC_P_RANGE + r, text);
+  }
+}
+
 static void edit_show(int row, int force) {
   char text[8];
   HWND e = item(IDC_P_EDIT + row);
@@ -287,12 +375,15 @@ static void panel_fill(void) {
   if (!panel)
     return;
   CheckDlgButton(panel, IDC_P_ON, cur.enable);
-  CheckDlgButton(panel, IDC_P_RUN, cur.run);
-  CheckDlgButton(panel, IDC_P_MONO, cur.mono);
+  CheckDlgButton(panel, IDC_P_HOLD, !cur.run);
+  CheckRadioButton(panel, IDC_P_STEREO, IDC_P_MONO,
+                   cur.mono ? IDC_P_MONO : IDC_P_STEREO);
   CheckDlgButton(panel, IDC_P_LIMIT, cur.limit);
   for (r = 0; r < nsliders; r++) {
-    if (r != drag)
+    if (r != drag) {
       SetScrollPos(item(IDC_P_SLIDER + r), SB_CTL, slider_value(r), TRUE);
+      unit_show(r, slider_value(r));
+    }
     edit_show(r, 0);
   }
   state_text(text, sizeof(text));
@@ -313,7 +404,7 @@ static void changed(int err) {
   tray_log(text);
 }
 
-// on, off, reset or defaults, as ess3d's commands do them
+// reset or defaults, as ess3d's commands do them
 static void do_action(int op) {
   struct ess3d_cmd c;
   int err;
@@ -412,6 +503,7 @@ static void panel_scroll(HWND sb, int code, int pos) {
   SetScrollPos(sb, SB_CTL, v, TRUE);
   sprintf(text, is_hex(row) ? "%02X" : "%d", v);
   SetDlgItemText(panel, IDC_P_EDIT + row, text);
+  unit_show(row, v);
   if (code == SB_THUMBTRACK && !winio_can_poll()) {
     // direct I/O with ES1869.VXD, only write when the thumb is released
     drag = row;
@@ -422,49 +514,79 @@ static void panel_scroll(HWND sb, int code, int pos) {
     do_field(slider_field(row), v);
 }
 
-// the controls, from the catalog
-static void panel_build(void) {
-  const struct ess_field *f;
-  char text[24];
-  RECT rc;
-  int r, y;
+// a row at y: its name, text field, end words, slider and units
+static void row_build(int r, int y) {
+  const struct ess_field *f = &ess_fields[slider_field(r)];
+  const char *lo = "0", *hi = "Max";
 
-  add("BUTTON", ess_fields[F_3D_EN].label, WS_TABSTOP | BS_AUTOCHECKBOX, 6, 4,
-      130, 10, IDC_P_ON);
-  add("BUTTON", ess_fields[F_3D_RUN].label, WS_TABSTOP | BS_AUTOCHECKBOX, 6, 17,
-      130, 10, IDC_P_RUN);
-  add("BUTTON", ess_fields[F_3D_MONO].label, WS_TABSTOP | BS_AUTOCHECKBOX, 6,
-      30, 130, 10, IDC_P_MONO);
-  add("BUTTON", ess_fields[F_3D_LIMIT].label, WS_TABSTOP | BS_AUTOCHECKBOX, 6,
-      43, 130, 10, IDC_P_LIMIT);
-  add("BUTTON", "&Reset", WS_TABSTOP | BS_PUSHBUTTON, P_W - 56, 4, 50, 14,
-      IDC_P_RESET);
-  nsliders = 1 + ess3d_regs();
-  for (r = 0; r < nsliders; r++) {
-    f = &ess_fields[slider_field(r)];
-    y = P_TOP + r * P_ROW;
-    add("STATIC", f->label, SS_LEFTNOWORDWRAP | SS_NOPREFIX, 6, y + 2, 70, 9,
+  if (row_name[r] >= 0) {
+    add("STATIC", names[row_name[r]].name, SS_LEFTNOWORDWRAP | SS_NOPREFIX,
+        P_NAME, y + 2, P_EDIT - 2 - P_NAME, 9, IDC_P_LABEL + r);
+    lo = names[row_name[r]].lo;
+    hi = names[row_name[r]].hi;
+  } else {
+    // a field that names doesn't have: its catalog name, without "3-D "
+    add("STATIC", strncmp(f->label, "3-D ", 4) ? f->label : f->label + 4,
+        SS_LEFTNOWORDWRAP | SS_NOPREFIX, P_NAME, y + 2, P_EDIT - 2 - P_NAME, 9,
         IDC_P_LABEL + r);
-    // the text field, then the slider on its right
-    add("EDIT", "", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_UPPERCASE, 78,
-        y, 22, 12, IDC_P_EDIT + r);
-    SendMessage(item(IDC_P_EDIT + r), EM_LIMITTEXT, 4, 0);
-    add("SCROLLBAR", "", WS_TABSTOP | SBS_HORZ, 103, y + 1, 77, 10,
-        IDC_P_SLIDER + r);
-    SetScrollRange(item(IDC_P_SLIDER + r), SB_CTL, 0, cat_max(f), FALSE);
-    if (f->kind == K_HEX)
-      sprintf(text, "00h-%02Xh", cat_max(f));
-    else
-      sprintf(text, "of %d", cat_max(f));
-    add("STATIC", text, SS_LEFTNOWORDWRAP, 183, y + 2, P_W - 186, 9,
-        IDC_P_RANGE + r);
   }
-  y = P_TOP + nsliders * P_ROW + 2;
+  add("EDIT", "",
+      WS_GROUP | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_UPPERCASE, P_EDIT,
+      y, 22, 12, IDC_P_EDIT + r);
+  SendMessage(item(IDC_P_EDIT + r), EM_LIMITTEXT, 4, 0);
+  add("STATIC", lo, SS_RIGHT | SS_NOPREFIX, P_LO, y + 2, P_SLIDER - 2 - P_LO, 9,
+      IDC_P_LO + r);
+  add("SCROLLBAR", "", WS_TABSTOP | SBS_HORZ, P_SLIDER, y + 1,
+      P_HI - 2 - P_SLIDER, 10, IDC_P_SLIDER + r);
+  SetScrollRange(item(IDC_P_SLIDER + r), SB_CTL, 0, cat_max(f), FALSE);
+  add("STATIC", hi, SS_LEFTNOWORDWRAP | SS_NOPREFIX, P_HI, y + 2,
+      P_UNIT - 2 - P_HI, 9, IDC_P_HI + r);
+  add("STATIC", "", SS_LEFTNOWORDWRAP | SS_NOPREFIX, P_UNIT, y + 2,
+      P_W - 8 - P_UNIT, 9, IDC_P_RANGE + r);
+}
+
+// a group box from y with its rows from row r0 to r1 - 1, its bottom
+static int group_build(int id, const char *title, int y, int r0, int r1) {
+  int r, h = P_ROWS + (r1 - r0) * P_ROW + 3;
+
+  add("BUTTON", title, BS_GROUPBOX, 4, y, P_W - 8, h, id);
+  for (r = r0; r < r1; r++)
+    row_build(r, y + P_ROWS + (r - r0) * P_ROW);
+  return y + h;
+}
+
+// the controls: the Spatializer, then the automatic level of its effect, as
+// the sound goes through them
+static void panel_build(void) {
+  RECT rc;
+  int y, ry;
+
+  rows_find();
+  // the effect's bits, and the row of 52h
+  ry = 2 + P_RADIO;
+  add("BUTTON", "O&n", WS_GROUP | WS_TABSTOP | BS_AUTOCHECKBOX, P_NAME, ry, 30,
+      10, IDC_P_ON);
+  add("BUTTON", "&Hold in reset", WS_GROUP | WS_TABSTOP | BS_AUTOCHECKBOX,
+      P_NAME + 34, ry, 62, 10, IDC_P_HOLD);
+  add("BUTTON", "&Stereo", WS_GROUP | WS_TABSTOP | BS_AUTORADIOBUTTON,
+      P_NAME + 100, ry, 38, 10, IDC_P_STEREO);
+  add("BUTTON", "&Mono", BS_AUTORADIOBUTTON, P_NAME + 140, ry, 36, 10,
+      IDC_P_MONO);
+  add("BUTTON", "&Reset", WS_GROUP | WS_TABSTOP | BS_PUSHBUTTON, P_W - 62,
+      ry - 2, 50, 14, IDC_P_RESET);
+  y = group_build(IDC_P_GROUP, "Spatializer", 2, 0, 1);
+  // the automatic level: the limit, and the rows of 54h-5Ah
+  ry = y + 4 + P_RADIO;
+  add("BUTTON", "On", WS_GROUP | WS_TABSTOP | BS_AUTOCHECKBOX, P_NAME, ry, 30,
+      10, IDC_P_LIMIT);
+  y = group_build(IDC_P_GROUP + 1, "Automatic effect level", y + 4, 1,
+                  nsliders);
+  y += 3;
   add("STATIC", "", SS_LEFTNOWORDWRAP | SS_NOPREFIX, 6, y, P_W - 12, 9,
       IDC_P_STATUS);
   y += 12;
-  add("BUTTON", "Driver &defaults", WS_TABSTOP | BS_PUSHBUTTON, 6, y, 68, 14,
-      IDC_P_DEFAULTS);
+  add("BUTTON", "Driver &defaults", WS_GROUP | WS_TABSTOP | BS_PUSHBUTTON, 6, y,
+      68, 14, IDC_P_DEFAULTS);
   add("BUTTON", "&Close tray icon", WS_TABSTOP | BS_PUSHBUTTON, P_W - 74, y, 68,
       14, IDC_P_CLOSE);
   // fit the panel to its rows
@@ -548,11 +670,11 @@ BOOL CALLBACK __export panel_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
     id = wp;
     code = HIWORD(lp);
     if (id == IDC_P_ON && code == BN_CLICKED) {
-      do_action(IsDlgButtonChecked(dlg, id) ? ESS3D_ON : ESS3D_OFF);
-    } else if (id == IDC_P_RUN && code == BN_CLICKED) {
-      do_field(F_3D_RUN, IsDlgButtonChecked(dlg, id));
-    } else if (id == IDC_P_MONO && code == BN_CLICKED) {
-      do_field(F_3D_MONO, IsDlgButtonChecked(dlg, id));
+      do_field(F_3D_EN, IsDlgButtonChecked(dlg, id));
+    } else if (id == IDC_P_HOLD && code == BN_CLICKED) {
+      do_field(F_3D_RUN, !IsDlgButtonChecked(dlg, id));
+    } else if ((id == IDC_P_STEREO || id == IDC_P_MONO) && code == BN_CLICKED) {
+      do_field(F_3D_MONO, id == IDC_P_MONO);
     } else if (id == IDC_P_LIMIT && code == BN_CLICKED) {
       do_field(F_3D_LIMIT, IsDlgButtonChecked(dlg, id));
     } else if (id == IDC_P_RESET) {

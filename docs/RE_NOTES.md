@@ -24,6 +24,13 @@ parentheses:
   Audio_Base+Ch).
 * **The ES1869 data sheet** (PDF) is in `docs/datasheet/`. The results are
   the register catalog `src/esscat.tbl` and [REGISTERS.md](REGISTERS.md).
+* **`driver/es1869f/`** holds ESS's ES1869F driver sets for Windows 3.1
+  (`WIN31DRV`, its driver files compressed as setup copies them), NT 4.0
+  (`NT40`), Windows 95 (`WIN95DRV`, another release than the one in
+  `driver/`) and OS/2 (`OS2`), as they were found. The results are the names
+  that ESS's drivers give the 3-D controls, and the layout of the OS/2 set's
+  *ES938 Controls* (`OS2/INSTALL/ES938.EXE`), which ess3d's tray panel
+  follows ([SPATIALIZER.md](SPATIALIZER.md#what-each-driver-writes)).
 
 The ES1868 driver sets for DOS, Windows 3.1, 95, 98, NT and OS/2, from
 philscomputerlab.com, served only for comparison and aren't in the

@@ -155,7 +155,7 @@ class WineTest(unittest.TestCase):
         self.assertIn("fx.3d.level=40", back)
         self.assertIn("rec.source=Line", back)
         log = read(self.path("ESSCTL.LOG")).decode()
-        self.assertIn("56 settings applied", log)
+        self.assertIn("57 settings applied", log)
 
     def test_profile_save_is_safe(self):
         # a section of the user's own stays, and no temporary file is left

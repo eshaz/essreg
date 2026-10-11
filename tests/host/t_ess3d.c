@@ -406,15 +406,20 @@ static void test_limit_and_regs(void) {
   struct ess3d_cmd c;
   u8 w[8];
 
-  // the Spatializer registers come from the catalog
-  CHECK_EQ(ess3d_regs(), 4);
+  // the fields of the Spatializer registers come from the catalog, the
+  // rise and the fall of 58h as two
+  CHECK_EQ(ess3d_regs(), 5);
   CHECK_EQ(ess3d_reg_field(0), F_3D_R54);
-  CHECK_EQ(ess3d_reg_field(3), F_3D_R5A);
-  CHECK_EQ(ess3d_reg_field(4), -1);
+  CHECK_EQ(ess3d_reg_field(2), F_3D_RISE);
+  CHECK_EQ(ess3d_reg_field(3), F_3D_FALL);
+  CHECK_EQ(ess3d_reg_field(4), F_3D_R5A);
+  CHECK_EQ(ess3d_reg_field(5), -1);
+  CHECK_EQ(ess3d_reg_addr(3), 0x58);
   CHECK_EQ(ess3d_reg_default(0), 0x8F);
   CHECK_EQ(ess3d_reg_default(1), 0x95);
-  CHECK_EQ(ess3d_reg_default(2), 0x94);
-  CHECK_EQ(ess3d_reg_default(3), 0x80);
+  CHECK_EQ(ess3d_reg_default(2), 9);
+  CHECK_EQ(ess3d_reg_default(3), 4);
+  CHECK_EQ(ess3d_reg_default(4), 0x80);
 
   // limit: bit 0 of 50h, the other bits kept
   chip(0x0C, 40);
@@ -434,7 +439,7 @@ static void test_limit_and_regs(void) {
   // model: bit 1 of 50h, the other bits kept; mono is its old name
   CHECK_EQ(run("model on", &s), 0);
   CHECK_EQ(simhw.mixer[0x50], 0x0F);
-  CHECK(text_is(&s, "3-D on, level 40 of 63, limit on, model on"));
+  CHECK(text_is(&s, "3-D on, level 40 of 63, limit on, mono on"));
   CHECK_EQ(run("MONO toggle limit off", &s), 0);
   CHECK_EQ(simhw.mixer[0x50], 0x0C);
   CHECK(!s.mono && !s.limit);
@@ -448,12 +453,20 @@ static void test_limit_and_regs(void) {
   CHECK_EQ(simhw.mixer[0x54], 0x8F);
   CHECK_EQ(simhw.mixer[0x5A], 0x7F);
   CHECK_EQ(s.reg[0], 0x8F);
-  CHECK_EQ(s.reg[3], 0x7F);
+  CHECK_EQ(s.reg[4], 0x7F);
   CHECK_EQ(run("reg 54 8f", &s), 0);
   CHECK_EQ(writes(0x54, w, 8), 0);
   CHECK_EQ(run("reg 54 0", &s), 0);
   CHECK_EQ(writes(0x54, w, 8), 1);
   CHECK_EQ(w[0], 0x00);
+  // 58h is two fields, and reg sets both in one write
+  CHECK_EQ(run("reg 58 3c", &s), 0);
+  CHECK_EQ(writes(0x58, w, 8), 1);
+  CHECK_EQ(w[0], 0x3C);
+  CHECK(s.reg[2] == 3 && s.reg[3] == 12);
+  CHECK(ess3d_reg_byte(&s, 2) == 0x3C && ess3d_reg_byte(&s, 3) == 0x3C);
+  CHECK_EQ(run("reg 58 3c", &s), 0);
+  CHECK_EQ(writes(0x58, w, 8), 0);
 
   // defaults: what ESS's driver sets when Windows starts
   chip(0x03, 5);

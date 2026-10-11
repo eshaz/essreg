@@ -41,27 +41,43 @@ int ess3d_regs(void) {
 
 int ess3d_reg_field(int i) { return i < ess3d_regs() ? reg_fields[i] : -1; }
 
+int ess3d_reg_addr(int i) {
+  return i < ess3d_regs() ? ess_regs[ess_fields[reg_fields[i]].reg].addr : -1;
+}
+
 int ess3d_reg_default(int i) {
   unsigned j;
-  u16 addr;
 
   if (i >= ess3d_regs())
     return -1;
-  addr = ess_regs[ess_fields[reg_fields[i]].reg].addr;
   for (j = 0; j < sizeof(driver_regs) / sizeof(driver_regs[0]); j++)
-    if (driver_regs[j][0] == addr)
-      return driver_regs[j][1];
+    if (driver_regs[j][0] == ess3d_reg_addr(i))
+      return cat_get(&ess_fields[reg_fields[i]], driver_regs[j][1]);
   return -1;
 }
 
-// the register with this address, -1 if it isn't one
-static int reg_index(unsigned long addr) {
+// the bits of the register at addr that its fields cover, 0 if it isn't
+// a Spatializer register
+static u8 reg_bits(unsigned long addr) {
+  u8 bits = 0;
   int i;
 
   for (i = 0; i < ess3d_regs(); i++)
-    if (ess_regs[ess_fields[reg_fields[i]].reg].addr == addr)
-      return i;
-  return -1;
+    if ((unsigned long)ess3d_reg_addr(i) == addr)
+      bits |= cat_mask(&ess_fields[reg_fields[i]]);
+  return bits;
+}
+
+int ess3d_reg_byte(const struct ess3d_state *s, int i) {
+  const struct ess_field *f;
+  int j, raw = 0;
+
+  for (j = 0; j < ess3d_regs(); j++)
+    if (ess3d_reg_addr(j) == ess3d_reg_addr(i)) {
+      f = &ess_fields[reg_fields[j]];
+      raw = cat_set(f, (u8)raw, s->reg[j]);
+    }
+  return raw;
 }
 
 // --- command line ---------------------------------------------------------
@@ -213,17 +229,16 @@ static int reg_word(const char **p, struct ess3d_cmd *c,
       return -1;
     }
   }
-  i = reg_index(v[0]);
-  if (i < 0) {
+  if (!reg_bits(v[0])) {
     fail(c, "reg: %.20s is not a Spatializer register", w[0]);
     return -1;
   }
-  if (v[1] > cat_max(&ess_fields[reg_fields[i]])) {
+  if (v[1] & ~reg_bits(v[0])) {
     fail(c, "reg: %.20s is too large for the register", w[1]);
     return -1;
   }
   a->op = ESS3D_REG;
-  a->reg = (u8)i;
+  a->reg = (u8)v[0];
   a->value = (u8)v[1];
   return 0;
 }
@@ -297,9 +312,9 @@ int ess3d_parse(const char *line, struct ess3d_cmd *c) {
         }
       }
       continue;
-    } else if (!strcmp(word, "limit") || !strcmp(word, "model") ||
-               !strcmp(word, "mono")) {
-      // an undocumented bit: on, off or toggle; mono is model's old name
+    } else if (!strcmp(word, "limit") || !strcmp(word, "mono") ||
+               !strcmp(word, "model")) {
+      // an undocumented bit: on, off or toggle; model is mono's old name
       after = next_word(p, arg, sizeof(arg));
       if (after)
         lower(arg);
@@ -416,7 +431,7 @@ static int reset(struct ess3d_state *s) {
 }
 
 // what ESS's driver sets when Windows starts: 3-D on, level 63, no
-// limit (its 3D Limit setting is 0 unless changed), model off, and 54h-5Ah
+// limit (its 3D Limit setting is 0 unless changed), mono off, and 54h-5Ah
 static int defaults(struct ess3d_state *s) {
   int i, v, err = set(F_3D_LIMIT, &s->limit, 0);
 
@@ -430,6 +445,31 @@ static int defaults(struct ess3d_state *s) {
     if ((v = ess3d_reg_default(i)) >= 0)
       err = set(reg_fields[i], &s->reg[i], (u8)v);
   return err;
+}
+
+// the register at addr to value in one write, if a field of it changes;
+// bits that no field covers keep what the chip has
+static int set_reg(u8 addr, u8 value, struct ess3d_state *s) {
+  const struct ess_field *f = 0;
+  int i, raw, err, change = 0;
+
+  for (i = 0; i < ess3d_regs(); i++)
+    if (ess3d_reg_addr(i) == addr) {
+      f = &ess_fields[reg_fields[i]];
+      change |= s->reg[i] != cat_get(f, value);
+    }
+  if (!change)
+    return 0;
+  raw = ess_read(f->reg);
+  if (raw < 0)
+    return raw;
+  err = ess_write(f->reg, (u8)((raw & ~reg_bits(addr)) | value));
+  if (err < 0)
+    return err;
+  for (i = 0; i < ess3d_regs(); i++)
+    if (ess3d_reg_addr(i) == addr)
+      s->reg[i] = cat_get(&ess_fields[reg_fields[i]], value);
+  return 0;
 }
 
 static int apply(const struct ess3d_action *a, struct ess3d_state *s) {
@@ -464,7 +504,7 @@ static int apply(const struct ess3d_action *a, struct ess3d_state *s) {
   case ESS3D_MONO:
     return set(F_3D_MONO, &s->mono, (u8)(a->arg == 2 ? !s->mono : a->arg != 0));
   case ESS3D_REG:
-    return set(reg_fields[a->reg], &s->reg[a->reg], a->value);
+    return set_reg(a->reg, a->value, s);
   case ESS3D_DEFAULTS:
     return defaults(s);
   }
@@ -498,7 +538,7 @@ void ess3d_text(const struct ess3d_state *s, char *buf, unsigned size) {
   sprintf(tmp, "3-D %s%s, level %u of %d%s%s", s->enable ? "on" : "off",
           s->enable && !s->run ? ", held in reset" : "", s->level,
           ess3d_level_max(), s->limit ? ", limit on" : "",
-          s->mono ? ", model on" : "");
+          s->mono ? ", mono on" : "");
   strncpy(buf, tmp, size - 1);
   buf[size - 1] = 0;
 }

@@ -21,7 +21,7 @@ ICON_ON ICON "ess3don.ico"
 ICON_OFF ICON "ess3doff.ico"
 
 /* the tray icon's panel, its controls come from the catalog (ess3dtr.c) */
-PANEL DIALOG 0, 0, 222, 120
+PANEL DIALOG 0, 0, 270, 182
 STYLE WS_POPUP | WS_DLGFRAME
 FONT 8, "MS Sans Serif"
 BEGIN
