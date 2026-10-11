@@ -338,7 +338,8 @@ Windows 95's 32-bit shell.
 Close the icon with *Close* or `ess3d exit` before you copy a new
 `ESS3D.EXE` over the old one, and start it again afterwards. While the icon
 runs, Windows starts every ess3d from the copy that is already loaded, and
-not from the new file, so a second `ess3d tray` would open the old panel.
+not from the new file, so a second `ess3d tray` would open the old panel. If
+the file is replaced anyway, the panel says so in a tip under *Close*.
 
 ## [`esfmrec.exe`](build)
 

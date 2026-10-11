@@ -718,6 +718,12 @@ loaded.
      8Fh, M +4.3 dB and M +3.9 dB, the fixed level at 80h, -36.3 dBFS, and
      the speeds at 4 and 9, 51.5 and 5.15 dB a second. Move the lower
      speed's slider, and the raise speed's dB a second follows it.
+   * Open the panel from the icon, move the mouse over it without a click,
+     and turn the wheel over a slider. The value moves, as the panel takes
+     the focus when the mouse comes over it.
+   * With the icon running, copy another `ess3d.exe` over
+     `C:\ESSREG\ESS3D.EXE` and open the panel. A tip under *Close* says that
+     ESS3D.EXE was replaced while this copy runs.
    * A second `ess3d tray` opens the panel. *Close* removes the icon. Start
      it again with `ess3d tray`, then run `ess3d exit`, and the icon goes
      too.

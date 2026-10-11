@@ -62,9 +62,12 @@
  * The panel closes when another window comes to the front, like the
  * tray's menus, or on a second click on the icon. It watches the
  * foreground window instead of its own activation, since Windows may not
- * let it take the focus. With the register interface of the rebuilt
- * ES1869.VXD, the icon also checks the setting every few seconds, so it
- * follows the Windows mixer.
+ * let it take the focus. It takes the focus when the mouse comes over it,
+ * which Windows allows after a mouse event, as the wheel's messages go
+ * to the focus. If ess3d.exe was replaced while the tray runs, the panel
+ * says so, as Windows starts every ess3d from the running copy. With the
+ * register interface of the rebuilt ES1869.VXD, the icon also checks the
+ * setting every few seconds, so it follows the Windows mixer.
  *
  * Explorer may not be ready when the tray starts from the StartUp folder,
  * and on Windows 98 it restarts after a crash: an icon the shell refused
@@ -83,6 +86,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "ess3d.h"
 #include "ess3dtr.h"
@@ -106,7 +110,8 @@
 #define TIP_MS 600
 #define GRAPH_TIMER 5   // a slider rests: the graph that was skipped
 #define TIP_SAY_MS 4000 // a message in the tip
-#define TIP_W 240       // a tip's width in pixels
+#define TIP_REPLACED_MS 15000
+#define TIP_W 240 // a tip's width in pixels
 #define TIP_CLASS "ess3dTip"
 #define INI_NAME "ESS3D.INI" // the graph shown or not, [Tray] Graph=
 
@@ -298,9 +303,11 @@ static HWND tip;
 static int tip_id;          // the control the mouse rests on
 static const char *tip_now; // and its tip
 static int tip_said;        // the tip holds a message instead
+static long exe_time;       // ess3d.exe's time and size when the tray started
+static long exe_size;
 
 static void tip_hide(void);
-static void tip_say(HWND ctl, const char *text);
+static void tip_say(HWND ctl, const char *text, UINT ms);
 
 // what the graph plots: the registers 50h, 52h, 54h, 56h, 58h and 5Ah,
 // S>S and M>S by frequency at the full boost and where the limit holds
@@ -924,7 +931,7 @@ static void edit_apply(int row) {
       sprintf(msg, "Enter a value from 00h to %02Xh.", cat_max(f));
     else
       sprintf(msg, "Enter a value from 0 to %d.", cat_max(f));
-    tip_say(item(IDC_P_EDIT + row), msg);
+    tip_say(item(IDC_P_EDIT + row), msg, TIP_SAY_MS);
     edit_show(row, 1);
     return;
   }
@@ -1130,9 +1137,8 @@ static void tip_show(void) {
   tip_place(pt.x + 2, pt.y + 20, pt.y - 4);
 }
 
-// a message in the tip, under a control, until a click, a key or
-// TIP_SAY_MS
-static void tip_say(HWND ctl, const char *text) {
+// a message in the tip, under a control, until a click, a key or ms
+static void tip_say(HWND ctl, const char *text, UINT ms) {
   static char said[96];
   RECT rc;
 
@@ -1145,7 +1151,7 @@ static void tip_say(HWND ctl, const char *text) {
   GetWindowRect(ctl, &rc);
   tip_place(rc.left, rc.bottom + 2, rc.top - 2);
   tip_said = 1;
-  if (!SetTimer(tray, TIP_TIMER, TIP_SAY_MS, 0))
+  if (!SetTimer(tray, TIP_TIMER, ms, 0))
     tray_log("no timer left for the tips");
 }
 
@@ -1157,11 +1163,18 @@ static void tip_watch(const MSG *m) {
 
   switch (m->message) {
   case WM_MOUSEMOVE:
-    // a message stays while the mouse moves
-    if (tip_said || (m->hwnd != panel && GetParent(m->hwnd) != panel))
+    if (m->hwnd != panel && GetParent(m->hwnd) != panel)
       return;
     id = tip_at();
     if (id == tip_id)
+      return;
+    // the wheel's messages go to the window with the focus: the panel
+    // takes it if Windows didn't let it when it opened, which it does
+    // after a mouse event over the panel
+    if (foreground() != (UINT)panel)
+      to_front(panel);
+    // a message stays while the mouse moves
+    if (tip_said)
       return;
     tip_hide();
     tip_id = id;
@@ -1346,6 +1359,26 @@ static void panel_check(void) {
     panel_hide();
 }
 
+// ess3d.exe's time and size, 0 if it can't be read
+static void exe_stat(long *t, long *size) {
+  char path[144];
+  struct stat st;
+
+  *t = *size = 0;
+  if (GetModuleFileName(inst, path, sizeof(path)) && stat(path, &st) == 0) {
+    *t = (long)st.st_mtime;
+    *size = (long)st.st_size;
+  }
+}
+
+// a different ess3d.exe was copied over the one this copy started from
+static int exe_replaced(void) {
+  long t, size;
+
+  exe_stat(&t, &size);
+  return exe_time && t && (t != exe_time || size != exe_size);
+}
+
 // the panel above the mouse, where the icon was clicked
 static void panel_show(void) {
   RECT rc;
@@ -1380,6 +1413,15 @@ static void panel_show(void) {
     tray_log("no timer left: the panel closes with Esc or a click on it");
   SetFocus(item(IDC_P_ON));
   tray_log("panel");
+  // while this copy runs, every ess3d starts from it, also after a newer
+  // ess3d.exe was copied over it
+  if (exe_replaced()) {
+    tip_say(item(IDC_P_CLOSE),
+            "ESS3D.EXE was replaced while this copy runs. Click Close, then "
+            "start ess3d tray again to run the new version.",
+            TIP_REPLACED_MS);
+    tray_log("ess3d.exe was replaced: this is still the old copy");
+  }
 }
 
 BOOL CALLBACK __export panel_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
@@ -1595,6 +1637,7 @@ int tray_run(const struct ess3d_cmd *c) {
 
   // the mouse wheel moves the slider under the pointer
   wheel_init();
+  exe_stat(&exe_time, &exe_size);
   while (wheel_get(&msg)) {
     // the tips, then the panel's keys: Tab, Enter and Esc
     if (panel)
