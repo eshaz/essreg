@@ -62,8 +62,9 @@ void s3dsim_levels(const u8 *reg, double m, double *rise, double *fall) {
   // or 56h over 91.2 times the M, and 5Ah's fixed part
   a = K_STEP * reg[2] * mi + D_STEP * reg[5];
   b = K_STEP * reg[3] * mi + D_STEP * reg[5];
-  *rise = 20 * log10(a * RISE / mi);
-  *fall = 20 * log10((b > a ? b : a) / mi);
+  // no level at all with 54h, 56h and 5Ah at 00h: the boost only falls
+  *rise = a > 0 ? 20 * log10(a * RISE / mi) : -120;
+  *fall = a > 0 || b > 0 ? 20 * log10((b > a ? b : a) / mi) : -120;
 }
 
 // a first-order all-pass (a + z^-1) / (1 + a z^-1) that delays by t
@@ -347,15 +348,63 @@ void s3dsim_curve(const u8 *reg, double hz, double gain, double *ss,
   *ms = db_of(mag(effect(reg, PLOT_RATE, w, one, zero, g)));
 }
 
+// the boost's filters and 50h at 08h's low-pass at each point of the
+// curves, worked out once, as the registers only scale them
+static struct z curve_b[S3DSIM_CURVE_N], curve_r[S3DSIM_CURVE_N];
+static int curve_ready;
+
+static void curve_parts(void) {
+  double hb[3], lb[3], rb[3], ap[3], w;
+  int i;
+
+  first(HP_HZ, PLOT_RATE, 1, hb);
+  first(LP_HZ, PLOT_RATE, 0, lb);
+  first(RESET_HZ, PLOT_RATE, 0, rb);
+  ap[0] = ap[2] = allpass(LAG, PLOT_RATE);
+  ap[1] = 1;
+  for (i = 0; i < S3DSIM_CURVE_N; i++) {
+    w = 2 * PI * S3DSIM_CURVE_HZ * pow(2.0, i / 6.0) / PLOT_RATE;
+    curve_b[i] = z_mul(z_mul(at(hb, w), at(lb, w)), at(ap, w));
+    curve_r[i] = at(rb, w);
+  }
+  curve_ready = 1;
+}
+
+void s3dsim_curves(const u8 *reg, double gain, float *ss, float *ms) {
+  double k = pow(10.0, gain / 20) * boost_gain(reg);
+  struct z s, m;
+  int i, on = (reg[0] & 0x0C) == 0x0C, model = reg[0] & 2;
+
+  if (!curve_ready)
+    curve_parts();
+  // as effect() has them: the S and the boost's S
+  for (i = 0; i < S3DSIM_CURVE_N; i++) {
+    s = z_of(1, 0);
+    m = z_of(0, 0);
+    if ((reg[0] & 0x0C) == 0x08) {
+      s = z_add(s, z_scale(curve_r[i], RESET_GAIN));
+    } else if (on && model) {
+      s = z_of(KEEP, 0);
+      m = z_scale(curve_b[i], k * MODEL);
+    } else if (on) {
+      s = z_add(s, z_scale(curve_b[i], k));
+    }
+    ss[i] = (float)db_of(mag(s));
+    ms[i] = (float)db_of(mag(m));
+  }
+}
+
 void s3dsim_step(const u8 *reg, double t1, double dt, int n, float *out,
                  double *held, double *rise, double *fall) {
   struct z zero = z_of(0, 0), one = z_of(1, 0), s0, s1, m0, m1;
   double w1 = 2 * PI * 1000 / PLOT_RATE, w4 = 2 * PI * 400 / PLOT_RATE;
-  double c[3], hp4, f, r, down, up, lo, hi, g = 1, s, a, b, sum;
+  double c[3], hp4, f, r, down, up, lo, hi, g = 1, s, a, b, x, sum;
   double seen[STEP_LATE];
-  int i, k, ms = (int)(dt * 1000 + 0.5), t = 0;
+  int i, k, ms = (int)(dt * 1000 + 0.5), t = 0, t1ms = (int)(t1 * 1000);
   int limit = (reg[0] & 0x0D) == 0x0D;
 
+  if (ms < 1)
+    ms = 1;
   // the S out of the S at 1 kHz and of the M at 400 Hz: a part that the
   // boost's gain doesn't move, and one that it does
   s0 = effect(reg, PLOT_RATE, w1, zero, one, 0);
@@ -363,41 +412,51 @@ void s3dsim_step(const u8 *reg, double t1, double dt, int n, float *out,
   m0 = effect(reg, PLOT_RATE, w4, one, zero, 0);
   m1 = z_sub(effect(reg, PLOT_RATE, w4, one, zero, 1), m0);
   // the limit's detector takes 400 Hz through its high-pass, against
-  // 1 kHz, and its levels and speeds, a millisecond's step
+  // 1 kHz, and its levels and speeds, a millisecond's step, all as powers
   first(DETECT, PLOT_RATE, 1, c);
   hp4 = hp_gain(c, PLOT_RATE, 400) * DETECT_1K;
+  hp4 *= hp4;
   s3dsim_levels(reg, STEP_M, rise, fall);
   s3dsim_speed(reg, &f, &r);
-  lo = pow(10.0, *rise / 20);
-  hi = pow(10.0, *fall / 20);
+  lo = pow(10.0, *rise / 10);
+  hi = pow(10.0, *fall / 10);
   down = pow(10.0, -f / 1000 / 20);
   up = pow(10.0, r / 1000 / 20);
   *held = 0;
   for (k = 0; k < STEP_LATE; k++)
     seen[k] = 0;
   for (i = 0; i < n; i++) {
-    // the mean of the S out over each step, where a fast limit hunts
+    // the mean power of the S out over each step, where a fast limit
+    // hunts around its level
     for (k = 0, sum = 0; k < (i ? ms : 1); k++, t++) {
       // the S at 0 dB against the M until t1, then 12 dB lower
-      s = t < t1 * 1000 ? 1 : 0.25119;
-      a = mag(z_add(s0, z_scale(s1, g))) * s;
-      b = mag(z_add(m0, z_scale(m1, g)));
-      sum += sqrt(a * a + b * b);
-      if (t == (long)(t1 * 1000))
+      s = t < t1ms ? 1 : 0.0630957;
+      x = s0.re + g * s1.re;
+      a = x * x;
+      x = s0.im + g * s1.im;
+      a = (a + x * x) * s;
+      x = m0.re + g * m1.re;
+      b = x * x;
+      x = m0.im + g * m1.im;
+      b += x * x;
+      sum += a + b;
+      if (t == t1ms)
         *held = db_of(g);
       if (!limit)
         continue;
       // the limit follows what it saw a few milliseconds ago
-      seen[t % STEP_LATE] = sqrt(a * a + b * b * hp4 * hp4);
-      if (seen[(t + 1) % STEP_LATE] > hi)
+      seen[t % STEP_LATE] = a + b * hp4;
+      x = seen[(t + 1) % STEP_LATE];
+      if (x > hi)
         g *= down;
-      if (seen[(t + 1) % STEP_LATE] < lo)
+      if (x < lo)
         g *= up;
       if (g > 1)
         g = 1;
       if (g < FLOOR)
         g = FLOOR;
     }
-    out[i] = (float)db_of(sum / (i ? ms : 1));
+    sum /= i ? ms : 1;
+    out[i] = (float)(sum > 1e-12 ? 10 * log10(sum) : -120);
   }
 }

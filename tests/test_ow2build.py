@@ -90,13 +90,14 @@ class OW2BuildTest(unittest.TestCase):
         self.assertIn(1, kinds[16])                    # version
 
     def test_ess3d(self):
-        # the window procedures of the display, the tray icon, its panel and
-        # its graph, and the measurement, which plays and records through
-        # MMSYSTEM
+        # the window procedures of the display, the tray icon, its panel,
+        # its graph and its tips, and the measurement, which plays and
+        # records through MMSYSTEM
         self.check_windows_program(self.ne3d, "ESS3D",
                                    ("KERNEL", "USER", "GDI", "MMSYSTEM"),
                                    {"OSD_PROC", "TRAY_PROC", "PANEL_PROC",
-                                    "GRAPH_PROC", "MEASURE_PROC"})
+                                    "GRAPH_PROC", "TIP_PROC",
+                                    "MEASURE_PROC"})
         kinds = self.resource_kinds(self.ne3d)
         self.assertEqual(set(kinds), {3, 5, 14, 16})  # icons, dialogs, version
         self.assertEqual(kinds[14], {"ESS3D", "ICON_ON", "ICON_OFF"})

@@ -102,12 +102,19 @@ void s3dsim_levels(const u8 *reg, double m, double *rise, double *fall);
 void s3dsim_curve(const u8 *reg, double hz, double gain, double *ss,
                   double *ms);
 
+// the same at S3DSIM_CURVE_N points, a sixth of an octave each from
+// S3DSIM_CURVE_HZ, into ss[] and ms[], quickly enough for a slider: the
+// filters are worked out at the first call
+#define S3DSIM_CURVE_N 49
+#define S3DSIM_CURVE_HZ 50.0
+void s3dsim_curves(const u8 *reg, double gain, float *ss, float *ms);
+
 // and the limit over time, as a step run of the measurement sees it: an M
 // at -24 dBFS and 400 Hz and an S at 1 kHz, the S at 0 dB against the M
-// until t1 seconds and then 12 dB lower. The S out against the M in dB
-// every dt seconds from 0, n of them into out, the boost's gain in dB at
-// t1 into *held, and the levels it rises under and falls over, in dB
-// against the M
+// until t1 seconds and then 12 dB lower. The S out against the M in dB,
+// its mean power over each dt seconds from 0, n of them into out, the
+// boost's gain in dB at t1 into *held, and the levels it rises under and
+// falls over, in dB against the M
 void s3dsim_step(const u8 *reg, double t1, double dt, int n, float *out,
                  double *held, double *rise, double *fall);
 

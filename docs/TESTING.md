@@ -670,6 +670,17 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
      width by frequency grows and shrinks with *Effect*, and with the
      automatic level on, the width over time falls to the red *Lower above*
      line at the lower speed and climbs after the drop at the raise speed.
+     Drag a slider quickly from end to end. The slider keeps up with the
+     mouse, and the graph follows it while it moves, without flicker. When
+     you let go, the icon's tooltip shows the new setting.
+   * Rest the mouse on each setting. After about half a second, a tip says
+     what the setting does. It goes when the mouse moves to another setting
+     or leaves the panel, and on a click.
+   * Clear *Show graph*. The graph goes and the panel gets narrower, with
+     its right edge where it was. Run `ess3d exit`, start `ess3d tray` again
+     and open the panel, and the graph is still hidden: `ESS3D.INI` next to
+     `ESS3D.EXE` has `Graph=0` in its `[Tray]` section. Check *Show graph*
+     to have the graph back.
    * The panel closes when you click the desktop, when you click the icon
      again, and when you press Esc. Try each one.
    * Run `ess3d off` from a shortcut key, and the icon turns gray and the

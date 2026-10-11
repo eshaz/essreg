@@ -650,6 +650,40 @@ static void test_plot(void) {
   s3dsim_step(reg, 2.0, 0.05, 161, out, &held, &rise, &fall);
   CHECK(held == 0 && fabs(out[39] - out[0]) < 0.01 &&
         fabs(out[41] - out[0] + 12) < 0.05);
+  // with 54h, 56h and 5Ah at 00h there is no level, and the boost falls
+  // to its floor
+  memcpy(reg, ess, 6);
+  reg[0] = 0x0D;
+  reg[2] = reg[3] = reg[5] = 0;
+  s3dsim_step(reg, 2.0, 0.05, 161, out, &held, &rise, &fall);
+  CHECK(rise == -120 && fall == -120 && held < -46);
+}
+
+// the panel's curves, worked out from filters cached at the first call, as
+// s3dsim_curve gives them point by point, for every state of 50h bits 3:0
+static void test_curves(void) {
+  float ss[S3DSIM_CURVE_N], ms[S3DSIM_CURVE_N];
+  double a, b, worst = 0;
+  u8 reg[6] = {0, 0x3F, 0x8F, 0x95, 0x94, 0x80};
+  int i, r, k;
+
+  for (r = 0; r < 16; r++)
+    for (k = 0; k < 2; k++) {
+      reg[0] = (u8)r;
+      reg[1] = (u8)(k ? 0x20 : 0x3F);
+      s3dsim_curves(reg, k ? -10 : 0, ss, ms);
+      for (i = 0; i < S3DSIM_CURVE_N; i++) {
+        s3dsim_curve(reg, S3DSIM_CURVE_HZ * pow(2.0, i / 6.0), k ? -10 : 0, &a,
+                     &b);
+        if (fabs(ss[i] - a) > worst)
+          worst = fabs(ss[i] - a);
+        if (fabs(ms[i] - b) > worst)
+          worst = fabs(ms[i] - b);
+      }
+    }
+  CHECK(worst < 1e-3);
+  if (verbose)
+    printf("curves: within %.6f dB of s3dsim_curve\n", worst);
 }
 
 static void test_limit_plan(void) {
@@ -1181,6 +1215,7 @@ int main(int argc, char **argv) {
   test_quick_plan();
   test_full_plan();
   test_plot();
+  test_curves();
   test_limit_plan();
   test_window_plan();
   test_one_register();

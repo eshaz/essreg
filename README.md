@@ -282,15 +282,21 @@ Each row has a text field and a slider to its right over the whole range of
 the field, in steps of one, with a word at each end of the slider and what
 the value does after it, which follows the slider as it moves. With the
 rebuilt `ES1869.VXD`, the value is written as the slider moves, and with
-ESS's own only when you let go of it. The text field takes 54h, 56h and 5Ah
-in hex and the others in decimal, and writes the value when you press Enter
-or leave the field. Under the groups:
+ESS's own only when you let go of it. While the slider moves, only its field
+is written, and the rest of the panel, the icon's tooltip and the log follow
+once it stops. The text field takes 54h, 56h and 5Ah in hex and the others
+in decimal, and writes the value when you press Enter or leave the field.
+Every setting has a tip that says what it does, which shows when the mouse
+rests on it. Under the groups:
+* *Show graph* shows or hides the graph left of the groups. It is shown at
+  first, and ess3d keeps the choice in `ESS3D.INI` next to `ESS3D.EXE`, as
+  `Graph=` in its `[Tray]` section.
 * *Driver defaults* sets what ESS's driver sets when Windows starts.
 * *Close tray icon* removes the icon, as `ess3d exit` does.
 
 Left of the groups, a graph shows what the setting does to the sound, from
 the effect of `/sim`, which follows one card's measurements. It follows each
-change, and a slider while you drag it:
+change, and a slider while you drag it, up to 25 times a second:
 * *Width by frequency* is what the effect does to the S at each frequency,
   in dB: the program's own stereo with *Stereo*, or the S made from the mono
   sum with *Mono*. With the automatic level on, a dotted curve shows the
@@ -303,8 +309,8 @@ change, and a slider while you drag it:
   green for raise.
 
 The panel closes when you click somewhere else, click the icon again or
-press Esc. Every change is written and read back, so the panel shows what
-the chip returned. The icon follows ess3d's commands and essctl's 3-D
+press Esc. Every change is read back once it is made, so the panel shows
+what the chip returned. The icon follows ess3d's commands and essctl's 3-D
 settings, and with the rebuilt `ES1869.VXD` it also reads the setting every
 3 seconds, so it follows the Windows mixer too. The panel has every field of
 the Spatializer registers in essctl's list, so one found later appears in
