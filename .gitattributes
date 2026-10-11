@@ -19,3 +19,4 @@
 *.EXE binary
 *.exe binary
 *.com binary
+driver/es1869f/** binary
