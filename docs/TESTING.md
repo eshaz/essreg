@@ -202,6 +202,16 @@ and stop at the first surprise. Each step says what you should see.
    * Type 20 in the text field and press Enter, and the slider moves to 20.
      Then type 99 and press Enter. You hear a beep, and the text field goes
      back to 20.
+   * Rest the pointer on the slider and turn the mouse wheel. Each notch
+     away from you raises the level by one, and each notch toward you lowers
+     it. Click in a text field of another row first, so that the focus is
+     elsewhere: the wheel still moves the slider under the pointer.
+   * Open the *Output mixer* page, make the window small enough that the
+     page has a scroll bar, and turn the wheel over the names of the
+     settings. The page scrolls three rows a notch.
+   * On the *Raw registers* page, double-click a register. In the *Register*
+     box, the wheel moves the slider and the value, one step a notch. Close
+     the box, and the main window works again.
 2. Turn on the microphone monitor in the Windows mixer, then speak into the
    microphone and toggle *Mic +26 dB preamp*. The microphone is much louder
    with the preamp on.
@@ -681,6 +691,12 @@ loaded.
    * Rest the mouse on each setting. After about half a second, a tip says
      what the setting does. It goes when the mouse moves to another setting
      or leaves the panel, and on a click.
+   * Rest the pointer on a slider and turn the mouse wheel. Each notch away
+     from you raises the value by one, each notch toward you lowers it, and
+     the graph and the music follow.
+   * Type 99 in the *Effect* field and press Enter. You hear a beep, the
+     field goes back to the setting, and a tip under it says "Enter a value
+     from 0 to 63." for a few seconds. The panel has no status line.
    * Click *Hide graph*. The graph goes, the panel gets narrower with its
      right edge where it was, and the button reads *Show graph*. Drag the
      sliders again, and note whether they move more freely than with the
@@ -697,14 +713,14 @@ loaded.
      effect is heard again.
    * With the extended driver, change 3-D in the Windows mixer. The icon
      follows within 3 seconds.
-   * Click *Driver defaults*. The panel shows *On* and *Stereo*, the effect
-     at 63 and +16.8 dB, the automatic effect level off, the levels at 95h
-     and 8Fh, M +4.3 dB and M +3.9 dB, the fixed level at 80h, -36.3 dBFS,
-     and the speeds at 4 and 9, 51.5 and 5.15 dB a second. Move the lower
+   * Click *Defaults*. The panel shows *On* and *Stereo*, the effect at 63
+     and +16.8 dB, the automatic effect level off, the levels at 95h and
+     8Fh, M +4.3 dB and M +3.9 dB, the fixed level at 80h, -36.3 dBFS, and
+     the speeds at 4 and 9, 51.5 and 5.15 dB a second. Move the lower
      speed's slider, and the raise speed's dB a second follows it.
-   * A second `ess3d tray` opens the panel. *Close tray icon* removes the
-     icon. Start it again with `ess3d tray`, then run `ess3d exit`, and the
-     icon goes too.
+   * A second `ess3d tray` opens the panel. *Close* removes the icon. Start
+     it again with `ess3d tray`, then run `ess3d exit`, and the icon goes
+     too.
    * Put a shortcut to `C:\ESSREG\ESS3D.EXE tray` in the StartUp folder and
      restart Windows. The icon is there after the start.
    * If Explorer restarts, after a crash or when it's ended with

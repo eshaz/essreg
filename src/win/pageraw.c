@@ -23,6 +23,7 @@
 #include "esshw.h"
 #include "essio.h"
 #include "resource.h"
+#include "wheel.h"
 #include "winio.h"
 
 #define MAX_VIEWS 16
@@ -364,7 +365,7 @@ BOOL CALLBACK __export bit_dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
       return TRUE;
     }
     if (wp == IDCANCEL) {
-      EndDialog(dlg, 0);
+      wheel_end(0);
       return TRUE;
     }
     break;
@@ -378,7 +379,8 @@ int bit_editor(HWND owner, int reg, int value) {
 
   be.reg = reg;
   be.value = (u8)value;
-  rc = DialogBox(g_inst, "BITEDIT", owner, proc);
+  // its own loop, which has the mouse wheel
+  rc = wheel_dialog(g_inst, "BITEDIT", owner, proc);
   FreeProcInstance((FARPROC)proc);
   return rc;
 }

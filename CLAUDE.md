@@ -22,7 +22,8 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   `tools/ess3dico.py`, and `ess3dms.c` its measurement of the 3-D effect,
   played on Audio 2 and recorded from record source 7. `esfmrec.c` records
   the FM digitally to a WAV file, and `essinst.c` installs the rebuilt
-  drivers and restarts Windows.
+  drivers and restarts Windows. `wheel.c` gives the sliders of essctl and
+  ess3d the mouse wheel.
 * `src/vxd/` holds `ES1869.VXD` as NASM source, made by `tools/vxd2asm.py`.
   `essext.asm` adds the register API and the DOS box improvements (the
   virtual FM chip, Windows' mixer around a DOS program, and the DACs' modes
@@ -187,7 +188,10 @@ tools/wineshot.sh run ess3d.exe /sim tray
   show it next to the slider.
 * **Ranged settings** (levels, and signed and raw values) are a text field
   with a slider on its right, in steps of one, in essctl, in its bit editor
-  and in the tray panel.
+  and in the tray panel. The mouse wheel moves the slider under the pointer
+  one step a notch, so a window with sliders gets its messages through
+  `wheel_get` (or `wheel_dialog` for a modal one): a 16-bit WM_MOUSEWHEEL
+  loses the turn, which USER32's PeekMessageA keeps.
 * **The VxD API from essctl.** Of ESS's functions, essctl calls only the
   *info* functions, and 0002 and 0003 as
   [VXD_API.md](docs/VXD_API.md#ownership-and-port-trapping) describes. It

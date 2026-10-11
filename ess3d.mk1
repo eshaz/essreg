@@ -33,8 +33,8 @@ w_s3dsim.obj : src\s3dsim.c .AUTODEPEND
 ess3d.res : src\win\ess3d.rc src\win\ess3dres.h src\win\essctl.ico src\win\ess3don.ico src\win\ess3doff.ico
  *wrc -q -r -bt=windows -i="$(%watcom)/h;$(%watcom)/h/win;src\win" src\win\ess3d.rc -fo=ess3d.res
 
-ess3d.exe : w_ess3dw.obj w_ess3dtr.obj w_ess3dms.obj w_s3dmeas.obj w_s3dsim.obj w_ess3d.obj w_winio.obj w_esshw.obj w_esscat.obj w_essio.obj w_simhw.obj w_vxdapi.obj w_vxdcall.obj ess3d.res nestamp.exe .AUTODEPEND
- @%write ess3d.lk1 FIL w_ess3dw.obj,w_ess3dtr.obj,w_ess3dms.obj,w_s3dmeas.obj,w_s3dsim.obj,w_ess3d.obj,w_winio.obj,w_esshw.obj,w_esscat.obj,w_essio.obj,w_simhw.obj,w_vxdapi.obj,w_vxdcall.obj
+ess3d.exe : w_ess3dw.obj w_ess3dtr.obj w_ess3dms.obj w_s3dmeas.obj w_s3dsim.obj w_ess3d.obj w_winio.obj w_wheel.obj w_esshw.obj w_esscat.obj w_essio.obj w_simhw.obj w_vxdapi.obj w_vxdcall.obj ess3d.res nestamp.exe .AUTODEPEND
+ @%write ess3d.lk1 FIL w_ess3dw.obj,w_ess3dtr.obj,w_ess3dms.obj,w_s3dmeas.obj,w_s3dsim.obj,w_ess3d.obj,w_winio.obj,w_wheel.obj,w_esshw.obj,w_esscat.obj,w_essio.obj,w_simhw.obj,w_vxdapi.obj,w_vxdcall.obj
  @%append ess3d.lk1 LIBR mmsystem.lib
  @%append ess3d.lk1 SEGMENT CLASS 'CODE' MOVEABLE DISCARDABLE
  @%append ess3d.lk1 OPTION DESCRIPTION 'ES1869 3-D'

@@ -54,7 +54,10 @@
  *
  * Each setting has a tip, which shows when the mouse rests on it. The
  * main loop watches the mouse over the panel (tip_watch), since a 16-bit
- * program has no tooltip control of its own.
+ * program has no tooltip control of its own. A value typed out of range
+ * is said in the tip, under its text field (tip_say), as the panel has no
+ * status line. The mouse wheel moves the slider under the pointer
+ * (wheel.c). Under the groups are Hide graph, Defaults and Close.
  *
  * The panel closes when another window comes to the front, like the
  * tray's menus, or on a second click on the icon. It watches the
@@ -87,6 +90,7 @@
 #include "esshw.h"
 #include "essio.h"
 #include "s3dsim.h"
+#include "wheel.h"
 #include "winio.h"
 
 #define TRAY_TITLE "ES1869 3-D"
@@ -100,8 +104,9 @@
 #define ADD_MS 2000
 #define TIP_TIMER 4 // the mouse rests on a setting: its tip
 #define TIP_MS 600
-#define GRAPH_TIMER 5 // a slider rests: the graph that was skipped
-#define TIP_W 240     // a tip's width in pixels
+#define GRAPH_TIMER 5   // a slider rests: the graph that was skipped
+#define TIP_SAY_MS 4000 // a message in the tip
+#define TIP_W 240       // a tip's width in pixels
 #define TIP_CLASS "ess3dTip"
 #define INI_NAME "ESS3D.INI" // the graph shown or not, [Tray] Graph=
 
@@ -142,7 +147,6 @@ typedef DWORD(FAR PASCAL *CALL32_2)(DWORD, DWORD, DWORD, DWORD, DWORD);
 #define IDC_P_RESET 106
 #define IDC_P_DEFAULTS 107
 #define IDC_P_CLOSE 108
-#define IDC_P_STATUS 109
 #define IDC_P_GROUP 110 // + 0 and 1: the group boxes
 #define IDC_P_GRAPH 112
 #define IDC_P_SHOWGRAPH 113
@@ -185,63 +189,74 @@ static const struct {
   const char *name, *lo, *hi, *tip;
 } names[] = {
     {F_3D_LEVEL, "Effect:", "Min", "Max",
-     "How much width the effect adds (52h): the boost's peak near 450 Hz, "
-     "+16.8 dB at 63 and 0.75 dB less for each step under it."},
+     "Effect strength: the gain of the band-pass copy of the side signal "
+     "(L-R) that widens the image, peaking near 450 Hz. +16.8 dB at 63, "
+     "0.75 dB less per step below. (Mixer 52h)"},
     {F_3D_R56, "Lower above:", "Low", "High",
-     "The effect is lowered while its S is over this level and the raise "
-     "level (56h). The level is the value over 91.2 times the M, plus the "
-     "fixed level."},
+     "Upper threshold. While the processed side signal is above it, the "
+     "effect is reduced at the lower speed. Threshold: the mid level (M) "
+     "times value / 91.2, plus the fixed level; 95h is M +4.3 dB. (56h)"},
     {F_3D_R54, "Raise below:", "Low", "High",
-     "The effect is raised while its S is under this level made 0.5 dB "
-     "higher (54h). The level is the value over 91.2 times the M, plus the "
-     "fixed level. The S is held at the higher of the two levels."},
+     "Lower threshold. While the processed side signal is below it, the "
+     "effect is restored at the raise speed. Computed as for Lower above, "
+     "then raised 0.5 dB; 8Fh is M +3.9 dB. Set above Lower above, it is "
+     "where the side signal settles. (54h)"},
     {F_3D_R5A, "Fixed level:", "None", "High",
-     "A level added to both levels in proportion to the value (5Ah), "
-     "-36.3 dBFS at 80h, so that quiet sound keeps the full effect."},
+     "Absolute level added to both thresholds, in proportion to the value: "
+     "-36.3 dBFS at 80h, none at 00h. Keeps quiet passages at the full "
+     "effect. (5Ah)"},
     {F_3D_FALL, "Lower speed:", "Fast", "Slow",
-     "How fast the effect is lowered while its S is over the levels (58h "
-     "bits 3:0, n): 257.5 / (n + 1) dB a second."},
+     "Attack rate: how fast the effect is reduced above the upper "
+     "threshold. 257.5 / (n + 1) dB/s: 257.5 at 0, 16.1 at 15. (58h bits "
+     "3:0)"},
     {F_3D_RISE, "Raise speed:", "Fast", "Slow",
-     "How much slower the effect is raised than lowered (58h bits 7:4, h): "
-     "the lower speed over h + 1."}};
+     "Release rate: how fast the effect is restored below the lower "
+     "threshold, as the lower speed / (h + 1): equal at 0, 16 times slower "
+     "at 15. (58h bits 7:4)"}};
 
 // the other controls' tips
 static const struct {
   int id;
   const char *tip;
 } tips[] = {
-    {IDC_P_ON, "Turns the 3-D effect on (mixer 50h bit 3). Off, the sound "
-               "passes as it is."},
-    {IDC_P_HOLD, "Holds the effect in reset (50h bit 2 clear). It then only "
-                 "adds 0.4 dB of bass to the S, so it is as good as off."},
-    {IDC_P_STEREO, "Widens the program's own stereo: the effect adds a "
-                   "band-pass copy of the S, the difference of the two "
-                   "channels, up to +16.8 dB near 450 Hz."},
-    {IDC_P_MONO, "Makes a stereo effect from the mono sum (50h bit 1): the S "
-                 "comes from the M through the same band-pass, 3 dB lower, "
-                 "and the program's own S is dropped."},
-    {IDC_P_RESET, "Resets the effect and releases it, keeping its setting."},
-    {IDC_P_LIMIT, "Lowers the effect while the S that it makes is over a "
-                  "level against the M, and raises it again once the S is "
-                  "under (50h bit 0, ESS's 3D Limit). A wide program then "
-                  "gets less effect."},
-    {IDC_P_GROUP, "The Spatializer adds a band-pass copy of the S, the "
-                  "difference of the channels, to widen the sound."},
-    {IDC_P_GROUP + 1, "The automatic effect level holds the S that the "
-                      "effect makes at a level against the M, at its own "
-                      "speeds."},
-    {IDC_P_DEFAULTS, "Sets what ESS's driver sets when Windows starts: the "
-                     "effect on at 63, the automatic level off, and 8Fh, "
-                     "95h, 94h and 80h in 54h-5Ah."},
-    {IDC_P_CLOSE, "Removes the tray icon, as ess3d exit does."},
-    {IDC_P_SHOWGRAPH, "Hides or shows the graph of what the setting does. "
-                      "ESS3D.INI keeps the choice."},
-    {IDC_P_GRAPH, "What the setting does, from the effect of /sim, which "
-                  "follows one card's measurements. Top: the width by "
-                  "frequency, dotted where the automatic level holds it. "
-                  "Bottom: the S against the M over time, with an S as loud "
-                  "as the M for 2 s and then 12 dB lower, and the two "
-                  "levels dashed."}};
+    {IDC_P_ON, "Turns the 3-D effect on. When off, the audio passes through "
+               "unchanged. (Mixer 50h bit 3)"},
+    {IDC_P_HOLD, "Holds the effect in reset. The audio passes almost "
+                 "unchanged: only a +0.4 dB bass shelf remains on the side "
+                 "signal (L-R). (50h bit 2 clear)"},
+    {IDC_P_STEREO, "Widens existing stereo: adds a band-pass copy of the "
+                   "side signal (L-R), the difference between the two "
+                   "channels. (50h bit 1 clear)"},
+    {IDC_P_MONO, "Creates width from mono: derives the side signal from the "
+                 "mid signal (L+R) through the same band-pass, 3 dB lower, "
+                 "and cuts the original side signal by 30 dB. (50h bit 1 "
+                 "set)"},
+    {IDC_P_RESET, "Pulses the effect's reset to clear its internal state, "
+                  "then resumes with the same settings. (50h bit 2)"},
+    {IDC_P_LIMIT, "Turns on the automatic level, a compressor on the "
+                  "effect: the boost is reduced while the processed side "
+                  "signal is above the upper threshold and restored below "
+                  "the lower one, so wide material gets less effect. (50h "
+                  "bit 0, ESS 3D Limit)"},
+    {IDC_P_GROUP, "The 3-D stage widens the stereo image by boosting the "
+                  "side signal (L-R) through a band-pass filter near "
+                  "450 Hz."},
+    {IDC_P_GROUP + 1, "A compressor on the effect: holds the processed side "
+                      "signal between two thresholds set against the mid "
+                      "signal (L+R)."},
+    {IDC_P_SHOWGRAPH, "Shows or hides the graph. ESS3D.INI keeps the "
+                      "choice."},
+    {IDC_P_DEFAULTS, "Restores the settings that ESS's driver applies when "
+                     "Windows starts: effect on at 63, automatic level off, "
+                     "54h-5Ah at 8Fh, 95h, 94h and 80h."},
+    {IDC_P_CLOSE, "Removes the tray icon and closes ess3d, as ess3d exit "
+                  "does."},
+    {IDC_P_GRAPH, "Simulated response of the current settings, modeled on "
+                  "one card's measurements. Top: side-signal gain by "
+                  "frequency, dotted while the automatic level reduces it. "
+                  "Bottom: side level relative to the mid over 8 s, with "
+                  "the side signal 12 dB lower after 2 s; dashed, the two "
+                  "thresholds."}};
 
 static struct {
   LOADLIB32 load;
@@ -282,6 +297,10 @@ static int skip_row, skip_value;   // and which
 static HWND tip;
 static int tip_id;          // the control the mouse rests on
 static const char *tip_now; // and its tip
+static int tip_said;        // the tip holds a message instead
+
+static void tip_hide(void);
+static void tip_say(HWND ctl, const char *text);
 
 // what the graph plots: the registers 50h, 52h, 54h, 56h, 58h and 5Ah,
 // S>S and M>S by frequency at the full boost and where the limit holds
@@ -793,7 +812,6 @@ LRESULT CALLBACK __export graph_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
 
 // the panel shows the setting
 static void panel_fill(void) {
-  char text[64];
   int r;
 
   if (!panel)
@@ -811,8 +829,6 @@ static void panel_fill(void) {
       unit_show(r, slider_value(r));
     edit_show(r, 0);
   }
-  state_text(text, sizeof(text));
-  set_text(IDC_P_STATUS, text);
   if (drag < 0)
     graph_update(-1, 0, 0);
 }
@@ -905,10 +921,10 @@ static void edit_apply(int row) {
   if (!text[0] || *end || v < 0 || v > cat_max(f)) {
     MessageBeep(0);
     if (is_hex(row))
-      sprintf(msg, "%.40s: %s is not 00h to %02Xh", f->label, text, cat_max(f));
+      sprintf(msg, "Enter a value from 00h to %02Xh.", cat_max(f));
     else
-      sprintf(msg, "%.40s: %s is not 0 to %d", f->label, text, cat_max(f));
-    SetDlgItemText(panel, IDC_P_STATUS, msg);
+      sprintf(msg, "Enter a value from 0 to %d.", cat_max(f));
+    tip_say(item(IDC_P_EDIT + row), msg);
     edit_show(row, 1);
     return;
   }
@@ -924,6 +940,8 @@ static void panel_scroll(HWND sb, int code, int pos) {
 
   if (row < 0 || row >= nsliders)
     return;
+  // a step of the wheel or the keys hides the tip, as a click does
+  tip_hide();
   v = GetScrollPos(sb, SB_CTL);
   max = cat_max(&ess_fields[slider_field(row)]);
   // steps of one: arrows, keys and clicks beside the thumb
@@ -1067,22 +1085,20 @@ static int tip_at(void) {
 
 static void tip_hide(void) {
   KillTimer(tray, TIP_TIMER);
+  tip_said = 0;
   if (tip && IsWindowVisible(tip))
     ShowWindow(tip, SW_HIDE);
 }
 
-// the tip under the mouse, sized for its text and kept on the screen
-static void tip_show(void) {
-  POINT pt;
+// the tip at x, y on the screen, sized for its text and kept on the
+// screen: above y0 where it doesn't fit under
+static void tip_place(int x, int y, int y0) {
   RECT rc;
   HFONT font;
   HGDIOBJ old = 0;
   HDC dc;
-  int w, h, x, y;
+  int w, h;
 
-  if (!tip || !tip_now || !panel || !IsWindowVisible(panel) ||
-      tip_at() != tip_id)
-    return;
   dc = GetDC(tip);
   font = (HFONT)SendMessage(panel, WM_GETFONT, 0, 0);
   if (font)
@@ -1094,16 +1110,43 @@ static void tip_show(void) {
   ReleaseDC(tip, dc);
   w = rc.right + 10;
   h = rc.bottom + 6;
-  GetCursorPos(&pt);
-  x = pt.x + 2;
-  y = pt.y + 20;
   if (x + w > GetSystemMetrics(SM_CXSCREEN))
     x = GetSystemMetrics(SM_CXSCREEN) - w;
   if (y + h > GetSystemMetrics(SM_CYSCREEN))
-    y = pt.y - h - 4;
+    y = y0 - h;
   SetWindowPos(tip, HWND_TOPMOST, x < 0 ? 0 : x, y < 0 ? 0 : y, w, h,
                SWP_NOACTIVATE | SWP_SHOWWINDOW);
   InvalidateRect(tip, 0, TRUE);
+}
+
+// the tip of the control under the mouse, under the pointer
+static void tip_show(void) {
+  POINT pt;
+
+  if (!tip || !tip_now || !panel || !IsWindowVisible(panel) ||
+      tip_at() != tip_id)
+    return;
+  GetCursorPos(&pt);
+  tip_place(pt.x + 2, pt.y + 20, pt.y - 4);
+}
+
+// a message in the tip, under a control, until a click, a key or
+// TIP_SAY_MS
+static void tip_say(HWND ctl, const char *text) {
+  static char said[96];
+  RECT rc;
+
+  if (!tip || !ctl)
+    return;
+  tip_hide();
+  strncpy(said, text, sizeof(said) - 1);
+  tip_now = said;
+  tip_id = GetDlgCtrlID(ctl);
+  GetWindowRect(ctl, &rc);
+  tip_place(rc.left, rc.bottom + 2, rc.top - 2);
+  tip_said = 1;
+  if (!SetTimer(tray, TIP_TIMER, TIP_SAY_MS, 0))
+    tray_log("no timer left for the tips");
 }
 
 // the mouse over the panel, before the dialog has the message: a new
@@ -1114,7 +1157,8 @@ static void tip_watch(const MSG *m) {
 
   switch (m->message) {
   case WM_MOUSEMOVE:
-    if (m->hwnd != panel && GetParent(m->hwnd) != panel)
+    // a message stays while the mouse moves
+    if (tip_said || (m->hwnd != panel && GetParent(m->hwnd) != panel))
       return;
     id = tip_at();
     if (id == tip_id)
@@ -1237,16 +1281,13 @@ static void panel_build(void) {
       10, IDC_P_LIMIT);
   y = group_build(IDC_P_GROUP + 1, "Automatic effect level", y + 4, 1,
                   nsliders);
-  y += 3;
-  add("STATIC", "", SS_LEFTNOWORDWRAP | SS_NOPREFIX, 6, y, P_W - 12, 9,
-      IDC_P_STATUS);
-  y += 12;
-  add("BUTTON", "Driver &defaults", WS_GROUP | WS_TABSTOP | BS_PUSHBUTTON, 6, y,
-      68, 14, IDC_P_DEFAULTS);
-  add("BUTTON", "Hide &graph", WS_TABSTOP | BS_PUSHBUTTON, (P_W - 68) / 2, y,
-      68, 14, IDC_P_SHOWGRAPH);
-  add("BUTTON", "&Close tray icon", WS_TABSTOP | BS_PUSHBUTTON, P_W - 74, y, 68,
-      14, IDC_P_CLOSE);
+  y += 5;
+  add("BUTTON", "Hide &graph", WS_GROUP | WS_TABSTOP | BS_PUSHBUTTON, 6, y, 68,
+      14, IDC_P_SHOWGRAPH);
+  add("BUTTON", "&Defaults", WS_TABSTOP | BS_PUSHBUTTON, (P_W - 68) / 2, y, 68,
+      14, IDC_P_DEFAULTS);
+  add("BUTTON", "&Close", WS_TABSTOP | BS_PUSHBUTTON, P_W - 74, y, 68, 14,
+      IDC_P_CLOSE);
   // the graph left of the controls, as tall as they are
   SetRect(&rc, 4, 4, G_W, y + 14);
   MapDialogRect(panel, &rc);
@@ -1438,7 +1479,12 @@ LRESULT CALLBACK __export tray_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     }
     if (wp == TIP_TIMER) {
       KillTimer(w, TIP_TIMER);
-      tip_show();
+      if (tip_said) {
+        tip_hide();
+        tip_id = 0;
+      } else {
+        tip_show();
+      }
       return 0;
     }
     if (wp == GRAPH_TIMER) {
@@ -1547,7 +1593,9 @@ int tray_run(const struct ess3d_cmd *c) {
   if (winio_can_poll() && !SetTimer(tray, POLL_TIMER, POLL_MS, 0))
     tray_log("no timer left: the icon won't follow the Windows mixer");
 
-  while (GetMessage(&msg, 0, 0, 0)) {
+  // the mouse wheel moves the slider under the pointer
+  wheel_init();
+  while (wheel_get(&msg)) {
     // the tips, then the panel's keys: Tab, Enter and Esc
     if (panel)
       tip_watch(&msg);
@@ -1556,6 +1604,7 @@ int tray_run(const struct ess3d_cmd *c) {
     TranslateMessage(&msg);
     DispatchMessage(&msg);
   }
+  wheel_free();
   FreeProcInstance((FARPROC)proc);
   w32_free();
   return 0;

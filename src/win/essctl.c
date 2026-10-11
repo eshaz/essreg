@@ -52,6 +52,7 @@
 #include "profile.h"
 #include "resource.h"
 #include "vxdapi.h"
+#include "wheel.h"
 #include "winio.h"
 
 HINSTANCE g_inst;
@@ -132,7 +133,7 @@ int wait_ms(DWORD ms) {
     // GetMessage sleeps until the timer's message comes; without a
     // timer, poll and let the other programs run
     if (timer) {
-      if (!GetMessage(&msg, 0, 0, 0)) {
+      if (!wheel_get(&msg)) {
         quit = 1;
         break;
       }
@@ -735,7 +736,10 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     set_status("%s", esshw_strerror(err));
   ShowWindow(g_main, show);
   accel = LoadAccelerators(inst, "ESSCTL");
-  while (GetMessage(&msg, 0, 0, 0)) {
+  // the mouse wheel moves the slider under the pointer, or scrolls the page
+  wheel_init();
+  wheel_other = page_wheel;
+  while (wheel_get(&msg)) {
     if (!(accel && TranslateAccelerator(g_main, accel, &msg)) &&
         !IsDialogMessage(g_main, &msg)) {
       TranslateMessage(&msg);
@@ -747,6 +751,7 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
       page_focus(focus);
     }
   }
+  wheel_free();
   FreeProcInstance((FARPROC)proc);
   return msg.wParam;
 }

@@ -224,6 +224,26 @@ void page_click(int x, int y) {
     fields_click(y);
 }
 
+// the wheel over a long page or its scroll bar: 3 rows a notch, back up
+// the page as it turns away from you
+int page_wheel(POINT pt, int steps) {
+  HWND sb = GetDlgItem(g_main, IDC_PGSCROLL);
+  int ux = 100, uy = 100;
+
+  if (cur_kind != PK_FIELDS || !IsWindowVisible(sb))
+    return 0;
+  if (WindowFromPoint(pt) != sb) {
+    ScreenToClient(g_main, &pt);
+    dlu_to_px(&ux, &uy);
+    pt.x = (int)((long)pt.x * 100 / ux) - area_x;
+    pt.y = (int)((long)pt.y * 100 / uy) - area_y;
+    if (pt.x < 0 || pt.x >= area_w || pt.y < 0 || pt.y >= area_h)
+      return 0;
+  }
+  page_vscroll(SB_THUMBPOSITION, GetScrollPos(sb, SB_CTL) - 3 * steps);
+  return 1;
+}
+
 void page_focus(HWND ctl) {
   if (cur_kind == PK_FIELDS && ctl && GetParent(ctl) == g_main)
     fields_focus(ctl);

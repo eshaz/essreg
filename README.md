@@ -27,12 +27,17 @@ reads it back, so a page always shows what the chip returned. Levels, signed
 values and raw values have a text field with a slider to its right. The
 slider moves in steps of one across the setting's range, and the text field
 accepts a decimal number, or hex for raw values, and writes it when you
-press Enter or leave the field.
+press Enter or leave the field. The mouse wheel moves the slider under the
+pointer one step a notch: a turn away from you raises the value, a turn
+toward you lowers it. Elsewhere on a page too long for the window, the wheel
+scrolls the page, three rows a notch. The *Register* box, which a
+double-click on a register of *Raw registers* opens, has the wheel on its
+slider too.
 
 The pages also include the registers that the data sheet leaves out but the
-drivers use, marked *(undocumented)*: the 3-D limit and model bits (mixer
-50h bits 0 and 1), the 3-D registers 54h, 56h, 58h and 5Ah, and bits 7:5 and
-2 of controller register A8h. [docs/REGISTERS.md](docs/REGISTERS.md) and
+drivers use, marked *(undocumented)*: the 3-D limit and mono bits (mixer 50h
+bits 0 and 1), the 3-D registers 54h, 56h, 58h and 5Ah, and bits 7:5 and 2
+of controller register A8h. [docs/REGISTERS.md](docs/REGISTERS.md) and
 [docs/SPATIALIZER.md](docs/SPATIALIZER.md) describe them. The *Plug and
 Play* page shows the optional logical devices (MPU-401, CD-ROM, modem and
 general-purpose) under the numbers that the card's PnP header gives them,
@@ -285,15 +290,17 @@ rebuilt `ES1869.VXD`, the value is written as the slider moves, and with
 ESS's own only when you let go of it. While the slider moves, only its field
 is written, and the rest of the panel, the icon's tooltip and the log follow
 once it stops. The text field takes 54h, 56h and 5Ah in hex and the others
-in decimal, and writes the value when you press Enter or leave the field.
-Every setting has a tip that says what it does, which shows when the mouse
-rests on it. Under the groups:
+in decimal, and writes the value when you press Enter or leave the field. A
+value out of range is not written, and a tip under the field gives the
+range. The mouse wheel moves the slider under the pointer one step a notch,
+up as the wheel turns away from you. Every setting has a tip that says what
+it does, which shows when the mouse rests on it. Under the groups:
 * *Hide graph* hides the graph left of the groups and makes the panel
   narrower, and *Show graph* brings it back. The graph is shown at first,
   and ess3d keeps the choice in `ESS3D.INI` next to `ESS3D.EXE`, as `Graph=`
   in its `[Tray]` section.
-* *Driver defaults* sets what ESS's driver sets when Windows starts.
-* *Close tray icon* removes the icon, as `ess3d exit` does.
+* *Defaults* sets what ESS's driver sets when Windows starts.
+* *Close* removes the icon and ends ess3d, as `ess3d exit` does.
 
 Left of the groups, a graph shows what the setting does to the sound, from
 the effect of `/sim`, which follows one card's measurements. It follows each
@@ -328,7 +335,7 @@ there, so the same command also works on a key. The tray icon needs Windows
 95 or later, because ess3d is a 16-bit program and reaches the tray through
 Windows 95's 32-bit shell.
 
-Close the icon with *Close tray icon* or `ess3d exit` before you copy a new
+Close the icon with *Close* or `ess3d exit` before you copy a new
 `ESS3D.EXE` over the old one, and start it again afterwards. While the icon
 runs, Windows starts every ess3d from the copy that is already loaded, and
 not from the new file, so a second `ess3d tray` would open the old panel.

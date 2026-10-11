@@ -93,6 +93,7 @@ void page_command(int id, int code, HWND ctl);
 void page_hscroll(int code, int pos, HWND ctl);
 void page_vscroll(int code, int pos);
 void page_click(int x, int y);
+int page_wheel(POINT pt, int steps);
 void page_focus(HWND ctl);
 int page_kind(void);
 HWND page_control(const char *cls, const char *text, DWORD style, int x, int y,
