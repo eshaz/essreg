@@ -96,4 +96,19 @@ void s3dsim_speed(const u8 *reg, double *fall, double *rise);
 // it falls, so where rise is the higher one it settles at fall
 void s3dsim_levels(const u8 *reg, double m, double *rise, double *fall);
 
+// what ess3d's tray panel plots, from the effect alone, without the
+// card's path. The S out of an S in (S>S) and of an M in (M>S) at hz, in
+// dB, with the boost gain dB under its full gain, as the limit leaves it
+void s3dsim_curve(const u8 *reg, double hz, double gain, double *ss,
+                  double *ms);
+
+// and the limit over time, as a step run of the measurement sees it: an M
+// at -24 dBFS and 400 Hz and an S at 1 kHz, the S at 0 dB against the M
+// until t1 seconds and then 12 dB lower. The S out against the M in dB
+// every dt seconds from 0, n of them into out, the boost's gain in dB at
+// t1 into *held, and the levels it rises under and falls over, in dB
+// against the M
+void s3dsim_step(const u8 *reg, double t1, double dt, int n, float *out,
+                 double *held, double *rise, double *fall);
+
 #endif /* S3DSIM_H */

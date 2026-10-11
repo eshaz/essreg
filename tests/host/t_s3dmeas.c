@@ -594,6 +594,64 @@ static void test_full_plan(void) {
     printf("full report: %d lines, %ld bytes\n", nlines, report_bytes);
 }
 
+// what ess3d's tray panel plots: the effect by frequency, and the limit's
+// step, from the same effect as /sim
+static void test_plot(void) {
+  static const u8 ess[6] = {0x0C, 0x3F, 0x8F, 0x95, 0x94, 0x80};
+  u8 reg[6];
+  float out[161];
+  double ss, ms, held, rise, fall, f2;
+  int i, at94, at00;
+
+  // the boost: about +18 dB at 450 Hz, nothing from the M
+  s3dsim_curve(ess, 450, 0, &ss, &ms);
+  CHECK(ss > 17.5 && ss < 18.5 && ms < -100);
+  // and 10 dB lower, as the limit leaves it
+  s3dsim_curve(ess, 450, -10, &f2, &ms);
+  CHECK(f2 < ss - 5 && f2 > ss - 11);
+  // off: the S as it is
+  memcpy(reg, ess, 6);
+  reg[0] = 0x04;
+  s3dsim_curve(reg, 450, 0, &ss, &ms);
+  CHECK(fabs(ss) < 0.01 && ms < -100);
+  // held in reset: 0.4 dB of bass
+  reg[0] = 0x08;
+  s3dsim_curve(reg, 60, 0, &ss, &ms);
+  CHECK(ss > 0.3 && ss < 0.5);
+  // mono: the S from the M, 3 dB under the boost, and a 32nd of the S
+  reg[0] = 0x0E;
+  s3dsim_curve(reg, 450, 0, &ss, &ms);
+  CHECK(fabs(ss + 30.1) < 0.2 && ms > 13 && ms < 15);
+
+  // the limit with ESS's values: from the full boost down to 56h's level,
+  // then, 12 dB narrower, back up to the full boost
+  reg[0] = 0x0D;
+  s3dsim_step(reg, 2.0, 0.05, 161, out, &held, &rise, &fall);
+  CHECK(fall > 5 && fall < 6 && rise > fall);
+  CHECK(out[0] > 15 && held < -12 && held > -16);
+  CHECK(fabs(out[39] - fall) < 0.3);
+  CHECK(out[41] < fall - 8);
+  CHECK(fabs(out[160] - (out[0] - 12)) < 0.2);
+  for (i = 1, at94 = 0; i < 40; i++) {
+    CHECK(out[i] <= out[i - 1] + 0.2);
+    if (!at94 && out[i] < fall + 0.5)
+      at94 = i;
+  }
+  // a faster fall gets there sooner
+  reg[4] = 0x00;
+  s3dsim_step(reg, 2.0, 0.05, 161, out, &held, &rise, &fall);
+  for (i = 1, at00 = 0; i < 40 && !at00; i++)
+    if (out[i] < fall + 0.5)
+      at00 = i;
+  CHECK(at00 > 0 && at00 < at94);
+  // without the limit, the width just follows the S
+  reg[0] = 0x0C;
+  reg[4] = 0x94;
+  s3dsim_step(reg, 2.0, 0.05, 161, out, &held, &rise, &fall);
+  CHECK(held == 0 && fabs(out[39] - out[0]) < 0.01 &&
+        fabs(out[41] - out[0] + 12) < 0.05);
+}
+
 static void test_limit_plan(void) {
   struct s3d_lim a, b;
   int i, n = 0;
@@ -1122,6 +1180,7 @@ int main(int argc, char **argv) {
   verbose = argc > 1 && !strcmp(argv[1], "-v");
   test_quick_plan();
   test_full_plan();
+  test_plot();
   test_limit_plan();
   test_window_plan();
   test_one_register();

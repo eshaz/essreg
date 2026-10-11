@@ -32,6 +32,17 @@
  * slider as it moves, and the rise follows the fall, since the rise is the
  * fall over h + 1.
  *
+ * Left of the controls, a graph shows what they do, from the effect of
+ * /sim, which follows one card's measurements (s3dsim.c). Its top pane is
+ * the width by frequency: what the effect does to the S, the difference of
+ * the channels (S>S), or with mono the S that it makes from the M (M>S),
+ * and dotted, the same where the automatic level holds it. Its bottom pane
+ * is the width over time in a step of the measurement: an M at -24 dBFS
+ * and an S as loud, which drops 12 dB after 2 s. It shows the S out
+ * against the M as the automatic level lowers the effect to its level and
+ * raises it again, with the two levels dotted. The graph follows the
+ * setting, and a slider while it is dragged.
+ *
  * The panel closes when another window comes to the front, like the
  * tray's menus, or on a second click on the icon. It watches the
  * foreground window instead of its own activation, since Windows may not
@@ -51,6 +62,7 @@
 
 #include <windows.h>
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -60,6 +72,7 @@
 #include "esscat.h"
 #include "esshw.h"
 #include "essio.h"
+#include "s3dsim.h"
 #include "winio.h"
 
 #define TRAY_TITLE "ES1869 3-D"
@@ -111,6 +124,7 @@ typedef DWORD(FAR PASCAL *CALL32_2)(DWORD, DWORD, DWORD, DWORD, DWORD);
 #define IDC_P_CLOSE 108
 #define IDC_P_STATUS 109
 #define IDC_P_GROUP 110 // + 0 and 1: the group boxes
+#define IDC_P_GRAPH 112
 #define IDC_P_LABEL 200 // + row
 #define IDC_P_SLIDER 300
 #define IDC_P_EDIT 400
@@ -131,6 +145,15 @@ typedef DWORD(FAR PASCAL *CALL32_2)(DWORD, DWORD, DWORD, DWORD, DWORD);
 #define P_SLIDER 104
 #define P_HI 186
 #define P_UNIT 208
+
+// the graph left of the controls, its width in dialog units; its points
+// by frequency, a sixth of an octave each from 50 Hz to 12.8 kHz, and over
+// time, 50 ms each over 8 s, with the S 12 dB lower after 2 s
+#define GRAPH_CLASS "ess3dGraph"
+#define G_W 150
+#define G_NF 49
+#define G_NT 161
+#define G_T1 2.0
 
 // the rows, named for what they do to the sound, with the words at the
 // ends of their sliders as ES938 Controls has Min and Max
@@ -171,6 +194,19 @@ static int shown;                  // the shell has the icon
 static int drag = -1;              // slider held without writing (direct I/O)
 static UINT panel_fg;              // the window in front while the panel is up
 static DWORD hidden_at;            // GetTickCount() when the panel last hid
+static HWND graph;
+static HFONT graph_font;
+
+// what the graph plots: the registers 50h, 52h, 54h, 56h, 58h and 5Ah,
+// S>S and M>S by frequency at the full boost and where the limit holds
+// it, and the S out over time, with the boost's gain where it held and
+// the two levels, in dB
+static struct {
+  u8 reg[6];
+  float ss[G_NF], ms[G_NF], ss_held[G_NF], ms_held[G_NF];
+  float width[G_NT];
+  double held, rise, fall;
+} plot;
 
 HWND tray_window(void) { return FindWindow(TRAY_CLASS, 0); }
 
@@ -321,7 +357,8 @@ static HWND add(const char *cls, const char *text, DWORD style, int x, int y,
   RECT rc;
   HWND ctl;
 
-  SetRect(&rc, x, y, x + w, y + h);
+  // right of the graph
+  SetRect(&rc, G_W + x, y, G_W + x + w, y + h);
   MapDialogRect(panel, &rc);
   ctl = CreateWindow(cls, text, WS_CHILD | WS_VISIBLE | style, rc.left, rc.top,
                      rc.right - rc.left, rc.bottom - rc.top, panel, (HMENU)id,
@@ -367,6 +404,236 @@ static void edit_show(int row, int force) {
   SetWindowText(e, text);
 }
 
+// --- the graph
+// ----------------------------------------------------------------
+
+// the registers that the graph plots: the setting, with a row's field at
+// value while its slider is dragged (row -1 for none)
+static void graph_update(int row, int value) {
+  static const u8 addr[4] = {0x54, 0x56, 0x58, 0x5A};
+  double ss, ms, hz;
+  int i, j;
+
+  plot.reg[0] =
+      (u8)((cur.enable << 3) | (cur.run << 2) | (cur.mono << 1) | cur.limit);
+  plot.reg[1] = cur.level;
+  for (j = 0; j < 4; j++)
+    for (i = 0; i < ess3d_regs(); i++)
+      if (ess3d_reg_addr(i) == addr[j])
+        plot.reg[2 + j] = (u8)ess3d_reg_byte(&cur, i);
+  if (row >= 0 && row_reg[row] < 0)
+    plot.reg[1] = (u8)value;
+  for (j = 0; row >= 0 && row_reg[row] >= 0 && j < 4; j++)
+    if (ess3d_reg_addr(row_reg[row]) == addr[j])
+      plot.reg[2 + j] = row_byte(row, value);
+  s3dsim_step(plot.reg, G_T1, 0.05, G_NT, plot.width, &plot.held, &plot.rise,
+              &plot.fall);
+  for (i = 0; i < G_NF; i++) {
+    hz = 50 * pow(2.0, i / 6.0);
+    s3dsim_curve(plot.reg, hz, 0, &ss, &ms);
+    plot.ss[i] = (float)ss;
+    plot.ms[i] = (float)ms;
+    s3dsim_curve(plot.reg, hz, plot.held, &ss, &ms);
+    plot.ss_held[i] = (float)ss;
+    plot.ms_held[i] = (float)ms;
+  }
+  if (graph)
+    InvalidateRect(graph, 0, TRUE);
+}
+
+// a pane of the graph: the plot's rectangle in pixels, x from x0 at its
+// left to x1, and y from y0 at its bottom to y1
+struct pane {
+  RECT rc;
+  double x0, x1, y0, y1;
+};
+
+static int px(const struct pane *p, double x) {
+  return p->rc.left +
+         (int)((x - p->x0) / (p->x1 - p->x0) * (p->rc.right - p->rc.left) +
+               0.5);
+}
+
+// y in the pane, at its edge where y is out of it
+static int py(const struct pane *p, double y) {
+  if (y > p->y1)
+    y = p->y1;
+  if (y < p->y0)
+    y = p->y0;
+  return p->rc.top +
+         (int)((p->y1 - y) / (p->y1 - p->y0) * (p->rc.bottom - p->rc.top) +
+               0.5);
+}
+
+static void text(HDC dc, int x, int y, UINT align, COLORREF color,
+                 const char *s) {
+  SetTextAlign(dc, align);
+  SetTextColor(dc, color);
+  TextOut(dc, x, y, s, strlen(s));
+}
+
+// n values from x0 in steps of dx
+static void curve(HDC dc, const struct pane *p, const float *v, int n,
+                  double x0, double dx, HPEN pen) {
+  static POINT pt[G_NT];
+  int i;
+
+  for (i = 0; i < n; i++) {
+    pt[i].x = px(p, x0 + i * dx);
+    pt[i].y = py(p, v[i]);
+  }
+  SelectObject(dc, pen);
+  Polyline(dc, pt, n);
+}
+
+// the pane between top and bottom, with room for its title and labels:
+// its grid every ystep with a label every other one, the lines at the
+// x of xs labeled xl, and its title
+static void pane_grid(HDC dc, struct pane *p, const RECT *client, int top,
+                      int bottom, int th, double ystep, const double *xs,
+                      const char *const *xl, int nx, const char *title,
+                      HPEN light, HPEN dark) {
+  char s[8];
+  double y;
+  int i, k;
+
+  SetRect(&p->rc, client->left + 3 * th, top + th + 3, client->right - 6,
+          bottom - th - 3);
+  for (y = p->y0, k = 0; y <= p->y1 + 0.01; y += ystep, k++) {
+    SelectObject(dc, y > -0.01 && y < 0.01 ? dark : light);
+    MoveTo(dc, p->rc.left, py(p, y));
+    LineTo(dc, p->rc.right, py(p, y));
+    if (k % 2 == 0) {
+      sprintf(s, y > 0.01 ? "+%.0f" : "%.0f", y);
+      text(dc, p->rc.left - 2, py(p, y) - th / 2, TA_RIGHT | TA_TOP,
+           RGB(96, 96, 96), s);
+    }
+  }
+  for (i = 0; i < nx; i++) {
+    SelectObject(dc, light);
+    MoveTo(dc, px(p, xs[i]), p->rc.top);
+    LineTo(dc, px(p, xs[i]), p->rc.bottom);
+    text(dc, px(p, xs[i]), p->rc.bottom + 1, TA_CENTER | TA_TOP,
+         RGB(96, 96, 96), xl[i]);
+  }
+  SelectObject(dc, dark);
+  MoveTo(dc, p->rc.left, p->rc.top);
+  LineTo(dc, p->rc.left, p->rc.bottom);
+  text(dc, client->left + 3, top + 1, TA_LEFT | TA_TOP, RGB(0, 0, 0), title);
+}
+
+// a key at the right of a pane's title row, right to left from *x
+static void key(HDC dc, int *x, int y, COLORREF color, const char *s) {
+  text(dc, *x, y, TA_RIGHT | TA_TOP, color, s);
+  *x -= LOWORD(GetTextExtent(dc, s, strlen(s))) + 6;
+}
+
+static void graph_paint(HDC dc, HWND w) {
+  static const double fx[3] = {1, 4.3219, 7.6439}; // 100 Hz, 1k, 10k
+  static const char *const fl[3] = {"100", "1k", "10k"};
+  static const double tx[5] = {0, 2, 4, 6, 8};
+  static const char *const tl[5] = {"0", "2", "4", "6", "8 s"};
+  COLORREF blue = RGB(0, 0, 192), red = RGB(192, 0, 0);
+  COLORREF green = RGB(0, 128, 0), main;
+  HPEN light, dark, solid, dotted, fall, rise, old;
+  HFONT oldf = 0;
+  TEXTMETRIC tm;
+  struct pane p;
+  RECT rc;
+  int on = (plot.reg[0] & 0x0C) == 0x0C, mono = on && (plot.reg[0] & 2);
+  int limit = on && (plot.reg[0] & 1), th, h, x;
+
+  GetClientRect(w, &rc);
+  if (graph_font)
+    oldf = SelectObject(dc, graph_font);
+  GetTextMetrics(dc, &tm);
+  th = tm.tmHeight;
+  h = (rc.bottom - rc.top) / 2;
+  SetBkMode(dc, TRANSPARENT);
+  main = mono ? red : blue;
+  light = CreatePen(PS_SOLID, 1, RGB(216, 216, 216));
+  dark = CreatePen(PS_SOLID, 1, RGB(128, 128, 128));
+  solid = CreatePen(PS_SOLID, 1, main);
+  dotted = CreatePen(PS_DOT, 1, main);
+  fall = CreatePen(PS_DOT, 1, red);
+  rise = CreatePen(PS_DOT, 1, green);
+  old = SelectObject(dc, light);
+
+  // the width by frequency: S>S, or M>S with mono, over 8 octaves
+  p.x0 = 0;
+  p.x1 = 8;
+  p.y0 = -40;
+  p.y1 = 20;
+  pane_grid(dc, &p, &rc, rc.top, rc.top + h, th, 10, fx, fl, 3,
+            "Width by frequency, dB", light, dark);
+  x = rc.right - 6;
+  if (limit) {
+    curve(dc, &p, mono ? plot.ms_held : plot.ss_held, G_NF, 0, 1.0 / 6, dotted);
+    key(dc, &x, rc.top + 1, main, "held");
+  }
+  curve(dc, &p, mono ? plot.ms : plot.ss, G_NF, 0, 1.0 / 6, solid);
+  key(dc, &x, rc.top + 1, main, mono ? "from mono" : "stereo");
+
+  // the width over time: the S out against the M, with the levels
+  p.x0 = 0;
+  p.x1 = 8;
+  p.y0 = -20;
+  p.y1 = 20;
+  pane_grid(dc, &p, &rc, rc.top + h, rc.bottom, th, 10, tx, tl, 5,
+            "Width over time, dB", light, dark);
+  x = rc.right - 6;
+  if (limit) {
+    SelectObject(dc, fall);
+    MoveTo(dc, p.rc.left, py(&p, plot.fall));
+    LineTo(dc, p.rc.right, py(&p, plot.fall));
+    SelectObject(dc, rise);
+    MoveTo(dc, p.rc.left, py(&p, plot.rise));
+    LineTo(dc, p.rc.right, py(&p, plot.rise));
+    key(dc, &x, rc.top + h + 1, green, "raise");
+    key(dc, &x, rc.top + h + 1, red, "lower");
+  }
+  curve(dc, &p, plot.width, G_NT, 0, 0.05, solid);
+  // where the S drops 12 dB
+  text(dc, px(&p, G_T1) + 2, p.rc.bottom - th, TA_LEFT | TA_TOP,
+       RGB(96, 96, 96), "S -12 dB");
+
+  SelectObject(dc, old);
+  DeleteObject(light);
+  DeleteObject(dark);
+  DeleteObject(solid);
+  DeleteObject(dotted);
+  DeleteObject(fall);
+  DeleteObject(rise);
+  if (oldf)
+    SelectObject(dc, oldf);
+}
+
+LRESULT CALLBACK __export graph_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
+  PAINTSTRUCT ps;
+  HDC dc;
+
+  switch (msg) {
+  case WM_CREATE:
+    graph_font =
+        CreateFont(-10, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET,
+                   OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                   VARIABLE_PITCH | FF_SWISS, "Small Fonts");
+    return 0;
+  case WM_PAINT:
+    dc = BeginPaint(w, &ps);
+    graph_paint(dc, w);
+    EndPaint(w, &ps);
+    return 0;
+  case WM_DESTROY:
+    if (graph_font)
+      DeleteObject(graph_font);
+    graph_font = 0;
+    graph = 0;
+    return 0;
+  }
+  return DefWindowProc(w, msg, wp, lp);
+}
+
 // the panel shows the setting
 static void panel_fill(void) {
   char text[64];
@@ -388,6 +655,8 @@ static void panel_fill(void) {
   }
   state_text(text, sizeof(text));
   SetDlgItemText(panel, IDC_P_STATUS, text);
+  if (drag < 0)
+    graph_update(-1, 0);
 }
 
 static void changed(int err) {
@@ -504,6 +773,7 @@ static void panel_scroll(HWND sb, int code, int pos) {
   sprintf(text, is_hex(row) ? "%02X" : "%d", v);
   SetDlgItemText(panel, IDC_P_EDIT + row, text);
   unit_show(row, v);
+  graph_update(row, v);
   if (code == SB_THUMBTRACK && !winio_can_poll()) {
     // direct I/O with ES1869.VXD, only write when the thumb is released
     drag = row;
@@ -589,8 +859,16 @@ static void panel_build(void) {
       68, 14, IDC_P_DEFAULTS);
   add("BUTTON", "&Close tray icon", WS_TABSTOP | BS_PUSHBUTTON, P_W - 74, y, 68,
       14, IDC_P_CLOSE);
+  // the graph left of the controls, as tall as they are
+  SetRect(&rc, 4, 4, G_W, y + 14);
+  MapDialogRect(panel, &rc);
+  graph = CreateWindow(GRAPH_CLASS, "", WS_CHILD | WS_VISIBLE | WS_BORDER,
+                       rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+                       panel, (HMENU)IDC_P_GRAPH, inst, 0);
+  if (!graph)
+    tray_log("no memory for the graph");
   // fit the panel to its rows
-  SetRect(&rc, 0, 0, P_W, y + 18);
+  SetRect(&rc, 0, 0, G_W + P_W, y + 18);
   MapDialogRect(panel, &rc);
   AdjustWindowRect(&rc, GetWindowLong(panel, GWL_STYLE), FALSE);
   SetWindowPos(panel, 0, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
@@ -789,6 +1067,7 @@ HWND tray_claim(HINSTANCE hinst) {
 }
 
 int tray_run(const struct ess3d_cmd *c) {
+  WNDCLASS wc;
   DLGPROC proc;
   MSG msg;
 
@@ -804,6 +1083,14 @@ int tray_run(const struct ess3d_cmd *c) {
   taskbar_created = RegisterWindowMessage("TaskbarCreated");
   icon_on = LoadIcon(inst, "ICON_ON");
   icon_off = LoadIcon(inst, "ICON_OFF");
+  memset(&wc, 0, sizeof(wc));
+  wc.lpfnWndProc = graph_proc;
+  wc.hInstance = inst;
+  wc.hCursor = LoadCursor(0, IDC_ARROW);
+  wc.hbrBackground = GetStockObject(WHITE_BRUSH);
+  wc.lpszClassName = GRAPH_CLASS;
+  if (!RegisterClass(&wc))
+    tray_log("the graph's window class wasn't registered");
   proc = (DLGPROC)MakeProcInstance((FARPROC)panel_proc, inst);
   // owned by the tray's window, so the panel gets no taskbar button
   if (!CreateDialog(inst, "PANEL", tray, proc)) {

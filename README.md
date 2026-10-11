@@ -288,6 +288,20 @@ or leave the field. Under the groups:
 * *Driver defaults* sets what ESS's driver sets when Windows starts.
 * *Close tray icon* removes the icon, as `ess3d exit` does.
 
+Left of the groups, a graph shows what the setting does to the sound, from
+the effect of `/sim`, which follows one card's measurements. It follows each
+change, and a slider while you drag it:
+* *Width by frequency* is what the effect does to the S at each frequency,
+  in dB: the program's own stereo with *Stereo*, or the S made from the mono
+  sum with *Mono*. With the automatic level on, a dotted curve shows the
+  same where the automatic level holds a wide passage.
+* *Width over time* is the S against the M, in dB, in a passage as wide as
+  the measurement's: an M at -24 dBFS and an S as loud for 2 seconds, and
+  then the S 12 dB lower. With the automatic level on, it shows the effect
+  lowered at the lower speed down to the *Lower above* level, and raised
+  again at the raise speed, with the two levels dotted, red for lower and
+  green for raise.
+
 The panel closes when you click somewhere else, click the icon again or
 press Esc. Every change is written and read back, so the panel shows what
 the chip returned. The icon follows ess3d's commands and essctl's 3-D

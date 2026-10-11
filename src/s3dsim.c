@@ -262,17 +262,14 @@ static struct z at(const double *c, double w) {
                z_of(1 + c[2] * cos(w), -c[2] * sin(w)));
 }
 
-// the M and S out at w of l and r in, with these registers and the limit
-// off
-static void path(const u8 *reg, u32 rate, double w, struct z l, struct z r,
-                 struct z *mo, struct z *so) {
+// the effect's S out at w of an M and an S in, with the boost at g of its
+// gain, as the limit leaves it
+static struct z effect(const u8 *reg, u32 rate, double w, struct z m,
+                       struct z s, double g) {
   double hb[3], lb[3], ap[3];
-  struct z m, s, b, lo, ro;
+  struct z b;
   int model = reg[0] & 2;
 
-  r = z_scale(r, RIGHT);
-  m = z_scale(z_add(l, r), 0.5);
-  s = z_scale(z_sub(l, r), 0.5);
   if ((reg[0] & 0x0C) == 0x08) {
     first(RESET_HZ, rate, 0, lb);
     s = z_add(s, z_mul(z_scale(at(lb, w), RESET_GAIN), s));
@@ -283,9 +280,23 @@ static void path(const u8 *reg, u32 rate, double w, struct z l, struct z r,
     ap[0] = ap[2] = allpass(LAG, rate);
     ap[1] = 1;
     b = z_mul(z_mul(at(hb, w), at(lb, w)), at(ap, w));
-    b = z_mul(z_scale(b, boost_gain(reg) * (model ? MODEL : 1)), model ? m : s);
+    b = z_mul(z_scale(b, g * boost_gain(reg) * (model ? MODEL : 1)),
+              model ? m : s);
     s = z_add(model ? z_scale(s, KEEP) : s, b);
   }
+  return s;
+}
+
+// the M and S out at w of l and r in, with these registers and the limit
+// off
+static void path(const u8 *reg, u32 rate, double w, struct z l, struct z r,
+                 struct z *mo, struct z *so) {
+  double ap[3];
+  struct z m, s, lo, ro;
+
+  r = z_scale(r, RIGHT);
+  m = z_scale(z_add(l, r), 0.5);
+  s = effect(reg, rate, w, m, z_scale(z_sub(l, r), 0.5), 1);
   ap[0] = ap[2] = allpass(SKEW, rate);
   ap[1] = 1;
   lo = z_add(m, s);
@@ -314,5 +325,79 @@ void s3dsim_response(const u8 *reg, u32 rate, double hz, double *re,
   for (i = 0; i < 4; i++) {
     re[i] = v[i].re;
     im[i] = v[i].im;
+  }
+}
+
+// --- what ess3d's tray panel plots ------------------------------------------
+
+#define PLOT_RATE 48000UL
+#define STEP_M 0.0630957 // the measurement's M, -24 dBFS
+#define STEP_LATE 4      // the limit's detector, about 4 ms late
+
+static double mag(struct z a) { return sqrt(a.re * a.re + a.im * a.im); }
+
+static double db_of(double v) { return v > 1e-6 ? 20 * log10(v) : -120; }
+
+void s3dsim_curve(const u8 *reg, double hz, double gain, double *ss,
+                  double *ms) {
+  struct z zero = z_of(0, 0), one = z_of(1, 0);
+  double w = 2 * PI * hz / PLOT_RATE, g = pow(10.0, gain / 20);
+
+  *ss = db_of(mag(effect(reg, PLOT_RATE, w, zero, one, g)));
+  *ms = db_of(mag(effect(reg, PLOT_RATE, w, one, zero, g)));
+}
+
+void s3dsim_step(const u8 *reg, double t1, double dt, int n, float *out,
+                 double *held, double *rise, double *fall) {
+  struct z zero = z_of(0, 0), one = z_of(1, 0), s0, s1, m0, m1;
+  double w1 = 2 * PI * 1000 / PLOT_RATE, w4 = 2 * PI * 400 / PLOT_RATE;
+  double c[3], hp4, f, r, down, up, lo, hi, g = 1, s, a, b, sum;
+  double seen[STEP_LATE];
+  int i, k, ms = (int)(dt * 1000 + 0.5), t = 0;
+  int limit = (reg[0] & 0x0D) == 0x0D;
+
+  // the S out of the S at 1 kHz and of the M at 400 Hz: a part that the
+  // boost's gain doesn't move, and one that it does
+  s0 = effect(reg, PLOT_RATE, w1, zero, one, 0);
+  s1 = z_sub(effect(reg, PLOT_RATE, w1, zero, one, 1), s0);
+  m0 = effect(reg, PLOT_RATE, w4, one, zero, 0);
+  m1 = z_sub(effect(reg, PLOT_RATE, w4, one, zero, 1), m0);
+  // the limit's detector takes 400 Hz through its high-pass, against
+  // 1 kHz, and its levels and speeds, a millisecond's step
+  first(DETECT, PLOT_RATE, 1, c);
+  hp4 = hp_gain(c, PLOT_RATE, 400) * DETECT_1K;
+  s3dsim_levels(reg, STEP_M, rise, fall);
+  s3dsim_speed(reg, &f, &r);
+  lo = pow(10.0, *rise / 20);
+  hi = pow(10.0, *fall / 20);
+  down = pow(10.0, -f / 1000 / 20);
+  up = pow(10.0, r / 1000 / 20);
+  *held = 0;
+  for (k = 0; k < STEP_LATE; k++)
+    seen[k] = 0;
+  for (i = 0; i < n; i++) {
+    // the mean of the S out over each step, where a fast limit hunts
+    for (k = 0, sum = 0; k < (i ? ms : 1); k++, t++) {
+      // the S at 0 dB against the M until t1, then 12 dB lower
+      s = t < t1 * 1000 ? 1 : 0.25119;
+      a = mag(z_add(s0, z_scale(s1, g))) * s;
+      b = mag(z_add(m0, z_scale(m1, g)));
+      sum += sqrt(a * a + b * b);
+      if (t == (long)(t1 * 1000))
+        *held = db_of(g);
+      if (!limit)
+        continue;
+      // the limit follows what it saw a few milliseconds ago
+      seen[t % STEP_LATE] = sqrt(a * a + b * b * hp4 * hp4);
+      if (seen[(t + 1) % STEP_LATE] > hi)
+        g *= down;
+      if (seen[(t + 1) % STEP_LATE] < lo)
+        g *= up;
+      if (g > 1)
+        g = 1;
+      if (g < FLOOR)
+        g = FLOOR;
+    }
+    out[i] = (float)db_of(sum / (i ? ms : 1));
   }
 }

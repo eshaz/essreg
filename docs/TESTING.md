@@ -666,6 +666,10 @@ it's installed. First copy `build\ess3d.exe` to `C:\ESSREG`.
    * Click *Mono* with a stereo recording. The stereo of the recording goes,
      and a width made from the mono sum takes its place. Click *Stereo* to
      have it back.
+   * Watch the graph left of the controls while you move the sliders. The
+     width by frequency grows and shrinks with *Effect*, and with the
+     automatic level on, the width over time falls to the red *Lower above*
+     line at the lower speed and climbs after the drop at the raise speed.
    * The panel closes when you click the desktop, when you click the icon
      again, and when you press Esc. Try each one.
    * Run `ess3d off` from a shortcut key, and the icon turns gray and the
