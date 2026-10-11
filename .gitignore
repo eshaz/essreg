@@ -42,3 +42,12 @@
 *.su
 *.idb
 *.pdb
+
+# Reverse-engineering and test outputs
+/out/
+__pycache__/
+*.pyc
+/tests/bin/
+
+# Claude Code worktrees of parallel agents
+/.claude/worktrees/
