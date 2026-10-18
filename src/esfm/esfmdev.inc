@@ -45,6 +45,9 @@ VOICE_HDR3      equ 0x07    ; byte 3 of the patch voice header
 VOICE_HDR0      equ 0x18    ; byte 0 of the patch voice header
 NUM_VOICES      equ 18
 
+; a client's block (16 bytes, LocalAlloc'd by MODM_OPEN, its dwUser)
+CLIENT_DEV      equ 0x00E       ; word: its device structure
+
 ; ESFM_FIX: queue of messages that arrive while the driver is held
 QSIZE           equ 256         ; entries, a power of 2: a GM file's
                                 ; first tick is over 100 messages

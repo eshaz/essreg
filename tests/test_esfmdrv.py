@@ -302,6 +302,36 @@ class StuckNoteTest(unittest.TestCase):
         self.assertEqual(emu.chip.splits, [])
         self.assertUnlocked(emu)
 
+    def close_sweep(self, which, step):
+        """Send a note on from an interrupt at every step-th instruction
+        of a close, and count the trials that leave a voice keyed after
+        it."""
+        emu = self.emu(which)
+        stuck = trials = 0
+        for k in range(0, 4000, step):
+            emu.data(NOTE_A_ON)
+            inj = Inject(MODM_DATA, dw1=0x7F4591, after_insns=k)
+            self.assertEqual(emu.close(injects=[inj]), 0)
+            if not inj.started:
+                break                   # past the close's end
+            trials += 1
+            if emu.keyed_voices():
+                stuck += 1
+            emu.open()
+        return emu, stuck, trials
+
+    def test_close_sweep(self):
+        # from the close's first instruction to its last, the note on of
+        # the program's interrupt is never played on the closed device:
+        # dropped while the close holds the driver, refused after it
+        _emu, stuck, _n = self.close_sweep("stock", 97)
+        self.assertGreater(stuck, 0)
+        emu, stuck, n = self.close_sweep("fixed", 47)
+        self.assertEqual(stuck, 0)
+        self.assertGreater(n, 40)
+        self.assertEqual(emu.chip.splits, [])
+        self.assertUnlocked(emu)
+
     # -- the queue of the fixed driver ---------------------------------------
 
     def test_long_message_queued(self):

@@ -16,7 +16,9 @@
 ; 2. MODM_OPEN and MODM_CLOSE hold the driver too, so a message from an
 ;    interrupt can't write FM registers between the address and the data
 ;    write of the chip reset or of the silencing at close.  Queued
-;    messages of a closed client are dropped.
+;    messages of a closed client are dropped, and a message for a client
+;    that is closed (from the program's interrupt, before MMSYSTEM drops
+;    the handle) is refused instead of played on the closed device.
 ; 3. all_notes_off (close, power suspend) keys off every voice and lifts
 ;    the sustain pedal of every channel.  The ESS code sent note offs, so
 ;    notes held by the pedal kept sounding after the close.
@@ -93,17 +95,29 @@ modMessage:
         cli
         cmp     word [fix_lock],0
         jne     .queue
+        ; its client closed (a message from the program's interrupt after
+        ; its close, before MMSYSTEM drops the handle): refused, not played
+        ; on the closed device.  While the driver is held, the open or
+        ; close that holds it decides: fix_unlock looks again
+        mov     bx,[ARG_USER]
+        mov     bx,[bx+CLIENT_DEV]
+        cmp     word [bx+DEV_OPEN],0
+        je      .closed
         inc     word [fix_lock]
         pop     dx
         call    restore_if
         call    call_orig
         jmp     .unlock
-.queue:
-        call    q_put                   ; AX = result
+.closed:
+        mov     ax,MIDIERR_NOTREADY
+.answer:
         pop     dx
         call    restore_if
         xor     dx,dx
         jmp     .ret
+.queue:
+        call    q_put                   ; AX = result
+        jmp     .answer
 
 .open:
         ; load the bank file first if it changed (esfmfile.asm)
@@ -328,6 +342,10 @@ fix_unlock:
         mov     ax,[si+Q_MSG]
         or      ax,ax
         jz      .dropped
+        mov     bx,[si+Q_USER]          ; its client closed meanwhile:
+        mov     bx,[bx+CLIENT_DEV]      ; dropped as q_drop drops them
+        cmp     word [bx+DEV_OPEN],0
+        je      .closed
         ; copy the entry to the stack before interrupts can reuse the slot,
         ; with what a refused long message needs afterwards
         push    word [si+Q_DW1+2]
@@ -364,6 +382,13 @@ fix_unlock:
         push    bx
         call    fix_long_done
         jmp     .again
+.closed:
+        inc     word [fix_purged]
+        cmp     ax,MODM_LONGDATA
+        jne     .dropped
+        les     bx,[si+Q_DW1]
+        and     byte [es:bx+MIDIHDR_FLAGS],~MHDR_INQUEUE & 0xFF
+        or      byte [es:bx+MIDIHDR_FLAGS],MHDR_DONE
 .dropped:
         call    restore_if
         jmp     .again
