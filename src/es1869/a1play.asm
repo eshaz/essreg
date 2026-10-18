@@ -120,7 +120,10 @@ a1_gap:
 .in:    mov     [si+A1_WRING],ax
 .ok:    ret
 
-; give back, oldest first, the headers the DMA played past; SI = dev
+; give back, oldest first, the headers the DMA played past; SI = dev.
+; A loop's first header stays until the loop's last pass is copied
+; (a1_next clears A1_LOOPHDR), as each pass copies the loop's headers
+; again, and so do those after it in the queue
 a1_retire:
 .next:  pushf
         cli
@@ -130,9 +133,16 @@ a1_retire:
         or      ax,dx
         jz      .none
         cmp     bx,[si+A1_CUR]
-        jne     .copied
+        jne     .loop
         cmp     dx,[si+A1_CUR+2]
         je      .none                   ; still being copied
+.loop:  mov     ax,[si+A1_LOOPHDR]
+        or      ax,[si+A1_LOOPHDR+2]
+        jz      .copied
+        cmp     bx,[si+A1_LOOPHDR]
+        jne     .copied
+        cmp     dx,[si+A1_LOOPHDR+2]
+        je      .none                   ; the loop plays it again
 .copied:
         mov     es,dx
         mov     ax,[si+A1_PPOS]

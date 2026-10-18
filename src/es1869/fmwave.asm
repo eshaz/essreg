@@ -174,6 +174,12 @@ es_wid_message:
         mov     ax,MMSYSERR_ALLOCATED
         test    byte [si+FM_STATE],FMF_OPEN
         jnz     .ret
+        test    byte [si+DEV_BUSY],1    ; what wid_acquire (4:00E0) refuses,
+        jnz     .ret                    ; refused before a DOS program's DSP
+        cmp     byte [si+DEV_A1_USER],0 ; is taken for nothing
+        jne     .ret
+        test    byte [si+DEV_WID_FLAGS],1
+        jnz     .ret
         call    fm_take_dsp
         call    fm_open
 .ret:   xor     dx,dx

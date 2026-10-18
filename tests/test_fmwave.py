@@ -32,7 +32,7 @@ TARGET_WAVEOUT, TARGET_WAVEIN = 1, 2
 MIXERR_INVALLINE = 1024
 FM_STATE = 0x132 + 0x54
 FMF_OPEN, FMF_ROUTED = 1, 2
-DEV_FLAGS, DEV_FM_DAC = 0x2A, 0x117
+DEV_FLAGS, DEV_FM_DAC, DEV_BUSY = 0x2A, 0x117, 0x127
 WAVE_FORMAT_QUERY = 1
 
 
@@ -149,6 +149,26 @@ class FMRecordTest(A1Case):
         self.assertEqual(e.open_in()[0], MMSYSERR_ALLOCATED)
         self.assertEqual(e.dev8(FM_STATE), 0)
         self.assertEqual(e.dev8(DEV_FLAGS) & 1, 1)
+
+    def test_no_take_when_refused(self):
+        # what wid_acquire (4:00E0) refuses is refused before the DOS
+        # program's DSP is taken: ESS's recording, the player, the chip
+        # given away
+        e = self.emu()
+        r, user = e.open_in(dev_id=0, rate=22050)
+        self.assertEqual(r, 0)
+        self.assertEqual(e.open_in()[0], MMSYSERR_ALLOCATED)
+        self.assertEqual(e.wid(0, WIDM_CLOSE, user), 0)
+        r, user = e.open(dev_id=1)
+        self.assertEqual(r, 0)
+        self.assertEqual(e.open_in()[0], MMSYSERR_ALLOCATED)
+        self.assertEqual(e.wod(1, drvemu.WODM_CLOSE, user), 0)
+        e.set_dev8(DEV_BUSY, 1)
+        self.assertEqual(e.open_in()[0], MMSYSERR_ALLOCATED)
+        self.assertEqual(e.dsp_taken, [])
+        e.set_dev8(DEV_BUSY, 0)
+        self.assertEqual(e.open_in()[0], 0)
+        self.assertEqual(e.dsp_taken, [DEVNODE])
 
     def test_recording_routes_the_fm(self):
         e = self.emu()

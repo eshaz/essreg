@@ -203,6 +203,12 @@ before ESS frees its interrupt handler.
   CODEC](#the-filter-of-the-audio-1-codec)).
 * DirectSound can't start while the player holds the DSP, which is also true
   of ESS's wave output.
+* The player sends DSP commands at task time only; its interrupt code moves
+  data and reads the DMA position. `waveOutPause`, `waveOutRestart` and
+  `waveOutReset` send DSP commands, so a program that calls one of them from
+  its WOM_DONE callback, which the multimedia API forbids, sends them at
+  interrupt time, where their bytes can mix with a command that a task is
+  sending. ESS's wave output has the same exposure.
 
 ## Dual playback
 
@@ -220,8 +226,11 @@ closes, it sets 71h bit 1 again, and Audio 2 returns to its own rate.
 The two DMAs play rings of the same size and start together. Audio 2's DMA
 first fills Audio 2's FIFO while 78h bit 0 is clear. Then, with interrupts
 off, Audio 1 starts (B8h bit 0) and Audio 2's FIFO is connected to its DAC
-(78h bit 0) immediately afterwards. Audio 1's interrupt refills both rings,
-and a pause stops both DMAs and later restarts both from where they stopped.
+(78h bit 0) immediately afterwards. Audio 1's interrupt refills both rings.
+A pause stops both DMAs, and a restart starts both again from where Audio
+1's DMA stopped, with the same start sequence. The frames that the two FIFOs
+held at the pause, up to 256 bytes in Audio 1's, are not played, and the
+DACs stay in step.
 
 A program writes the stream to device 1 as 4-channel PCM with 8 or 16 bits,
 at 4000 to 49000 Hz. Programs that use the wave mapper, such as Media

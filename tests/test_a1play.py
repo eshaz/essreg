@@ -381,6 +381,52 @@ class PlayTest(A1Case):
         self.assertEqual(len(end) % len(a), 0)
         self.assertEqual(end, a * (len(end) // len(a)))
 
+    def test_loop_longer_than_the_ring(self):
+        # each pass copies the loop's headers again, so none goes back
+        # before the last pass is copied: with a body of two rings the DMA
+        # plays past the first header's end long before that
+        e, user = self.opened(rate=22050)
+        ring = e.dev16(A1_RING)
+        a, b, c = pattern(ring, 5), pattern(ring, 6), pattern(300, 7)
+        ha = e.header(a, flags=WHDR_PREPARED | WHDR_BEGINLOOP, loops=3)
+        hb = e.header(b, flags=WHDR_PREPARED | WHDR_ENDLOOP)
+        hc = e.header(c)
+        for h in (ha, hb, hc):
+            e.write(user, h)
+        self.play(e, 5)                             # the first pass, and
+        self.assertEqual(e.done(), [])              # into the second
+        self.play(e, 6)                             # its last pass played
+        self.assertEqual(e.done(), [ha])
+        self.play(e, 3)
+        want = (a + b) * 3 + c
+        self.assertEqual(bytes(e.played[:len(want)]), want)
+        self.assertEqual(e.done(), [ha, hb, hc])
+        self.assertEqual(e.getpos(user)[2], len(want))
+
+    def test_endloop_written_after_an_interrupt(self):
+        # the loop's first header waits for its end, played past
+        e, user = self.opened(rate=22050)
+        a, b, c = pattern(1000, 5), pattern(700, 6), pattern(300, 7)
+        ha = e.header(a, flags=WHDR_PREPARED | WHDR_BEGINLOOP, loops=3)
+        e.write(user, ha)
+        self.play(e, 2)                             # a, then silence
+        self.assertEqual(bytes(e.played[:len(a)]), a)
+        self.assertEqual(e.done(), [])
+        start = len(e.played)
+        hb = e.header(b, flags=WHDR_PREPARED | WHDR_ENDLOOP)
+        hc = e.header(c)
+        e.write(user, hb)
+        e.write(user, hc)
+        self.play(e, 6)
+        out = bytes(e.played[start:])
+        at = out.find(b[:64])
+        self.assertGreater(at, 0)
+        want = b + (a + b) * 2 + c
+        self.assertEqual(out[at:at + len(want)], want)
+        self.assertEqual(set(out[:at]), {0})
+        self.assertEqual(e.done(), [ha, hb, hc])
+        self.assertEqual(e.getpos(user)[2], 3 * (len(a) + len(b)) + len(c))
+
     def test_pause_restart(self):
         e, user = self.opened(rate=22050)
         block = e.dev16(A1_BLOCK)
