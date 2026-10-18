@@ -61,6 +61,17 @@ The Python tests, in `tests/test_*.py`, cover the following:
   driver does. With every key at 0, the VxD (`test_vxdini`) and `ESFM.DRV`
   (`SettingsTest` in `test_esfmdrv`) make the same port accesses as ESS's
   drivers, step by step.
+* `test_esssb16` runs `esssb16.com` in the CPU emulator (`tests/tsremu.py`),
+  where DOS, the memory managers, the DPMI host and HDPMI32i are Python
+  behind the interrupt hook and the chip is `vxdemu`'s model. It installs
+  the program under QEMM, QPIEMU, EMM386 and a DPMI host, including the
+  32-bit code after the DPMI switch at ring 3, and checks its refusals, its
+  options and `BLASTER`. Then it calls the resident shims as the memory
+  managers do, with their far frames, and checks the Sound Blaster 16 they
+  answer: the DSP's answers, 16-bit transfers on Audio 2 with the rates
+  ES1869.DRV would pick, 8-bit ones on Audio 1, the mixer's view and the
+  chip's levels, the interrupts, resets, and the chip's own commands going
+  through unchanged.
 * Other tests run `esfmpat` on copies of `ESFM.DRV` and check that the
   generated documentation is current.
 
@@ -266,6 +277,34 @@ and stop at the first surprise. Each step says what you should see.
 2. Run `essreg x=1 a1s`, which uses the safe DSP protocol (C6h, polling
    Audio_Base+Ch). Check that the Audio 1 sample rate it reports matches the
    one essreg reports in its default mode, without `x=1`.
+
+### D2. esssb16 (DOS)
+
+1. In real DOS with `EMM386.EXE` loaded (`DEVICE=C:\WINDOWS\EMM386.EXE RAM`
+   in `CONFIG.SYS`), run `LH ESSSB16`. It prints the card's base, IRQ and
+   channels, the `BLASTER` line to set, and
+   `traps: EMM386 for real-mode games`. `MEM /C` shows it in upper memory,
+   3.5 KB. Run it again: "already loaded". In a Windows DOS box it refuses
+   with "not for a Windows DOS box", and without a memory manager with "no
+   port traps".
+2. Set `BLASTER` as printed. Run a real-mode game that supports the Sound
+   Blaster 16, such as one with the Miles Sound System's `SETUP` or
+   `SOUNDSET`. Its setup detects a Sound Blaster 16 (DSP version 4.05) and
+   offers 16-bit stereo. The game plays, with 16-bit sound at the game's
+   rate (its setup may say 22, 44 or 48 kHz), and without the 8-bit hiss.
+   Its digital sound and its FM music both play.
+3. With `LH HDPMI32I -r` before `esssb16` (HDPMI32i from SBEMU's release),
+   `esssb16` adds `, HDPMI32i for protected-mode games`. A DOS/4GW game set
+   to the Sound Blaster 16 (Descent, Duke Nukem 3D, Quake) plays 16-bit
+   sound. Without HDPMI32i the same game plays 8-bit sound, or finds no
+   Sound Blaster 16, as before `esssb16`.
+4. With QEMM, or with JEMMEX and `JLOAD QPIEMU.DLL`, step 2 again: the
+   banner says `traps: QPI for real-mode games`.
+5. A program that knows the chip works as before: ESS's own DOS mixer, or
+   `essreg a`, which reads the chip's registers through E7h and the Extended
+   mode.
+6. If sound breaks up, `ESSSB16 /S` (single DMA transfers); with `/H0` the
+   game plays its 16-bit sound through Audio 1 on the 8-bit channel.
 
 ### E0. Installing with essinst
 

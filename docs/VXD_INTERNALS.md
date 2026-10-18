@@ -501,6 +501,14 @@ whole 16-bit sound goes through one 8-bit channel, two bytes a sample, with
 demand transfers of 2 bytes, so the bus is arbitrated as often as for a
 Sound Blaster 16's words.
 
+In DOS itself, `esssb16.com` (`src/esssb16.asm`) is the same front as a
+resident program. There no driver sees a port access, so it traps the Sound
+Blaster ports through the memory manager: EMM386's port trap interface,
+QEMM's QPI, which JEMM gets from QPIEMU, and for protected-mode games
+HDPMI32i, with which it registers as a 32-bit client. Without VDMAD, a
+16-bit transfer goes to Audio 2 on the game's own 16-bit channel, through
+PnP register 75h, with the game's DMA programming untouched.
+
 ## Hardware volume
 
 The volume buttons change the master volume in the chip (mixer 60h/62h).

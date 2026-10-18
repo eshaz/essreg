@@ -45,10 +45,17 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   byte-identical rebuilds, with ESS's ES1869F driver sets for Windows 3.1,
   NT 4.0, Windows 95 and OS/2 in `driver/es1869f/`, and `build/` the
   committed binaries.
+* `src/esssb16.asm` is `esssb16.com`, the DOS TSR that answers games as a
+  Sound Blaster 16 and plays their 16-bit sound on Audio 2, through the port
+  traps of EMM386, QPI (QEMM, JEMM with QPIEMU) and HDPMI32i. It is the
+  VxD's front (`ESSREG_S16_*` in `essext.asm`) in DOS: the same commands,
+  operand table, transfer sequences and mixer mapping.
 * `tools/` holds the builders, the RE tools, `guard.py`, `wineshot.sh` and
   `dualwav.py`, which makes 4-channel files for dual playback. `tests/`
   holds the Python tests (`esfmemu.py`, `vxdemu.py` and `drvemu.py` run the
-  drivers in a CPU emulator), and `tests/host/` the C tests.
+  drivers in a CPU emulator, `tsremu.py` runs `esssb16.com` in one, with
+  DOS, the memory managers and the DPMI host in Python), and `tests/host/`
+  the C tests.
 * `docs/` holds [TESTING.md](docs/TESTING.md),
   [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md),
   [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md),
@@ -81,6 +88,7 @@ python3 -m unittest tests.test_esfmdrv.SustainTest
 python3 tools/build_esfm.py            # build/ESFM.DRV
 python3 tools/build_vxd.py             # build/ES1869.VXD
 python3 tools/build_es1869drv.py       # build/ES1869.DRV
+python3 tools/build_esssb16.py         # build/esssb16.com
 python3 tools/build_esfm.py --stock --verify
 python3 tools/build_vxd.py --stock --verify
 python3 tools/build_es1869drv.py --stock --verify
@@ -153,10 +161,18 @@ tools/wineshot.sh run ess3d.exe /sim tray
   goes after ESS's E9h bytes of the ADI, and a VM's state after ESS's 2Eh
   bytes of its node (`essext.inc`). `tests/test_vxddos.py` runs the DOS box
   paths in the emulator.
+* **esssb16.com.** The resident part ends at `resident_end`, makes no DOS
+  call, and reaches the chip only through `chip_in` and `chip_out`, which go
+  through HDPMI32i's untrapped I/O while its handler runs. The shims run the
+  front on its own stack, and the code after the DPMI switch is 32-bit
+  (`BITS 32`), entered through a short jump, which both modes decode the
+  same. A change to the Sound Blaster 16's translation goes into the VxD's
+  front and the TSR alike, with a test in `tests/test_esssb16.py`, which
+  also checks that `build/esssb16.com` is current.
 * **Committed binaries.** After changing their sources, rebuild
-  `build/ESFM.DRV`, `build/ES1869.VXD` or `build/ES1869.DRV`, and copy the
-  changed programs from `out/ow2/` to `build/`. `test_build_is_current`
-  checks `ESFM.DRV` and `ES1869.DRV`.
+  `build/ESFM.DRV`, `build/ES1869.VXD`, `build/ES1869.DRV` or
+  `build/esssb16.com`, and copy the changed programs from `out/ow2/` to
+  `build/`. `test_build_is_current` checks `ESFM.DRV` and `ES1869.DRV`.
 * **ESFM_FIX code:**
   * A label at a relocation site is a `..@` name, so that it doesn't end
     NASM's local label scope.

@@ -468,7 +468,7 @@ DOS game expects it
   card's address, IRQ and 8-bit channel, and `H5` for the 16-bit channel
   ([docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#a-sound-blaster-16-for-dos-programs)).
   A game or tool that knows the ESS chip, which it asks with E7h, gets the
-  chip as before.
+  chip as before. In DOS itself, [`esssb16.com`](#esssb16com) does the same.
 
 The Sound Blaster part and the MPU-401 still belong to one program at a
 time, as with ESS's driver. A DOS game that starts while Windows plays a
@@ -668,6 +668,80 @@ Example:
 
 c:\>1869opl3.com "c:\path\to\game.exe"
 ```
+
+## [`esssb16.com`](build)
+
+A Sound Blaster 16 in front of the ES1869 for DOS games, in DOS itself. The
+chip answers a DOS program as a Sound Blaster Pro, version 3.01, and plays
+16-bit sound only through ESS's own commands, so a game written for the
+Sound Blaster 16 plays 8-bit sound on it at best. `esssb16` stays resident,
+in upper memory with `LH`, answers the game as a Sound Blaster 16, version
+4.05, and turns the game's commands into the chip's own:
+* A 16-bit transfer plays on Audio 2, the chip's 16-bit stereo DAC, on the
+  game's 16-bit DMA channel, at the rate the game asked for, up to 48 kHz,
+  with the DAC's 4x oversampling off and its filter bypassed, as the rebuilt
+  Windows drivers play. The game's DMA programming goes to the controller as
+  it is, and the game's interrupt comes from Audio 2 on the card's IRQ.
+* An 8-bit transfer plays or records on Audio 1 in ESS's Extended mode, as
+  the Windows driver's Sound Blaster 16 does.
+* The Sound Blaster 16's mixer registers, 30h to 47h, keep the game's view
+  and set the chip's levels and record source. Registers 80h to 82h give the
+  card's IRQ, its channels and which interrupt is pending.
+* A game or tool that knows the chip, which it asks with E7h, gets the chip
+  as it is, with ESS's own commands and mixer.
+
+In a Windows DOS box the rebuilt
+[`ES1869.VXD`](#es1869vxd-with-a-register-interface-and-better-dos-boxes)
+does the same, and `esssb16` refuses to load there.
+
+Nothing in DOS sees a port access unless the processor traps it, so
+`esssb16` needs a memory manager that traps ports for it:
+* MS-DOS's `EMM386.EXE` 4.46 or later, the one of MS-DOS 6.22 and of Windows
+  95 and 98, through its port trap interface (int 2Fh 4A15h, as
+  [SoftMPU](https://github.com/bjt42/softmpu) uses it);
+* QEMM 7.03 or later, through
+  [QPI](https://www.cs.cmu.edu/~ralf/papers/qpi.txt);
+* [JEMM386 or JEMMEX](https://github.com/Baron-von-Riedesel/Jemm) with
+  `QPIEMU.DLL` loaded (`JLOAD QPIEMU.DLL`), which gives JEMM the same
+  interface.
+
+These trap the accesses of real-mode games. A protected-mode game, such as
+one with DOS/4GW, runs under a DPMI host and leaves the memory manager's
+traps behind. For those, load HDPMI32i resident before `esssb16`: it is the
+build of [HX](https://github.com/crazii/HX)'s DPMI host that runs its
+programs without I/O privilege and traps ports for
+[SBEMU](https://github.com/crazii/sbemu), and `esssb16` registers its traps
+with it too. Without it, protected-mode games play 8-bit sound, as before.
+
+In `AUTOEXEC.BAT`:
+
+```
+SET BLASTER=A220 I5 D1 H5 P330 T6
+LH HDPMI32I -r
+LH ESSSB16
+```
+
+`esssb16` prints the card it found and the `BLASTER` line to set: the base,
+the IRQ and the 8-bit channel as the card's PnP registers have them, and
+`H5` for the 16-bit channel, which it gives to Audio 2. The options:
+* `/A220`: the card's base, otherwise `BLASTER`'s `A`, or 220h.
+* `/H5`, `/H6` or `/H7`: the 16-bit channel, otherwise `BLASTER`'s `H`, or
+  5. `/H0` gives up the 16-bit channel: 16-bit sound then plays through
+     Audio 1 on the 8-bit channel, two bytes a sample, as a Sound Blaster 16
+     does without an `H`.
+* `/S`: single DMA transfers instead of demand transfers of four, ESS's own
+  *Single Mode DMA* setting, if sound breaks up.
+
+The resident part takes 3.5 KB with its PSP and makes no DOS call once it is
+in. The exit codes are 1 for a bad option, 2 when no ES1869 answers at the
+base, 3 without port traps, 4 in a Windows DOS box and 5 when it is loaded
+already. Two limits: a 16-bit recording goes to Audio 1, which records on
+the 8-bit channel only, so a game that records 16-bit sound on the 16-bit
+channel gets nothing; and the FM ports aren't trapped, so a game plays FM as
+before. The program was tested in a CPU emulator against models of the chip,
+DOS, the memory managers and HDPMI32i
+([docs/TESTING.md](docs/TESTING.md#d2-esssb16-dos) has the steps for real
+hardware).
 
 ## [`esfmpat.exe`](build)
 * Utility to write custom patch banks to the Windows ESFM VxD driver.
@@ -904,8 +978,9 @@ copy C:\WINDOWS\SYSTEM\ESFM.ORG C:\WINDOWS\SYSTEM\ESFM.DRV
   `1869opl3.com`, `esfmpat.exe`, `essctl.exe`, `ess3d.exe`, `esfmrec.exe`
   and `essinst.exe`.
 * Run `python3 tools/build_vxd.py` to build `build/ES1869.VXD`,
-  `python3 tools/build_esfm.py` to build `build/ESFM.DRV`, and
-  `python3 tools/build_es1869drv.py` to build `build/ES1869.DRV`.
+  `python3 tools/build_esfm.py` to build `build/ESFM.DRV`,
+  `python3 tools/build_es1869drv.py` to build `build/ES1869.DRV`, and
+  `python3 tools/build_esssb16.py` to build `build/esssb16.com` with NASM.
 * On Linux, `tools/ow2build.sh <open-watcom-v2 directory>` builds the
   programs with Open Watcom v2 into `out/ow2/`. The programs in
   [`build`](build), other than `1869opl3.com`, were built this way, and
