@@ -8,6 +8,7 @@ usage: python3 -m unittest tests.test_vxdext   (needs nasm and unicorn)
 """
 
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -89,8 +90,8 @@ class ExtensionTest(VxDBuilds, unittest.TestCase):
         m, _hw = self.emu()
         out, cf = self.api(m, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0113)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x1FFF)
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0114)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x3FFF)   # DrqLatch is off
         self.assertEqual(out["EDX"] & 0xFFFF, 14)
         out, cf = self.api(m, 0x0000)            # stock functions still work
         self.assertEqual((cf, out["EAX"] & 0xFFFF), (False, 0x0404))
@@ -275,6 +276,14 @@ class ExtensionTest(VxDBuilds, unittest.TestCase):
         self.assertFalse(cf)
         self.assertEqual(hw.pnp[(1, 0x70)], 0x05)
         self.assertEqual((hw.cfg_index, hw.ldn), (0x25, 3))
+        # Config Control, Activate and I/O Range Check: refused, untouched
+        for reg in (0x02, 0x30, 0x31):
+            for ldn in (0x01, 0xFF):
+                out, cf = self.api(m, 0x040A, EBX=(reg << 8) | ldn, EAX=0x01)
+                self.assertEqual((cf, out["EAX"] & 0xFFFF), (True, 3))
+        self.assertNotIn((1, 0x30), hw.pnp)
+        self.assertNotIn((None, 0x02), hw.pnp)
+        self.assertEqual((hw.cfg_index, hw.ldn), (0x25, 3))
 
     def test_mixer_block(self):
         import vxdemu
@@ -351,6 +360,9 @@ HOOKS = [
     (5, 0x3604, 0x3607),    # the VxD's Audio 2 start, 71h: ESSREG_A2_Mode
     (7, 0x0043, 0x0043),    # the per-VM node's size
     (6, 0x0368, 0x036B),    # the audio IRQ's EOI: ESSREG_EOI
+    (6, 0x0494, 0x0497),    # IDsDriver::GetDriverDesc: ESSREG_DS_GetDriverDesc
+    (6, 0x04D4, 0x04DB),    # IDsDriverBuffer::Lock and Unlock: ESSREG_DS_*
+    (6, 0x04F0, 0x04F3),    # IDsDriverBuffer::Play: ESSREG_DS_Play
 ] + [(6, off, off + 3) for off in (     # the FM ports' trap handler
     0x02D6, 0x02DC, 0x02E2, 0x02E8, 0x0306, 0x030C,
     0x0338, 0x033E, 0x0344, 0x034A)] + [
@@ -491,6 +503,247 @@ class PcmPathTest(VxDBuilds, unittest.TestCase):
                          [(0, False)] * 4 + [1, 0, (0, False)])
         self.assertNotEqual(stock[1][1], stock[2][1])
         self.assertTrue(stock[5][2])            # the DSP reset of a release
+
+
+def words(data):
+    """the 16-bit DMA channel's form of data: each byte in the low byte of
+    a word, as L5_3309 copies it (the high byte is the pair's high byte)"""
+    out = bytearray()
+    for i in range(0, len(data) - 1, 2):
+        out += bytes([data[i], data[i + 1], data[i + 1], data[i + 1]])
+    return bytes(out)
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class DirectSoundTest(VxDBuilds, unittest.TestCase):
+    """ESS's DirectSound driver, the IDsDriver and IDsDriverBuffer in PDAT,
+    in both builds: on a 16-bit DMA channel the extended driver asks for
+    Lock and Unlock, fills the channel's buffer in Unlock and starts
+    without ESS's time-out; on an 8-bit channel, and with
+    DirectSoundLock=0, it does as ESS's."""
+
+    A = 0x28000000          # DirectSound's buffer (64 KB mapped)
+    B = 0x29000000          # the 16-bit channel's (128 KB)
+    SIZE = 0x8000
+    VXD = "ES1869.VXD"
+    DRV = "ES1869.DRV"
+    # the keys a DirectSound playback goes through, at ESS's values
+    ESS = {(VXD, "DirectSoundLock"): "0", (DRV, "Audio2Oversampling"): "1",
+           (DRV, "Audio2Filter"): "1", (DRV, "Audio1Filter"): "1"}
+    E_NOTIMPL = 0x80004001
+    DSERR_INVALIDPARAM = 0x80070057
+
+    def machine_ds(self, ext, channel, ini=None):
+        """the driver with Audio 2 on the DMA channel, as ADI_Create leaves
+        it, and the IDsDriver object as L5_2D00 makes it"""
+        import vxdemu
+        m = self.machine(ext)
+        if ext:
+            m.start(ini or {})
+        e, adi = m.emu, vxdemu.ADI
+        e.uc.mem_map(self.A, 0x10000)
+        e.uc.mem_map(self.B, 0x20000)
+        e.uc.mem_write(adi + 0x79, bytes([channel]))
+        e.write32(adi + 0x7A, vxdemu.DMA2)
+        e.write32(adi + 0x82, 0x00100000)       # physical
+        e.write32(adi + 0x86, self.A)           # linear
+        e.write32(adi + 0x8A, self.SIZE)
+        e.write32(adi + 0xCF, 0x00200000)
+        e.write32(adi + 0xD3, self.B)
+        drv = vxdemu.LISTS + 0x800      # vtable, devnode, dsound's handle,
+        e.write32(drv, m.syms["D6_0488"])       # references, buffers
+        e.write32(drv + 4, vxdemu.DEVNODE)
+        for off in (8, 0xC, 0x10):
+            e.write32(drv + off, 0)
+        return m, drv
+
+    def call(self, m, this, index, *args):
+        """a method of the COM object at this, entry index of its vtable:
+        stdcall, EAX back"""
+        import vxdemu
+        e = m.emu
+        sp = vxdemu.STACK - 0x100
+        e.write32(sp + 4, this)
+        for i, a in enumerate(args):
+            e.write32(sp + 8 + 4 * i, a)
+        proc = e.read32(e.read32(this) + 4 * index)
+        return e.run(proc, {"EBX": vxdemu.VM_SYS})["EAX"]
+
+    def buffer(self, m, drv):
+        """CreateSoundBuffer for 44.1 kHz 16-bit stereo: the buffer object"""
+        import vxdemu
+        e = m.emu
+        wfx, out = vxdemu.LISTS + 0x900, vxdemu.LISTS + 0x920
+        e.uc.mem_write(wfx, struct.pack("<HHIIHHH", 1, 2, 44100, 176400,
+                                        4, 16, 0))
+        e.write32(out, self.SIZE)
+        self.assertEqual(self.call(m, drv, 7, wfx, 0, 0, out, out + 4,
+                                   out + 8), 0)
+        self.assertEqual(e.read32(out), self.SIZE)
+        self.assertEqual(e.read32(out + 4), self.A)
+        return e.read32(out + 8)
+
+    def lock(self, m, buf, pos, length):
+        import vxdemu
+        e, out = m.emu, vxdemu.LISTS + 0x940
+        rc = self.call(m, buf, 3, out, out + 4, out + 8, out + 12, pos,
+                       length, 0)
+        return rc, tuple(e.read32(out + 4 * i) for i in range(4))
+
+    def desc_flags(self, m, drv):
+        import vxdemu
+        e = m.emu
+        e.uc.mem_write(vxdemu.BUFFER, bytes(0x240))
+        self.assertEqual(self.call(m, drv, 3, vxdemu.BUFFER), 0)
+        self.assertEqual(e.cstr(vxdemu.BUFFER + 0x104), "ES1869.VXD")
+        return e.read32(vxdemu.BUFFER)
+
+    def test_description_asks_for_lock(self):
+        # DSDDESC_DOMMSYSTEMOPEN with DONTNEEDPRIMARYLOCK (8) in ESS's
+        m, drv = self.machine_ds(False, 5)
+        self.assertEqual(self.desc_flags(m, drv), 0x9)
+        m, drv = self.machine_ds(True, 5)
+        self.assertEqual(self.desc_flags(m, drv), 0x1)
+        m, drv = self.machine_ds(True, 5, {(self.VXD, "DirectSoundLock"): "0"})
+        self.assertEqual(self.desc_flags(m, drv), 0x9)
+
+    def test_lock_in_two_pieces(self):
+        m, drv = self.machine_ds(True, 5)
+        buf = self.buffer(m, drv)
+        self.assertEqual(self.lock(m, buf, 0x100, 0x200),
+                         (0, (self.A + 0x100, 0x200, 0, 0)))
+        self.assertEqual(self.lock(m, buf, 0x7F00, 0x200),
+                         (0, (self.A + 0x7F00, 0x100, self.A, 0x100)))
+        # more than the buffer: the buffer, from the position
+        self.assertEqual(self.lock(m, buf, 0x10, 0x9000),
+                         (0, (self.A + 0x10, 0x7FF0, self.A, 0x10)))
+        self.assertEqual(self.lock(m, buf, 0x8000, 4)[0],
+                         self.DSERR_INVALIDPARAM)
+        # ESS's: not implemented, as the description said
+        for ext, ini in ((False, None),
+                         (True, {(self.VXD, "DirectSoundLock"): "0"})):
+            m, drv = self.machine_ds(ext, 5, ini)
+            buf = self.buffer(m, drv)
+            self.assertEqual(self.lock(m, buf, 0x100, 0x200)[0],
+                             self.E_NOTIMPL)
+            self.assertEqual(self.call(m, buf, 4, self.A, 0x100, 0, 0),
+                             self.E_NOTIMPL)
+
+    def test_unlock_fills_the_16_bit_channels_buffer(self):
+        m, drv = self.machine_ds(True, 5)
+        buf = self.buffer(m, drv)
+        e = m.emu
+        head = bytes(range(0x100))
+        tail = bytes(range(0xFF, -1, -1))
+        e.uc.mem_write(self.A + 0x7F00, tail)
+        e.uc.mem_write(self.A, head)
+        self.assertEqual(self.call(m, buf, 4, self.A + 0x7F00, 0x100,
+                                   self.A, 0x100), 0)
+        self.assertEqual(bytes(e.uc.mem_read(self.B + 0xFE00, 0x200)),
+                         words(tail))
+        self.assertEqual(bytes(e.uc.mem_read(self.B, 0x200)), words(head))
+        # nothing else was touched
+        self.assertEqual(bytes(e.uc.mem_read(self.B + 0x200, 0xFC00)),
+                         bytes(0xFC00))
+        # a piece outside the buffer is refused and copied nowhere
+        for piece in ((self.A + 0x8000, 0x10), (self.A - 0x10, 0x10),
+                      (self.A + 0x7FF8, 0x10)):
+            self.assertEqual(self.call(m, buf, 4, piece[0], piece[1], 0, 0),
+                             self.DSERR_INVALIDPARAM)
+        self.assertEqual(bytes(e.uc.mem_read(self.B + 0x200, 0xFC00)),
+                         bytes(0xFC00))
+        # an 8-bit channel plays DirectSound's buffer itself
+        m, drv = self.machine_ds(True, 1)
+        buf = self.buffer(m, drv)
+        m.emu.uc.mem_write(self.A, head)
+        self.assertEqual(self.call(m, buf, 4, self.A, 0x100, 0, 0), 0)
+        self.assertEqual(bytes(m.emu.uc.mem_read(self.B, 0x200)),
+                         bytes(0x200))
+
+    def play(self, m, drv):
+        """Play, with the buffer filled with a pattern first: the buffer
+        object, and what the channel's buffer holds afterwards"""
+        e = m.emu
+        buf = self.buffer(m, drv)
+        data = bytes((i * 7 + i // 256) & 0xFF for i in range(self.SIZE))
+        e.uc.mem_write(self.A, data)
+        self.assertEqual(self.call(m, buf, 10, 0, 0, 0), 0)
+        self.assertEqual(e.read32(buf + 8), 1)      # playing
+        return buf, data, bytes(e.uc.mem_read(self.B, 2 * self.SIZE))
+
+    def test_play_without_the_time_out(self):
+        m, drv = self.machine_ds(True, 5)
+        buf, data, b = self.play(m, drv)
+        self.assertEqual(b, words(data))        # the whole buffer, at once
+        self.assertEqual(m.emu.timeouts, {})
+        # playing twice is refused, as in ESS's
+        self.assertEqual(self.call(m, buf, 10, 0, 0, 0), 0x80004005)
+        # Stop is ESS's: the DMA stops, still no time-out
+        self.assertEqual(self.call(m, buf, 11), 0)
+        self.assertEqual(m.emu.read32(buf + 8), 0)
+        self.assertEqual(m.emu.timeouts, {})
+        # on an 8-bit channel the channel's buffer is never touched
+        m, drv = self.machine_ds(True, 1)
+        _buf, _data, b = self.play(m, drv)
+        self.assertEqual(b, bytes(2 * self.SIZE))
+        self.assertEqual(m.emu.timeouts, {})
+
+    def test_ess_play_copies_from_a_time_out(self):
+        # ESS's: the first 80 ms (14,112 bytes at 44.1 kHz 16-bit stereo),
+        # then a time-out every 20 ms that copies 80 ms from the DMA's
+        # position; the same with DirectSoundLock=0
+        chunk = 44100 * 4 * 20 // 1000 * 4
+        for ext, ini in ((False, None),
+                         (True, {(self.VXD, "DirectSoundLock"): "0"})):
+            with self.subTest(ext=ext):
+                m, drv = self.machine_ds(ext, 5, ini)
+                buf, data, b = self.play(m, drv)
+                self.assertEqual(b[:2 * chunk], words(data[:chunk]))
+                self.assertEqual(b[2 * chunk:], bytes(2 * self.SIZE - 2 * chunk))
+                self.assertEqual([t[0] - m.hw.clock.us // 1000
+                                  for t in m.emu.timeouts.values()], [20])
+                m.advance(20)       # it ran: 80 ms more from where the
+                pos = self.SIZE - m.emu.dma_count   # DMA is, and comes again
+                self.assertEqual(bytes(m.emu.uc.mem_read(
+                    self.B + 2 * pos, 0x200)), words(data[pos:pos + 0x100]))
+                self.assertEqual(len(m.emu.timeouts), 1)
+                self.assertEqual(self.call(m, buf, 11), 0)
+
+    def test_as_ess_driver_with_the_key_off(self):
+        """the port accesses, services and time-outs of a DirectSound
+        playback are ESS's with every key at ESS's value"""
+        runs = []
+        for ext, ini in ((False, None), (True, self.ESS)):
+            m, drv = self.machine_ds(ext, 5, ini)
+            e = m.emu
+            log, svc = len(m.hw.log), len(e.services)
+            self.desc_flags(m, drv)
+            buf, _data, b = self.play(m, drv)
+            self.call(m, buf, 9, vxdemu_out(e), vxdemu_out(e) + 4)
+            self.call(m, buf, 11)
+            runs.append((m.hw.log[log:], [s for s in e.services[svc:]
+                                          if s & 0xFFFF0000 == 0x00040000],
+                         sorted(t[0] for t in e.timeouts.values()), b))
+        self.assertEqual(runs[0], runs[1])
+
+    def test_position_from_the_dma_count(self):
+        # both cursors at the DMA's position, ESS's code in both builds
+        for ext in (False, True):
+            m, drv = self.machine_ds(ext, 5)
+            buf, _data, _b = self.play(m, drv)
+            e = m.emu
+            out = vxdemu_out(e)
+            self.assertEqual(self.call(m, buf, 9, out, out + 4), 0)
+            play, write = e.read32(out), e.read32(out + 4)
+            self.assertEqual(play, write)
+            self.assertLess(play, self.SIZE)
+            self.assertEqual(play, self.SIZE - (e.dma_count + 1))
+
+
+def vxdemu_out(e):
+    """scratch memory for a method's results"""
+    import vxdemu
+    return vxdemu.LISTS + 0x960
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")

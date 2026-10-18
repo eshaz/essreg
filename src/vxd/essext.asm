@@ -62,6 +62,12 @@
 ;     ticks, a few milliseconds late but evenly, whatever bursts Windows
 ;     hands the ticks over in (DosFMDelay)
 ;
+; DirectSound (docs/VXD_INTERNALS.md, "DirectSound"): on a 16-bit DMA
+; channel, the driver copies what DirectSound wrote into the channel's
+; buffer as it is written, in Unlock, in place of ESS's time-out that
+; copies 80 ms every 20 ms (DirectSoundLock). With DrqLatch=1, it sets the
+; chip's DRQ latch each time a VM takes the DSP (docs/AUDIO_PIPELINE.md).
+;
 ; Settings (docs/DRIVER_CONFIG.md): each change can be turned off in
 ; SYSTEM.INI, [ES1869.VXD] and the Audio 2 mode in [ES1869.DRV], read once
 ; when the VxD starts (ESSREG_Read_Settings).  Off, the VxD does what ESS's
@@ -71,17 +77,20 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0113
-ESSREG_FEATURES         equ 0x1FFF      ; mixer, controller, ports, config,
+ESSREG_VERSION          equ 0x0114
+ESSREG_FEATURES         equ 0x7FFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
                                         ; Audio 1 filter, recording takes DSP,
-                                        ; DOS FM on its clock
+                                        ; DOS FM on its clock, DirectSound's
+                                        ; Lock and Unlock, the DRQ latch
 FEATURE_DOS_FM          equ 0x0080      ; cleared while VirtualFM=0
 FEATURE_DOS_MIXER       equ 0x0100      ; cleared while DosMixerRestore=0
 FEATURE_DOS_A1          equ 0x0400      ; cleared while Audio1Filter=1
 FEATURE_REC_DSP         equ 0x0800      ; cleared while RecordTakesDSP=0
 FEATURE_FM_TIMED        equ 0x1000      ; cleared while DosFMDelay=0
+FEATURE_DS_LOCK         equ 0x2000      ; cleared while DirectSoundLock=0
+FEATURE_DRQ_LATCH       equ 0x4000      ; cleared while DrqLatch=0
 
 ; settings (ESSREG_Opts), 1 = the change is on
 OPT_API                 equ 0x0001      ; RegisterAPI: group 4
@@ -96,12 +105,15 @@ OPT_A2_4X               equ 0x0100      ; Audio2Oversampling: ESS's 4x
 OPT_A2_FILTER           equ 0x0200      ; Audio2Filter: the filter in use
 OPT_A1_FILTER           equ 0x0400      ; Audio1Filter: the filter in use
 OPT_FM_TIMED            equ 0x0800      ; DosFMDelay: DOS FM on its clock
+OPT_DS_LOCK             equ 0x1000      ; DirectSoundLock: Lock and Unlock
+OPT_DRQ_LATCH           equ 0x2000      ; DrqLatch: 25h bit 7 at each acquisition
 OPT_READ                equ 0x8000      ; SYSTEM.INI was read
-OPT_DEFAULT             equ 0x08FF
+OPT_DEFAULT             equ 0x18FF
 
 FMQ_DELAY               equ 30          ; DosFMDelay's default (ms)
 FMQ_DELAY_MAX           equ 250         ; and the most it takes
 FMQ_WINDOW              equ 32          ; ticks the clock looks at at once
+FMQ_TICK0               equ 54925       ; the timer's default tick (us)
 FMQ_LATE                equ 4000        ; a data write this long (us) after a
                                         ; tick, and half a tick, is late
 VMSTAT_PM_APP           equ 0x40        ; CB_VM_Status: a protected mode program
@@ -527,8 +539,14 @@ ESSREG_API_Info:
         jnz     .timed
         and     ax,~FEATURE_REC_DSP & 0xFFFF
 .timed: test    byte [ESSREG_Opts+1],OPT_FM_TIMED >> 8
-        jnz     .out
+        jnz     .lock
         and     ax,~FEATURE_FM_TIMED & 0xFFFF
+.lock:  test    byte [ESSREG_Opts+1],OPT_DS_LOCK >> 8
+        jnz     .latch
+        and     ax,~FEATURE_DS_LOCK & 0xFFFF
+.latch: test    byte [ESSREG_Opts+1],OPT_DRQ_LATCH >> 8
+        jnz     .out
+        and     ax,~FEATURE_DRQ_LATCH & 0xFFFF
 .out:   mov     [ebp+Client_EBX],ax
         mov     ax,[ESSREG_Opts]
         mov     [ebp+Client_ECX],ax
@@ -757,6 +775,13 @@ ESSREG_API_PnPRead:
 ESSREG_API_PnPWrite:
         call    ESSREG_Get_ADI
         jc      .done
+        mov     al,[ebp+Client_EBX+1]   ; BH: Config Control (02h), Activate
+        cmp     al,0x02                 ; (30h) and I/O Range Check (31h)
+        je      .param                  ; take the card from its drivers:
+        cmp     al,0x30                 ; never
+        je      .param
+        cmp     al,0x31
+        je      .param
         call    ESSREG_Get_Config_Port
         jc      .done
         movzx   esi,word [ebp+Client_EBX]
@@ -771,6 +796,8 @@ ESSREG_API_PnPWrite:
         popfd
         clc
 .done:  ret
+.param: mov     ax,ESSREG_E_PARAM
+        jmp     ESSREG_Fail
 
 ; --- 040B: read mixer registers 00h-7Fh into ES:DI --------------------------
 ESSREG_API_MixerBlock:
@@ -1144,7 +1171,8 @@ ESSREG_Reclaim:
         je      .skip
         push    eax
         push    edx
-        movzx   edx,word [edi+ADI_AudioBase]
+        call    Wake_From_Local_Powerdown ; if ESS powered the chip down
+        movzx   edx,word [edi+ADI_AudioBase] ; when the program ended
         call    L5_19C4                 ; ESS's FM reset pulse
         call    L5_0BD0                 ; and its init: OPL2 mode, silent
         mov     dword [edi+ADI_FMLastOwner],-1
@@ -1161,10 +1189,12 @@ ESSREG_Reclaim:
 
 ; --- Windows' mixer while a DOS VM has the audio device ------------------------
 
-; in place of ESS's Save_DOS_Mixer when a VM (EBX) acquires the DSP:
-; a DOS VM taking it from Windows first saves Windows' mixer (unless it's
-; already saved and not put back yet); DosMixerRestore=0: ESS's alone
+; in place of ESS's Save_DOS_Mixer when a VM (EBX) acquires the DSP: the
+; DRQ latch first (DrqLatch=1), then a DOS VM taking the DSP from Windows
+; saves Windows' mixer (unless it's already saved and not put back yet);
+; DosMixerRestore=0: ESS's alone
 ESSREG_DSP_Save:
+        call    ESSREG_DRQ_Latch
         test    byte [ESSREG_Opts],OPT_DOS_MIXER
         jz      .stock
         VxDCall Test_Sys_VM_Handle
@@ -2111,11 +2141,15 @@ ESSREG_VSB_Start:
         rep     stosd
         pop     edi
         call    ESSREG_VSB_Mix_Save
-        mov     eax,[edi+ADI_DMA1Handle]
+        xor     ecx,ecx
+        mov     dl,DMA_MASKED           ; no channel yet (the no-DMA
+        mov     eax,[edi+ADI_DMA1Handle] ; variant): as masked
+        or      eax,eax
+        jz      .state
         push    edi
         VxDCall VDMAD_Get_Virt_State    ; ECX = count, DL = mode
         pop     edi
-        push    ecx
+.state: push    ecx
         push    edx
         mov     eax,1
         call    Release_Resources       ; EBX = the VM, EDI = ADI
@@ -2126,7 +2160,11 @@ ESSREG_VSB_Start:
         mov     byte [edi+EX_VSB_TC],0xD2       ; 22 kHz, as after a reset
         mov     word [edi+EX_VSB_Size],0x07FF
         mov     dword [edi+EX_VSB_Id],0x01038968 ; 68h 89h, 03h 01h
-        call    ESSREG_VSB_Ask
+        mov     eax,1                   ; its blocks end on time: VTD's
+        VxDCall VTD_Begin_Min_Int_Period ; 1 ms interrupts, not the timer's
+        jc      .ask                    ; 55 ms ticks
+        mov     byte [edi+EX_VSB_MinInt],1
+.ask:   call    ESSREG_VSB_Ask
         pop     edx
         pop     ecx
         ; a transfer that runs goes on as blocks of half its buffer, at the
@@ -2145,17 +2183,28 @@ ESSREG_VSB_Start:
         ret
 
 ; the chip's answers to E7h (its identification) and E1h (its version)
-; into EX_VSB_Id and EX_VSB_Ver, EDI = ADI, while nobody has the DSP
+; into EX_VSB_Id and EX_VSB_Ver, EDI = ADI, while nobody has the DSP: not
+; while ESS has the chip powered down (the release may have), when the
+; defaults stand. The DSP is waited for with interrupts on, then each
+; command's bytes go with them off
 ESSREG_VSB_Ask:
         pushad
+        test    word [edi+ADI_Flags],0x80
+        jnz     .done
         movzx   edx,word [edi+ADI_AudioBase]
         add     edx,byte 0x0C
-        pushfd
+        mov     ecx,ESSREG_POLL_IDLE
+.idle:  in      al,dx
+        test    al,0x80
+        jz      .ready
+        loop    .idle
+        jmp     .done
+.ready: lea     esi,[edi+EX_VSB_Id]
+        mov     bl,0xE7
+.cmd:   pushfd
         cli
         call    ESSREG_DSP_Drain
-        lea     esi,[edi+EX_VSB_Id]
-        mov     bl,0xE7
-.cmd:   mov     al,bl
+        mov     al,bl
         mov     ecx,ESSREG_POLL_BYTE
         call    ESSREG_DSP_Put
         jc      .out
@@ -2166,15 +2215,16 @@ ESSREG_VSB_Ask:
         mov     ecx,ESSREG_POLL_REST
         call    ESSREG_DSP_Get
         jc      .out
+        popfd
         xchg    al,ah
         mov     [esi],ax
         add     esi,byte 2
         cmp     bl,0xE1
-        je      .out
+        je      .done
         mov     bl,0xE1
         jmp     .cmd
 .out:   popfd
-        popad
+.done:  popad
         ret
 
 ; I/O trap of Audio_Base+4h-Fh, in place of ESS's DSP_Port_Trap: the DOS VM
@@ -2347,7 +2397,14 @@ ESSREG_VSB_End:
         je      .done
         call    ESSREG_VSB_Stop
         call    ESSREG_VSB_Ack
-        mov     dword [edi+EX_VSB_VM],0
+        cmp     byte [edi+EX_VSB_MinInt],0
+        je      .vm
+        mov     byte [edi+EX_VSB_MinInt],0
+        push    eax
+        mov     eax,1
+        VxDCall VTD_End_Min_Int_Period
+        pop     eax
+.vm:    mov     dword [edi+EX_VSB_VM],0
 .done:  ret
 
 ; the real DSP back to the program once nobody has it and its virtual Sound
@@ -3022,7 +3079,9 @@ ESSREG_EOI:
         jz      .ess
         cmp     [edi+EX_VSB_VM],ebx
         jne     .ess
-        pop     edi
+        test    word [edi+4],0x1000     ; a physical MPU-401 interrupt of
+        jnz     .ess                    ; its own on the shared IRQ: ESS's
+        pop     edi                     ; EOI ends it
         VxDCall VPICD_Clear_Int_Request
         clc
         ret
@@ -3117,11 +3176,12 @@ ESSREG_FMQ_Put:
         xor     ebp,ebp                         ; EBP = 1: off its ticks
         test    dl,1
         jz      .queue                          ; an address
-        test    byte [esi+FMQ_Flags],FMQF_LAST
-        jz      .late                           ; no tick yet at all
+        mov     eax,FMQ_TICK0 / 2               ; no tick yet: the start was
+        test    byte [esi+FMQ_Flags],FMQF_LAST  ; one, of the timer's default
+        jz      .half                           ; length
         mov     eax,[esi+FMQ_T]
         shr     eax,9                           ; half a tick (us)
-        cmp     eax,FMQ_LATE
+.half:  cmp     eax,FMQ_LATE
         jae     .limit
         mov     eax,FMQ_LATE
 .limit: mov     ebx,ecx
@@ -3266,11 +3326,12 @@ ESSREG_FMQ_End:
 .flush: pop     esi
         or      bl,bl
         jz      .free
-        pushfd
-        cli
-.out:   cmp     dword [esi+FMQ_Count],byte 0
+.out:   pushfd                                  ; interrupts in between the
+        cli                                     ; entries: up to 1024
+        cmp     dword [esi+FMQ_Count],byte 0
         je      .sent
         call    ESSREG_FMQ_Out
+        popfd
         jmp     .out
 .sent:  popfd
 .free:  test    byte [esi+FMQ_Flags],FMQF_MININT
@@ -3614,6 +3675,225 @@ ESSREG_Profile_Int:
         pop     ecx
         ret
 
+; --- DirectSound's primary buffer on a 16-bit DMA channel -------------------
+
+; ESS's DirectSound driver (pcod.asm L5_2A30-L5_3220: the IDsDriver and
+; IDsDriverBuffer of DirectX's dsdriver.h) gives DirectSound a buffer of
+; system memory and plays it by DMA. On an 8-bit channel the DMA plays
+; that buffer itself. On a 16-bit channel the chip takes the low byte of
+; each word only, so the DMA plays a second buffer of twice the size, each
+; byte of DirectSound's in the low byte of a word (L5_3309), which ESS's
+; driver fills from a time-out: every 20 ms, 80 ms from where the DMA is
+; (L5_3040). A late time-out then plays what the buffer held a lap ago.
+; With DirectSoundLock=1 the driver asks DirectSound to bracket its writes
+; with Lock and Unlock (DSDDESC_DONTNEEDPRIMARYLOCK clear), copies in
+; Unlock what was written, once and at once, and starts without the
+; time-out. The vtables in pdat.asm point here.
+DSDDESC_DONTNEEDPRIMARYLOCK equ 0x08
+DSERR_GENERIC           equ 0x80004005
+DSERR_INVALIDPARAM      equ 0x80070057
+; ESS's buffer object
+DSB_Playing             equ 0x08        ; dword: the DMA runs
+DSB_Buffer              equ 0x10        ; dword: DirectSound's buffer
+DSB_Size                equ 0x1C        ; dword: its size in bytes
+DSB_Base                equ 0x2E        ; word: Audio_Base
+DSB_Channel             equ 0x30        ; byte: the DMA channel, 5-7 16-bit
+DSB_Words               equ 0x35        ; dword: the 16-bit channel's buffer
+
+; IDsDriver::GetDriverDesc (this, description): ESS's, then
+; DSDDESC_DONTNEEDPRIMARYLOCK cleared, for Lock and Unlock
+ESSREG_DS_GetDriverDesc:
+        push    dword [esp+8]
+        push    dword [esp+8]
+        call    L5_2AA0                 ; stdcall: takes its arguments
+        test    byte [ESSREG_Opts+1],OPT_DS_LOCK >> 8
+        jz      .done
+        push    edx
+        mov     edx,[esp+12]
+        and     dword [edx],~DSDDESC_DONTNEEDPRIMARYLOCK
+        pop     edx
+.done:  ret     8
+
+; IDsDriverBuffer::Lock (this, piece 1 and its length, piece 2 and its
+; length, position, length, flags): the part of DirectSound's buffer from
+; position, in two pieces where it wraps
+ESSREG_DS_Lock:
+        test    byte [ESSREG_Opts+1],OPT_DS_LOCK >> 8
+        jz      L5_2EF0                 ; ESS's: not implemented
+        push    ebx
+        push    esi
+        push    edi
+        mov     edi,[esp+16]            ; this
+        mov     esi,[edi+DSB_Size]
+        mov     eax,[esp+36]            ; the position
+        mov     ecx,[esp+40]            ; and the length
+        cmp     eax,esi
+        jae     .param
+        cmp     ecx,esi
+        jbe     .fits
+        mov     ecx,esi
+.fits:  mov     ebx,esi
+        sub     ebx,eax                 ; to the end of the buffer
+        add     eax,[edi+DSB_Buffer]
+        mov     edx,[esp+20]
+        mov     [edx],eax               ; piece 1
+        xor     eax,eax
+        cmp     ecx,ebx
+        jbe     .one
+        sub     ecx,ebx
+        xchg    ecx,ebx                 ; ECX = piece 1's length, EBX = 2's
+        mov     eax,[edi+DSB_Buffer]    ; piece 2 starts the buffer
+        jmp     .two
+.one:   xor     ebx,ebx                 ; no piece 2
+.two:   mov     edx,[esp+24]
+        mov     [edx],ecx
+        mov     edx,[esp+28]            ; which may not be asked for
+        or      edx,edx
+        jz      .len2
+        mov     [edx],eax
+.len2:  mov     edx,[esp+32]
+        or      edx,edx
+        jz      .ok
+        mov     [edx],ebx
+.ok:    xor     eax,eax
+.out:   pop     edi
+        pop     esi
+        pop     ebx
+        ret     32
+.param: mov     eax,DSERR_INVALIDPARAM
+        jmp     .out
+
+; IDsDriverBuffer::Unlock (this, piece 1 and its length, piece 2 and its
+; length): what DirectSound wrote, into the 16-bit channel's buffer; an
+; 8-bit channel plays DirectSound's buffer itself
+ESSREG_DS_Unlock:
+        test    byte [ESSREG_Opts+1],OPT_DS_LOCK >> 8
+        jz      L5_2F00                 ; ESS's: not implemented
+        push    edi
+        mov     edi,[esp+8]             ; this
+        cmp     byte [edi+DSB_Channel],3
+        jbe     .ok
+        push    dword [esp+16]          ; piece 1's length
+        push    dword [esp+16]          ; and piece 1
+        call    ESSREG_DS_Words
+        jc      .param
+        push    dword [esp+24]          ; piece 2's length
+        push    dword [esp+24]          ; and piece 2
+        call    ESSREG_DS_Words
+        jc      .param
+.ok:    xor     eax,eax
+.out:   pop     edi
+        ret     20
+.param: mov     eax,DSERR_INVALIDPARAM
+        jmp     .out
+
+; a piece of DirectSound's buffer (address, length) into the 16-bit
+; channel's buffer, each byte in the low byte of a word (L5_3309) at twice
+; its offset; EDI = the buffer object; CF set for a piece that isn't in the
+; buffer; keeps the registers
+ESSREG_DS_Words:
+        push    eax
+        push    ecx
+        push    edx
+        mov     ecx,[esp+20]            ; the length
+        jecxz   .ok
+        mov     eax,[esp+16]            ; the address
+        sub     eax,[edi+DSB_Buffer]    ; its offset
+        jc      .bad
+        mov     edx,eax
+        add     edx,ecx
+        jc      .bad
+        cmp     edx,[edi+DSB_Size]
+        ja      .bad
+        add     eax,eax
+        add     eax,[edi+DSB_Words]
+        push    ecx
+        push    eax
+        push    dword [esp+24]          ; the address
+        call    L5_3309                 ; (from, to, bytes)
+        add     esp,byte 12
+.ok:    clc
+.out:   pop     edx
+        pop     ecx
+        pop     eax
+        ret     8
+.bad:   stc
+        jmp     .out
+
+; IDsDriverBuffer::Play (this, reserved, reserved, flags): on a 16-bit
+; channel, the whole of DirectSound's buffer into the channel's first,
+; which Unlock keeps up to date from here on, and none of ESS's time-out;
+; then ESS's start (L5_3178), which has EDI = the buffer and SI = Audio_Base
+ESSREG_DS_Play:
+        test    byte [ESSREG_Opts+1],OPT_DS_LOCK >> 8
+        jz      L5_30D0                 ; ESS's
+        push    esi
+        push    edi
+        mov     edi,[esp+12]            ; this
+        mov     eax,DSERR_GENERIC
+        cmp     dword [edi+DSB_Playing],0
+        jnz     .out                    ; playing already
+        cmp     byte [edi+DSB_Channel],3
+        jbe     .start
+        push    dword [edi+DSB_Size]
+        push    dword [edi+DSB_Words]
+        push    dword [edi+DSB_Buffer]
+        call    L5_3309
+        add     esp,byte 12
+.start: xor     esi,esi
+        mov     si,[edi+DSB_Base]
+        jmp     L5_3178
+.out:   pop     edi
+        pop     esi
+        ret     16
+
+; --- the DRQ latch -------------------------------------------------------------
+
+; each time a VM takes the DSP (DrqLatch=1): card-level PnP register 25h
+; bit 7, the DRQ latch, which holds each DMA request until the controller
+; answers it (docs/AUDIO_PIPELINE.md). The chip loads 25h from its PnP
+; data at a reset, and the data sheet has it read-only, so the write may
+; not take; essctl's Plug and Play page shows whether it did. EDI = the
+; ADI; keeps the registers
+ESSREG_DRQ_Latch:
+        test    byte [ESSREG_Opts+1],OPT_DRQ_LATCH >> 8
+        jz      .done
+        pushad
+        pushfd
+        cli
+        movzx   ecx,word [edi+ADI_AudioBase]
+        lea     edx,[ecx+4]
+        in      al,dx                   ; the mixer index: ESS's search
+        mov     bl,al                   ; may read the identification
+        push    ecx                     ; sequence (40h)
+        call    Find_Config_Port        ; EDX = the port or -1
+        pop     ecx
+        push    edx
+        lea     edx,[ecx+4]
+        mov     al,bl
+        out     dx,al                   ; the index back
+        pop     edx
+        cmp     edx,0x100
+        jb      .skip
+        cmp     edx,0xFF8
+        ja      .skip
+        test    dl,7
+        jnz     .skip
+        call    Read_LDN1_Base          ; AX = logical device 1's base
+        cmp     ax,cx
+        jne     .skip                   ; not this card's port
+        mov     esi,0x25FF              ; card level, register 25h
+        call    ESSREG_PnP_Select
+        inc     edx
+        in      al,dx
+        or      al,0x80
+        out     dx,al
+        dec     edx
+        call    ESSREG_PnP_Restore
+.skip:  popfd
+        popad
+.done:  ret
+
 ; --- a microsecond clock for the virtual timers --------------------------------
 
 ; EAX = microseconds (wraps after 71 minutes)
@@ -3819,6 +4099,8 @@ ESSREG_Settings:
         dd ESSREG_Key_Filter, ESSREG_Sec_Drv, OPT_A2_FILTER
         ; and the Audio 1 DAC's filter, for DOS programs here
         dd ESSREG_Key_A1Filter, ESSREG_Sec_Drv, OPT_A1_FILTER
+        dd ESSREG_Key_DSLock, ESSREG_Sec_VxD, OPT_DS_LOCK
+        dd ESSREG_Key_Latch, ESSREG_Sec_VxD, OPT_DRQ_LATCH
         dd 0
 ESSREG_Sec_VxD:         db "ES1869.VXD", 0
 ESSREG_Sec_Drv:         db "ES1869.DRV", 0
@@ -3834,3 +4116,5 @@ ESSREG_Key_Delay:       db "DosFMDelay", 0
 ESSREG_Key_4X:          db "Audio2Oversampling", 0
 ESSREG_Key_Filter:      db "Audio2Filter", 0
 ESSREG_Key_A1Filter:    db "Audio1Filter", 0
+ESSREG_Key_DSLock:      db "DirectSoundLock", 0
+ESSREG_Key_Latch:       db "DrqLatch", 0

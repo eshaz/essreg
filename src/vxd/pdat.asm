@@ -280,7 +280,11 @@ D6_0488:
         dd L5_2A30                                      ; 0488
         dd L5_2A80                                      ; 048C
         dd L5_2A90                                      ; 0490
+%if ESSREG_EXT
+        dd ESSREG_DS_GetDriverDesc              ; essreg: Lock and Unlock wanted
+%else
         dd L5_2AA0                                      ; 0494
+%endif
         dd L5_2B20                                      ; 0498
         dd L5_2CD0                                      ; 049C
         dd L5_2B50                                      ; 04A0
@@ -296,12 +300,21 @@ D6_04C8:
         dd L5_2E90                                      ; 04C8
         dd L5_2EE0                                      ; 04CC
         dd L5_2E60                                      ; 04D0
+%if ESSREG_EXT
+        dd ESSREG_DS_Lock                       ; essreg: the 16-bit channel's
+        dd ESSREG_DS_Unlock                     ; buffer filled as it's written
+%else
         dd L5_2EF0                                      ; 04D4
         dd L5_2F00                                      ; 04D8
+%endif
         dd L5_2F10                                      ; 04DC
         dd L5_2F90                                      ; 04E0
         dd L5_2FC0                                      ; 04E4
         dd L5_2FE0                                      ; 04E8
         dd L5_2FF0                                      ; 04EC
+%if ESSREG_EXT
+        dd ESSREG_DS_Play                       ; essreg: without the time-out
+%else
         dd L5_30D0                                      ; 04F0
+%endif
         dd L5_3220                                      ; 04F4

@@ -658,8 +658,9 @@ the way `GetPrivateProfileInt` reads it, as its leading digits, or 0 if
 there are none. Write `1` or `0`, because `yes` and `on` read as 0.
 `DosFMDelay` takes a number of milliseconds, where `0` is off as well.
 
-For example, these settings give ESS's DOS box behavior, ESS's wave devices
-and ESS's modes of both DACs, while keeping the register API:
+For example, these settings give ESS's DOS box behavior, ESS's DirectSound
+driver, ESS's wave devices and ESS's modes of both DACs, while keeping the
+register API:
 
 ```
 [ES1869.VXD]
@@ -671,6 +672,8 @@ DosMixerRestore=0
 ResetDosFM=0
 RecordTakesDSP=0
 DosFMDelay=0
+DirectSoundLock=0
+DrqLatch=0
 
 [ES1869.DRV]
 Audio1Device=0
@@ -721,7 +724,24 @@ ESS's driver:
   in bursts
   ([VXD_INTERNALS.md](VXD_INTERNALS.md#a-dos-programs-fm-on-its-own-clock)).
   With 0, the program writes to the chip directly, and its music comes in
-  the bursts of its ticks.
+  the bursts of its ticks. The queue takes its writes from the virtual FM
+  chip's trap, so it needs `VirtualFM=1`: with `VirtualFM=0` the program
+  writes directly whatever the delay.
+* **DirectSoundLock** (default 1). On a 16-bit DMA channel, the driver
+  copies what DirectSound writes into the channel's buffer as it is written,
+  in DirectSound's Lock and Unlock calls
+  ([VXD_INTERNALS.md](VXD_INTERNALS.md#directsound)). With 0, ESS's time-out
+  copies 80 ms from the DMA's position every 20 ms, and a late time-out
+  plays what the buffer held a lap ago. On an 8-bit channel the DMA plays
+  DirectSound's buffer itself, and the key changes nothing.
+* **DrqLatch** (default 0). With 1, the driver sets the chip's DRQ latch,
+  card-level PnP register 25h bit 7, each time a VM takes the DSP, so that
+  each DMA request stays up until the DMA controller answers it
+  ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#what-software-can-do-about-it)).
+  The chip loads 25h from its PnP ROM or EEPROM at a reset and the data
+  sheet has the register as read-only, so first check with essctl, in Expert
+  mode on the *Plug and Play* page, whether the chip takes the write. With
+  0, the latch stays as the card's PnP data set it.
 
 ### 6.2 [ES1869.DRV]
 

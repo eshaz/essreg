@@ -39,8 +39,10 @@ KEYS = {                            # key: its bit in ESSREG_Opts
     (DRV, "Audio2Oversampling"): 0x0100,
     (DRV, "Audio2Filter"): 0x0200,
     (DRV, "Audio1Filter"): 0x0400,
+    (VXD, "DirectSoundLock"): 0x1000,
+    (VXD, "DrqLatch"): 0x2000,
 }
-DEFAULT, READ = 0x08FF, 0x8000
+DEFAULT, READ = 0x18FF, 0x8000
 # every change off: ESS's driver
 ESS = {key: "0" for key in KEYS}
 ESS.update({(DRV, "Audio2Oversampling"): "1", (DRV, "Audio2Filter"): "1",
@@ -62,7 +64,8 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         names = ("OPT_API", "OPT_VFM", "OPT_TAKES_FM", "OPT_KEEPS_FM",
                  "OPT_FM_AUDIBLE", "OPT_DOS_MIXER", "OPT_RESET_FM",
                  "OPT_REC_TAKES", "OPT_FM_TIMED", "OPT_A2_4X",
-                 "OPT_A2_FILTER", "OPT_A1_FILTER")
+                 "OPT_A2_FILTER", "OPT_A1_FILTER", "OPT_DS_LOCK",
+                 "OPT_DRQ_LATCH")
         self.assertEqual([m.syms[n] for n in names], list(KEYS.values()))
         self.assertEqual(m.syms["OPT_READ"], READ)
 
@@ -133,16 +136,22 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         m.start({})
         out, cf = m.api(VM_SYS, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0113)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x1FFF)
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0114)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x3FFF)   # DrqLatch is off
         self.assertEqual(out["ECX"] & 0xFFFF, DEFAULT | READ)
         m = self.machine()
         m.start({(VXD, "VirtualFM"): "0", (VXD, "DosMixerRestore"): "0",
                  (VXD, "RecordTakesDSP"): "0",
                  (DRV, "Audio2Filter"): "1", (DRV, "Audio1Filter"): "1"})
         out, cf = m.api(VM_SYS, 0x0400)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x1FFF & ~0x0D80)
-        self.assertEqual(out["ECX"] & 0xFFFF, 0x005D | 0x0E00 | READ)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x3FFF & ~0x0D80)
+        self.assertEqual(out["ECX"] & 0xFFFF, 0x105D | 0x0E00 | READ)
+        m = self.machine()
+        m.start({(VXD, "DrqLatch"): "1", (VXD, "DirectSoundLock"): "0"})
+        out, cf = m.api(VM_SYS, 0x0400)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x7FFF & ~0x2000)
+        self.assertEqual(out["ECX"] & 0xFFFF, (DEFAULT & ~0x1000) | 0x2000
+                         | READ)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
@@ -251,6 +260,35 @@ class EachSettingTest(VxDBuilds, unittest.TestCase):
                     stock.api(VM_SYS, 0x0002, EAX=WIN_AUDIO, EBX=1)
                     if (over, filt, a1) == ("1", "1", "1"):
                         self.assertEqual(want, stock.hw.mixer[0x71])
+
+    def test_drq_latch(self):
+        # DrqLatch=1: each DSP acquisition sets card-level PnP register 25h
+        # bit 7 through the configuration port, and puts the mixer and PnP
+        # indexes back; by default the register isn't touched
+        m = self.machine_with({(VXD, "DrqLatch"): "1"})
+        m.hw.pnp[(None, 0x25)] = 0x31
+        m.hw.cfg_index = 0x60
+        m.api(VM_SYS, 0x0002, EAX=WIN_AUDIO, EBX=1)
+        self.assertEqual(m.hw.pnp[(None, 0x25)], 0xB1)
+        self.assertEqual(m.hw.cfg_index, 0x60)
+        # the mixer index the configuration port's search changed (40h, the
+        # identification sequence) came back right after it
+        log = m.hw.log
+        at = log.index(("out", 0x224, 0x40))
+        self.assertEqual(log[at - 1][:2], ("in", 0x224))
+        self.assertEqual([entry[:2] for entry in log[at + 1:at + 5]],
+                         [("in", 0x225)] * 4)
+        self.assertEqual(log[at + 5], ("out", 0x224, log[at - 1][2]))
+        self.assertLess(at, log.index(("out", 0x251, 0xB1)))
+        m.api(VM_SYS, 0x0003, EAX=WIN_AUDIO, EBX=1)
+        m.hw.pnp[(None, 0x25)] = 0x31           # as a reset would leave it
+        m.api(VM_DOS, 0x0002, EAX=WIN_AUDIO, EBX=1)
+        self.assertEqual(m.hw.pnp[(None, 0x25)], 0xB1)
+        for ini in ({}, {(VXD, "DrqLatch"): "0"}):
+            m = self.machine_with(ini)
+            m.api(VM_SYS, 0x0002, EAX=WIN_AUDIO, EBX=1)
+            self.assertNotIn((None, 0x25), m.hw.pnp)
+            self.assertNotIn(("out", 0x250, 0x25), m.hw.log)
 
     def test_audio1_filter(self):
         # a DOS program's Audio 1 DAC plays through the filter, bit 2 as

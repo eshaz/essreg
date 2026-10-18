@@ -25,9 +25,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   drivers and restarts Windows. `wheel.c` gives the sliders of essctl and
   ess3d the mouse wheel.
 * `src/vxd/` holds `ES1869.VXD` as NASM source, made by `tools/vxd2asm.py`.
-  `essext.asm` adds the register API and the DOS box improvements (the
-  virtual FM chip, Windows' mixer around a DOS program, and the DACs' modes
-  for it), and `essext.inc` has its layout.
+  `essext.asm` adds the register API, the DOS box improvements (the virtual
+  FM chip, Windows' mixer around a DOS program, and the DACs' modes for it),
+  DirectSound's Lock and Unlock on a 16-bit DMA channel and the DRQ latch,
+  and `essext.inc` has its layout.
 * `src/esfm/` holds `ESFM.DRV` as NASM source, made by `tools/ne2asm.py`.
   `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm`
   and `esfmgm.asm` hold the fixes and General MIDI, and `esfmini.asm` their
@@ -116,8 +117,10 @@ tools/wineshot.sh run ess3d.exe /sim tray
 * **SYSTEM.INI settings.** Every change to ESS's drivers has a key in the
   driver's section (`[ES1869.VXD]`, `[ES1869.DRV]` or `[ESFM.DRV]`), which
   the driver reads once when it starts, and `0` gives back what ESS's driver
-  does there. ESFM.DRV's `Bank=` is the exception: it is a file name, read
-  at every MIDI open. A new change gets a key with its default, a row in
+  does there. The exceptions: `Audio2Oversampling`, `Audio2Filter` and
+  `Audio1Filter`, where `1` is ESS's setting of a DAC stage and the default
+  `0` turns the stage off, and ESFM.DRV's `Bank=`, a file name, read at
+  every MIDI open. A new change gets a key with its default, a row in
   section 6 of
   [DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings),
   and tests of both values (`tests/test_vxdini.py`,

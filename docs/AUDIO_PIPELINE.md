@@ -56,6 +56,30 @@ mixer.
 Recording runs the other way, on Audio 1, with a 256-byte FIFO, demand
 transfers of 2 bytes (B9h = 02h) and the same block sizes.
 
+## The path of a DirectSound sound
+
+DirectSound doesn't go through `waveOutWrite`. ES1869.VXD is a DirectSound
+driver too ([VXD_INTERNALS.md](VXD_INTERNALS.md#directsound)): DirectSound
+mixes every sound in software into the driver's primary buffer, 32 KB of
+system memory that the VxD allocated, and the VxD plays that buffer by DMA
+on Audio 2, in auto-initialize mode as ES1869.DRV does. DirectSound asks the
+VxD for the DMA position and writes a little ahead of it, so a DirectSound
+sound has less delay than a Windows sound, and the time each step has is
+DirectSound's own lead.
+
+On an 8-bit DMA channel the DMA plays the primary buffer itself. On a 16-bit
+channel the chip takes only the low byte of each word, so the VxD plays a
+second buffer of twice the size, each byte of the primary buffer in the low
+byte of a word. ESS's driver fills it from a time-out: every 20 ms, 80 ms
+from wherever the DMA is. The DMA then plays what the last time-out copied,
+and a time-out that comes late by more than DirectSound's lead plays what
+the buffer held a lap ago, which is heard as a skip. The extended
+`ES1869.VXD` has DirectSound say what it wrote (its `Lock` and `Unlock`
+calls) and copies just that, at once, so the second buffer always holds what
+DirectSound has written, however late Windows runs anything else.
+`DirectSoundLock=0` gives ESS's time-out back
+([DRIVER_CONFIG.md](DRIVER_CONFIG.md#61-es1869vxd)).
+
 ## The Audio 2 DAC: oversampling and the filter
 
 Mixer register 71h selects how the Audio 2 DAC turns samples into sound (DS
@@ -171,6 +195,9 @@ much time the step has.
 * **The DMA controller answers Audio 1's request for Sound Blaster sound**
   (a 64-byte FIFO). It has 2.9 ms at 22 kHz 8-bit mono.
 * **The driver handles the interrupt** (one block). It has 62 ms.
+* **ESS's DirectSound time-out copies the next 80 ms** (DirectSound's lead,
+  on a 16-bit DMA channel). It has DirectSound's lead, some tens of ms. The
+  extended driver copies as DirectSound writes, so this step is gone.
 * **The program sends its next buffer** (the program's own queue). It
   usually has hundreds of ms.
 
@@ -230,12 +257,18 @@ you clear its check box and restart.
 
 ## What software can do about it
 
-If the DRQ latch takes a write, ES1869.VXD's extension could set it each
-time the device starts. If it doesn't, the card's EEPROM could be changed
-instead, by a tool that reads it, saves a copy and rewrites the one header
-byte. That is possible only with an EEPROM, not with the internal ROM, and a
-bad write can make the card vanish from Plug and Play until the EEPROM is
-written again.
+If the DRQ latch takes a write, `DrqLatch=1` under `[ES1869.VXD]` in
+`SYSTEM.INI` makes the extended `ES1869.VXD` set it each time a VM takes the
+DSP, so it is on for every Windows sound, every DirectSound game and every
+DOS program, and again after anything reset the chip
+([DRIVER_CONFIG.md](DRIVER_CONFIG.md#61-es1869vxd)). The key is off unless
+you set it, because the data sheet has the register as read-only and ESS's
+own ROM data leaves the latch off: check with essctl first that the chip
+takes the write, and listen for whether the skips go away. If the chip
+doesn't take it, the card's EEPROM could be changed instead, by a tool that
+reads it, saves a copy and rewrites the one header byte. That is possible
+only with an EEPROM, not with the internal ROM, and a bad write can make the
+card vanish from Plug and Play until the EEPROM is written again.
 
 The driver's buffering is generous, at 62 ms per block, so changing
 ES1869.DRV wouldn't help a FIFO that runs dry. In this path,

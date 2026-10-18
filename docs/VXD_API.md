@@ -296,9 +296,9 @@ in another VM, or the driver's own interrupt code.
 
 The functions have these inputs and outputs:
 
-* **0400** takes nothing and returns AX = 0113h (version 1.13), BX = the
-  feature bits (0FFFh), CX = the SYSTEM.INI settings and DX = the number of
-  functions (14).
+* **0400** takes nothing and returns AX = 0114h (version 1.14), BX = the
+  feature bits (7FFFh with every change on), CX = the SYSTEM.INI settings
+  and DX = the number of functions (14).
 * **0401** takes BL = a mixer register and returns AL = its value.
 * **0402** takes BL = a mixer register and BH = the value.
 * **0403** takes BL = a controller register (A0h-BFh) and returns AL = its
@@ -311,7 +311,9 @@ The functions have these inputs and outputs:
 * **0409** takes BL = a logical device (FFh = card level) and BH = a PnP
   register, and returns AL = its value.
 * **040A** takes BL = a logical device (FFh = card level), BH = a PnP
-  register and AL = the value.
+  register and AL = the value. It refuses Config Control (02h), Activate
+  (30h) and I/O Range Check (31h), which would take the card away from its
+  drivers.
 * **040B** takes ES:DI = a 128-byte buffer and fills it with mixer registers
   00h-7Fh, with 40h read as 0 because its reads advance the identification
   sequence.
@@ -367,21 +369,23 @@ the write also changes the value that Windows gets back afterwards.
 
 0400 returns these feature bits in BX:
 
-| Bit | Function                                                   |
-|-----|------------------------------------------------------------|
-| 0   | mixer                                                      |
-| 1   | controller                                                 |
-| 2   | ports                                                      |
-| 3   | configuration ports                                        |
-| 4   | PnP                                                        |
-| 5   | mixer block                                                |
-| 6   | owner information                                          |
-| 7   | DOS FM, clear with `VirtualFM=0`                           |
-| 8   | DOS mixer, clear with `DosMixerRestore=0`                  |
-| 9   | CX holds the settings below (version 1.11)                 |
-| 10  | Audio 1 filter, clear with `Audio1Filter=1` (version 1.12) |
-| 11  | the DSP for a recording, clear with `RecordTakesDSP=0`     |
-| 12  | DOS FM on its own clock, clear with `DosFMDelay=0`         |
+| Bit | Function                                                      |
+|-----|---------------------------------------------------------------|
+| 0   | mixer                                                         |
+| 1   | controller                                                    |
+| 2   | ports                                                         |
+| 3   | configuration ports                                           |
+| 4   | PnP                                                           |
+| 5   | mixer block                                                   |
+| 6   | owner information                                             |
+| 7   | DOS FM, clear with `VirtualFM=0`                              |
+| 8   | DOS mixer, clear with `DosMixerRestore=0`                     |
+| 9   | CX holds the settings below (version 1.11)                    |
+| 10  | Audio 1 filter, clear with `Audio1Filter=1` (version 1.12)    |
+| 11  | the DSP for a recording, clear with `RecordTakesDSP=0`        |
+| 12  | DOS FM on its own clock, clear with `DosFMDelay=0`            |
+| 13  | DirectSound's Lock and Unlock, clear with `DirectSoundLock=0` |
+| 14  | the DRQ latch, set with `DrqLatch=1` (version 1.14)           |
 
 DOS FM stands for the virtual FM chip and the rest of [DOS
 boxes](VXD_INTERNALS.md#dos-boxes). DOS mixer means that Windows' mixer is
@@ -393,7 +397,12 @@ DOS program
 on its own clock means that a DOS program's FM plays evenly on the clock of
 its timer ticks
 ([VXD_INTERNALS.md](VXD_INTERNALS.md#a-dos-programs-fm-on-its-own-clock)),
-both since version 1.13.
+both since version 1.13. DirectSound's Lock and Unlock means that the driver
+copies what DirectSound writes into the 16-bit DMA channel's buffer as it is
+written ([VXD_INTERNALS.md](VXD_INTERNALS.md#directsound)), and the DRQ
+latch that the driver sets the chip's DRQ latch each time a VM takes the DSP
+([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#what-software-can-do-about-it)), both
+since version 1.14.
 
 CX holds the settings that the VxD read from SYSTEM.INI when it started
 ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings)).
@@ -413,6 +422,8 @@ A set bit means that the change is on:
 | 9   | `[ES1869.DRV] Audio2Filter`       | 0       |
 | 10  | `[ES1869.DRV] Audio1Filter`       | 0       |
 | 11  | `DosFMDelay` isn't 0 (1.13)       | 30      |
+| 12  | `DirectSoundLock` (1.14)          | 1       |
+| 13  | `DrqLatch` (1.14)                 | 0       |
 | 15  | SYSTEM.INI was read               |         |
 
 Bit 0 is always set here, because with `RegisterAPI=0`, 0400 fails. When bit

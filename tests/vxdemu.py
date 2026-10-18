@@ -84,6 +84,7 @@ SVC_LIST_GET_FIRST = 0x000100A3
 SVC_LIST_GET_NEXT = 0x000100A4
 SVC_GET_PROFILE_STRING = 0x000100B3
 SVC_GET_SYSTEM_INIT_STATE = 0x00010111
+SVC_LSTRCPYN = 0x0001017B          # _lstrcpyn(to, from, size)
 SVC_SHELL_MESSAGE = 0x00170004
 SVC_VDMAD_GET_PHYS_COUNT = 0x0004001C
 SVC_VDMAD_GET_VIRT_STATE = 0x00040004
@@ -94,6 +95,9 @@ SVC_VPICD_PHYS_EOI = 0x00030004
 NOOP_SERVICES = {
     0x00030008, 0x00030009,                                      # VPICD
     0x00040013, 0x00040014,                                      # VDMAD
+    # VDMAD_Set_Region_Info, Set_Phys_State, Phys_Mask_Channel and
+    # Phys_Unmask_Channel: the VxD's own DMA, for DirectSound
+    0x00040003, 0x00040006, 0x00040018, 0x00040019,
     0x0017000E,                         # SHELL_CallAtAppyTime
 }
 SVC_VPICD_STATUS = 0x00030005
@@ -410,6 +414,7 @@ class VxDEmu:
         uc.hook_add(UC_HOOK_INSN, self._cpuid, None, 1, 0, UC_X86_INS_CPUID)
         uc.hook_add(UC_HOOK_INTR, self._intr)
         self.services = []
+        self._jump = 0
         rdtsc = self.syms.get("ESSREG_Rdtsc")
         if rdtsc is not None:
             uc.mem_write(rdtsc, bytes([0xCD, INT_RDTSC]))
@@ -487,7 +492,10 @@ class VxDEmu:
         self._set_cf(False)
 
     def _arg(self, n):
-        return self.read32(self.uc.reg_read(UC_X86_REG_ESP) + 4 * n)
+        """the n-th stack argument of a cdecl service: past the return
+        address when the service was reached by VxDJmp from a thunk"""
+        return self.read32(self.uc.reg_read(UC_X86_REG_ESP) + 4 * n +
+                           (4 if self._jump else 0))
 
     def _intr(self, uc, intno, _user):
         if intno == INT_RDTSC:
@@ -499,7 +507,7 @@ class VxDEmu:
             raise RuntimeError("unexpected interrupt %#x" % intno)
         eip = uc.reg_read(UC_X86_REG_EIP)
         svc = self.read32(eip) & ~0x8000
-        jump = self.read32(eip) & 0x8000
+        jump = self._jump = self.read32(eip) & 0x8000
         self.services.append(svc)
         ebx = uc.reg_read(UC_X86_REG_EBX)
         if svc == SVC_LIST_GET_FIRST:
@@ -584,6 +592,11 @@ class VxDEmu:
             uc.reg_write(UC_X86_REG_ECX, 0)
         elif svc == SVC_GET_PROFILE_STRING:
             self._profile_string(uc)
+        elif svc == SVC_LSTRCPYN:
+            to, src, size = self._arg(0), self._arg(1), self._arg(2)
+            text = self.cstr(src).encode("latin-1")[:max(size - 1, 0)]
+            uc.mem_write(to, text + b"\0")
+            uc.reg_write(UC_X86_REG_EAX, to)
         elif svc == SVC_HEAP_ALLOCATE:
             size, flags = self._arg(0), self._arg(1)
             addr = self.heap_next

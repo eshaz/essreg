@@ -449,6 +449,16 @@ DOS game expects it
   with a virtual Sound Blaster, which answers as the chip does and keeps the
   timing of the game's sound and its interrupts, but plays nothing. The
   game's FM music goes on to the chip, and so into the recording.
+* DirectSound on a 16-bit DMA channel plays what DirectSound writes, as it
+  is written. ESS's driver fills the DMA buffer from a time-out, 80 ms every
+  20 ms, and a late time-out plays a lap-old piece of the buffer, which is
+  heard as a skip. The extended driver has DirectSound say what it wrote and
+  copies just that, at once
+  ([docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md#the-path-of-a-directsound-sound)).
+* `DrqLatch=1` in `SYSTEM.INI` sets the chip's DRQ latch, which holds each
+  DMA request until the DMA controller answers it, each time a program takes
+  the chip. It is off unless you set it
+  ([docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md#what-software-can-do-about-it)).
 
 The Sound Blaster part and the MPU-401 still belong to one program at a
 time, as with ESS's driver. A DOS game that starts while Windows plays a

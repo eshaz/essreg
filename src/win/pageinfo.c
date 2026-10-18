@@ -51,6 +51,7 @@ static const struct {
     {VXD_S_RESET_FM, "ResetDosFM", 0x0111},
     {VXD_S_REC_TAKES, "RecordTakesDSP", 0x0113},
     {VXD_S_FM_TIMED, "DosFMDelay", 0x0113},
+    {VXD_S_DS_LOCK, "DirectSoundLock", 0x0114},
 };
 
 static void settings_text(char *p) {
@@ -65,6 +66,9 @@ static void settings_text(char *p) {
       strcat(p, off++ ? ", " : ", off: ");
       strcat(p, vxd_keys[i].key);
     }
+  // DrqLatch is off unless set
+  if (vxd.ext_version >= 0x0114 && (s & VXD_S_DRQ_LATCH))
+    strcat(p, ", DRQ latch on");
   sprintf(ADD, "\r\nVxD Audio 2:\t%s, filter %s\r\n",
           s & VXD_S_A2_4X ? "4x oversampling" : "not oversampled",
           s & VXD_S_A2_4X       ? "bypassed (4x)"

@@ -146,6 +146,69 @@ close, and it also acquires and releases the DSP around every mixer change.
 idle Windows desktop nothing is owned, and the first program in any VM that
 touches a port becomes its owner.
 
+## DirectSound
+
+The driver is a DirectSound driver as well (DirectX's `dsdriver.h`). When
+the device is created, `L5_2D00` (o5:2D00) loads `dsound.vxd`, builds an
+`IDsDriver` object with the vtable at o6:0488 and registers it with
+`DSOUND_RegisterDeviceDriver`. Its `GetDriverDesc` (o5:2AA0) names the
+driver, the device's devnode and the VxD ID 3B07h, with the flags
+DSDDESC_DOMMSYSTEMOPEN and DSDDESC_DONTNEEDPRIMARYLOCK. The first makes
+DirectSound open the wave device through MMSYSTEM first, so that ES1869.DRV
+opens it and owns it as for any program. `GetCaps` (o5:2B50) offers one
+primary buffer, mono or stereo, 8 or 16 bits, and no hardware mixing, so
+DirectSound mixes every secondary buffer in software into the primary
+buffer. `Open` (o5:2B20) takes the DSP through `L5_335E` and
+`Acquire_Resources`, and `Close` gives it back.
+
+`CreateSoundBuffer` (o5:2BA0) makes the primary buffer: an `IDsDriverBuffer`
+with the vtable at o6:04C8, over the second of the buffers that `ADI_Create`
+allocated for Audio 2's DMA channel (ADI 86h, its linear address, 82h its
+physical address and 8Ah its size, 32 KB). DirectSound writes into this
+buffer. `SetFormat` (o5:2F10) and `SetFrequency` (o5:2F90) program the rate
+through `L5_34F6`, and `GetPosition` (o5:2FF0) reads the DMA count
+(`VDMAD_Get_Phys_Count`) and reports it as both cursors. `Lock` and `Unlock`
+return E_NOTIMPL, which the DONTNEEDPRIMARYLOCK flag allows.
+
+`Play` (o5:30D0) depends on the channel. On an 8-bit DMA channel (0 to 3)
+the DMA plays DirectSound's buffer itself. On a 16-bit channel (5) the chip
+takes only the low byte of each word, so the driver plays a third buffer of
+twice the size (ADI D3h, its physical address at CFh), with each byte of
+DirectSound's buffer in the low byte of a word (`L5_3309`, the same copy
+that ES1869.DRV makes at 1:1B82). ESS's `Play` copies the first 80 ms, then
+sets a global time-out that runs every 20 ms (`L5_3040`), which copies 80 ms
+again from wherever the DMA is. The DMA therefore plays what the time-out
+copied last, and a time-out that is late by more than DirectSound's own lead
+plays what the buffer held a lap ago.
+
+With `DirectSoundLock=1`, the default, the extension changes four entries of
+the two vtables. `ESSREG_DS_GetDriverDesc` runs ESS's `GetDriverDesc` and
+clears DSDDESC_DONTNEEDPRIMARYLOCK, so that DirectSound brackets each write
+to the primary buffer with `Lock` and `Unlock`. `ESSREG_DS_Lock` returns the
+part of the buffer that DirectSound asks for, in two pieces where it wraps.
+`ESSREG_DS_Unlock` copies the pieces that DirectSound wrote into the 16-bit
+channel's buffer, at twice their offset, with `L5_3309`, once and at once;
+on an 8-bit channel it has nothing to do. `ESSREG_DS_Play` copies the whole
+buffer first, so that the DMA finds what DirectSound wrote before it
+started, sets no time-out, and continues in ESS's `Play` at o5:3178, which
+programs the DMA controller and starts Audio 2. `Stop`, `GetPosition` and
+the rest stay ESS's. With `DirectSoundLock=0`, the four entries run ESS's
+code.
+
+The driver answers `QueryInterface` for `IDsDriverNotify`,
+`IDsDriverPropertySet` and `IDsCaptureDriver` with E_NOINTERFACE, so
+DirectSound keeps its own notifications and property sets, and
+DirectSoundCapture records through the wave input device. Hardware
+notifications and property sets concern hardware secondary buffers, which
+the ES1869 doesn't have, so DirectSound does as well without them. A capture
+driver would need its own DMA path on Audio 1 inside the VxD, and nothing
+here tests one, so it isn't attempted.
+
+`tests/test_vxdext.py` (`DirectSoundTest`) runs both vtables in the
+emulator: the description's flags, `Lock` in two pieces, `Unlock` on both
+kinds of channel, `Play` with and without the time-out, and the stock driver
+against the extended one with `DirectSoundLock=0`.
+
 ## DOS boxes
 
 With ESS's driver, DOS boxes have these limits:
@@ -254,7 +317,8 @@ the way the chip does:
   exit (D0h, D4h, DAh, D9h), the speaker (D1h, D3h, D8h), E0h, E4h, E8h and
   F2h, which interrupts.
 * E1h and E7h return the chip's own version and identification, which the
-  VxD asks the chip for before the VM's first access.
+  VxD asks the chip for before the VM's first access, unless ESS has the
+  chip powered down just then: an ES1869 with version 3.01 stands in.
 * In ESS's Extended mode (C6h, C7h), the controller registers A0h-BFh keep
   what the program wrote and C0h reads them back. B8h bit 0 starts or stops
   a transfer of the count in A4h/A5h, at the rate of A1h, for the channels
@@ -268,15 +332,19 @@ the way the chip does:
 The transfers are silent but keep their timing. A block lasts as long as the
 chip would take for its bytes at the programmed rate, and a VMM global
 time-out (`Set_Global_Time_Out`) ends it, in units of 1/1024 ms so that the
-blocks don't drift. At the end of a block, the VM gets the audio interrupt
-through VPICD (`VPICD_Set_Int_Request`), unless an Extended mode transfer
-runs without B1h bit 6, and an auto-initialize transfer starts its next
-block. ESS's end-of-interrupt handler (o1:0734) would end a physical
-interrupt that the chip never raised, so `ESSREG_EOI` only clears the
-request for the virtual Sound Blaster's VM. A transfer that runs when the
-recording starts goes on as blocks of half its buffer at 21.7 kHz, because
-the reset clears the rate it set, until the program starts its next
-transfer.
+blocks don't drift. VTD gives the VxD 1 ms timer interrupts while the
+virtual Sound Blaster exists (`VTD_Begin_Min_Int_Period`), so a block ends
+when it is due and not at the timer's next 55 ms tick. At the end of a
+block, the VM gets the audio interrupt through VPICD
+(`VPICD_Set_Int_Request`), unless an Extended mode transfer runs without B1h
+bit 6, and an auto-initialize transfer starts its next block. ESS's
+end-of-interrupt handler (o1:0734) would end a physical interrupt that the
+chip never raised, so `ESSREG_EOI` only clears the request for the virtual
+Sound Blaster's VM, except when ESS's handler delivered a physical MPU-401
+interrupt to that VM on the shared IRQ (ADI flag 1000h), which ESS's handler
+ends. A transfer that runs when the recording starts goes on as blocks of
+half its buffer at 21.7 kHz, because the reset clears the rate it set, until
+the program starts its next transfer.
 
 The program gets the real DSP back when it resets the DSP while nobody has
 it, or when Windows lets go of the DSP (0003, `ESSREG_VSB_Back`) while its
@@ -348,7 +416,9 @@ driver:
   the RTC or polls a timer, writes long after its last tick. When a quarter
   of 64 data writes come at least 4 ms and half a tick after the last tick,
   the queue goes to the chip at once and the program plays directly until it
-  ends (`ESSREG_FMQ_Direct`).
+  ends (`ESSREG_FMQ_Direct`). Until the first tick, the start counts as a
+  tick of the timer's default 55 ms, so a program that sets up every
+  register as soon as it finds the chip stays on the queue.
 
 When the program lets go of the chip, by ending or with its VM, the queue
 goes to the chip at once (`ESSREG_FMQ_End`). When the device or the VxD goes
@@ -454,6 +524,9 @@ under `%if ESSREG_EXT` and each keeping its length:
 * the last jump of the two DMA handlers, for Audio 1's channel (o1:0546) and
   Audio 2's (o1:0870), which now goes to `VDMAD_Default_Handler` through
   `ESSREG_DMA1` and `ESSREG_DMA2`
+* four entries of the DirectSound vtables in PDAT: GetDriverDesc (0494),
+  Lock (04D4), Unlock (04D8) and Play (04F0), which are now `ESSREG_DS_*`
+  ([DirectSound](#directsound))
 
 Everything else is appended, so ESS's code stays at its addresses, and
 Windows' sound, DirectSound and the interrupt handlers run the same bytes as
@@ -500,7 +573,7 @@ it by hand:
    `ES1869VX.ORG` in the same directory, the name essinst uses too.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
 3. Restart Windows. essctl's *Device information* page now shows "Register
-   API: version 1.13".
+   API: version 1.14".
 
 If sound stops working, run `essinst /restore`. If Windows doesn't start,
 restart, press F8 at "Starting Windows 95", choose *Command prompt only*,

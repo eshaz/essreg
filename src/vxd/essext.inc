@@ -36,6 +36,8 @@ EX_VSB_Rate             equ 0x12A       ; word: sample rate (41h), 0 if none
 EX_VSB_Index            equ 0x12C       ; byte: mixer index
 EX_VSB_Count            equ 0x12D       ; byte: bytes in the read queue
 EX_VSB_Last             equ 0x12E       ; byte: the last byte read
+EX_VSB_MinInt           equ 0x12F       ; byte: 1 while VTD gives it 1 ms
+                                        ; timer interrupts
 EX_VSB_Queue            equ 0x130       ; 4 bytes: the read queue
 EX_VSB_Id               equ 0x134       ; 2 bytes: the chip's answer to E7h
 EX_VSB_Ver              equ 0x136       ; 2 bytes: and to E1h

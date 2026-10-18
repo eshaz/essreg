@@ -684,6 +684,33 @@ class RecordingTakesDSPTest(VxDBuilds, unittest.TestCase):
         m.eoi(VM_SYS)
         self.assertEqual(self.events(m, "eoi"), [VM_SYS])
 
+    def test_its_blocks_end_on_1_ms_interrupts(self):
+        # VTD's timer period while the virtual Sound Blaster exists, so a
+        # block's time-out comes when it's due and not at the timer's next
+        # 55 ms tick; given back when it ends
+        m = self.game()
+        before = list(m.emu.min_int)
+        self.take(m)
+        self.assertEqual(m.emu.min_int, before + [1])
+        m.program_end(VM_DOS)
+        self.assertEqual(self.vsb(m), 0)
+        self.assertEqual(m.emu.min_int, [])
+
+    def test_its_mpu_401_interrupt_ends_physically(self):
+        # the program also owns the MPU-401, on the shared IRQ: ESS's
+        # handler delivered a physical interrupt to it (ADI+4 bit 1000h),
+        # which its EOI ends at the PIC, as with ESS's driver
+        m = self.game()
+        self.take(m)
+        m.emu.write32(ADI + 0x45, VM_DOS)
+        m.emu.write32(ADI + 4, m.adi32(4) | 0x3000)
+        m.eoi(VM_DOS)
+        self.assertEqual(self.events(m, "eoi"), [VM_DOS])
+        self.assertEqual(m.adi32(4) & 0x1000, 0)
+        # without one pending, the virtual interrupt's EOI ends nothing
+        m.eoi(VM_DOS)
+        self.assertEqual(self.events(m, "eoi"), [VM_DOS])
+
     def test_auto_initialize_pause_and_stop(self):
         m = self.game()
         self.take(m)
@@ -1053,6 +1080,32 @@ class TimedFMTest(VxDBuilds, unittest.TestCase):
         self.assertEqual(m.adi32(m.syms["EX_FMQ_Direct"]), 0)
         self.write(m, 0x20, 0x01)
         self.assertTrue(self.timed(m))
+
+    def test_a_burst_before_the_first_tick_stays_on_the_queue(self):
+        # a program sets up every register as soon as it finds the chip,
+        # before its timer's first tick: within the timer's default 55 ms
+        # tick of the start, its writes aren't off its ticks
+        m = self.game()
+        for reg in range(0x20, 0xA0):
+            self.write(m, reg, 0)
+            m.hw.clock.advance(10)
+        self.assertTrue(self.timed(m))
+        self.assertEqual(m.adi32(m.syms["EX_FMQ_Direct"]), 0)
+        self.assertNotIn((VM_DOS, 0x388), m.emu.trap_off)
+        # then its ticks come, and its music plays a delay after each
+        times = self.play(m, 1428.6, 64)
+        m.advance(50)
+        got = self.chip(m, 0xA0)
+        self.assertEqual([v for v, t in got], list(range(64)))
+        for (v, t), tick in zip(got, times):
+            self.assertLessEqual(abs(t - (tick + self.DELAY)), 1500)
+        # writes that go on without a tick past that are off its ticks
+        m = self.game()
+        m.hw.clock.advance(40000)
+        for k in range(70):
+            self.write(m, 0xA0, k)
+            m.hw.clock.advance(10)
+        self.assertFalse(self.timed(m))
 
     def test_a_full_queue_loses_nothing(self):
         m = self.game()
