@@ -26,9 +26,9 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   ess3d the mouse wheel.
 * `src/vxd/` holds `ES1869.VXD` as NASM source, made by `tools/vxd2asm.py`.
   `essext.asm` adds the register API, the DOS box improvements (the virtual
-  FM chip, Windows' mixer around a DOS program, and the DACs' modes for it),
-  DirectSound's Lock and Unlock on a 16-bit DMA channel and the DRQ latch,
-  and `essext.inc` has its layout.
+  FM chip, Windows' mixer around a DOS program, the DACs' modes for it, and
+  a Sound Blaster 16 in front of the chip), DirectSound's Lock and Unlock on
+  a 16-bit DMA channel and the DRQ latch, and `essext.inc` has its layout.
 * `src/esfm/` holds `ESFM.DRV` as NASM source, made by `tools/ne2asm.py`.
   `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm`
   and `esfmgm.asm` hold the fixes and General MIDI, and `esfmini.asm` their

@@ -36,8 +36,7 @@ EX_VSB_Rate             equ 0x12A       ; word: sample rate (41h), 0 if none
 EX_VSB_Index            equ 0x12C       ; byte: mixer index
 EX_VSB_Count            equ 0x12D       ; byte: bytes in the read queue
 EX_VSB_Last             equ 0x12E       ; byte: the last byte read
-EX_VSB_MinInt           equ 0x12F       ; byte: 1 while VTD gives it 1 ms
-                                        ; timer interrupts
+EX_VSB_Flags2           equ 0x12F       ; byte: VSB2_*
 EX_VSB_Queue            equ 0x130       ; 4 bytes: the read queue
 EX_VSB_Id               equ 0x134       ; 2 bytes: the chip's answer to E7h
 EX_VSB_Ver              equ 0x136       ; 2 bytes: and to E1h
@@ -53,7 +52,35 @@ EX_FMQ_VM               equ 0x1A0       ; dword: the VM whose FM plays from
 EX_FMQ_Blk              equ 0x1A4       ; dword: its queue and clock (FMQ_*)
 EX_FMQ_Direct           equ 0x1A8       ; dword: a VM whose program plays
                                         ; directly, its writes off its ticks
-ESSREG_ADI_SIZE         equ 0x1AC       ; ESS allocated E9h
+EX_VSB_Ops3             equ 0x1AC       ; byte: the third operand of a Sound
+                                        ; Blaster 16 transfer command
+; the Sound Blaster 16 front of the DOS VM that owns the DSP (ESSREG_S16_*)
+EX_S16_Flags            equ 0x1AD       ; byte: S16_*
+EX_S16_Cmd              equ 0x1AE       ; byte: the command whose operands come
+EX_S16_Need             equ 0x1AF       ; byte: operands still to come
+EX_S16_VM               equ 0x1B0       ; dword: the VM it serves, 0 if none
+EX_S16_Last             equ 0x1B4       ; dword: the VM it served last, whose
+                                        ; settings stay for its return
+EX_S16_Got              equ 0x1B8       ; byte: operands so far
+EX_S16_Ops              equ 0x1B9       ; 3 bytes: the operands
+EX_S16_Index            equ 0x1BC       ; byte: the mixer index the VM wrote,
+                                        ; FFh for the chip's (not yet seen)
+EX_S16_Chan             equ 0x1BD       ; byte: its 16-bit DMA channel (5-7),
+                                        ; 0 if none
+EX_S16_Count            equ 0x1BE       ; byte: bytes in the read queue
+EX_S16_Head             equ 0x1BF       ; byte: where the queue's next byte is
+EX_S16_TC               equ 0x1C0       ; byte: the time constant of 40h
+EX_S16_Pass             equ 0x1C1       ; byte: 1 while the command's bytes go
+                                        ; to the chip
+EX_S16_Rate             equ 0x1C2       ; word: the rate of 41h/42h (Hz), 0
+                                        ; before one came
+EX_S16_Queue            equ 0x1C4       ; S16_QUEUE bytes: the read queue (the
+                                        ; answers to E1h and E3h)
+EX_S16_Mix              equ 0x1F4       ; 24 bytes: the Sound Blaster 16's
+                                        ; mixer registers 30h-47h
+ESSREG_ADI_SIZE         equ 0x20C       ; ESS allocated E9h
+
+S16_QUEUE               equ 48          ; bytes of the read queue
 
 VSB_RESET               equ 0x01        ; the reset port is at 1
 VSB_SPEAKER             equ 0x02        ; the speaker is on (D1h)
@@ -63,6 +90,24 @@ VSB_AUTO                equ 0x10        ; it auto-initializes
 VSB_PAUSE               equ 0x20        ; it's paused (D0h)
 VSB_IRQ                 equ 0x40        ; its interrupt request is set
 VSB_NOIRQ               equ 0x80        ; Extended mode without B1h bit 6
+
+VSB2_MININT             equ 0x01        ; VTD gives it 1 ms timer interrupts
+VSB2_ESS                equ 0x02        ; the program identified the chip (E7h):
+                                        ; Bxh and Cxh are the chip's commands
+VSB2_16                 equ 0x04        ; its transfer is 16-bit (mixer 82h)
+VSB2_STEREO             equ 0x08        ; and stereo (two samples a frame)
+
+; the Sound Blaster 16 front (EX_S16_Flags)
+S16_ESS                 equ 0x01        ; the program identified the chip (E7h):
+                                        ; every command is the chip's
+S16_EXT                 equ 0x02        ; the chip is in Extended mode (C6h)
+S16_16                  equ 0x04        ; the transfer is 16-bit (mixer 82h bit 1)
+S16_8                   equ 0x08        ; it is 8-bit (bit 0)
+S16_RUN                 equ 0x10        ; a transfer of the front's runs
+S16_AUTO                equ 0x20        ; it auto-initializes
+S16_DMA16               equ 0x40        ; Audio 1's channel runs the 16-bit
+                                        ; channel's programming
+S16_IN                  equ 0x80        ; it records
 
 ; the queue of a DOS program's FM writes and the clock of its ticks, a
 ; block allocated while its FM plays from the queue

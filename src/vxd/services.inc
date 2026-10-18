@@ -76,6 +76,9 @@ VDMAD_Phys_Mask_Channel                  equ 0x00040018
 VDMAD_Phys_Unmask_Channel                equ 0x00040019
 VDMAD_Unvirtualize_Channel               equ 0x0004001A
 VDMAD_Get_Phys_Count                     equ 0x0004001C
+VDMAD_Set_Channel_Callbacks              equ 0x0004001F
+VDMAD_Get_Virt_Count                     equ 0x00040020
+VDMAD_Set_Virt_Count                     equ 0x00040021
 VTD_Begin_Min_Int_Period                 equ 0x00050003
 VTD_End_Min_Int_Period                   equ 0x00050004
 SHELL_Message                            equ 0x00170004

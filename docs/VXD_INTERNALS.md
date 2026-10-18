@@ -227,6 +227,9 @@ With ESS's driver, DOS boxes have these limits:
 * When a DOS program gives the DSP back, 11 mixer registers go back to
   Windows' values. The others stay as the program left them: the 3-D effect,
   the record source and levels, the wave volume, MONO_IN and MONO_OUT.
+* A DOS program written for the Sound Blaster 16 finds a Sound Blaster Pro,
+  DSP version 3.01, and plays 8-bit sound at best, because the chip plays
+  16-bit sound only through its own Extended mode commands.
 
 The extended driver (`src/vxd/essext.asm`) changes this. Each change has a
 key in the `[ES1869.VXD]` section of SYSTEM.INI. The keys are on by default,
@@ -425,6 +428,78 @@ goes to the chip at once (`ESSREG_FMQ_End`). When the device or the VxD goes
 away, the queue is dropped, and the VxD unhooks interrupt 8. Each FM access
 of a program that plays from the queue goes through the VxD, which costs
 some processor time, as it does for a program with a virtual chip.
+
+### A Sound Blaster 16 for DOS programs
+
+The chip answers DSP commands as a Sound Blaster Pro, version 3.01, and
+plays 16-bit sound only through its own Extended mode. A DOS program written
+for the Sound Blaster 16 asks for version 4.xx, starts its transfers with
+Bxh and Cxh, programs a 16-bit DMA channel for them, sets its volumes in
+mixer registers 30h-47h and acknowledges a 16-bit transfer's interrupt at
+Audio_Base+Fh. On the chip it plays 8-bit sound at best, or nothing.
+
+With `SoundBlaster16=1`, a DOS VM that takes the DSP gets a Sound Blaster 16
+in front of the chip (`ESSREG_S16_Start`, from ESS's `Acquire_Resources`).
+ESS's code untraps the audio ports for the owner, and the front traps seven
+of them again for its VM: the mixer index and data, the reset, the read
+data, the command, the status and the 16-bit acknowledge ports. Everything
+else, the FM ports included, stays as ESS has it. The front answers E1h with
+version 4.05 and E3h with the Sound Blaster 16's copyright string, and takes
+the Sound Blaster 16's own commands: the rate (41h, 42h), the transfers Bxh
+and Cxh with their mode and length, pause, continue and stop (D5h, D6h, D9h,
+and DAh while a transfer of the front's runs) and the 16-bit interrupt
+(F3h). Every other command goes to the chip as it comes, with its operands,
+so a Sound Blaster or Sound Blaster Pro program sees the chip as before, and
+the port accesses it makes reach the chip unchanged.
+
+A transfer command becomes the chip's Extended mode transfer
+(`ESSREG_S16_Transfer`), the sequence of the data sheet (p. 48) that
+ES1869.DRV's recording uses: C6h once after a reset, B8h for the direction
+and auto-initialize, B9h for demand transfers of 2 bytes, or single ones
+with ESS's "Single Mode DMA" setting, A8h for mono or stereo, A1h and A2h
+for the rate as ES1869.DRV computes them, from the rate of 41h/42h or the
+time constant of 40h, which gives the rate of each channel, A4h and A5h for
+the length in bytes, B6h and B7h for the format, B1h and B2h for the
+interrupt and the DMA request, then B8h bit 0 and D1h. Mixer 82h answers
+with the transfer that interrupts, 8-bit or 16-bit, and the MPU-401's bit,
+80h with the card's IRQ and 81h with its channels.
+
+The DMA runs on Audio 1's 8-bit channel, where a 16-bit sample is two bytes.
+A program that uses the 16-bit channel (`SoundBlaster16DMA`, 5 by default,
+the `H5` of `BLASTER`) programs it as ever. When that channel is Audio 2's,
+ESS's handler for it gets the programming (`ESSREG_DMA2`); else the VxD
+takes the channel from VDMAD once (`VDMAD_Virtualize_Channel`), and its
+callback gets it. Either way the programming, region, length and mode, goes
+to Audio 1's channel (`VDMAD_Set_Virt_State`, with the length in bytes and
+the mode changed to demand transfers), and ESS's handler for Audio 1's
+channel programs the chip's channel from it, as if the program had
+(`ESSREG_S16_DMA_State`). Masking the 16-bit channel masks Audio 1's. VDMAD
+tells the front when the program reads the channel's count
+(`VDMAD_Set_Channel_Callbacks`), and the front answers with Audio 1's count
+(`VDMAD_Get_Phys_Count` and `VDMAD_Set_Virt_Count`, `ESSREG_S16_Position`),
+also at the end of each block and at each acknowledge, so a program that
+polls the position sees it move. The Sound Blaster 16's mixer registers
+30h-47h keep what the program writes, and the chip gets the volumes they
+stand for (`ESSREG_S16_Mix_Apply`): master in 60h/62h, voice in 14h, MIDI in
+36h, CD in 38h, line in 3Eh, the mic in 1Ah and the PC speaker in 3Ch,
+through the output switches of 3Ch, and the record source of 1Ch from the
+input switches of 3Dh/3Eh. The Sound Blaster Pro's registers below 30h reach
+the chip as they are.
+
+A program that identifies the chip with E7h, or that uses Extended mode
+itself, gets the chip throughout: its commands, Bxh and Cxh included, its
+registers and its mixer go to the chip as they come. C6h is both the Sound
+Blaster 16's 8-bit auto-initializing transfer and the chip's Extended mode,
+and the byte after it tells them apart: a transfer's mode byte has only bits
+4 and 5, and a command has more. The front's settings stay with the VM while
+a recording has the DSP, and go when the program or the VM ends.
+
+Two limits remain. A buffer that crosses a 64 KB physical page is copied
+through VDMAD's buffer, as every DOS program's is on Audio 1's channel, and
+an auto-initializing transfer in such a buffer plays stale data. And the
+whole 16-bit sound goes through one 8-bit channel, two bytes a sample, with
+demand transfers of 2 bytes, so the bus is arbitrated as often as for a
+Sound Blaster 16's words.
 
 ## Hardware volume
 

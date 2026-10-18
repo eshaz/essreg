@@ -76,6 +76,7 @@ int VXD_CALL vxd_raw_call(void ESS_FAR *entry, vxd_regs ESS_FAR *r);
 #define VXD_F_FM_TIMED 0x1000  // DOS FM on its own clock (1.13)
 #define VXD_F_DS_LOCK 0x2000   // DirectSound's Lock and Unlock (1.14)
 #define VXD_F_DRQ_LATCH 0x4000 // the DRQ latch set (1.14)
+#define VXD_F_SB16 0x8000      // a Sound Blaster 16 for DOS programs (1.15)
 
 // the SYSTEM.INI settings the VxD runs with (0400, CX), 1 = on
 #define VXD_S_API 0x0001        // [ES1869.VXD] RegisterAPI
@@ -92,6 +93,7 @@ int VXD_CALL vxd_raw_call(void ESS_FAR *entry, vxd_regs ESS_FAR *r);
 #define VXD_S_FM_TIMED 0x0800   // [ES1869.VXD] DosFMDelay isn't 0 (1.13)
 #define VXD_S_DS_LOCK 0x1000    // DirectSoundLock (version 1.14)
 #define VXD_S_DRQ_LATCH 0x2000  // DrqLatch (1.14), default 0
+#define VXD_S_SB16 0x4000       // SoundBlaster16 (1.15)
 #define VXD_S_READ 0x8000       // read from SYSTEM.INI, else the defaults
 
 // owner classes reported by function 040C

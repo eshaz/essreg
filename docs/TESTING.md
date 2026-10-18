@@ -51,9 +51,10 @@ The Python tests, in `tests/test_*.py`, cover the following:
 * `test_vxddos` runs DOS boxes and the rebuilt VxD in the same emulator,
   with VMs, per-VM port trapping and a model of the FM chip that follows
   ESFMu. It covers FM detection no matter who has FM, the virtual FM chip
-  and its hand-over, the music DAC, Windows' mixer around a DOS game, and
-  the reset when Windows uses the card again. Where ESS's driver behaves
-  differently, the test runs the same steps on it too.
+  and its hand-over, the music DAC, Windows' mixer around a DOS game, the
+  reset when Windows uses the card again, and the Sound Blaster 16 in front
+  of the chip, with VDMAD's channel services modeled. Where ESS's driver
+  behaves differently, the test runs the same steps on it too.
 * The `SYSTEM.INI` settings of all three drivers are read with emulated
   profile calls. The tests check each key and its default, that each key is
   read once, and that each change, when it is turned off, does what ESS's
@@ -353,7 +354,22 @@ Sound Blaster sound, and a second game that uses the Sound Blaster too.
      test makes the music stop and hurry, which is what the setting fixes.
    * A game with DOS/4GW plays as with `DosFMDelay=0`. Note whether its
      tempo wavers.
-9. Note anything that differs, and in which game.
+9. Play a Sound Blaster 16 game. Set `BLASTER=A220 I5 D1 H5 P330 T6` in the
+   DOS box, with the card's own address, IRQ and 8-bit channel, `H5` for the
+   16-bit channel and `T6` for a Sound Blaster 16, and set the game up for a
+   Sound Blaster 16 with 16-bit sound. Try one whose setup plays a test
+   sound, such as Doom's or Duke Nukem 3D's, and one that streams music,
+   such as Quake.
+   * The setup finds a Sound Blaster 16, DSP version 4.05, and the game
+     plays 16-bit stereo sound, in step with the picture, without a stutter
+     where it loops.
+   * The game's own volume settings work, and after the game Windows' mixer
+     is as it was.
+   * With `SoundBlaster16=0` in `[ES1869.VXD]` and Windows restarted, the
+     setup finds a Sound Blaster Pro, version 3.01, as with ESS's driver.
+   * A game or tool with an ESS AudioDrive setting, which asks the chip for
+     its identification, works the same with either setting.
+10. Note anything that differs, and in which game.
 
 ### E3. The Audio 2 DAC
 

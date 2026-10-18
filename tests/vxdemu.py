@@ -89,6 +89,15 @@ SVC_SHELL_MESSAGE = 0x00170004
 SVC_VDMAD_GET_PHYS_COUNT = 0x0004001C
 SVC_VDMAD_GET_VIRT_STATE = 0x00040004
 SVC_VDMAD_DEFAULT_HANDLER = 0x00040012
+SVC_VDMAD_VIRTUALIZE = 0x00040001
+SVC_VDMAD_SET_VIRT_STATE = 0x00040005
+SVC_VDMAD_MASK = 0x00040007
+SVC_VDMAD_UNMASK = 0x00040008
+SVC_VDMAD_UNVIRTUALIZE = 0x0004001A
+SVC_VDMAD_SET_CALLBACKS = 0x0004001F
+SVC_VDMAD_GET_VIRT_COUNT = 0x00040020
+SVC_VDMAD_SET_VIRT_COUNT = 0x00040021
+DMA_16BIT = 0x40                        # VDMAD's extended mode: a word channel
 SVC_VPICD_SET_INT = 0x00030002
 SVC_VPICD_CLEAR_INT = 0x00030003
 SVC_VPICD_PHYS_EOI = 0x00030004
@@ -229,6 +238,8 @@ class FakeES1869:
         self.ctrl = {r: 0 for r in range(0xA0, 0xC0)}
         self.ext_mode = False
         self.pending = []          # DSP command bytes waiting for operands
+        self.operands = []         # the operands so far
+        self.commands = []         # every DSP command, with its operands
         self.out = []              # DSP read-data buffer
         self.busy = False          # Audio_Base+Ch bit 7 stuck
         self.ports = [0] * 16      # plain audio ports (6, 7, ...)
@@ -307,6 +318,7 @@ class FakeES1869:
             if self.ports[6] & 1 and not v & 1:     # reset released
                 self.ext_mode = False
                 self.pending = []
+                self.operands = []
                 self.out = [0xAA]
             self.ports[6] = v
         elif off == 7:
@@ -330,14 +342,25 @@ class FakeES1869:
         elif self.cfg < port < self.cfg + 8:
             self.cfg_ports[port - self.cfg] = v
 
+    # the Sound Blaster commands' operands (DS p.47), and the chip's own
+    SB_OPERANDS = {0x10: 1, 0x14: 2, 0x15: 2, 0x16: 2, 0x17: 2, 0x24: 2,
+                   0x25: 2, 0x38: 1, 0x40: 1, 0x48: 2, 0x74: 2, 0x75: 2,
+                   0x76: 2, 0x77: 2, 0x80: 2, 0xE0: 1, 0xE4: 1}
+
     def _dsp(self, v):
         if self.pending:
-            cmd = self.pending.pop(0)
+            cmd, want = self.pending[0]
+            self.operands.append(v)
+            if len(self.operands) < want:
+                return
+            self.pending.pop(0)
+            ops, self.operands = self.operands, []
+            self.commands.append((cmd,) + tuple(ops))
             if cmd == 0xC0:
-                if self.ext_mode and 0xA0 <= v <= 0xBF:
-                    self.out.append(self.ctrl[v])
+                if self.ext_mode and 0xA0 <= ops[0] <= 0xBF:
+                    self.out.append(self.ctrl[ops[0]])
             elif 0xA0 <= cmd <= 0xBF and self.ext_mode:
-                self.ctrl[cmd] = v
+                self.ctrl[cmd] = ops[0]
             return
         if v == 0xC6:
             self.ext_mode = True
@@ -348,7 +371,13 @@ class FakeES1869:
         elif v == 0xE1:
             self.out += [0x03, 0x01]
         elif v == 0xC0 or 0xA0 <= v <= 0xBF:
-            self.pending.append(v)
+            if self.ext_mode:
+                self.pending.append((v, 1))
+                return
+        elif v in self.SB_OPERANDS:
+            self.pending.append((v, self.SB_OPERANDS[v]))
+            return
+        self.commands.append((v,))
 
     def dsp_writes(self):
         return [v for op, p, v in self.log
@@ -391,9 +420,20 @@ class VxDEmu:
         self.messages = []
         self.dma_count = 0x2B10         # VDMAD_Get_Phys_Count's next answer
         # VDMAD_Get_Virt_State's mode (DL) for each DMA handle, masked if
-        # not set, and the calls passed on to VDMAD_Default_Handler
+        # not set, its region (ESI, ECX) and extended mode (DH), and the
+        # calls passed on to VDMAD_Default_Handler
         self.virt_mode = {}
+        self.virt_region = {}           # handle: (linear, bytes)
+        self.virt_ext = {}              # handle: DH (DMA_16BIT for a word channel)
+        self.virt_cur = {}              # handle: VDMAD's cur_count
         self.dma_default = []           # (DMA handle, VM)
+        # the channels the driver virtualized (VDMAD_Virtualize_Channel),
+        # their callbacks' options, and its masking, unmasking and
+        # programming of channels
+        self.dma_virt = {}              # channel: (handle, callback)
+        self.dma_callbacks = {}         # handle: VDMAD_Callbacks_*
+        self.dma_masks = []             # ("mask"/"unmask", handle)
+        self.dma_states = []            # (handle, VM, linear, bytes, DL, DH)
         self.timeouts = {}              # handle: (due ms, callback, data)
         self.next_timeout = 1
         self.vm_events = {}             # handle: (VM, callback, data)
@@ -624,12 +664,61 @@ class VxDEmu:
             self.dma_count = (self.dma_count - 0x123) & 0xFFFF
             uc.reg_write(UC_X86_REG_ECX, self.dma_count)
         elif svc == SVC_VDMAD_GET_VIRT_STATE:
-            mode = self.virt_mode.get(uc.reg_read(UC_X86_REG_EAX), 0x01)
-            uc.reg_write(UC_X86_REG_ESI, BUFFER)
-            uc.reg_write(UC_X86_REG_ECX, 0x1000)
-            uc.reg_write(UC_X86_REG_EDX, mode)
+            handle = uc.reg_read(UC_X86_REG_EAX)
+            mode = self.virt_mode.get(handle, 0x01)
+            linear, size = self.virt_region.get(handle, (BUFFER, 0x1000))
+            uc.reg_write(UC_X86_REG_ESI, linear)
+            uc.reg_write(UC_X86_REG_ECX, size)
+            uc.reg_write(UC_X86_REG_EDX,
+                         mode | (self.virt_ext.get(handle, 0) << 8))
+        elif svc == SVC_VDMAD_SET_VIRT_STATE:
+            handle = uc.reg_read(UC_X86_REG_EAX)
+            edx = uc.reg_read(UC_X86_REG_EDX)
+            linear = uc.reg_read(UC_X86_REG_ESI)
+            size = uc.reg_read(UC_X86_REG_ECX)
+            self.virt_mode[handle] = edx & 0xFF
+            self.virt_ext[handle] = (edx >> 8) & 0xFF
+            self.virt_region[handle] = (linear, size)
+            self.virt_cur[handle] = self._cur_count(handle, size)
+            self.dma_states.append((handle, ebx, linear, size, edx & 0xFF,
+                                    (edx >> 8) & 0xFF))
         elif svc == SVC_VDMAD_DEFAULT_HANDLER:
             self.dma_default.append((uc.reg_read(UC_X86_REG_EAX), ebx))
+        elif svc == SVC_VDMAD_VIRTUALIZE:
+            channel = uc.reg_read(UC_X86_REG_EAX)
+            if channel in self.dma_virt:
+                self._set_cf(True)      # another VxD's
+            else:
+                handle = 0x7200 + channel
+                self.dma_virt[channel] = (handle, uc.reg_read(UC_X86_REG_ESI))
+                if channel >= 4:
+                    self.virt_ext[handle] = DMA_16BIT
+                uc.reg_write(UC_X86_REG_EAX, handle)
+                self._set_cf(False)
+        elif svc == SVC_VDMAD_UNVIRTUALIZE:
+            handle = uc.reg_read(UC_X86_REG_EAX)
+            channel = [c for c, (h, _cb) in self.dma_virt.items()
+                       if h == handle]
+            if not channel:
+                raise RuntimeError("VDMAD_Unvirtualize_Channel of %08X"
+                                   % handle)
+            del self.dma_virt[channel[0]]
+            self._set_cf(False)
+        elif svc == SVC_VDMAD_SET_CALLBACKS:
+            handle = uc.reg_read(UC_X86_REG_EAX)
+            self.dma_callbacks[handle] = (
+                (self.dma_callbacks.get(handle, 0) & ebx)
+                | uc.reg_read(UC_X86_REG_ECX)) & 0xFFFF
+        elif svc in (SVC_VDMAD_MASK, SVC_VDMAD_UNMASK):
+            self.dma_masks.append(("mask" if svc == SVC_VDMAD_MASK else
+                                   "unmask", uc.reg_read(UC_X86_REG_EAX)))
+        elif svc == SVC_VDMAD_GET_VIRT_COUNT:
+            handle = uc.reg_read(UC_X86_REG_EAX)
+            uc.reg_write(UC_X86_REG_ECX, self.virt_count(handle))
+        elif svc == SVC_VDMAD_SET_VIRT_COUNT:
+            handle = uc.reg_read(UC_X86_REG_EAX)
+            self.virt_cur[handle] = self._cur_count(
+                handle, uc.reg_read(UC_X86_REG_ECX))
         elif svc in NOOP_SERVICES:
             pass
         else:
@@ -641,6 +730,24 @@ class VxDEmu:
             uc.reg_write(UC_X86_REG_ESP, esp + 4)
         else:
             uc.reg_write(UC_X86_REG_EIP, eip + 4)
+
+    def _cur_count(self, handle, size):
+        """VDMAD's cur_count for a count of size bytes on the channel of
+        the handle: bytes - 1, or words - 1 on a word channel"""
+        if size == 0:
+            return 0
+        cur = size - 1
+        return cur >> 1 if self.virt_ext.get(handle, 0) & DMA_16BIT else cur
+
+    def virt_count(self, handle):
+        """VDMAD_Get_Virt_Count: the count in bytes from cur_count"""
+        cur = self.virt_cur.get(handle)
+        if cur is None:
+            cur = self._cur_count(handle,
+                                  self.virt_region.get(handle, (0, 0x1000))[1])
+        if self.virt_ext.get(handle, 0) & DMA_16BIT:
+            return cur * 2 + 2
+        return cur + 1
 
     def _map_flat(self, ax):
         def client16(off):
@@ -720,6 +827,7 @@ def load_syms(elf, le):
 ADI_FLAGS, ADI_AUDIO, ADI_FM, ADI_ALIAS, ADI_MPU = 0x04, 0x06, 0x08, 0x0A, 0x0C
 ADI_DMA1, ADI_DMA2 = 0x4D, 0x7A         # the DMA channels' VDMAD handles
 DMA1, DMA2 = 0x7100, 0x7101             # and their values here
+ADI_IRQ, ADI_DMA1_CHANNEL, ADI_DMA2_CHANNEL = 0x0F, 0x10, 0x79
 ADI_DSP_OWNER, ADI_DSP_LAST = 0x35, 0x39
 ADI_FM_OWNER, ADI_FM_LAST = 0x3D, 0x41
 ADI_MPU_OWNER = 0x45
@@ -844,6 +952,46 @@ class Machine:
         e.current_vm = vm
         e.run(self.syms["L1_0518" if channel == 1 else "L1_0870"],
               {"EAX": handle, "EBX": vm})
+
+    def channel16(self):
+        """the Sound Blaster 16's 16-bit channel as the VxD has it: its
+        VDMAD handle and callback, Audio 2's (L1_0870) when it is that
+        channel, else the VxD's own virtualized one; None if none"""
+        e = self.emu
+        channel = e.read32(self.syms["ESSREG_S16_Chan"])
+        if channel and channel == e.read8(ADI + ADI_DMA2_CHANNEL):
+            return DMA2, self.syms["L1_0870"]
+        return e.dma_virt.get(channel)
+
+    def dma16(self, vm, mode, linear=BUFFER, size=0x1000, masked=False,
+              event=0):
+        """a VM programs its 16-bit channel, as VDMAD tells the channel's
+        owner: the state (mode as VDMAD_Get_Virt_State gives it, bytes),
+        then the callback with EDX = 0 once it is unmasked, or the mask
+        port's address with bit 0 when it masked the channel, or event"""
+        e = self.emu
+        self.run_events(vm)
+        handle, callback = self.channel16()
+        e.write32(ADI + ADI_DMA1, DMA1)
+        e.write32(ADI + ADI_DMA2, DMA2)
+        e.virt_mode[handle] = (mode | 1) if masked else (mode & ~1)
+        e.virt_ext[handle] = DMA_16BIT
+        e.virt_region[handle] = (linear, size)
+        e.virt_cur[handle] = e._cur_count(handle, size)
+        e.current_vm = vm
+        e.run(callback, {"EAX": handle, "EBX": vm,
+                         "EDX": event or (0xD5 if masked else 0), "ECX": 0})
+
+    def dma16_count(self, vm):
+        """the VM reads its 16-bit channel's count: VDMAD's read notice to
+        the owner (EDX = 1), then the count it answers, in bytes"""
+        e = self.emu
+        self.run_events(vm)
+        handle, callback = self.channel16()
+        e.current_vm = vm
+        if e.dma_callbacks.get(handle, 0) & 1:
+            e.run(callback, {"EAX": handle, "EBX": vm, "EDX": 1, "ECX": 0})
+        return e.virt_count(handle)
 
     def api(self, vm, fn, **regs):
         client = {"EDX": fn, "ECX": DEVNODE}

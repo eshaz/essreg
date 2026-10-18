@@ -52,6 +52,7 @@ static const struct {
     {VXD_S_REC_TAKES, "RecordTakesDSP", 0x0113},
     {VXD_S_FM_TIMED, "DosFMDelay", 0x0113},
     {VXD_S_DS_LOCK, "DirectSoundLock", 0x0114},
+    {VXD_S_SB16, "SoundBlaster16", 0x0115},
 };
 
 static void settings_text(char *p) {

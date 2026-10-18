@@ -20,6 +20,10 @@ ADI_FMBase              equ 0x08    ; word: the FM port ESS uses (Audio_Base), F
 ADI_FMAlias             equ 0x0A    ; word: FM alias base (e.g. 388h), negative if none
 ADI_MPUBase             equ 0x0C    ; word: MPU-401 port (e.g. 330h), FFFFh if none
 ADI_MPUIRQ              equ 0x0E    ; byte
+ADI_IRQ                 equ 0x0F    ; byte: the audio IRQ
+ADI_DMA1Channel         equ 0x10    ; byte: Audio 1's DMA channel
+ADI_CfgFlags            equ 0x11    ; dword: ESS's registry settings (DRIVER_CONFIG.md
+                                    ; section 1); bit 16 = demand-mode DMA (o5:32F2)
 ADI_DSPOwner            equ 0x35    ; dword: VM handle that owns the DSP, 0 = none
 ADI_DSPLastOwner        equ 0x39    ; dword: previous DSP owner
 ADI_FMOwner             equ 0x3D    ; dword: VM handle that owns the FM synthesizer
@@ -29,6 +33,7 @@ ADI_MPULastOwner        equ 0x49
 ADI_IRQHandle           equ 0x31    ; dword: VPICD handle of the audio IRQ
 ADI_DMA1Handle          equ 0x4D    ; dword: VDMAD handle of Audio 1's channel
 ADI_DevNode             equ 0x55    ; dword: CONFIGMG devnode
+ADI_DMA2Channel         equ 0x79    ; byte: Audio 2's DMA channel
 ADI_DMA2Handle          equ 0x7A    ; dword: VDMAD handle of Audio 2's channel
 
 %endif

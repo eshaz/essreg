@@ -296,8 +296,8 @@ in another VM, or the driver's own interrupt code.
 
 The functions have these inputs and outputs:
 
-* **0400** takes nothing and returns AX = 0114h (version 1.14), BX = the
-  feature bits (7FFFh with every change on), CX = the SYSTEM.INI settings
+* **0400** takes nothing and returns AX = 0115h (version 1.15), BX = the
+  feature bits (FFFFh with every change on), CX = the SYSTEM.INI settings
   and DX = the number of functions (14).
 * **0401** takes BL = a mixer register and returns AL = its value.
 * **0402** takes BL = a mixer register and BH = the value.
@@ -386,6 +386,7 @@ the write also changes the value that Windows gets back afterwards.
 | 12  | DOS FM on its own clock, clear with `DosFMDelay=0`            |
 | 13  | DirectSound's Lock and Unlock, clear with `DirectSoundLock=0` |
 | 14  | the DRQ latch, set with `DrqLatch=1` (version 1.14)           |
+| 15  | Sound Blaster 16 for DOS boxes, clear with `SoundBlaster16=0` |
 
 DOS FM stands for the virtual FM chip and the rest of [DOS
 boxes](VXD_INTERNALS.md#dos-boxes). DOS mixer means that Windows' mixer is
@@ -402,7 +403,10 @@ copies what DirectSound writes into the 16-bit DMA channel's buffer as it is
 written ([VXD_INTERNALS.md](VXD_INTERNALS.md#directsound)), and the DRQ
 latch that the driver sets the chip's DRQ latch each time a VM takes the DSP
 ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#what-software-can-do-about-it)), both
-since version 1.14.
+since version 1.14. Sound Blaster 16 for DOS boxes means that a DOS program
+finds a Sound Blaster 16 in front of the chip
+([VXD_INTERNALS.md](VXD_INTERNALS.md#a-sound-blaster-16-for-dos-programs)),
+since version 1.15.
 
 CX holds the settings that the VxD read from SYSTEM.INI when it started
 ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings)).
@@ -424,6 +428,7 @@ A set bit means that the change is on:
 | 11  | `DosFMDelay` isn't 0 (1.13)       | 30      |
 | 12  | `DirectSoundLock` (1.14)          | 1       |
 | 13  | `DrqLatch` (1.14)                 | 0       |
+| 14  | `SoundBlaster16` (1.15)           | 1       |
 | 15  | SYSTEM.INI was read               |         |
 
 Bit 0 is always set here, because with `RegisterAPI=0`, 0400 fails. When bit

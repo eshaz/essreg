@@ -68,6 +68,13 @@
 ; copies 80 ms every 20 ms (DirectSoundLock). With DrqLatch=1, it sets the
 ; chip's DRQ latch each time a VM takes the DSP (docs/AUDIO_PIPELINE.md).
 ;
+; A Sound Blaster 16 for DOS programs (SoundBlaster16, ESSREG_S16_*): a
+; DOS VM that takes the DSP finds DSP version 4.05, and its Sound Blaster
+; 16 transfers, 16-bit stereo included, play through the chip's Extended
+; mode, by DMA, with its 16-bit DMA channel's programming carried over to
+; Audio 1's channel (docs/VXD_INTERNALS.md, "A Sound Blaster 16 for DOS
+; programs").
+;
 ; Settings (docs/DRIVER_CONFIG.md): each change can be turned off in
 ; SYSTEM.INI, [ES1869.VXD] and the Audio 2 mode in [ES1869.DRV], read once
 ; when the VxD starts (ESSREG_Read_Settings).  Off, the VxD does what ESS's
@@ -77,13 +84,14 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0114
-ESSREG_FEATURES         equ 0x7FFF      ; mixer, controller, ports, config,
+ESSREG_VERSION          equ 0x0115
+ESSREG_FEATURES         equ 0xFFFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
                                         ; Audio 1 filter, recording takes DSP,
                                         ; DOS FM on its clock, DirectSound's
-                                        ; Lock and Unlock, the DRQ latch
+                                        ; Lock and Unlock, the DRQ latch, the
+                                        ; Sound Blaster 16
 FEATURE_DOS_FM          equ 0x0080      ; cleared while VirtualFM=0
 FEATURE_DOS_MIXER       equ 0x0100      ; cleared while DosMixerRestore=0
 FEATURE_DOS_A1          equ 0x0400      ; cleared while Audio1Filter=1
@@ -91,6 +99,7 @@ FEATURE_REC_DSP         equ 0x0800      ; cleared while RecordTakesDSP=0
 FEATURE_FM_TIMED        equ 0x1000      ; cleared while DosFMDelay=0
 FEATURE_DS_LOCK         equ 0x2000      ; cleared while DirectSoundLock=0
 FEATURE_DRQ_LATCH       equ 0x4000      ; cleared while DrqLatch=0
+FEATURE_SB16            equ 0x8000      ; cleared while SoundBlaster16=0
 
 ; settings (ESSREG_Opts), 1 = the change is on
 OPT_API                 equ 0x0001      ; RegisterAPI: group 4
@@ -107,8 +116,18 @@ OPT_A1_FILTER           equ 0x0400      ; Audio1Filter: the filter in use
 OPT_FM_TIMED            equ 0x0800      ; DosFMDelay: DOS FM on its clock
 OPT_DS_LOCK             equ 0x1000      ; DirectSoundLock: Lock and Unlock
 OPT_DRQ_LATCH           equ 0x2000      ; DrqLatch: 25h bit 7 at each acquisition
+OPT_SB16                equ 0x4000      ; SoundBlaster16: the front for DOS VMs
 OPT_READ                equ 0x8000      ; SYSTEM.INI was read
-OPT_DEFAULT             equ 0x18FF
+OPT_DEFAULT             equ 0x58FF
+
+S16_VERSION             equ 0x0405      ; the DSP version the front answers
+S16_CHAN                equ 5           ; SoundBlaster16DMA's default
+S16_POLL                equ 0x400       ; polls for a byte of the chip's
+                                        ; answer, interrupts off
+S16_PORTS               equ 0xD470      ; bit n = Audio_Base+n: the mixer,
+                                        ; the reset, the read data, the
+                                        ; command, the status and the 16-bit
+                                        ; acknowledge ports stay trapped
 
 FMQ_DELAY               equ 30          ; DosFMDelay's default (ms)
 FMQ_DELAY_MAX           equ 250         ; and the most it takes
@@ -146,6 +165,7 @@ ESSREG_A1_SCF_BYPASS    equ 0x04        ; Audio 1's filter bypassed
 
 ; VDMAD_Get_Virt_State's mode (DL)
 DMA_MASKED              equ 0x01        ; the channel is masked
+DMA_16BIT               equ 0x40        ; VDMAD's extended mode: a word channel
 DMA_TO_MEMORY           equ 0x04        ; a write transfer: device to memory
 DMA_FROM_MEMORY         equ 0x08        ; a read transfer: memory to device
 
@@ -545,8 +565,11 @@ ESSREG_API_Info:
         jnz     .latch
         and     ax,~FEATURE_DS_LOCK & 0xFFFF
 .latch: test    byte [ESSREG_Opts+1],OPT_DRQ_LATCH >> 8
-        jnz     .out
+        jnz     .sb16
         and     ax,~FEATURE_DRQ_LATCH & 0xFFFF
+.sb16:  test    byte [ESSREG_Opts+1],OPT_SB16 >> 8
+        jnz     .out
+        and     ax,~FEATURE_SB16 & 0xFFFF
 .out:   mov     [ebp+Client_EBX],ax
         mov     ax,[ESSREG_Opts]
         mov     [ebp+Client_ECX],ax
@@ -906,19 +929,35 @@ ESSREG_DMA1:
         VxDJmp  VDMAD_Default_Handler
 
 ; in place of VDMAD_Default_Handler as Audio 2's DMA handler (L1_0870),
-; EAX = DMA handle, EBX = VM: a DOS program's transfer on Audio 2's channel
-; gets the DAC's mode from SYSTEM.INI in 71h again, in case the program
-; reset the mixer after it took the DSP. ESS's setting leaves 71h. A
-; program with a virtual Sound Blaster doesn't get the channel either
+; EAX = DMA handle, EBX = VM, EDX = 0 when the VM programmed the channel,
+; else what it did (ESSREG_S16_Notify): a DOS program's transfer on Audio
+; 2's channel gets the DAC's mode from SYSTEM.INI in 71h again, in case the
+; program reset the mixer after it took the DSP. ESS's setting leaves 71h.
+; A program with a virtual Sound Blaster doesn't get the channel either,
+; and a Sound Blaster 16 program's programming of it, as its 16-bit
+; channel, goes to Audio 1's channel
 ESSREG_DMA2:
         push    edi
         call    ESSREG_DMA2_ADI
         or      edi,edi
-        jz      .mode
+        jz      .read
         cmp     [edi+EX_VSB_VM],ebx
-        jne     .mode
+        je      .theirs
+        cmp     [edi+EX_S16_VM],ebx
+        jne     .read
+        push    eax
+        mov     al,[edi+ADI_DMA2Channel]
+        cmp     [edi+EX_S16_Chan],al
+        pop     eax
+        jne     .read
+        call    ESSREG_S16_Notify
+.theirs:
         pop     edi
         ret                             ; the channel stays Windows'
+.read:  cmp     edx,byte 3              ; a read of the channel's count, page
+        ja      .mode                   ; or address (notified while the
+        or      edx,edx                 ; front has the channel): not a
+        jnz     .theirs                 ; change of its state
 .mode:  pop     edi
         test    byte [ESSREG_Opts+1],OPT_A2_4X >> 8
         jz      .mine
@@ -1229,6 +1268,7 @@ ESSREG_DSP_Save:
 ; in place of ESS's Restore_DOS_Mixer when a VM (EBX) releases the DSP:
 ; after ESS's own restore, all of Windows' saved mixer goes back
 ESSREG_DSP_Restore:
+        call    ESSREG_S16_End          ; its Sound Blaster 16 front, if any
         test    byte [ESSREG_Opts],OPT_DOS_MIXER
         jz      near Restore_DOS_Mixer
         call    Restore_DOS_Mixer
@@ -1974,6 +2014,7 @@ ESSREG_App_End:
         pushfd
         pushad
         call    ESSREG_VSB_End_VM
+        call    ESSREG_S16_End_VM
         mov     al,1
         call    ESSREG_FMQ_End_VM
         mov     esi,[ADI_List]
@@ -2070,6 +2111,7 @@ ESSREG_Node_Remove:
 ; Sound Blaster, FM queue and virtual chips go first
 ESSREG_VM_Not_Executeable:
         call    ESSREG_VSB_End_VM
+        call    ESSREG_S16_End_VM
         push    eax
         mov     al,1
         call    ESSREG_FMQ_End_VM
@@ -2079,6 +2121,7 @@ ESSREG_VM_Not_Executeable:
 
 ; in place of ESS's Sys_Dynamic_Device_Exit: every virtual Sound Blaster,
 ; FM queue and VM's virtual chips go first, and the hook of interrupt 8
+; and the Sound Blaster 16's DMA channel
 ESSREG_Dynamic_Exit:
         pushad
         xor     ebx,ebx                 ; no time-out may outlive the VxD
@@ -2086,6 +2129,7 @@ ESSREG_Dynamic_Exit:
         mov     al,0
         call    ESSREG_FMQ_End_VM
         call    ESSREG_FMQ_Unhook
+        call    ESSREG_S16_Unhook
         VxDCall Get_Sys_VM_Handle
         mov     edx,ebx
 .vm:    call    ESSREG_VFM_Free
@@ -2163,8 +2207,11 @@ ESSREG_VSB_Start:
         mov     eax,1                   ; its blocks end on time: VTD's
         VxDCall VTD_Begin_Min_Int_Period ; 1 ms interrupts, not the timer's
         jc      .ask                    ; 55 ms ticks
-        mov     byte [edi+EX_VSB_MinInt],1
-.ask:   call    ESSREG_VSB_Ask
+        or      byte [edi+EX_VSB_Flags2],VSB2_MININT
+.ask:   test    byte [edi+EX_S16_Flags],S16_ESS ; the program knows the
+        jz      .ask2                   ; chip: its Bxh and Cxh are ESS's
+        or      byte [edi+EX_VSB_Flags2],VSB2_ESS
+.ask2:  call    ESSREG_VSB_Ask
         pop     edx
         pop     ecx
         ; a transfer that runs goes on as blocks of half its buffer, at the
@@ -2231,9 +2278,37 @@ ESSREG_VSB_Ask:
 ; that gave up the DSP for a recording gets the virtual Sound Blaster
 ; ESI = ADI, EBX = VM, EDX = port, ECX = type, EAX = data written
 ESSREG_DSP_Trap:
+        cmp     [esi+EX_S16_VM],ebx
+        je      ESSREG_S16_Trap         ; the DSP owner's Sound Blaster 16
         cmp     [esi+EX_VSB_VM],ebx
+        je      .vsb
+        cmp     dword [esi+ADI_DSPOwner],byte 0
         jne     DSP_Port_Trap
-        cmp     ecx,byte 4              ; Byte_Input 0, Byte_Output 4
+        ; nobody's: the VM takes it with this access, as in ESS's trap
+        ; (o5:0C84), and the access goes through its front, if it got one
+        push    eax
+        push    ebx
+        push    ecx
+        push    edx
+        mov     edi,esi
+        mov     eax,1
+        call    Acquire_Resources
+        pop     edx
+        pop     ecx
+        pop     ebx
+        pop     eax
+        jc      .refused
+        cmp     [esi+EX_S16_VM],ebx
+        je      ESSREG_S16_Trap
+        jmp     DSP_Port_Trap           ; the owner's access
+.refused:
+        mov     eax,1                   ; ESS's "in use" message, and FFh
+        mov     edi,esi
+        call    Show_Contention_Message
+        xor     eax,eax
+        dec     eax
+        ret
+.vsb:   cmp     ecx,byte 4              ; Byte_Input 0, Byte_Output 4
         jbe     .byte
         VxDJmp  Simulate_IO             ; words and strings come back as bytes
 .byte:  push    edi
@@ -2290,6 +2365,8 @@ ESSREG_VSB_In:
         je      .data
         cmp     dl,0x0E
         je      .status
+        cmp     dl,0x0F                 ; the Sound Blaster 16's acknowledge
+        je      .status                 ; of a 16-bit transfer's interrupt
         cmp     dl,0x0C
         je      .ready
         cmp     dl,0x04
@@ -2303,11 +2380,25 @@ ESSREG_VSB_In:
 .index: mov     al,[edi+EX_VSB_Index]
         ret
 .mixer: movzx   edx,byte [edi+EX_VSB_Index]
+        cmp     dl,0x80                 ; the Sound Blaster 16's IRQ, its
+        je      ESSREG_S16_IRQ_Bits     ; channels and the interrupt that
+        cmp     dl,0x81                 ; waits
+        je      ESSREG_S16_DMA_Bits
+        cmp     dl,0x82
+        je      .waits
         xor     al,al
         cmp     dl,0x40
         jae     .ret
         mov     al,[edi+EX_VSB_Mix+edx]
 .ret:   ret
+.waits: xor     al,al
+        test    byte [edi+EX_VSB_Flags],VSB_IRQ
+        jz      .ret
+        mov     al,0x01
+        test    byte [edi+EX_VSB_Flags2],VSB2_16
+        jz      .ret
+        mov     al,0x02
+        ret
         ; reading the status acknowledges the interrupt, as on the chip
 .status:
         call    ESSREG_VSB_Ack
@@ -2357,6 +2448,8 @@ ESSREG_VSB_Reset:
         ret
 .low:   test    byte [edi+EX_VSB_Flags],VSB_RESET
         jz      .done
+        mov     word [edi+EX_S16_Rate],0 ; its Sound Blaster 16 front, when
+        mov     byte [edi+EX_S16_TC],0  ; it's back: 22050 Hz again
         cmp     dword [edi+ADI_DSPOwner],byte 0
         je      .real
         call    ESSREG_VSB_Stop
@@ -2397,9 +2490,9 @@ ESSREG_VSB_End:
         je      .done
         call    ESSREG_VSB_Stop
         call    ESSREG_VSB_Ack
-        cmp     byte [edi+EX_VSB_MinInt],0
-        je      .vm
-        mov     byte [edi+EX_VSB_MinInt],0
+        test    byte [edi+EX_VSB_Flags2],VSB2_MININT
+        jz      .vm
+        and     byte [edi+EX_VSB_Flags2],~VSB2_MININT & 0xFF
         push    eax
         mov     eax,1
         VxDCall VTD_End_Min_Int_Period
@@ -2616,17 +2709,40 @@ ESSREG_VSB_Write:
         ret
 .operand:
         movzx   ecx,byte [edi+EX_VSB_Got]
-        and     ecx,1
-        mov     [edi+EX_VSB_Ops+ecx],al
-        inc     byte [edi+EX_VSB_Got]
+        cmp     byte [edi+EX_VSB_Cmd],0xC6      ; C6h, then not a Sound
+        jne     .nth                    ; Blaster 16 transfer's mode (bits
+        or      ecx,ecx                 ; 4 and 5 only): the chip's Extended
+        jnz     .nth                    ; mode on, and this byte a command
+        test    al,0xCF
+        jz      .nth
+        or      byte [edi+EX_VSB_Flags],VSB_EXT
+        mov     byte [edi+EX_VSB_Need],0
+        jmp     ESSREG_VSB_Write
+.nth:   cmp     ecx,byte 2
+        jb      .two
+        mov     [edi+EX_VSB_Ops3],al    ; the third, of a Sound Blaster 16
+        jmp     short .got              ; transfer
+.two:   mov     [edi+EX_VSB_Ops+ecx],al
+.got:   inc     byte [edi+EX_VSB_Got]
         dec     byte [edi+EX_VSB_Need]
         jz      ESSREG_VSB_Command
         ret
 
 ; CL = the operands of command AL, EDI = ADI: the Sound Blaster's commands,
-; and in Extended mode the controller registers (A0h-BFh) and C0h
+; the Sound Blaster 16's transfers (Bxh and Cxh, for a program that doesn't
+; know the chip, with SoundBlaster16=1), and in Extended mode the
+; controller registers (A0h-BFh) and C0h
 ESSREG_VSB_Operands:
-        mov     cl,2
+        call    ESSREG_VSB_Is16
+        jnz     .sb
+        test    al,0x01                 ; an odd one is no transfer (C7h)
+        jnz     .sb
+        mov     cl,3                    ; a transfer: its mode and length
+        cmp     al,0xB0
+        jb      .sb
+        cmp     al,0xCF
+        jbe     .done
+.sb:    mov     cl,2
         cmp     al,0x14                 ; 8-bit, ADPCM and silence transfers
         je      .done
         cmp     al,0x15
@@ -2673,10 +2789,37 @@ ESSREG_VSB_Operands:
 .none:  mov     cl,0
 .done:  ret
 
+; ZF set when the virtual Sound Blaster is a Sound Blaster 16, EDI = ADI:
+; SoundBlaster16=1, the program hasn't identified the chip (E7h), and it
+; isn't in Extended mode, where Bxh and C0h are the chip's
+ESSREG_VSB_Is16:
+        test    byte [ESSREG_Opts+1],OPT_SB16 >> 8
+        jz      .no
+        test    byte [edi+EX_VSB_Flags2],VSB2_ESS
+        jnz     .no
+        test    byte [edi+EX_VSB_Flags],VSB_EXT
+        ret
+.no:    or      esp,esp                 ; ZF clear
+        ret
+
 ; the command in EX_VSB_Cmd with its operands, EDI = ADI
 ESSREG_VSB_Command:
         movzx   eax,byte [edi+EX_VSB_Cmd]
         movzx   edx,word [edi+EX_VSB_Ops]
+        cmp     al,0xB0                 ; the Sound Blaster 16's transfers
+        jb      .notx
+        cmp     al,0xCF
+        ja      .notx
+        test    al,0x01
+        jnz     .notx
+        call    ESSREG_VSB_Is16
+        je      .x16
+.notx:  cmp     al,0xD5                 ; its pause, continue and stop of a
+        je      ESSREG_VSB_Pause        ; 16-bit transfer, and its 16-bit
+        cmp     al,0xD6                 ; interrupt
+        je      ESSREG_VSB_Continue
+        cmp     al,0xF3
+        je      .irq16
         cmp     al,0x40
         je      .tc
         cmp     al,0x41
@@ -2785,7 +2928,7 @@ ESSREG_VSB_Command:
         mov     ax,3
 .single:
         lea     ecx,[edx+1]
-        jmp     ESSREG_VSB_Go
+        jmp     short .old
 .auto:  mov     ax,(VSB_AUTO << 8) | 1
         jmp     short .autogo
 .auto2: mov     ax,(VSB_AUTO << 8) | 4
@@ -2796,11 +2939,40 @@ ESSREG_VSB_Command:
 .autogo:
         movzx   ecx,word [edi+EX_VSB_Size]
         inc     ecx
-        jmp     ESSREG_VSB_Go
+        jmp     short .old
 .block: movzx   ecx,word [edi+EX_VSB_Size]
         inc     ecx
         mov     ax,1
+.old:   and     byte [edi+EX_VSB_Flags2],~(VSB2_16 | VSB2_STEREO) & 0xFF
         jmp     ESSREG_VSB_Go
+        ; a Sound Blaster 16 transfer: 16-bit (Bxh) or 8-bit (Cxh), with
+        ; its mode (bit 5 stereo) and its length in samples less one, in
+        ; the rate of 41h/42h or of the time constant
+.x16:   movzx   ecx,byte [edi+EX_VSB_Ops3]
+        shl     ecx,8
+        mov     cl,[edi+EX_VSB_Ops+1]
+        inc     ecx
+        mov     ah,[edi+EX_VSB_Flags2]
+        and     ah,~(VSB2_16 | VSB2_STEREO) & 0xFF
+        test    byte [edi+EX_VSB_Ops],0x20
+        jz      .mono16
+        or      ah,VSB2_STEREO
+.mono16:
+        test    al,0x10
+        jz      .bytes16                ; Cxh: 8-bit
+        shl     ecx,1                   ; two bytes a sample
+        or      ah,VSB2_16
+.bytes16:
+        mov     [edi+EX_VSB_Flags2],ah
+        xor     ah,ah
+        test    al,0x04
+        jz      .once16
+        mov     ah,VSB_AUTO
+.once16:
+        mov     al,1
+        jmp     ESSREG_VSB_Go
+.irq16: or      byte [edi+EX_VSB_Flags2],VSB2_16
+        jmp     ESSREG_VSB_IRQ
 .noauto:
         and     byte [edi+EX_VSB_Flags],~VSB_AUTO & 0xFF
         ret
@@ -2820,11 +2992,19 @@ ESSREG_VSB_Command:
         not     al
         jmp     .put
 .version:
+        call    ESSREG_VSB_Is16         ; a Sound Blaster 16's version, as
+        jne     .chipver               ; the front answers
+        mov     al,S16_VERSION >> 8
+        call    ESSREG_VSB_Put
+        mov     al,S16_VERSION & 0xFF
+        jmp     .put
+.chipver:
         mov     al,[edi+EX_VSB_Ver]
         call    ESSREG_VSB_Put
         mov     al,[edi+EX_VSB_Ver+1]
         jmp     .put
-.ess:   mov     al,[edi+EX_VSB_Id]
+.ess:   or      byte [edi+EX_VSB_Flags2],VSB2_ESS ; it knows the chip: its
+        mov     al,[edi+EX_VSB_Id]      ; Bxh and Cxh are the chip's
         call    ESSREG_VSB_Put
         mov     al,[edi+EX_VSB_Id+1]
         jmp     .put
@@ -2903,7 +3083,8 @@ ESSREG_VSB_Go:
 
 ; EAX = the bytes a second of the transfer, EDI = ADI: Extended mode's
 ; rate (A1h, as the chip clocks it), channels (A8h) and sample size (B7h
-; bit 2), else the rate of 41h, else the time constant
+; bit 2), else the rate of 41h, else the time constant, twice for a 16-bit
+; Sound Blaster 16 transfer and twice for a stereo one
 ESSREG_VSB_Rate:
         push    ecx
         push    edx
@@ -2930,13 +3111,19 @@ ESSREG_VSB_Rate:
         jmp     short .done
 .sb:    movzx   eax,word [edi+EX_VSB_Rate]
         or      eax,eax
-        jnz     .done
+        jnz     .frame
         movzx   ecx,byte [edi+EX_VSB_TC]
         neg     ecx
         add     ecx,256
         mov     eax,1000000
         xor     edx,edx
         div     ecx
+.frame: test    byte [edi+EX_VSB_Flags2],VSB2_16
+        jz      .chans
+        shl     eax,1
+.chans: test    byte [edi+EX_VSB_Flags2],VSB2_STEREO
+        jz      .done
+        shl     eax,1
 .done:  or      eax,eax
         jnz     .out
         mov     eax,22050
@@ -3077,7 +3264,10 @@ ESSREG_EOI:
         pop     eax
         or      edi,edi
         jz      .ess
-        cmp     [edi+EX_VSB_VM],ebx
+        cmp     [edi+EX_S16_VM],ebx
+        jne     .vsb
+        call    ESSREG_S16_Position     ; its 16-bit channel's count, at the
+.vsb:   cmp     [edi+EX_VSB_VM],ebx     ; end of a block
         jne     .ess
         test    word [edi+4],0x1000     ; a physical MPU-401 interrupt of
         jnz     .ess                    ; its own on the shared IRQ: ESS's
@@ -3087,6 +3277,1181 @@ ESSREG_EOI:
         ret
 .ess:   pop     edi
         jmp     L1_0734
+
+; --- a Sound Blaster 16 for DOS programs -----------------------------------------
+
+; The chip answers as a Sound Blaster Pro (DSP version 3.01): 8-bit stereo
+; at most through the Sound Blaster commands, and 16-bit stereo only
+; through its own Extended mode (commands Axh, Bxh and Cxh). A DOS program
+; written for the Sound Blaster 16 (version 4.xx, the transfer commands
+; Bxh and Cxh, a 16-bit DMA channel, the mixer registers 30h-47h and
+; 80h-82h, the 16-bit acknowledge at Audio_Base+Fh) plays 8-bit on it, or
+; nothing. With SoundBlaster16=1, a DOS VM that takes the DSP finds a Sound
+; Blaster 16 in front of the chip: the VxD keeps the mixer, reset, read
+; data, command, status and acknowledge ports trapped for the VM
+; (ESSREG_S16_Start, from Acquire_Resources), answers version 4.05, and
+; turns each Sound Blaster 16 transfer into one of the chip's Extended mode
+; (ESSREG_S16_Transfer): the rate of 41h/42h into A1h and A2h as ES1869.DRV
+; computes them, the format into B6h/B7h, the length into A4h/A5h, then
+; B8h and D1h. The DMA runs as for any DOS program, on Audio 1's 8-bit
+; channel, where a 16-bit sample is two bytes. A program that uses a 16-bit
+; channel (SoundBlaster16DMA, 5) programs it as ever: the VxD owns that
+; channel, or ESS's code does when it is Audio 2's, and carries the
+; programming over to Audio 1's channel, in bytes (ESSREG_S16_DMA_State),
+; and VDMAD tells it when the program reads the channel's count, which it
+; takes from Audio 1's channel (ESSREG_S16_Position). The Sound Blaster
+; 16's mixer registers go to the chip's own volumes (ESSREG_S16_Mix_*),
+; and 80h-82h answer with the card's IRQ, its channels and the transfer
+; that interrupts. Every other command and register goes to the chip as it
+; comes, with its operands, and a program that identified the chip (E7h)
+; gets the chip's own commands throughout, Bxh and Cxh included.
+
+; the VM in EBX took the DSP (Acquire_Resources), EDI = ADI, after ESS's
+; code untrapped the audio ports for it: a DOS VM gets the front, and the
+; front's ports trapped again
+ESSREG_DSP_Untrap:
+        call    Audio_Disable_Local_Trapping
+ESSREG_S16_Start:
+        test    byte [ESSREG_Opts+1],OPT_SB16 >> 8
+        jz      .out
+        VxDCall Test_Sys_VM_Handle
+        je      .out
+        test    word [edi+ADI_Flags],0x20       ; the no-DMA emulation: ESS's
+        jnz     .out
+        pushad
+        mov     [edi+EX_S16_VM],ebx
+        cmp     [edi+EX_S16_Last],ebx   ; the same program back (after a
+        je      .same                   ; recording): its settings stay
+        mov     [edi+EX_S16_Last],ebx
+        mov     byte [edi+EX_S16_Flags],0
+        mov     word [edi+EX_S16_Rate],0
+        mov     byte [edi+EX_S16_TC],0
+        call    ESSREG_S16_Mix_Reset
+.same:  and     byte [edi+EX_S16_Flags],S16_ESS ; the chip was reset
+        mov     byte [edi+EX_S16_Need],0
+        mov     byte [edi+EX_S16_Count],0
+        mov     byte [edi+EX_S16_Pass],0
+        mov     byte [edi+EX_S16_Index],0xFF    ; the access that took the
+        call    ESSREG_S16_Channel      ; DSP goes to the chip, not here
+        movzx   edx,word [edi+ADI_AudioBase]
+        mov     esi,S16_PORTS
+.port:  shr     esi,1
+        jnc     .next
+        VxDCall Enable_Local_Trapping
+.next:  inc     edx
+        or      esi,esi
+        jnz     .port
+        popad
+.out:   ret
+
+; the 16-bit channel for the VM's Sound Blaster 16, EDI = ADI: Audio 2's
+; when it is that channel (ESSREG_DMA2 gets the VM's programming), else
+; the VxD takes it from VDMAD once (ESSREG_S16_DMA gets it); either way
+; with the VM's reads of its count notified while the front has it
+ESSREG_S16_Channel:
+        mov     byte [edi+EX_S16_Chan],0
+        mov     eax,[ESSREG_S16_Chan]
+        or      eax,eax
+        jz      .out
+        cmp     [edi+ADI_DMA2Channel],al
+        jne     .own
+        mov     eax,[edi+ADI_DMA2Handle]
+        jmp     short .notify
+.own:   cmp     dword [ESSREG_S16_Virt],0
+        jne     .mine
+        mov     esi,ESSREG_S16_DMA
+        VxDCall VDMAD_Virtualize_Channel
+        jc      .out
+        mov     [ESSREG_S16_Virt],eax
+.notify:
+        or      eax,eax
+        jz      .mine
+        push    ebx
+        mov     ebx,0xFFFF              ; its callbacks kept, and the reads
+        mov     ecx,1                   ; of the count notified
+        VxDCall VDMAD_Set_Channel_Callbacks
+        pop     ebx
+.mine:  mov     eax,[ESSREG_S16_Chan]
+        mov     [edi+EX_S16_Chan],al
+.out:   ret
+
+; the VxD's 16-bit channel goes back to VDMAD (Sys_Dynamic_Device_Exit)
+ESSREG_S16_Unhook:
+        push    eax
+        xor     eax,eax
+        xchg    eax,[ESSREG_S16_Virt]
+        or      eax,eax
+        jz      .out
+        VxDCall VDMAD_Unvirtualize_Channel
+.out:   pop     eax
+        ret
+
+; the VM in EBX lets go of the DSP (Release_Resources), EDI = ADI: its
+; front ends, its settings kept for the program's return
+ESSREG_S16_End:
+        cmp     [edi+EX_S16_VM],ebx
+        jne     .out
+        push    eax
+        push    ecx
+        test    byte [edi+EX_S16_Flags],S16_DMA16
+        jz      .reads
+        and     byte [edi+EX_S16_Flags],~S16_DMA16 & 0xFF
+        mov     eax,[edi+ADI_DMA1Handle]
+        or      eax,eax
+        jz      .reads
+        VxDCall VDMAD_Mask_Channel
+.reads: call    ESSREG_S16_Handle       ; its count's reads no longer
+        or      eax,eax                 ; notified
+        jz      .pop
+        push    ebx
+        mov     ebx,0xFFFE
+        xor     ecx,ecx
+        VxDCall VDMAD_Set_Channel_Callbacks
+        pop     ebx
+.pop:   pop     ecx
+        pop     eax
+        mov     dword [edi+EX_S16_VM],0
+.out:   ret
+
+; the VM in EBX ends (VM_Not_Executeable), or its program did
+; (DOSMGR_End_V86_App): its front on every device, and the settings kept
+; for it, which the next program starts without
+ESSREG_S16_End_VM:
+        pushad
+        mov     esi,[ADI_List]
+        or      esi,esi
+        jz      .done
+        pushfd
+        cli
+        VxDCall List_Get_First
+        popfd
+        or      eax,eax
+        jz      .done
+.next:  mov     edi,[eax]
+        call    ESSREG_S16_End
+        cmp     [edi+EX_S16_Last],ebx
+        jne     .list
+        mov     dword [edi+EX_S16_Last],0
+.list:  pushfd
+        cli
+        VxDCall List_Get_Next
+        popfd
+        or      eax,eax
+        jnz     .next
+.done:  popad
+        ret
+
+; EDI = the ADI whose front serves the VM in EBX, 0 if none
+ESSREG_S16_ADI:
+        push    eax
+        push    esi
+        xor     edi,edi
+        mov     esi,[ADI_List]
+        or      esi,esi
+        jz      .done
+        pushfd
+        cli
+        VxDCall List_Get_First
+        jz      .none
+.next:  mov     edi,[eax]
+        cmp     [edi+EX_S16_VM],ebx
+        je      .found
+        VxDCall List_Get_Next
+        jnz     .next
+.none:  xor     edi,edi
+.found: popfd
+.done:  pop     esi
+        pop     eax
+        ret
+
+; I/O trap of the front's ports for its VM: ESI = ADI, EBX = VM, EDX =
+; port, ECX = type, EAX = data written; returns EAX = data read
+ESSREG_S16_Trap:
+        cmp     ecx,byte 4              ; Byte_Input 0, Byte_Output 4
+        jbe     .byte
+        VxDJmp  Simulate_IO             ; words and strings come back as bytes
+.byte:  push    edi
+        push    esi
+        push    ecx
+        push    edx
+        mov     edi,esi
+        mov     esi,edx                 ; ESI = the port
+        push    ecx
+        movzx   ecx,word [edi+ADI_AudioBase]
+        sub     edx,ecx                 ; EDX = its offset
+        pop     ecx
+        jecxz   .in
+        call    ESSREG_S16_Out
+        jmp     short .ret
+.in:    call    ESSREG_S16_In
+        movzx   eax,al
+.ret:   pop     edx
+        pop     ecx
+        pop     esi
+        pop     edi
+        ret
+
+; AL written to Audio_Base+EDX by the VM, ESI = the port, EDI = ADI
+ESSREG_S16_Out:
+        cmp     dl,0x0C
+        je      ESSREG_S16_Write
+        cmp     dl,0x05
+        je      ESSREG_S16_Mix_Write
+        cmp     dl,0x04
+        je      .index
+        cmp     dl,0x06
+        jne     ESSREG_S16_Chip_Out
+        test    al,1                    ; the reset's end: the chip is in
+        jnz     ESSREG_S16_Chip_Out     ; Compatibility mode again, and the
+        and     byte [edi+EX_S16_Flags],S16_ESS | S16_DMA16 ; front starts over
+        mov     byte [edi+EX_S16_Need],0
+        mov     byte [edi+EX_S16_Count],0
+        mov     byte [edi+EX_S16_Pass],0
+        mov     word [edi+EX_S16_Rate],0 ; 22050 Hz again
+        mov     byte [edi+EX_S16_TC],0
+        jmp     ESSREG_S16_Chip_Out
+.index: mov     [edi+EX_S16_Index],al   ; the chip gets the index too
+        jmp     ESSREG_S16_Chip_Out
+
+; AL to the chip's port ESI, and AL = the chip's port ESI
+ESSREG_S16_Chip_Out:
+        push    edx
+        mov     edx,esi
+        out     dx,al
+        pop     edx
+        ret
+ESSREG_S16_Chip_In:
+        push    edx
+        mov     edx,esi
+        in      al,dx
+        pop     edx
+        ret
+
+; AL = the VM's read of Audio_Base+EDX, ESI = the port, EDI = ADI
+ESSREG_S16_In:
+        cmp     dl,0x0A
+        je      .data
+        cmp     dl,0x0E
+        je      .status
+        cmp     dl,0x0F
+        je      .ack16
+        cmp     dl,0x05
+        je      ESSREG_S16_Mix_Read
+        jmp     ESSREG_S16_Chip_In      ; the mixer index, the write
+                                        ; buffer's state
+.data:  cmp     byte [edi+EX_S16_Count],0
+        je      ESSREG_S16_Chip_In
+        push    ecx                     ; the front's answer
+        movzx   ecx,byte [edi+EX_S16_Head]
+        mov     al,[edi+EX_S16_Queue+ecx]
+        inc     ecx
+        cmp     ecx,S16_QUEUE
+        jb      .head
+        xor     ecx,ecx
+.head:  mov     [edi+EX_S16_Head],cl
+        dec     byte [edi+EX_S16_Count]
+        pop     ecx
+        ret
+.status:
+        call    ESSREG_S16_Chip_In      ; acknowledges the chip's interrupt,
+        cmp     byte [edi+EX_S16_Count],0 ; as on the Sound Blaster 16
+        je      ESSREG_S16_Position
+        or      al,0x80                 ; a byte to read
+        jmp     ESSREG_S16_Position
+.ack16: push    edx
+        lea     edx,[esi-1]             ; Audio_Base+Eh acknowledges it
+        in      al,dx
+        pop     edx
+        jmp     ESSREG_S16_Position
+
+; AL into the read queue, EDI = ADI; a full queue drops the byte
+ESSREG_S16_Put:
+        push    ecx
+        movzx   ecx,byte [edi+EX_S16_Count]
+        cmp     ecx,S16_QUEUE
+        jae     .full
+        add     cl,[edi+EX_S16_Head]
+        cmp     ecx,S16_QUEUE
+        jb      .at
+        sub     ecx,S16_QUEUE
+.at:    mov     [edi+EX_S16_Queue+ecx],al
+        inc     byte [edi+EX_S16_Count]
+.full:  pop     ecx
+        ret
+
+; AL to the chip's command port, EDI = ADI, once it takes a byte, or after
+; a short wait anyway (the VM saw it ready)
+ESSREG_S16_DSP:
+        push    eax
+        push    ecx
+        push    edx
+        movzx   edx,word [edi+ADI_AudioBase]
+        add     edx,byte 0x0C
+        mov     ecx,S16_POLL
+.wait:  in      al,dx
+        test    al,0x80
+        jz      .ready
+        loop    .wait
+.ready: mov     eax,[esp+8]
+        out     dx,al
+        pop     edx
+        pop     ecx
+        pop     eax
+        ret
+
+; the chip's register AH = AL (Extended mode), EDI = ADI
+ESSREG_S16_Reg:
+        push    eax
+        mov     al,ah
+        call    ESSREG_S16_DSP
+        pop     eax
+        jmp     ESSREG_S16_DSP
+
+; AL = the chip's register AH (command C0h), EDI = ADI, with interrupts off
+; so that nothing reads the answer first; 0 if none comes
+ESSREG_S16_Read:
+        push    ecx
+        push    edx
+        pushfd
+        cli
+        movzx   edx,word [edi+ADI_AudioBase]
+        add     edx,byte 0x0C
+        call    ESSREG_DSP_Drain        ; a byte nobody read
+        mov     al,0xC0
+        call    ESSREG_S16_DSP
+        mov     al,ah
+        call    ESSREG_S16_DSP
+        mov     ecx,S16_POLL
+        call    ESSREG_DSP_Get
+        jnc     .got
+        xor     al,al
+.got:   popfd
+        pop     edx
+        pop     ecx
+        ret
+
+; AL written to the command port by the VM, EDI = ADI: the Sound Blaster
+; 16's commands are the front's; the chip's own go to it as they come,
+; with their operands (ESSREG_S16_Operands). C6h is both the Sound Blaster
+; 16's 8-bit auto-initializing transfer and the chip's Extended mode: the
+; byte after it tells, a transfer's mode (bits 4 and 5 only), or a command
+ESSREG_S16_Write:
+        cmp     byte [edi+EX_S16_Need],0
+        jne     .operand
+.cmd:   mov     [edi+EX_S16_Cmd],al
+        mov     byte [edi+EX_S16_Got],0
+        call    ESSREG_S16_Operands     ; CL = operands, CH = 1 for the chip's
+        mov     [edi+EX_S16_Need],cl
+        mov     [edi+EX_S16_Pass],ch
+        or      ch,ch
+        jz      .mine
+        call    ESSREG_S16_Chip_Out     ; as the program wrote it
+.mine:  cmp     byte [edi+EX_S16_Need],0
+        jne     .out
+        jmp     ESSREG_S16_Command
+.operand:
+        cmp     byte [edi+EX_S16_Cmd],0xC6
+        jne     .keep
+        cmp     byte [edi+EX_S16_Got],0
+        jne     .keep
+        cmp     byte [edi+EX_S16_Pass],0
+        jne     .keep
+        test    al,0xCF
+        jz      .keep
+        push    eax                     ; the program knows the chip: its
+        mov     al,0xC6                 ; Extended mode on, and this byte a
+        call    ESSREG_S16_Chip_Out     ; command
+        pop     eax
+        or      byte [edi+EX_S16_Flags],S16_EXT | S16_ESS
+        mov     byte [edi+EX_S16_Need],0
+        jmp     .cmd
+.keep:  push    ecx
+        movzx   ecx,byte [edi+EX_S16_Got]
+        cmp     ecx,byte 3
+        jae     .more
+        mov     [edi+EX_S16_Ops+ecx],al
+.more:  pop     ecx
+        inc     byte [edi+EX_S16_Got]
+        cmp     byte [edi+EX_S16_Pass],0
+        je      .kept
+        call    ESSREG_S16_Chip_Out
+.kept:  dec     byte [edi+EX_S16_Need]
+        jnz     .out
+        jmp     ESSREG_S16_Command
+.out:   ret
+
+; CX for the command in AL: CL = its operands, CH = 1 when it is the chip's
+; (its bytes go to the chip), 0 for the front's; EDI = ADI
+ESSREG_S16_Operands:
+        test    byte [edi+EX_S16_Flags],S16_ESS
+        jnz     .chip
+        cmp     al,0xB0                 ; the Sound Blaster 16's own
+        jb      .nox
+        cmp     al,0xCF
+        ja      .nox
+        test    al,0x01                 ; an odd one is no transfer: C7h
+        jnz     .chip                   ; and the chip's registers
+        mov     cx,3                    ; a transfer: its mode and length
+        ret
+.nox:   xor     cx,cx
+        cmp     al,0x41                 ; the rates
+        je      .two
+        cmp     al,0x42
+        je      .two
+        cmp     al,0xE1                 ; the version
+        je      .out
+        cmp     al,0xE3                 ; the copyright
+        je      .out
+        cmp     al,0xD5                 ; 16-bit pause, continue and stop
+        je      .out
+        cmp     al,0xD6
+        je      .out
+        cmp     al,0xD9
+        je      .out
+        cmp     al,0xF3                 ; the 16-bit interrupt
+        je      .out
+        cmp     al,0xDA                 ; the 8-bit stop, of a transfer of
+        jne     .chip                   ; the front's
+        test    byte [edi+EX_S16_Flags],S16_RUN
+        jnz     .out
+.chip:  mov     ch,1
+        mov     cl,2
+        cmp     al,0x14
+        je      .out
+        cmp     al,0x15
+        je      .out
+        cmp     al,0x16
+        je      .out
+        cmp     al,0x17
+        je      .out
+        cmp     al,0x24
+        je      .out
+        cmp     al,0x25
+        je      .out
+        cmp     al,0x48
+        je      .out
+        cmp     al,0x80
+        je      .out
+        cmp     al,0x11
+        je      .out
+        cmp     al,0x64
+        jb      .one
+        cmp     al,0x6F
+        jbe     .out                    ; ESPCM transfers
+        cmp     al,0x74
+        jb      .one
+        cmp     al,0x77
+        jbe     .out                    ; ADPCM transfers
+.one:   mov     cl,1
+        cmp     al,0x10
+        je      .out
+        cmp     al,0x38
+        je      .out
+        cmp     al,0x40
+        je      .out
+        cmp     al,0xE0
+        je      .out
+        cmp     al,0xE2
+        je      .out
+        cmp     al,0xE4
+        je      .out
+        cmp     al,0xDD
+        je      .out
+        test    byte [edi+EX_S16_Flags],S16_ESS
+        jz      .ext
+        cmp     al,0x41                 ; the chip's own time constants
+        je      .out
+        cmp     al,0x42
+        je      .out
+        cmp     al,0xCF
+        je      .out
+.ext:   test    byte [edi+EX_S16_Flags],S16_EXT
+        jz      .none
+        cmp     al,0xC0                 ; a register read, and the writes
+        je      .out
+        cmp     al,0xA0
+        jb      .none
+        cmp     al,0xBF
+        jbe     .out
+.none:  mov     cl,0
+.out:   ret
+.two:   mov     cl,2
+        ret
+
+; the command in EX_S16_Cmd with its operands, EDI = ADI: the chip has the
+; chip's own already, the front acts on its own and on what the chip's
+; mean to it
+ESSREG_S16_Command:
+        push    eax
+        push    ecx
+        movzx   eax,byte [edi+EX_S16_Cmd]
+        cmp     al,0xC7                 ; the chip's Extended mode off: a
+        je      .c7                     ; program that knows the chip
+        test    byte [edi+EX_S16_Flags],S16_ESS
+        jnz     .chipcmd
+        cmp     al,0xB0
+        jb      .notx
+        cmp     al,0xCF
+        ja      .notx
+        test    al,0x01
+        jnz     .out
+        call    ESSREG_S16_Transfer
+        jmp     .out
+.notx:  cmp     al,0x41
+        je      .rate
+        cmp     al,0x42
+        je      .rate
+        cmp     al,0x40
+        je      .tc
+        cmp     al,0xE1
+        je      .version
+        cmp     al,0xE3
+        je      .copyright
+        cmp     al,0xD5
+        je      .pause
+        cmp     al,0xD6
+        je      .continue
+        cmp     al,0xD9
+        je      .stop
+        cmp     al,0xDA
+        je      .stop
+        cmp     al,0xF3
+        je      .irq16
+        cmp     al,0xF2
+        je      .irq8
+        cmp     al,0xE7
+        je      .ident
+        cmp     al,0x10                 ; the chip's 8-bit transfers, for
+        jb      .out                    ; mixer 82h: 1xh, 2xh, 6xh, 7xh, 9xh
+        cmp     al,0x2F
+        jbe     .sb8
+        cmp     al,0x64
+        jb      .out
+        cmp     al,0x7F
+        jbe     .sb8
+        cmp     al,0x90
+        jb      .out
+        cmp     al,0x9F
+        ja      .out
+.sb8:   and     byte [edi+EX_S16_Flags],~(S16_16 | S16_RUN | S16_AUTO) & 0xFF
+        or      byte [edi+EX_S16_Flags],S16_8
+        jmp     .out
+.chipcmd:
+        cmp     al,0xC6                 ; the chip's Extended mode on
+        jne     .out
+        or      byte [edi+EX_S16_Flags],S16_EXT
+        jmp     .out
+.c7:    and     byte [edi+EX_S16_Flags],~S16_EXT & 0xFF
+        or      byte [edi+EX_S16_Flags],S16_ESS
+        jmp     .out
+.rate:  mov     ah,[edi+EX_S16_Ops]     ; high byte first
+        mov     al,[edi+EX_S16_Ops+1]
+        mov     [edi+EX_S16_Rate],ax
+        jmp     .out
+.tc:    mov     al,[edi+EX_S16_Ops]
+        mov     [edi+EX_S16_TC],al
+        mov     word [edi+EX_S16_Rate],0
+        jmp     .out
+.version:
+        mov     al,S16_VERSION >> 8
+        call    ESSREG_S16_Put
+        mov     al,S16_VERSION & 0xFF
+        call    ESSREG_S16_Put
+        jmp     .out
+.copyright:
+        mov     ecx,ESSREG_S16_Copyright
+.str:   mov     al,[ecx]
+        call    ESSREG_S16_Put
+        inc     ecx
+        or      al,al
+        jnz     .str
+        jmp     .out
+.pause: mov     al,0xD0
+        call    ESSREG_S16_DSP
+        jmp     .out
+.continue:
+        mov     al,0xD4
+        call    ESSREG_S16_DSP
+        jmp     .out
+.stop:  test    byte [edi+EX_S16_Flags],S16_RUN
+        jz      .out
+        and     byte [edi+EX_S16_Flags],~S16_AUTO & 0xFF
+        mov     ah,0xB8                 ; the block that plays is the last
+        call    ESSREG_S16_Read
+        and     al,~0x04 & 0xFF
+        mov     ah,0xB8
+        call    ESSREG_S16_Reg
+        jmp     .out
+.irq16: mov     al,0xF2
+        call    ESSREG_S16_DSP
+        and     byte [edi+EX_S16_Flags],~S16_8 & 0xFF
+        or      byte [edi+EX_S16_Flags],S16_16
+        jmp     .out
+.irq8:  and     byte [edi+EX_S16_Flags],~S16_16 & 0xFF
+        or      byte [edi+EX_S16_Flags],S16_8
+        jmp     .out
+.ident: or      byte [edi+EX_S16_Flags],S16_ESS
+.out:   pop     ecx
+        pop     eax
+        ret
+ESSREG_S16_Copyright:
+        db "COPYRIGHT (C) CREATIVE TECHNOLOGY LTD, 1992.", 0
+
+; a transfer command of the Sound Blaster 16 (Bxh 16-bit, Cxh 8-bit; bit 3
+; records, bit 2 auto-initializes, bit 1 the FIFO), its mode (bit 4
+; signed, bit 5 stereo) and its length in samples less one, EDI = ADI: the
+; chip's Extended mode transfer of the same bytes (DS p.48), on the
+; program's DMA programming
+ESSREG_S16_Transfer:
+        pushad
+        movzx   ebx,byte [edi+EX_S16_Cmd]       ; BL = the command
+        movzx   ecx,byte [edi+EX_S16_Ops]       ; CL = the mode
+        movzx   esi,word [edi+EX_S16_Ops+1]     ; ESI = the bytes
+        inc     esi
+        mov     al,[edi+EX_S16_Flags]
+        and     al,S16_ESS | S16_EXT | S16_DMA16
+        or      al,S16_RUN | S16_8
+        test    bl,0x10
+        jz      .bits                   ; Cxh: 8-bit
+        shl     esi,1                   ; two bytes a sample
+        xor     al,S16_8 | S16_16
+.bits:  test    bl,0x04
+        jz      .dir
+        or      al,S16_AUTO
+.dir:   test    bl,0x08
+        jz      .flags
+        or      al,S16_IN
+.flags: mov     [edi+EX_S16_Flags],al
+        test    al,S16_EXT              ; the Extended mode commands, after
+        jnz     .ext                    ; every reset
+        mov     al,0xC6
+        call    ESSREG_S16_DSP
+        or      byte [edi+EX_S16_Flags],S16_EXT
+.ext:   ; the direction and the DMA: B8h bits 3 and 1 for the ADC, bit 2
+        ; for auto-initialize, bit 0 clear until the start; B9h demand
+        ; transfers of 2 bytes, as ESS's recording, or single ones with
+        ; ESS's "Single Mode DMA" (ADI flag 10000h clear)
+        mov     ah,0xB8
+        call    ESSREG_S16_Read
+        and     al,0x30                 ; bits 5:4 kept, as ES1869.DRV keeps them
+        test    bl,0x04
+        jz      .once
+        or      al,0x04
+.once:  test    bl,0x08
+        jz      .dac
+        or      al,0x0A
+.dac:   mov     ah,0xB8
+        call    ESSREG_S16_Reg
+        mov     ax,0xB902
+        test    byte [edi+ADI_CfgFlags+2],0x01
+        jnz     .b9
+        mov     al,0x01
+.b9:    call    ESSREG_S16_Reg
+        mov     ah,0xA8                 ; mono or stereo: A8h bits 1:0
+        call    ESSREG_S16_Read
+        and     al,0xFC
+        or      al,0x02
+        test    cl,0x20
+        jz      .mono
+        xor     al,0x03
+.mono:  mov     ah,0xA8
+        call    ESSREG_S16_Reg
+        call    ESSREG_S16_Clocks       ; A1h and A2h for the rate
+        mov     eax,esi                 ; an interrupt every ESI bytes: A4h
+        neg     eax                     ; and A5h, two's complement
+        mov     ah,0xA4
+        call    ESSREG_S16_Reg
+        mov     eax,esi
+        neg     eax
+        shr     eax,8
+        mov     ah,0xA5
+        call    ESSREG_S16_Reg
+        mov     ax,0xB680               ; the format: B6h, then B7h twice
+        test    cl,0x10                 ; (DS p.49, table 16)
+        jz      .b6
+        mov     al,0x00                 ; signed
+.b6:    call    ESSREG_S16_Reg
+        mov     ax,0xB751
+        test    cl,0x10
+        jz      .b7
+        mov     al,0x71
+.b7:    call    ESSREG_S16_Reg
+        mov     al,0xD0                 ; 8-bit mono unsigned
+        test    cl,0x10
+        jz      .size
+        xor     al,0x20                 ; signed: F0h
+.size:  test    bl,0x10
+        jz      .chans
+        xor     al,0x04                 ; 16-bit: D4h, F4h
+.chans: test    cl,0x20
+        jz      .fmt
+        xor     al,0x48                 ; stereo: 98h, B8h, 9Ch, BCh
+.fmt:   mov     ah,0xB7
+        call    ESSREG_S16_Reg
+        mov     ah,0xB1                 ; its interrupt and DMA request on:
+        call    ESSREG_S16_Read         ; bits 6 and 4, 7 and 5 clear
+        and     al,0x0F
+        or      al,0x50
+        mov     ah,0xB1
+        call    ESSREG_S16_Reg
+        mov     ah,0xB2
+        call    ESSREG_S16_Read
+        and     al,0x0F
+        or      al,0x50
+        mov     ah,0xB2
+        call    ESSREG_S16_Reg
+        mov     ah,0xB8                 ; go, and the DAC into the mixer,
+        call    ESSREG_S16_Read         ; which a Sound Blaster 16 program
+        or      al,0x01                 ; doesn't ask for
+        mov     ah,0xB8
+        call    ESSREG_S16_Reg
+        test    bl,0x08
+        jnz     .done
+        mov     al,0xD1
+        call    ESSREG_S16_DSP
+.done:  popad
+        ret
+
+; A1h and A2h for the rate of 41h/42h, or of the time constant of 40h (1
+; MHz / (256 - TC), the rate of each channel for a Sound Blaster 16
+; transfer), or 22050 Hz after a reset, as ES1869.DRV computes them
+; (6:1FF4): the 795.5 kHz clock above 22050 Hz, the 397.7 kHz one up to
+; it, and the filter clock from its tables between 22 and 44 kHz, else
+; 7.16 MHz over 35.9 times the rate; CL bit 5 = stereo, EDI = ADI
+ESSREG_S16_Clocks:
+        pushad
+        movzx   ebx,word [edi+EX_S16_Rate]
+        or      ebx,ebx
+        jnz     .rate
+        mov     ebx,22050
+        movzx   eax,byte [edi+EX_S16_TC]
+        or      eax,eax
+        jz      .rate
+        neg     eax
+        add     eax,256
+        mov     ebx,eax
+        mov     eax,1000000
+        xor     edx,edx
+        div     ebx
+        mov     ebx,eax
+.rate:  cmp     ebx,4000
+        jae     .min
+        mov     ebx,4000
+.min:   cmp     ebx,48000
+        jbe     .max
+        mov     ebx,48000
+.max:   mov     eax,397700
+        mov     esi,128
+        cmp     ebx,22050
+        jbe     .clock
+        mov     eax,795500
+        mov     esi,256
+.clock: xor     edx,edx
+        div     ebx                     ; EAX = the divisor, rounded
+        shl     edx,1
+        cmp     edx,ebx
+        jb      .div
+        inc     eax
+.div:   mov     ebp,eax
+        sub     esi,eax
+        mov     eax,esi
+        mov     ah,0xA1
+        call    ESSREG_S16_Reg
+        cmp     ebx,22050
+        jbe     .general
+        cmp     ebp,byte 18
+        jb      .general
+        cmp     ebp,byte 35
+        ja      .general
+        mov     esi,ESSREG_S16_Filter_Stereo
+        test    cl,0x20
+        jnz     .table
+        mov     esi,ESSREG_S16_Filter_Mono
+.table: movzx   eax,byte [esi+ebp-18]
+        jmp     .a2
+.general:
+        mov     eax,199582
+        xor     edx,edx
+        div     ebx
+        shl     edx,1
+        cmp     edx,ebx
+        jb      .a2
+        inc     eax
+.a2:    neg     eax
+        mov     ah,0xA2
+        call    ESSREG_S16_Reg
+        popad
+        ret
+
+; ES1869.DRV's filter dividers (DGROUP 4Eh and 60h) for the 795.5 kHz
+; clock's divisors 18 to 35 (44.2 to 22.7 kHz)
+ESSREG_S16_Filter_Stereo:
+        db 3, 5, 5, 5, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9
+ESSREG_S16_Filter_Mono:
+        db 3, 5, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 10, 10
+
+; the Sound Blaster 16's mixer registers 30h-47h: the program's view in
+; EX_S16_Mix, and the chip's volumes they stand for. AL written to the
+; mixer register the VM selected, ESI = the data port, EDI = ADI; the
+; chip's own registers get it as it comes, at the index the VM gave the
+; chip
+ESSREG_S16_Mix_Write:
+        push    eax
+        push    ecx
+        push    edx
+        mov     ecx,eax                 ; CL = the value
+        call    ESSREG_S16_Index        ; CH = the register
+        movzx   edx,word [edi+ADI_AudioBase]
+        test    byte [edi+EX_S16_Flags],S16_ESS ; the chip's own mixer for
+        jnz     .chip                   ; a program that knows the chip
+        or      ch,ch
+        jz      .reset
+        cmp     ch,0x30
+        jb      .chip
+        cmp     ch,0x47
+        ja      .high
+        movzx   eax,ch
+        mov     [edi+EX_S16_Mix+eax-0x30],cl
+        call    ESSREG_S16_Mix_Apply
+        jmp     .out
+.high:  cmp     ch,0x80
+        jb      .chip
+        cmp     ch,0x82                 ; the card's IRQ, channels and status
+        jbe     .out
+.chip:  call    ESSREG_S16_Chip_Out
+        jmp     .out
+.reset: call    ESSREG_S16_Chip_Out     ; the chip's reset, and the view's
+        call    ESSREG_S16_Mix_Reset
+.out:   pop     edx
+        pop     ecx
+        pop     eax
+        ret
+
+; CH = the mixer register the VM selected, EDI = ADI, ESI = the data port:
+; the index it wrote through the front, or the chip's when it wrote it
+; before the front started (EX_S16_Index FFh)
+ESSREG_S16_Index:
+        mov     ch,[edi+EX_S16_Index]
+        cmp     ch,0xFF
+        jne     .out
+        push    eax
+        push    edx
+        lea     edx,[esi-1]
+        in      al,dx
+        mov     [edi+EX_S16_Index],al
+        mov     ch,al
+        pop     edx
+        pop     eax
+.out:   ret
+
+; the Sound Blaster 16's reset values into the view, EDI = ADI
+ESSREG_S16_Mix_Reset:
+        push    ecx
+        push    esi
+        push    edi
+        lea     edi,[edi+EX_S16_Mix]
+        mov     esi,ESSREG_S16_Mix_Default
+        mov     ecx,24 / 4
+        cld
+        rep     movsd
+        pop     edi
+        pop     esi
+        pop     ecx
+        ret
+ESSREG_S16_Mix_Default:
+        db 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0   ; master, voice, MIDI
+        db 0x00, 0x00, 0x00, 0x00, 0x00, 0x00   ; CD, line, mic, PC speaker
+        db 0x1F, 0x15, 0x0B, 0x00, 0x00, 0x00   ; the switches, the gains
+        db 0x00, 0x00, 0x80, 0x80, 0x80, 0x80   ; AGC, treble, bass
+
+; AL = the VM's read of the mixer register it selected, ESI = the data
+; port, EDI = ADI, EBX = VM
+ESSREG_S16_Mix_Read:
+        push    ecx
+        push    edx
+        call    ESSREG_S16_Index
+        movzx   ecx,ch
+        test    byte [edi+EX_S16_Flags],S16_ESS
+        jnz     .chip
+        cmp     cl,0x30
+        jb      .chip
+        cmp     cl,0x47
+        ja      .high
+        mov     al,[edi+EX_S16_Mix+ecx-0x30]
+        jmp     .out
+.high:  cmp     cl,0x80
+        je      .irq
+        cmp     cl,0x81
+        je      .dma
+        cmp     cl,0x82
+        je      .status
+.chip:  call    ESSREG_S16_Chip_In
+        jmp     .out
+.irq:   call    ESSREG_S16_IRQ_Bits
+        jmp     .out
+.dma:   call    ESSREG_S16_DMA_Bits
+        jmp     .out
+.status:                                ; bit 0 an 8-bit interrupt, bit 1 a
+        xor     al,al                   ; 16-bit one, bit 2 the MPU-401's
+        test    byte [edi+EX_S16_Flags],S16_8
+        jz      .s16
+        or      al,0x01
+.s16:   test    byte [edi+EX_S16_Flags],S16_16
+        jz      .mpu
+        or      al,0x02
+.mpu:   call    ESSREG_S16_MPU_Bit
+.out:   pop     edx
+        pop     ecx
+        ret
+
+; AL = mixer 80h: bit 0 IRQ 2, 1 IRQ 5, 2 IRQ 7, 3 IRQ 10; EDI = ADI
+ESSREG_S16_IRQ_Bits:
+        mov     al,[edi+ADI_IRQ]
+        cmp     al,2
+        je      .b0
+        cmp     al,9                    ; 9 is 2's
+        je      .b0
+        cmp     al,5
+        je      .b1
+        cmp     al,7
+        je      .b2
+        cmp     al,10
+        je      .b3
+        xor     al,al
+        ret
+.b0:    mov     al,1
+        ret
+.b1:    mov     al,2
+        ret
+.b2:    mov     al,4
+        ret
+.b3:    mov     al,8
+        ret
+
+; AL = mixer 81h: bits 0, 1 and 3 for the 8-bit channel, 5 to 7 for the
+; 16-bit one; EDI = ADI
+ESSREG_S16_DMA_Bits:
+        push    ecx
+        mov     cl,[edi+ADI_DMA1Channel]
+        mov     al,1
+        shl     al,cl
+        mov     cl,[edi+EX_S16_Chan]
+        or      cl,cl
+        jz      .out
+        mov     ah,1
+        shl     ah,cl
+        or      al,ah
+.out:   pop     ecx
+        ret
+
+; AL |= 4 when a physical MPU-401 interrupt of the VM in EBX waits (ESS's
+; handler sets ADI flag 1000h for the MPU-401's owner), EDI = ADI
+ESSREG_S16_MPU_Bit:
+        test    word [edi+ADI_Flags],0x1000
+        jz      .out
+        cmp     [edi+ADI_MPUOwner],ebx
+        jne     .out
+        or      al,0x04
+.out:   ret
+
+; the chip's volumes for the Sound Blaster 16's register CH, from the
+; program's view, EDI = ADI, EDX = Audio_Base; keeps ECX
+ESSREG_S16_Mix_Apply:
+        push    eax
+        push    ecx
+        cmp     ch,0x31
+        jbe     .master
+        cmp     ch,0x33
+        jbe     .voice
+        cmp     ch,0x35
+        jbe     .fm
+        cmp     ch,0x3C
+        jbe     .sources                ; CD, line, mic, the PC speaker and
+        cmp     ch,0x3E                 ; the output switches
+        jbe     .input                  ; the input switches
+        jmp     .out                    ; the gains, AGC and tone: kept only
+.master:                                ; 8 bits to the 6-bit 60h and 62h
+        mov     al,[edi+EX_S16_Mix+0]
+        shr     al,2
+        mov     ah,0x60
+        call    ESSREG_Mix_Write
+        mov     al,[edi+EX_S16_Mix+1]
+        shr     al,2
+        mov     ah,0x62
+        call    ESSREG_Mix_Write
+        jmp     .out
+.voice: mov     al,[edi+EX_S16_Mix+2]   ; the Audio 1 (wave) volume 14h
+        mov     ah,[edi+EX_S16_Mix+3]
+        call    ESSREG_S16_Nibbles
+        mov     ah,0x14
+        call    ESSREG_Mix_Write
+        jmp     .out
+.fm:    mov     al,[edi+EX_S16_Mix+4]   ; the music DAC (FM) volume 36h
+        mov     ah,[edi+EX_S16_Mix+5]
+        call    ESSREG_S16_Nibbles
+        mov     ah,0x36
+        call    ESSREG_Mix_Write
+        jmp     .out
+.sources:
+        mov     al,[edi+EX_S16_Mix+6]   ; AuxA (CD) 38h, through the
+        mov     ah,[edi+EX_S16_Mix+7]   ; switches' bits 2 and 1
+        test    byte [edi+EX_S16_Mix+0x0C],0x04
+        jnz     .cdl
+        xor     al,al
+.cdl:   test    byte [edi+EX_S16_Mix+0x0C],0x02
+        jnz     .cdr
+        xor     ah,ah
+.cdr:   call    ESSREG_S16_Nibbles
+        mov     ah,0x38
+        call    ESSREG_Mix_Write
+        mov     al,[edi+EX_S16_Mix+8]   ; line 3Eh, through bits 4 and 3
+        mov     ah,[edi+EX_S16_Mix+9]
+        test    byte [edi+EX_S16_Mix+0x0C],0x10
+        jnz     .linel
+        xor     al,al
+.linel: test    byte [edi+EX_S16_Mix+0x0C],0x08
+        jnz     .liner
+        xor     ah,ah
+.liner: call    ESSREG_S16_Nibbles
+        mov     ah,0x3E
+        call    ESSREG_Mix_Write
+        mov     al,[edi+EX_S16_Mix+0x0A] ; the mono mic 1Ah, through bit 0
+        test    byte [edi+EX_S16_Mix+0x0C],0x01
+        jnz     .mic
+        xor     al,al
+.mic:   mov     ah,al
+        call    ESSREG_S16_Nibbles
+        mov     ah,0x1A
+        call    ESSREG_Mix_Write
+        mov     al,[edi+EX_S16_Mix+0x0B] ; the PC speaker 3Ch, 3 bits
+        shr     al,5
+        mov     ah,0x3C
+        call    ESSREG_Mix_Write
+        jmp     .out
+.input: mov     ah,[edi+EX_S16_Mix+0x0D] ; the record source 1Ch, bits 2:0,
+        or      ah,[edi+EX_S16_Mix+0x0E] ; from the input switches of both
+        xor     ecx,ecx                 ; channels: CL = a source alone, CH
+        test    ah,0x01                 ; = how many; the mic
+        jz      .nomic
+        inc     ch
+.nomic: test    ah,0x06                 ; AuxA (CD)
+        jz      .nocd
+        mov     cl,2
+        inc     ch
+.nocd:  test    ah,0x18                 ; line
+        jz      .noline
+        mov     cl,6
+        inc     ch
+.noline:
+        test    ah,0x60                 ; the music: the record mixer
+        jz      .count
+        mov     cl,5
+        inc     ch
+.count: cmp     ch,1
+        jb      .out                    ; nothing: as it is
+        je      .src
+        mov     cl,5                    ; several: the record mixer
+.src:   mov     ah,0x1C
+        call    ESSREG_Mix_Read
+        and     al,0xF8
+        or      al,cl
+        mov     ah,0x1C
+        call    ESSREG_Mix_Write
+.out:   pop     ecx
+        pop     eax
+        ret
+
+; AL = the chip's two 4-bit volumes for the 8-bit left AL and right AH
+ESSREG_S16_Nibbles:
+        and     al,0xF0
+        shr     ah,4
+        or      al,ah
+        ret
+
+; VDMAD's callback for the VxD's 16-bit channel: EAX = its handle, EBX =
+; the VM, EDX = what the VM did. The device whose front serves the VM acts
+; on it
+ESSREG_S16_DMA:
+        pushad
+        call    ESSREG_S16_ADI
+        or      edi,edi
+        jz      .out
+        call    ESSREG_S16_Notify
+.out:   popad
+        ret
+
+; what the VM did with its 16-bit channel, as VDMAD tells its owner: EAX =
+; the channel's VDMAD handle, EBX = the VM, EDX = 0 when it programmed the
+; channel (while unmasked), the port's address with bit 0 when it masked or
+; requested it, 1 when it read its count, 2 or 3 when it read its page or
+; address; EDI = ADI
+ESSREG_S16_Notify:
+        or      edx,edx
+        jz      ESSREG_S16_DMA_State
+        cmp     edx,byte 3
+        ja      ESSREG_S16_DMA_State
+        cmp     edx,byte 1
+        je      ESSREG_S16_Position
+        ret
+
+; the VM's programming of its 16-bit channel, EAX = the channel's VDMAD
+; handle, EBX = the VM, EDI = ADI: unmasked, Audio 1's channel gets the
+; same region, bytes and mode, in demand transfers unless ESS's "Single
+; Mode DMA" (ADI flag 10000h clear) keeps the VM's, and ESS's handler and
+; VDMAD's program the chip's channel from them, as if the VM had; masked,
+; Audio 1's channel is masked too
+ESSREG_S16_DMA_State:
+        pushad
+        cmp     dword [edi+ADI_DMA1Handle],byte 0
+        je      .out
+        VxDCall VDMAD_Get_Virt_State    ; ESI, ECX, DL and DH
+        test    dl,DMA_MASKED
+        jz      .go
+        test    byte [edi+EX_S16_Flags],S16_DMA16
+        jz      .out
+        and     byte [edi+EX_S16_Flags],~S16_DMA16 & 0xFF
+        mov     eax,[edi+ADI_DMA1Handle]
+        VxDCall VDMAD_Mask_Channel
+        jmp     .out
+.go:    and     dh,~DMA_16BIT & 0xFF    ; a byte channel's count
+        test    byte [edi+ADI_CfgFlags+2],0x01
+        jz      .mode
+        and     dl,0x3F                 ; demand mode
+.mode:  mov     eax,[edi+ADI_DMA1Handle]
+        VxDCall VDMAD_Set_Virt_State
+        or      byte [edi+EX_S16_Flags],S16_DMA16
+        call    L1_0518
+.out:   popad
+        ret
+
+; the VM's view of its 16-bit channel's count, from Audio 1's channel,
+; EDI = ADI, EBX = the VM; AL kept
+ESSREG_S16_Position:
+        test    byte [edi+EX_S16_Flags],S16_DMA16
+        jz      .out
+        pushad
+        mov     eax,[edi+ADI_DMA1Handle]
+        VxDCall VDMAD_Get_Phys_Count    ; ECX = bytes left - 1
+        inc     ecx
+        call    ESSREG_S16_Handle
+        or      eax,eax
+        jz      .done
+        VxDCall VDMAD_Set_Virt_Count    ; in bytes: words - 1 to the VM
+.done:  popad
+.out:   ret
+
+; EAX = the VDMAD handle of the front's 16-bit channel, EDI = ADI, 0 if none
+ESSREG_S16_Handle:
+        mov     al,[edi+EX_S16_Chan]
+        or      al,al
+        jz      .none
+        cmp     [edi+ADI_DMA2Channel],al
+        mov     eax,[edi+ADI_DMA2Handle]
+        je      .out
+        mov     eax,[ESSREG_S16_Virt]
+        ret
+.none:  xor     eax,eax
+.out:   ret
 
 ; --- a DOS program's FM on its own clock ---------------------------------------
 
@@ -3629,13 +4994,23 @@ ESSREG_Read_Settings:
         jc      .skip                   ; not there: the default
         call    ESSREG_Profile_Int
         cmp     dword [ebx],ESSREG_Key_Delay
-        jne     .bit
+        jne     .chan
         mov     ecx,eax                 ; DosFMDelay is the delay in ms too
         cmp     ecx,FMQ_DELAY_MAX
         jbe     .ms
         mov     ecx,FMQ_DELAY_MAX
 .ms:    imul    ecx,ecx,1000
         mov     [ESSREG_FMQ_Delay],ecx
+.chan:  cmp     dword [ebx],ESSREG_Key_S16DMA
+        jne     .bit
+        mov     ecx,eax                 ; SoundBlaster16DMA: 5, 6 or 7, or
+        cmp     ecx,byte 5              ; none
+        jb      .none
+        cmp     ecx,byte 7
+        jbe     .set
+.none:  xor     ecx,ecx
+.set:   mov     [ESSREG_S16_Chan],ecx
+        jmp     .skip
 .bit:   mov     ecx,[ebx+8]             ; its bit
         or      eax,eax
         jz      .off
@@ -4028,6 +5403,10 @@ ESSREG_Opts:            dw OPT_DEFAULT  ; OPT_*: the changes that are on
 ESSREG_FMQ_Delay:       dd FMQ_DELAY * 1000     ; DosFMDelay (us)
 ESSREG_FMQ_Streams:     dd 0            ; FM queues that play
 ESSREG_FMQ_Hooked:      db 0            ; interrupt 8's V86 hook is in
+ESSREG_S16_Chan:        dd S16_CHAN     ; SoundBlaster16DMA: the Sound Blaster
+                                        ; 16's 16-bit channel, 0 for none
+ESSREG_S16_Virt:        dd 0            ; its VDMAD handle, once taken (not
+                                        ; Audio 2's channel)
 
 section PDAT
 
@@ -4101,6 +5480,8 @@ ESSREG_Settings:
         dd ESSREG_Key_A1Filter, ESSREG_Sec_Drv, OPT_A1_FILTER
         dd ESSREG_Key_DSLock, ESSREG_Sec_VxD, OPT_DS_LOCK
         dd ESSREG_Key_Latch, ESSREG_Sec_VxD, OPT_DRQ_LATCH
+        dd ESSREG_Key_SB16, ESSREG_Sec_VxD, OPT_SB16
+        dd ESSREG_Key_S16DMA, ESSREG_Sec_VxD, 0 ; the channel, no bit
         dd 0
 ESSREG_Sec_VxD:         db "ES1869.VXD", 0
 ESSREG_Sec_Drv:         db "ES1869.DRV", 0
@@ -4118,3 +5499,5 @@ ESSREG_Key_Filter:      db "Audio2Filter", 0
 ESSREG_Key_A1Filter:    db "Audio1Filter", 0
 ESSREG_Key_DSLock:      db "DirectSoundLock", 0
 ESSREG_Key_Latch:       db "DrqLatch", 0
+ESSREG_Key_SB16:        db "SoundBlaster16", 0
+ESSREG_Key_S16DMA:      db "SoundBlaster16DMA", 0

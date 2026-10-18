@@ -41,8 +41,9 @@ KEYS = {                            # key: its bit in ESSREG_Opts
     (DRV, "Audio1Filter"): 0x0400,
     (VXD, "DirectSoundLock"): 0x1000,
     (VXD, "DrqLatch"): 0x2000,
+    (VXD, "SoundBlaster16"): 0x4000,
 }
-DEFAULT, READ = 0x18FF, 0x8000
+DEFAULT, READ = 0x58FF, 0x8000
 # every change off: ESS's driver
 ESS = {key: "0" for key in KEYS}
 ESS.update({(DRV, "Audio2Oversampling"): "1", (DRV, "Audio2Filter"): "1",
@@ -51,7 +52,11 @@ WIN_AUDIO = 0x220
 
 
 def dos_mixer(m, vm=None):
-    """a DOS game sets up the mixer its way (test_vxddos)"""
+    """a DOS game that knows the chip (E7h) sets up the mixer its way, with
+    the chip's own registers (test_vxddos)"""
+    m.outb(vm or VM_DOS, 0x22C, 0xE7)
+    m.inb(vm or VM_DOS, 0x22A)
+    m.inb(vm or VM_DOS, 0x22A)
     for reg in WINDOWS:
         m.outb(vm or VM_DOS, 0x224, reg)
         m.outb(vm or VM_DOS, 0x225, 0x00 if reg != 0x0E else 0x02)
@@ -65,7 +70,7 @@ class ReadTest(VxDBuilds, unittest.TestCase):
                  "OPT_FM_AUDIBLE", "OPT_DOS_MIXER", "OPT_RESET_FM",
                  "OPT_REC_TAKES", "OPT_FM_TIMED", "OPT_A2_4X",
                  "OPT_A2_FILTER", "OPT_A1_FILTER", "OPT_DS_LOCK",
-                 "OPT_DRQ_LATCH")
+                 "OPT_DRQ_LATCH", "OPT_SB16")
         self.assertEqual([m.syms[n] for n in names], list(KEYS.values()))
         self.assertEqual(m.syms["OPT_READ"], READ)
 
@@ -123,7 +128,7 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         m = self.machine()
         m.start({(VXD, "VirtualFM"): "0"})
         calls = m.emu.services.count(0x000100B3)
-        self.assertEqual(calls, len(KEYS))
+        self.assertEqual(calls, len(KEYS) + 1)  # and SoundBlaster16DMA
         m.emu.ini = {}                          # changed while Windows runs
         opl3(m, VM_DOS)
         m.api(VM_SYS, 0x0400)
@@ -136,22 +141,27 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         m.start({})
         out, cf = m.api(VM_SYS, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0114)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x3FFF)   # DrqLatch is off
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0115)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0xBFFF)   # DrqLatch is off
         self.assertEqual(out["ECX"] & 0xFFFF, DEFAULT | READ)
         m = self.machine()
         m.start({(VXD, "VirtualFM"): "0", (VXD, "DosMixerRestore"): "0",
                  (VXD, "RecordTakesDSP"): "0",
                  (DRV, "Audio2Filter"): "1", (DRV, "Audio1Filter"): "1"})
         out, cf = m.api(VM_SYS, 0x0400)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x3FFF & ~0x0D80)
-        self.assertEqual(out["ECX"] & 0xFFFF, 0x105D | 0x0E00 | READ)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0xBFFF & ~0x0D80)
+        self.assertEqual(out["ECX"] & 0xFFFF, 0x505D | 0x0E00 | READ)
         m = self.machine()
         m.start({(VXD, "DrqLatch"): "1", (VXD, "DirectSoundLock"): "0"})
         out, cf = m.api(VM_SYS, 0x0400)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x7FFF & ~0x2000)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0xFFFF & ~0x2000)
         self.assertEqual(out["ECX"] & 0xFFFF, (DEFAULT & ~0x1000) | 0x2000
                          | READ)
+        m = self.machine()
+        m.start({(VXD, "SoundBlaster16"): "0"})
+        out, cf = m.api(VM_SYS, 0x0400)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x3FFF)
+        self.assertEqual(out["ECX"] & 0xFFFF, (DEFAULT & ~0x4000) | READ)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
@@ -225,6 +235,51 @@ class EachSettingTest(VxDBuilds, unittest.TestCase):
         self.assertEqual(m.hw.mixer, stock.hw.mixer)
         self.assertEqual(m.hw.mixer[0x50], 0x00)    # the game's 3-D stays
         self.assertFalse(m.adi8(0xEC) & 0x01)
+
+    def test_sound_blaster_16(self):
+        # off: the chip answers a DOS program itself, through untrapped
+        # ports, as with ESS's driver; on: the front answers the version,
+        # and a Sound Blaster Pro program's accesses reach the chip the same
+        def program(m, mixer=dos_mixer):
+            m.outb(VM_DOS, 0x226, 1)
+            m.outb(VM_DOS, 0x226, 0)
+            m.inb(VM_DOS, 0x22A)
+            m.outb(VM_DOS, 0x22C, 0xE1)
+            version = (m.inb(VM_DOS, 0x22A), m.inb(VM_DOS, 0x22A))
+            n = len(m.hw.log)
+            mixer(m)
+            for b in (0xD1, 0x40, 0xD2, 0x48, 0xFF, 0x03, 0x1C):
+                m.outb(VM_DOS, 0x22C, b)
+            m.inb(VM_DOS, 0x22E)
+            return version, m.hw.log[n:]
+
+        def pro_mixer(m):
+            """a Sound Blaster Pro program's mixer: its registers, which
+            the chip has at the same places"""
+            for reg in (0x04, 0x0A, 0x0C, 0x0E, 0x22, 0x26, 0x28, 0x2E):
+                m.outb(VM_DOS, 0x224, reg)
+                m.outb(VM_DOS, 0x225, 0x11 if reg != 0x0E else 0x02)
+                m.inb(VM_DOS, 0x225)
+        stock = self.machine(False)
+        off = self.machine_with({(VXD, "SoundBlaster16"): "0"})
+        self.assertEqual(program(stock), program(off))
+        self.assertEqual(program(off)[0], (0x03, 0x01))
+        self.assertIn((VM_DOS, 0x22C), off.emu.trap_off)
+        stock = self.machine(False)
+        on = self.machine_with({})
+        version, log = program(on, pro_mixer)
+        self.assertEqual(version, (0x04, 0x05))
+        self.assertEqual(log, program(stock, pro_mixer)[1])
+        self.assertNotIn((VM_DOS, 0x22C), on.emu.trap_off)
+        # the channel: 5 to 7, or none
+        for value, channel in (("5", 5), ("6", 6), ("7", 7), ("0", 0),
+                               ("1", 0), ("8", 0), ("", 0)):
+            with self.subTest(value=value):
+                m = self.machine_with({(VXD, "SoundBlaster16DMA"): value})
+                self.assertEqual(m.emu.read32(m.syms["ESSREG_S16_Chan"]),
+                                 channel)
+        m = self.machine_with({})
+        self.assertEqual(m.emu.read32(m.syms["ESSREG_S16_Chan"]), 5)
 
     def test_reset_dos_fm(self):
         m = self.machine_with({(VXD, "ResetDosFM"): "0"})

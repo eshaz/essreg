@@ -1770,7 +1770,11 @@ L5_126D:
 %else
         call Save_DOS_Mixer                             ; 1279
 %endif
+%if ESSREG_EXT
+        call ESSREG_DSP_Untrap                          ; essreg: then the Sound Blaster 16
+%else
         call Audio_Disable_Local_Trapping               ; 127E
+%endif
         test word [edi+0x4],0x20                        ; 1283
         jnz short L5_12B2                               ; 1289
         VxDCall Test_Sys_VM_Handle                      ; 128B

@@ -459,6 +459,16 @@ DOS game expects it
   DMA request until the DMA controller answers it, each time a program takes
   the chip. It is off unless you set it
   ([docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md#what-software-can-do-about-it)).
+* A DOS game written for the Sound Blaster 16 gets one. The chip answers as
+  a Sound Blaster Pro and plays 16-bit sound only through ESS's own
+  commands, so such a game played 8-bit sound at best. The extended driver
+  answers the game as a Sound Blaster 16, version 4.05, and turns its 16-bit
+  stereo transfers, its 16-bit DMA channel and its mixer settings into the
+  chip's own, on Audio 1. Set `BLASTER=A220 I5 D1 H5 P330 T6` with the
+  card's address, IRQ and 8-bit channel, and `H5` for the 16-bit channel
+  ([docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#a-sound-blaster-16-for-dos-programs)).
+  A game or tool that knows the ESS chip, which it asks with E7h, gets the
+  chip as before.
 
 The Sound Blaster part and the MPU-401 still belong to one program at a
 time, as with ESS's driver. A DOS game that starts while Windows plays a

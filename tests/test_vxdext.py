@@ -90,8 +90,8 @@ class ExtensionTest(VxDBuilds, unittest.TestCase):
         m, _hw = self.emu()
         out, cf = self.api(m, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0114)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x3FFF)   # DrqLatch is off
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0115)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0xBFFF)   # DrqLatch is off
         self.assertEqual(out["EDX"] & 0xFFFF, 14)
         out, cf = self.api(m, 0x0000)            # stock functions still work
         self.assertEqual((cf, out["EAX"] & 0xFFFF), (False, 0x0404))
@@ -354,6 +354,7 @@ HOOKS = [
     (5, 0x110C, 0x110F),    # Release_Resources, DSP: ESSREG_DSP_Restore
     (5, 0x122A, 0x122D),    # Acquire_Resources, FM: ESSREG_FM_Reset
     (5, 0x127A, 0x127D),    # Acquire_Resources, DSP: ESSREG_DSP_Save
+    (5, 0x127F, 0x1282),    # its untrapping: ESSREG_DSP_Untrap
     (5, 0x1362, 0x1362),    # the API's groups: 0-4
     (5, 0x136D, 0x1370),    # and their table
     (5, 0x198D, 0x1990),    # a VM takes the DSP, 71h: ESSREG_A2_Mode
