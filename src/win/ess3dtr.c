@@ -303,6 +303,7 @@ static HWND tip;
 static int tip_id;          // the control the mouse rests on
 static const char *tip_now; // and its tip
 static int tip_said;        // the tip holds a message instead
+static int hiding;          // the panel is on its way out
 static long exe_time;       // ess3d.exe's time and size when the tray started
 static long exe_size;
 
@@ -1139,13 +1140,16 @@ static void tip_show(void) {
 
 // a message in the tip, under a control, until a click, a key or ms
 static void tip_say(HWND ctl, const char *text, UINT ms) {
-  static char said[96];
+  static char said[160];
   RECT rc;
 
-  if (!tip || !ctl)
+  // not for a panel that is hidden or going: a field that loses the
+  // focus as the panel hides would leave the tip behind
+  if (!tip || !ctl || !panel || !IsWindowVisible(panel) || hiding)
     return;
   tip_hide();
   strncpy(said, text, sizeof(said) - 1);
+  said[sizeof(said) - 1] = 0;
   tip_now = said;
   tip_id = GetDlgCtrlID(ctl);
   GetWindowRect(ctl, &rc);
@@ -1331,7 +1335,9 @@ static void panel_hide(void) {
   if (moving >= 0)
     refresh();
   if (panel && IsWindowVisible(panel)) {
+    hiding = 1; // the focus leaves a field: no tip for what it holds
     ShowWindow(panel, SW_HIDE);
+    hiding = 0;
     hidden_at = GetTickCount();
   }
 }
@@ -1343,10 +1349,10 @@ static void panel_check(void) {
   POINT pt;
   RECT rc;
 
-  // the mouse left the panel: no tip
+  // the mouse left the panel: no tip, while a message stays its time
   GetCursorPos(&pt);
   GetWindowRect(panel, &rc);
-  if (tip_id && !PtInRect(&rc, pt)) {
+  if (tip_id && !tip_said && !PtInRect(&rc, pt)) {
     tip_hide();
     tip_id = 0;
   }
