@@ -192,6 +192,7 @@ class Machine(Cpu):
         self.qpi_accesses = []          # 1A00h/1A01h: ("in", port, v) ...
         self.chained = []               # calls to the callback before ours
         self.emm386 = None              # (major, minor) of EMMXXXX0
+        self.noems = False              # EMM386 with NOEMS: EMMQXXX0
         self.emm_fail = set()           # the 4A15h calls that fail (0, 1, ...)
         self.emm_traps = []             # 4A15h: dicts
         self.dpmi = False               # int 2Fh 1687h answers
@@ -302,7 +303,8 @@ class Machine(Cpu):
             if name == "QEMM386$" and self.qemm:
                 self.w16("eax", 5)
                 self.carry(False)
-            elif name == "EMMXXXX0" and self.emm386:
+            elif name == ("EMMQXXX0" if self.noems else "EMMXXXX0") \
+                    and self.emm386:
                 self.w16("eax", 6)
                 self.carry(False)
             else:
@@ -420,8 +422,10 @@ class Machine(Cpu):
 
     # --- the installer -------------------------------------------------------
     def install(self, tail="", qemm=False, qpiemu=False, emm386=None,
-                dpmi=False, windows=0, loaded=False, old_callback=True):
+                noems=False, dpmi=False, windows=0, loaded=False,
+                old_callback=True):
         self.qemm, self.qpiemu, self.emm386 = qemm, qpiemu, emm386
+        self.noems = noems
         self.dpmi, self.windows = dpmi, windows
         self.qpi_callback = (STUB_PARA, OLD_OFF) if old_callback else (0, 0)
         if loaded:

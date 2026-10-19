@@ -280,13 +280,13 @@ and stop at the first surprise. Each step says what you should see.
 
 ### D2. esssb16 (DOS)
 
-1. In real DOS with `EMM386.EXE` loaded (`DEVICE=C:\WINDOWS\EMM386.EXE RAM`
-   in `CONFIG.SYS`), run `LH ESSSB16`. It prints the card's base, IRQ and
-   channels, the `BLASTER` line to set, and
-   `traps: EMM386 for real-mode games`. `MEM /C` shows it in upper memory,
-   3.5 KB. Run it again: "already loaded". In a Windows DOS box it refuses
-   with "not for a Windows DOS box", and without a memory manager with "no
-   port traps".
+1. In real DOS with `EMM386.EXE` loaded
+   (`DEVICE=C:\WINDOWS\EMM386.EXE NOEMS` or `RAM` in `CONFIG.SYS`), run
+   `LH ESSSB16`. It prints the card's base, IRQ and channels, the `BLASTER`
+   line to set, and `traps: EMM386 for real-mode games`. `MEM /C` shows it
+   in upper memory, 3.5 KB. Run it again: "already loaded". In a Windows DOS
+   box it refuses with "not for a Windows DOS box", and without a memory
+   manager with "no port traps".
 2. Set `BLASTER` as printed. Run a real-mode game that supports the Sound
    Blaster 16, such as one with the Miles Sound System's `SETUP` or
    `SOUNDSET`. Its setup detects a Sound Blaster 16 (DSP version 4.05) and

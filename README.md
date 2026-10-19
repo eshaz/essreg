@@ -697,8 +697,8 @@ does the same, and `esssb16` refuses to load there.
 Nothing in DOS sees a port access unless the processor traps it, so
 `esssb16` needs a memory manager that traps ports for it:
 * MS-DOS's `EMM386.EXE` 4.46 or later, the one of MS-DOS 6.22 and of Windows
-  95 and 98, through its port trap interface (int 2Fh 4A15h, as
-  [SoftMPU](https://github.com/bjt42/softmpu) uses it);
+  95 and 98, with or without `NOEMS`, through its port trap interface (int
+  2Fh 4A15h, as [SoftMPU](https://github.com/bjt42/softmpu) uses it);
 * QEMM 7.03 or later, through
   [QPI](https://www.cs.cmu.edu/~ralf/papers/qpi.txt);
 * [JEMM386 or JEMMEX](https://github.com/Baron-von-Riedesel/Jemm) with

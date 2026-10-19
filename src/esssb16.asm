@@ -2052,10 +2052,14 @@ qpi_install:
 ; also passes the FM ports +8h and +9h
 emm_install:
         mov     ax,0x3D00
-        mov     dx,emm_device
+        mov     dx,emm_device           ; EMMXXXX0, or EMMQXXX0 with NOEMS,
+        int     0x21                    ; where EMM386 hides its device
+        jnc     .open
+        mov     ax,0x3D00
+        mov     dx,emm_device2
         int     0x21
         jc      .none
-        mov     bx,ax
+.open:  mov     bx,ax
         mov     dx,emm_version
         mov     cx,2
         mov     ax,0x4402
@@ -2259,6 +2263,7 @@ rmcs_edx        equ rmcs + 5 * 4
 
 qemm_device:    db "QEMM386$", 0
 emm_device:     db "EMMXXXX0", 0
+emm_device2:    db "EMMQXXX0", 0
 blaster_name:   db "BLASTER=", 0
 
 banner:         db "esssb16 1.0: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"

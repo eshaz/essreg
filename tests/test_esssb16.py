@@ -174,6 +174,14 @@ class InstallTest(unittest.TestCase):
                           (BASE + 0xE, shim), (BASE + 0xF, shim)])
         self.assertEqual(first["size"], m.sym("resident_end"))
 
+    def test_emm386_noems(self):
+        """Windows 98's EMM386 with NOEMS: the device is EMMQXXX0"""
+        m = machine()
+        m.install(emm386=(4, 95), noems=True)
+        self.assertEqual(m.exit[0], "tsr")
+        self.assertIn("traps: EMM386 for real-mode games", m.output)
+        self.assertEqual(len(m.emm_traps), 2)
+
     def test_emm386_one_table(self):
         m = machine()
         m.emm_fail = {1}
