@@ -3,11 +3,13 @@
 # Licensed under GPL Version 3.0
 """esssb16.com in a CPU emulator: the installer under QEMM, QPIEMU, EMM386
 and a DPMI host, its refusals and what it says about them, and the Sound
-Blaster 16 front through the QPI callback, EMM386's handler and HDPMI32i's
-handler against the chip model: the DSP's answers, 16-bit and 8-bit
-transfers on Audio 1 with the rates ES1869.DRV would pick, the game's
-16-bit DMA channel carried over to the card's, the mixer's view, the
-interrupts, resets, and the chip's own commands going through.
+Blaster 16 front through the QPI callback, EMM386's handler at ring 0 and
+HDPMI32i's handler at ring 3 against the chip model: the DSP's answers,
+16-bit and 8-bit transfers on Audio 1 with the rates ES1869.DRV would
+pick, the game's 16-bit DMA channel carried over to the card's, the
+mixer's view, the interrupts, resets, and the chip's own commands going
+through. Every resident test runs after DOS has reused the memory the
+TSR gave back.
 
 usage: python3 -m unittest tests.test_esssb16   (needs nasm and unicorn)
 """
@@ -26,9 +28,9 @@ import build_esssb16  # noqa: E402
 
 if HAVE_UNICORN:
     from tsremu import (Machine, PMMachine, Chip, DeadChip,  # noqa: E402
-                        PAGE_PORTS, PSP_PARA, ENV_PARA, STUB_PARA, HOST_PARA,
-                        OLD_OFF, STUB32, VENDOR_OFF, SEL_DATA, SEL_CODE32,
-                        SEL_NEW)
+                        PAGE_PORTS, PSP_PARA, ENV_PARA, STUB_PARA, OLD_OFF,
+                        STUB32, VENDOR_OFF, SEL_CODE16, SEL_DATA, SEL_CODE32,
+                        POISON)
 
 E_USAGE, E_NOCARD, E_NOTRAP, E_WINDOWS, E_LOADED = 1, 2, 3, 4, 5
 F_ESS, F_EXT, F_16, F_8, F_RUN, F_AUTO, F_RESET = 1, 2, 4, 8, 0x10, 0x20, 0x80
@@ -47,6 +49,9 @@ def build():
 
 def paragraphs(syms):
     return (syms["resident_end"] + 15) >> 4
+
+
+HOST = 0x20             # HDPMI's data for a client, in paragraphs
 
 
 def machine(chip=None, env="BLASTER=A220 I5 D1 H5 P330 T6"):
@@ -119,6 +124,18 @@ class BuildTest(unittest.TestCase):
         self.assertLess(paragraphs(syms), 256)       # under 4 KB resident
         self.assertLess(syms["resident_end"], syms["install"] + 1)
 
+    def test_host_area(self):
+        """the DPMI host's data go right after the resident part, over the
+        routines that run before the switch"""
+        _image, syms = build()
+        self.assertEqual(syms["host_area"], paragraphs(syms) * 16)
+        self.assertEqual(syms["HOST_PARAS"], HOST)
+        self.assertGreaterEqual(syms["host_code_end"] - syms["host_area"],
+                                HOST * 16)
+        for name in ("install", "print", "trap_dpmi", "hdpmi_ranges",
+                     "rmcs", "msg_nohdpmi", "msg_hdpmi", "hdpmi_name"):
+            self.assertGreaterEqual(syms[name], syms["host_code_end"], name)
+
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
 class InstallTest(unittest.TestCase):
@@ -126,6 +143,8 @@ class InstallTest(unittest.TestCase):
         m = machine()
         m.install(qpiemu=True)
         self.assertEqual(m.exit, ("tsr", paragraphs(m.syms)))
+        self.assertEqual(m.data8("signature"), ord("E"))
+        self.assertEqual(m.mem(m.addr("install"), 1)[0], POISON)
         self.assertIn("ES1869 at 220h, IRQ 5, DMA 1, the game's DMA 5 "
                       "through it", m.output)
         self.assertIn("set BLASTER=A220 I5 D1 H5 P330 T6", m.output)
@@ -186,7 +205,12 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(call["table"],
                          [(BASE + o, shim if o in (4, 5, 6, 0xA, 0xC, 0xE, 0xF)
                            else skip) for o in range(4, 0x10)])
-        self.assertEqual(call["size"], m.sym("resident_end"))
+        # EMM386 searches the table where it is: in the resident part, in
+        # the size its selectors get
+        self.assertEqual((call["ds"], call["si"]),
+                         (PSP_PARA, m.sym("emm_table")))
+        self.assertEqual(call["size"], paragraphs(m.syms) * 16)
+        self.assertLessEqual(call["si"] + 4 * 12, m.sym("resident_end"))
 
     def test_emm386_noems(self):
         """Windows 98's EMM386 with NOEMS: the device is EMMQXXX0"""
@@ -293,33 +317,24 @@ class InstallTest(unittest.TestCase):
         self.assertIn("set BLASTER=A220 I5 D1 P330 T6", m.output)
 
     def test_dpmi(self):
-        """the DPMI host: the switch, the handler's selector, HDPMI32i's
-        traps, then the TSR through a real-mode int 21h"""
+        """HDPMI: the switch with the host's data after the resident part,
+        16-bit code on the host's first selectors, HDPMI32i's traps for
+        them, the TSR through a real-mode int 21h that keeps the host's
+        data; then a protected-mode game's accesses through the handler
+        as the installer registered it"""
         m = machine()
         m.install(qpiemu=True, dpmi=True)
         self.assertEqual(m.stopped, "dpmi")
-        self.assertEqual(m.resized, [(PSP_PARA, 0x1000)])
-        self.assertEqual(m.allocated, [m.dpmi_paras])
-        self.assertEqual(m.dpmi_call[:2], (1, HOST_PARA))
+        self.assertEqual((m.resized, m.allocated), ([], []))
+        self.assertEqual(m.dpmi_call[:2], (1, PSP_PARA + paragraphs(m.syms)))
         pm = PMMachine(m)
         rmcs = pm.install(m)
-        fns = [c[0] for c in pm.dpmi_calls]
-        self.assertEqual(fns, [0x0000, 0x0007, 0x0008, 0x0009, 0x0300])
-        calls = dict(pm.dpmi_calls)
-        self.assertEqual(calls[0x0000]["ecx"] & 0xFFFF, 1)
-        for fn in (0x0007, 0x0008, 0x0009):
-            self.assertEqual(calls[fn]["ebx"] & 0xFFFF, SEL_NEW)
-        self.assertEqual((calls[0x0007]["ecx"] & 0xFFFF,
-                          calls[0x0007]["edx"] & 0xFFFF),
-                         (PSP_PARA * 16 >> 16, PSP_PARA * 16 & 0xFFFF))
-        self.assertEqual((calls[0x0008]["ecx"] & 0xFFFF,
-                          calls[0x0008]["edx"] & 0xFFFF), (0, 0xFFFF))
-        self.assertEqual(calls[0x0009]["ecx"] & 0xFFFF, 0x00FA)
-        traps = [(r["esi"] & 0xFFFF, r["edi"] & 0xFFFF, r["ecx"] & 0xFFFF,
-                  r["edx"], r["ebx"] & 0xFFFF)
+        self.assertEqual([c[0] for c in pm.dpmi_calls], [0x0300])
+        traps = [(r["esi"], r["edi"], r["ecx"] & 0xFFFF, r["edx"],
+                  r["ebx"] & 0xFFFF)
                  for fn, r in pm.vendor_calls if fn == 6]
-        self.assertEqual(traps, [(BASE + o, n, SEL_NEW, m.sym("hdpmi_shim"),
-                                  SEL_DATA)
+        self.assertEqual(traps, [(BASE + o, n, SEL_CODE16,
+                                  m.sym("hdpmi_shim"), SEL_DATA)
                                  for o, n in ((4, 3), (0xA, 1), (0xC, 1),
                                               (0xE, 2))])
         self.assertIn("HDPMI32i for protected-mode games", pm.output)
@@ -329,10 +344,27 @@ class InstallTest(unittest.TestCase):
                          SEL_CODE32.to_bytes(2, "little"))
         eax = int.from_bytes(rmcs[0x1C:0x20], "little")
         edx = int.from_bytes(rmcs[0x14:0x18], "little")
-        self.assertEqual((eax, edx), (0x3100, paragraphs(m.syms)))
+        self.assertEqual((eax, edx), (0x3100, paragraphs(m.syms) + HOST))
         self.assertEqual(rmcs[0x2E:0x32], b"\0\0\0\0")      # SS:SP: the host's
+        self.assertEqual(m.kept, paragraphs(m.syms) + HOST)
+        # a protected-mode game, through what the installer registered
+        m.chip.commands = []
+        pm.hdpmi_io(BASE + 0xC, 0xE1)
+        self.assertEqual((pm.hdpmi_io(BASE + 0xA), pm.hdpmi_io(BASE + 0xA)),
+                         (4, 5))
+        game_dma(m.chip, 5, 0x1234, 0x07FF, 0x03, SINGLE | AUTO | PLAY)
+        for b in (0x41, 0xAC, 0x44, 0xB6, 0x30, 0xFF, 0x07):
+            pm.hdpmi_io(BASE + 0xC, b)
+        self.assertEqual(regs(m)[0xB7], 0xBC)
+        self.assertEqual(m.chip.dma[1]["addr"], 0x2468)
+        # and a real-mode game through QPI, on the same memory
+        m.chip.commands = []
+        m.dsp(0xE1)
+        self.assertEqual((m.dsp_read(), m.dsp_read()), (4, 5))
 
     def test_dpmi_without_hdpmi(self):
+        """a host with HDPMI's logo that doesn't answer 168Ah: no traps, and
+        the TSR still keeps the host's data"""
         m = machine()
         m.install(qpiemu=True, dpmi=True)
         pm = PMMachine(m)
@@ -341,13 +373,60 @@ class InstallTest(unittest.TestCase):
         self.assertEqual([fn for fn, _r in pm.vendor_calls], [])
         self.assertIn("play 8-bit without HDPMI32i", pm.output)
         self.assertEqual(int.from_bytes(rmcs[0x1C:0x20], "little"), 0x3100)
+        self.assertEqual(m.kept, paragraphs(m.syms) + HOST)
 
-    def test_dpmi_no_memory(self):
+    def test_dpmi_not_hdpmi(self):
+        """another DPMI host: no switch, and the TSR as without one"""
         m = machine()
-        m.alloc_fail = True
+        m.dpmi_logo = b"CWSDPMI\0"
         m.install(qpiemu=True, dpmi=True)
+        self.assertIsNone(m.dpmi_call)
         self.assertEqual(m.exit, ("tsr", paragraphs(m.syms)))
         self.assertIn("play 8-bit without HDPMI32i", m.output)
+
+    def test_dpmi_too_much_host_data(self):
+        m = machine()
+        m.dpmi_paras = HOST + 1
+        m.install(qpiemu=True, dpmi=True)
+        self.assertIsNone(m.dpmi_call)
+        self.assertEqual(m.exit, ("tsr", paragraphs(m.syms)))
+
+    def test_dpmi_switch_fails(self):
+        """the switch fails after the host took its data: the installer
+        goes on in real mode with nothing of what it overwrote"""
+        m = machine()
+        m.dpmi_fails = True
+        m.install(qpiemu=True, dpmi=True)
+        self.assertIsNotNone(m.dpmi_call)
+        self.assertEqual(m.exit, ("tsr", paragraphs(m.syms)))
+        self.assertIn("play 8-bit without HDPMI32i", m.output)
+        m.dsp(0xE1)
+        self.assertEqual((m.dsp_read(), m.dsp_read()), (4, 5))
+
+    def test_hdpmi32_without_i(self):
+        """HDPMI32 (IOPL 3) refuses the traps: none, a DPMI TSR still"""
+        m = machine()
+        m.install(qpiemu=True, dpmi=True)
+        pm = PMMachine(m)
+        pm.trap_fail = {0}
+        rmcs = pm.install(m)
+        self.assertEqual([fn for fn, _r in pm.vendor_calls], [6])
+        self.assertIn("play 8-bit without HDPMI32i", pm.output)
+        self.assertEqual(int.from_bytes(rmcs[0x14:0x18], "little"),
+                         paragraphs(m.syms) + HOST)
+
+    def test_hdpmi_traps_all_or_none(self):
+        """a range refused after others: those are released again"""
+        m = machine()
+        m.install(qpiemu=True, dpmi=True)
+        pm = PMMachine(m)
+        pm.trap_fail = {2}
+        pm.install(m)
+        calls = [(fn, r["edx"]) for fn, r in pm.vendor_calls]
+        self.assertEqual([fn for fn, _edx in calls], [6, 6, 6, 7, 7])
+        self.assertEqual([edx for fn, edx in calls if fn == 7],
+                         [0x1010, 0x1000])
+        self.assertIn("play 8-bit without HDPMI32i", pm.output)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
@@ -770,8 +849,8 @@ class FrontTest(unittest.TestCase):
         self.assertEqual(n, 48)
 
     def test_emm386_handler(self):
-        """the same front through EMM386's handler, which passes the ports
-        it doesn't answer back to EMM386"""
+        """the same front through EMM386's handler at ring 0, which passes
+        the ports it doesn't answer back to EMM386"""
         m = installed(emm386=(4, 95), noems=True)
         m.path = "emm"
         m.dsp(0xE1)
@@ -784,13 +863,20 @@ class FrontTest(unittest.TestCase):
         self.assertEqual(m.chip.dma[1]["addr"], 0x2468)
         self.assertEqual(m.chained, [])
         self.assertEqual(m.emm_io(BASE + 6), (0xA5, True))
+        for o in (7, 8, 9, 0xB, 0xD):               # in the range, passed
+            self.assertEqual(m.emm_io(BASE + o, 0x12)[1], True)
+            self.assertEqual(m.emm_io(BASE + o)[1], True)
+        self.assertEqual(m.emm_io(BASE + 0x10), (None, True))   # not trapped
         self.assertEqual(m.chained, [])
-        m._frame()
-        m.w16("cs", PSP_PARA)
-        m.w16("eip", m.sym("emm_pass"))
-        m.w("eflags", 0x202)
-        m.run(m.addr("emm_pass"))
-        self.assertTrue(m.r("eflags") & 1)
+
+    def test_emm386_out_is_8(self):
+        """EMM386's documented direction for a byte out, 8 (4 in 6.22)"""
+        m = installed(emm386=(4, 95), noems=True)
+        m.path, m.emm_out = "emm", 8
+        m.dsp(0xE1)
+        self.assertEqual((m.dsp_read(), m.dsp_read()), (4, 5))
+        m.mix_set(0x30, 0xF0)
+        self.assertEqual(m.chip.mixer[0x60], 0x3C)
 
     def test_stack(self):
         """the front runs on its own stack, below the game's"""
@@ -805,12 +891,36 @@ class FrontTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class EMM386FrontTest(FrontTest):
+    """the Sound Blaster 16 through EMM386's handler at ring 0"""
+
+    def setUp(self):
+        self.m = installed(emm386=(4, 95), noems=True)
+        self.m.path = "emm"
+
+    def test_other_ports(self):
+        """the ports QPI chains are EMM386's to do"""
+        m = self.m
+        m.chip.ports[6] = 0x33
+        self.assertEqual(m.inp(BASE + 6), 0x33)
+        self.assertEqual(m.chained, [(BASE + 6, 0, 0x33)])
+
+    def test_stack(self):
+        """the front runs on EMM386's stack, not its own"""
+        m = self.m
+        m.dsp(0xB6, 0x30, 0xFF, 0x07)
+        used = m.mem(m.addr("stack"), m.sym("stack_top") - m.sym("stack"))
+        self.assertEqual(used.lstrip(b"\0"), b"")
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
 class HDPMITest(unittest.TestCase):
     """the front through HDPMI32i's handler at ring 3"""
 
     def setUp(self):
         self.m = installed()
         self.pm = PMMachine(self.m)
+        self.pm.fake_install()
 
     def test_version(self):
         pm = self.pm

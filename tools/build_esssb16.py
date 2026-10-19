@@ -40,25 +40,43 @@ def build(output=None, workdir=None):
         raise SystemExit("build_esssb16: nasm failed")
     with open(output, "rb") as f:
         data = f.read()
-    return data, symbols(mapfile)
+    syms = symbols(mapfile)
+    check(syms)
+    return data, syms
 
 
 def symbols(mapfile):
-    """the symbols of NASM's map: {name: offset in the segment}"""
+    """the symbols of NASM's map: {name: offset in the segment}, and the
+    constants (EQU) with their values"""
     syms = {}
     with open(mapfile) as f:
         for line in f:
             parts = line.split()
-            if len(parts) != 3:
-                continue
             try:
-                real, virtual = int(parts[0], 16), int(parts[1], 16)
+                values = [int(p, 16) for p in parts[:-1]]
             except ValueError:
                 continue
-            if parts[2] == "Name":
-                continue
-            syms[parts[2]] = virtual if virtual >= real else real
+            if len(parts) == 2:
+                syms[parts[1]] = values[0]
+            elif len(parts) == 3:
+                syms[parts[2]] = max(values)
     return syms
+
+
+def check(syms):
+    """the layout the program relies on: the DPMI host's data, after the
+    resident part, take the place of routines that run before the switch
+    only, so those must fill the host's paragraphs"""
+    paras = syms["RESIDENT_PARAS"]
+    if syms["host_area"] != paras * 16:
+        raise SystemExit("build_esssb16: host_area is at %Xh, not at the "
+                         "resident part's end, %Xh"
+                         % (syms["host_area"], paras * 16))
+    room = syms["host_code_end"] - syms["host_area"]
+    if room < syms["HOST_PARAS"] * 16:
+        raise SystemExit("build_esssb16: the routines before the DPMI "
+                         "switch take %d bytes, less than the host's %d"
+                         % (room, syms["HOST_PARAS"] * 16))
 
 
 def main():
@@ -68,10 +86,10 @@ def main():
     output = args.output or os.path.join(ROOT, "build", "esssb16.com")
     os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
     data, syms = build(output)
-    resident = (syms["resident_end"] + 15) & ~15
-    print("%s: %d bytes, %d resident (%d paragraphs with the PSP)"
-          % (os.path.relpath(output, ROOT), len(data), resident,
-             resident // 16))
+    resident = syms["RESIDENT_PARAS"] * 16
+    print("%s: %d bytes, %d resident (%d paragraphs with the PSP, %d more "
+          "with HDPMI)" % (os.path.relpath(output, ROOT), len(data), resident,
+                           resident // 16, syms["HOST_PARAS"]))
 
 
 if __name__ == "__main__":

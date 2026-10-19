@@ -732,17 +732,18 @@ EMM386 device, one older than 4.46, or one that refused the traps.
 * `/S`: single DMA transfers instead of demand transfers of two bytes, ESS's
   own *Single Mode DMA* setting, if sound breaks up.
 
-The resident part takes 3.3 KB with its PSP and makes no DOS call once it is
-in. The exit codes are 1 for a bad option, 2 when no ES1869 answers at the
-base, 3 without port traps, 4 in a Windows DOS box and 5 when it is loaded
-already. The limits: the game must program its 16-bit channel before the
-transfer command, as Creative's guide says, and a game that reads that
-channel's count for its position sees it stand still, because the sound
-flows through the 8-bit channel; a 16-bit buffer that crosses a 64 KB
-boundary, which the 16-bit channel allows and the 8-bit one doesn't, plays
-wrong; and the FM ports aren't trapped, so a game plays FM as before. The
-program was tested in a CPU emulator against models of the chip, the DMA
-controllers, DOS, the memory managers and HDPMI32i
+The resident part takes 3.3 KB with its PSP, 3.8 KB with HDPMI32i, whose
+data for it stay too, and makes no DOS call once it is in. The exit codes
+are 1 for a bad option, 2 when no ES1869 answers at the base, 3 without port
+traps, 4 in a Windows DOS box and 5 when it is loaded already. The limits:
+the game must program its 16-bit channel before the transfer command, as
+Creative's guide says, and a game that reads that channel's count for its
+position sees it stand still, because the sound flows through the 8-bit
+channel; a 16-bit buffer that crosses a 64 KB boundary, which the 16-bit
+channel allows and the 8-bit one doesn't, plays wrong; and the FM ports
+aren't trapped, so a game plays FM as before. The program was tested in a
+CPU emulator against models of the chip, the DMA controllers, DOS, the
+memory managers and HDPMI32i
 ([docs/TESTING.md](docs/TESTING.md#d2-esssb16-dos) has the steps for real
 hardware).
 
@@ -797,9 +798,10 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
 6. As it loads, `esssb16` prints the card, the `BLASTER` line and `traps:
    EMM386 4.95 for real-mode games, HDPMI32i for protected-mode games`; the
    HDPMI32i part is there only when HDPMI32i was resident first. `MEM /C`
-   lists `ESSSB16` in upper memory, 3.3 KB. A game's setup program then
-   detects a Sound Blaster 16, DSP version 4.05, and offers 16-bit sound. To
-   take `esssb16` out again, restart without its line.
+   lists `ESSSB16` in upper memory, 3.3 KB, or 3.8 KB with HDPMI32i. A
+   game's setup program then detects a Sound Blaster 16, DSP version 4.05,
+   and offers 16-bit sound. To take `esssb16` out again, restart without its
+   line.
 
 ## [`esfmpat.exe`](build)
 * Utility to write custom patch banks to the Windows ESFM VxD driver.

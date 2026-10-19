@@ -22,7 +22,8 @@
 ; API, int 2Fh 4A15h). A protected-mode game (DOS/4GW) runs under a DPMI
 ; host and leaves the memory manager's traps behind: HDPMI32i, the HDPMI
 ; build that runs its clients with IOPL 0, traps for them, and the TSR
-; registers with it too, entering protected mode once at installation.
+; registers with it too, entering protected mode once at installation and
+; staying resident as its client.
 ;
 ; Build: nasm -f bin -o esssb16.com esssb16.asm (tools/build_esssb16.py).
 ;
@@ -39,6 +40,8 @@ QUEUE_LEN       equ 48          ; bytes of the read queue (the copyright string)
 DSP_POLLS       equ 0x400       ; polls for the chip's answer
 MIX_LEN         equ 24          ; the Sound Blaster 16's mixer registers 30h-47h
 STACK_LEN       equ 256         ; the front's stack: about 130 bytes at most
+HOST_PARAS      equ 0x20        ; the DPMI host's data at most: HDPMI's
+                                ; 512-byte real-mode stack
 
 ; the state flags (S16 in the VxD front)
 F_ESS           equ 0x01        ; the program knows the chip (E7h): every
@@ -89,6 +92,10 @@ dma16:          db 5            ; the Sound Blaster 16's 16-bit channel, 0
 single:         db 0            ; /S: single transfers
 qpi:            dd 0            ; the QPI entry (seg:off), 0 if none
 qpi_old:        dd 0            ; the I/O callback before ours, 0 if none
+emm_table:      times 12 dw 0, 0        ; EMM386's dispatch table: the ports
+                                        ; of Audio_Base+4h to +Fh, each with
+                                        ; its handler, which EMM386 searches
+                                        ; at every trapped access
 vendor:         dd 0            ; HDPMI32i's vendor entry: offset
 vendor_sel:     dw 0            ; and selector
 pm_data:        dw 0            ; this segment's data selector, from the
@@ -144,9 +151,10 @@ qpi_shim:
         clc
         retf
 
-; EMM386's I/O handler, in protected mode at ring 0: DX = port, CL = the
-; direction (0 in, else out), AL = the byte, DS = an alias of this segment.
-; CF set tells EMM386 to do the access itself
+; EMM386's I/O handler, in protected mode at ring 0 on EMM386's stack, with
+; interrupts off: DX = port, CL = the direction (0 in, 4 or 8 out), AL =
+; the byte, CS and DS ring 0 selectors of this segment as long as the
+; resident part. CF set tells EMM386 to do the access itself
 emm_shim:
         call    front
         retf
@@ -336,8 +344,9 @@ dsp_read:
 
 ; a trapped access: DX = port, CL = the direction (0 in, else out), AL =
 ; the byte written; AL = the byte read. CF set if the port isn't the
-; front's. DS = this segment
+; front's. DS = this segment; the direction flag is the game's
 front:
+        cld
         push    bx
         push    cx
         push    dx
@@ -1313,111 +1322,14 @@ resident_end:
 RESIDENT_PARAS  equ (resident_end - $$ + 0x100 + 15) >> 4   ; with the PSP
 
 ; --- the installer ---------------------------------------------------------
-; discarded once the TSR is in: everything from here on
+; discarded once the TSR is in: everything from here on. With HDPMI, its
+; first paragraphs stay as the host's data, the client's real-mode stack
+; (HOST_PARAS at most), which the host takes at the switch: they hold the
+; routines that run before it, up to host_code_end, never after
+; (build_esssb16.py checks that they fill HOST_PARAS)
 
-install:
-        mov     ax,cs
-        mov     ds,ax
-        mov     es,ax
-        mov     dx,banner
-        call    print
-        call    parse_options
-        jc      .usage
-        call    windows_check
-        jc      .windows
-        call    installed_check
-        jc      .loaded
-        call    find_card
-        jc      .nocard
-        call    setup_card
-        call    report
-        call    trap_v86                ; QPI, else EMM386
-        jc      .notrap
-        call    free_environment
-        call    trap_dpmi               ; HDPMI32i, and the TSR from there
-        mov     dx,RESIDENT_PARAS
-        mov     ax,0x3100
-        int     0x21
-.usage: mov     dx,usage
-        call    print
-        mov     ax,0x4C00 | E_USAGE
-        int     0x21
-.windows:
-        mov     dx,msg_windows
-        mov     al,E_WINDOWS
-        jmp     short .fail
-.loaded:
-        mov     dx,msg_loaded
-        mov     al,E_LOADED
-        jmp     short .fail
-.nocard:
-        mov     dx,msg_nocard
-        mov     al,E_NOCARD
-        jmp     short .fail
-.notrap:
-        mov     dx,msg_notrap
-        mov     al,E_NOTRAP
-.fail:  push    ax
-        call    print
-        pop     ax
-        mov     ah,0x4C
-        int     0x21
-
-; the string at DX, $-terminated
-print:  push    ax
-        mov     ah,0x09
-        int     0x21
-        pop     ax
-        ret
-
-; the number in AX in decimal
-print_dec:
-        push    ax
-        push    bx
-        push    cx
-        push    dx
-        mov     bx,10
-        xor     cx,cx
-.digit: xor     dx,dx
-        div     bx
-        push    dx
-        inc     cx
-        or      ax,ax
-        jnz     .digit
-.put:   pop     dx
-        add     dl,'0'
-        mov     ah,0x02
-        int     0x21
-        loop    .put
-        pop     dx
-        pop     cx
-        pop     bx
-        pop     ax
-        ret
-
-; the number in AX in hex, 3 digits
-print_hex3:
-        push    ax
-        push    cx
-        push    dx
-        mov     cx,3
-        rol     ax,4                    ; past the top digit, a 0
-.digit: rol     ax,4
-        push    ax
-        and     al,0x0F
-        add     al,'0'
-        cmp     al,'9'
-        jbe     .put
-        add     al,'A' - '0' - 10
-.put:   mov     dl,al
-        mov     ah,0x02
-        int     0x21
-        pop     ax
-        loop    .digit
-        pop     dx
-        pop     cx
-        pop     ax
-        ret
+        align   16
+host_area:
 
 ; the options on the command line (/S single transfers, /H5 /H6 /H7 /H0 the
 ; 16-bit channel, /A220 the base) and BLASTER's A, I, D and H; CF set
@@ -1805,6 +1717,112 @@ report:
 .t:     mov     dx,msg_t
         call    print
         ret
+host_code_end:
+
+install:
+        mov     ax,cs
+        mov     ds,ax
+        mov     es,ax
+        cld
+        mov     dx,banner
+        call    print
+        call    parse_options
+        jc      .usage
+        call    windows_check
+        jc      .windows
+        call    installed_check
+        jc      .loaded
+        call    find_card
+        jc      .nocard
+        call    setup_card
+        call    report
+        call    trap_v86                ; QPI, else EMM386
+        jc      .notrap
+        call    free_environment
+        call    trap_dpmi               ; HDPMI32i, and the TSR from there
+        mov     dx,RESIDENT_PARAS
+        mov     ax,0x3100
+        int     0x21
+.usage: mov     dx,usage
+        call    print
+        mov     ax,0x4C00 | E_USAGE
+        int     0x21
+.windows:
+        mov     dx,msg_windows
+        mov     al,E_WINDOWS
+        jmp     short .fail
+.loaded:
+        mov     dx,msg_loaded
+        mov     al,E_LOADED
+        jmp     short .fail
+.nocard:
+        mov     dx,msg_nocard
+        mov     al,E_NOCARD
+        jmp     short .fail
+.notrap:
+        mov     dx,msg_notrap
+        mov     al,E_NOTRAP
+.fail:  push    ax
+        call    print
+        pop     ax
+        mov     ah,0x4C
+        int     0x21
+
+; the string at DX, $-terminated
+print:  push    ax
+        mov     ah,0x09
+        int     0x21
+        pop     ax
+        ret
+
+; the number in AX in decimal
+print_dec:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        mov     bx,10
+        xor     cx,cx
+.digit: xor     dx,dx
+        div     bx
+        push    dx
+        inc     cx
+        or      ax,ax
+        jnz     .digit
+.put:   pop     dx
+        add     dl,'0'
+        mov     ah,0x02
+        int     0x21
+        loop    .put
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+; the number in AX in hex, 3 digits
+print_hex3:
+        push    ax
+        push    cx
+        push    dx
+        mov     cx,3
+        rol     ax,4                    ; past the top digit, a 0
+.digit: rol     ax,4
+        push    ax
+        and     al,0x0F
+        add     al,'0'
+        cmp     al,'9'
+        jbe     .put
+        add     al,'A' - '0' - 10
+.put:   mov     dl,al
+        mov     ah,0x02
+        int     0x21
+        pop     ax
+        loop    .digit
+        pop     dx
+        pop     cx
+        pop     ax
+        ret
 
 ; the traps for real-mode games: QPI (QEMM, or JEMM with QPIEMU), else
 ; EMM386's API. CF set if neither is there, each having said why
@@ -1947,8 +1965,11 @@ qpi_install:
 
 ; the front's ports trapped through EMM386 (int 2Fh 4A15h, 4.46 or later):
 ; one dispatch table of Audio_Base+4h to +Fh, where +7h to +9h, +Bh and
-; +Dh pass. CF set, having said why, without EMM386's device (EMMXXXX0, or
-; EMMQXXX0 with NOEMS), with an older one, or when it refuses
+; +Dh pass. EMM386 keeps the table where it is and searches it at every
+; trapped access, through a ring 0 selector of this segment as long as DI
+; says, so the table and its handlers are resident. CF set, having said
+; why, without EMM386's device (EMMXXXX0, or EMMQXXX0 with NOEMS), with an
+; older one, or when it refuses
 emm_install:
         mov     dx,emm_device
         call    dev_open
@@ -2014,7 +2035,7 @@ emm_call:
         shl     eax,16
         mov     ax,dx                   ; EDX = the last port : the first
         mov     edx,eax
-        mov     di,resident_end         ; the segment's size for its selector
+        mov     di,RESIDENT_PARAS * 16  ; the resident block, for the selectors
         mov     ax,0x4A15
         xor     bx,bx
         stc
@@ -2031,97 +2052,79 @@ free_environment:
         mov     word [0x2C],0
         ret
 
-; the traps for protected-mode games, through HDPMI32i, if a DPMI host is
-; in: the TSR enters protected mode as a 32-bit client, registers a
-; 16-bit code segment for the front, and stays resident from there, as
-; SBEMU does, so that its selectors live on. Returns in real mode only
-; without a host
+; the traps for protected-mode games, through HDPMI32i, when the DPMI host
+; is HDPMI (its logo starts the entry's segment, as HDPMI itself checks):
+; the TSR enters protected mode as a 32-bit client and stays resident from
+; there, as SBEMU does, so that its selectors live on, with the host's data
+; in the paragraphs after the resident part. The host's first CS is a
+; 16-bit selector of this segment whatever the client (DPMI 0.9), so the
+; code after the switch is 16-bit, with the 32-bit registers a 32-bit
+; client passes, and that CS and DS serve the handler. Returns in real
+; mode only without the switch
 trap_dpmi:
         mov     ax,0x1687
         int     0x2F
         or      ax,ax
         jnz     .none
-        test    bl,1                    ; 32-bit clients supported
+        test    bl,1                    ; 32-bit clients
         jz      .none
+        cmp     dword [es:0],'HDPM'     ; HDPMI's logo
+        jne     .none
+        cmp     byte [es:4],'I'
+        jne     .none
+        cmp     si,HOST_PARAS
+        ja      .none
         mov     [dpmi_entry],di
         mov     [dpmi_entry+2],es
-        mov     [pm_segment],cs
-        push    cs
-        pop     es
-        or      si,si
-        jz      .switch
-        mov     bx,0x1000               ; the program's block down to 64 KB,
-        mov     ah,0x4A                 ; the stack kept; the host's data
-        int     0x21                    ; above
-        mov     bx,si
-        mov     ah,0x48
-        int     0x21
-        jc      .none
+        mov     [host_paras],si
+        mov     ax,cs                   ; the host's data
+        add     ax,RESIDENT_PARAS
         mov     es,ax
-.switch:
         mov     ax,1                    ; a 32-bit client
         call    far [dpmi_entry]
-        jnc     short .pm               ; a short jump reads the same in
-        jmp     .none                   ; both modes: still in real mode
-        BITS    32
-        ; protected mode: CS is a 32-bit code selector of this segment, DS
-        ; its data selector; the code from here is 32-bit
-.pm:    mov     [pm_data],ds
-        xor     eax,eax                 ; a 16-bit code selector for the
-        mov     ecx,1                   ; front: the segment, 64 KB, ring 3,
-        int     0x31                    ; readable code, 16-bit
-        jc      .pm_tsr
-        mov     [pm_code16],ax
-        mov     ebx,eax
-        mov     ax,0x0007
-        movzx   edx,word [pm_segment]
-        shl     edx,4
-        mov     cx,dx
-        shr     edx,16
-        xchg    cx,dx                   ; CX:DX = the base
-        int     0x31
-        mov     ax,0x0008
-        xor     cx,cx
-        mov     dx,0xFFFF
-        int     0x31
-        mov     ax,0x0009
-        mov     cx,0x00FA
-        int     0x31
-        mov     ax,0x168A               ; HDPMI's vendor API
-        mov     esi,hdpmi_name
+        jc      .none                   ; still in real mode
+        mov     [pm_data],ds            ; protected mode: DS is this
+        mov     ax,0x168A               ; segment's data selector, CS its
+        mov     esi,hdpmi_name          ; code one; HDPMI's vendor API
         int     0x2F
         or      al,al
-        jnz     .pm_nohdpmi
+        jnz     .nohdpmi
         mov     [vendor],edi
         mov     [vendor_sel],es
-        movzx   esi,word [base]
-        add     esi,4                   ; +4h to +6h
-        mov     edi,3
-        call    .pm_range
-        jc      .pm_nohdpmi
-        movzx   esi,word [base]
-        add     esi,0x0A                ; +Ah
-        mov     edi,1
-        call    .pm_range
-        movzx   esi,word [base]
-        add     esi,0x0C                ; +Ch
-        mov     edi,1
-        call    .pm_range
-        movzx   esi,word [base]
-        add     esi,0x0E                ; +Eh and +Fh
-        mov     edi,2
-        call    .pm_range
-        mov     ah,0x09
+        mov     bx,hdpmi_ranges         ; the front's ports, trapped for it
+.trap:  push    bx
+        movzx   esi,byte [bx]           ; ESI = the first port, EDI = how
+        add     si,[base]               ; many, CX:EDX = the handler, BX
+        movzx   edi,byte [bx+1]         ; its data
+        mov     cx,cs
+        mov     edx,hdpmi_shim
+        mov     bx,[pm_data]
+        mov     ax,6
+        o32 call far [vendor]
+        pop     bx
+        jc      .release
+        mov     [bx+2],eax              ; the handle
+        add     bx,6
+        cmp     bx,hdpmi_ranges_end
+        jb      .trap
         mov     edx,msg_hdpmi
-        int     0x21
-        jmp     .pm_tsr
-.pm_nohdpmi:
-        mov     ah,0x09
+        jmp     short .tsr
+.release:                               ; all or none: HDPMI32, without the
+        sub     bx,6                    ; i, refuses the first
+        cmp     bx,hdpmi_ranges
+        jb      .nohdpmi
+        mov     edx,[bx+2]
+        mov     ax,7
+        o32 call far [vendor]
+        jmp     short .release
+.nohdpmi:
         mov     edx,msg_nohdpmi
+.tsr:   mov     ah,0x09
         int     0x21
-.pm_tsr:                                ; the TSR, as a real-mode call, from
-        mov     dword [rmcs_eax],0x3100 ; which DOS doesn't return
-        mov     dword [rmcs_edx],RESIDENT_PARAS
+        mov     dword [rmcs_eax],0x3100 ; the TSR, as a real-mode call from
+        movzx   eax,word [host_paras]   ; which DOS doesn't return, with the
+        add     ax,RESIDENT_PARAS       ; host's data
+        mov     [rmcs_edx],eax
         push    ds
         pop     es
         mov     edi,rmcs
@@ -2129,17 +2132,12 @@ trap_dpmi:
         mov     bx,0x0021
         xor     ecx,ecx
         int     0x31
-        mov     ax,0x4C00               ; not reached
+        mov     dx,[rmcs_edx]           ; not reached: the same through the
+        mov     ax,0x3100               ; host
         int     0x21
-.pm_range:                              ; ESI = the first port, EDI = how
-        mov     cx,[pm_code16]          ; many: trapped for the front
-        mov     bx,[pm_data]
-        mov     edx,hdpmi_shim
-        mov     ax,6
-        call    far [vendor]
-        ret
-        BITS    16
-.none:  mov     dx,msg_nohdpmi
+.none:  push    cs                      ; real mode
+        pop     ds
+        mov     dx,msg_nohdpmi
         call    print
         ret
 
@@ -2149,11 +2147,19 @@ trap_ports:     db 0x04, 0x05, 0x06, 0x0A, 0x0C, 0x0E, 0x0F
 trap_handlers:  dw emm_shim, emm_shim, emm_shim, emm_pass    ; +4h to +7h
                 dw emm_pass, emm_pass, emm_shim, emm_pass    ; +8h to +Bh
                 dw emm_shim, emm_pass, emm_shim, emm_shim    ; +Ch to +Fh
-emm_table:      times 12 dw 0, 0
+; HDPMI32i's ranges of them: the first port, how many, the trap's handle
+hdpmi_ranges:   db 0x04, 3
+                dd 0
+                db 0x0A, 1
+                dd 0
+                db 0x0C, 1
+                dd 0
+                db 0x0E, 2
+                dd 0
+hdpmi_ranges_end:
 emm_version:    db 2, 0         ; the IOCTL's subfunction 2, the version
 dpmi_entry:     dd 0
-pm_segment:     dw 0            ; CS, for the 32-bit code
-pm_code16:      dw 0            ; the front's code selector
+host_paras:     dw 0            ; the DPMI host's data, in paragraphs
 hdpmi_name:     db "HDPMI", 0
 rmcs:           times 7 dd 0    ; the real-mode call structure: EDI, ESI,
 rmcs_eax:       dd 0            ; EBP, reserved, EBX, EDX, ECX; EAX

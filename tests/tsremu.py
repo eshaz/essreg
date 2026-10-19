@@ -13,19 +13,29 @@ which has the mixer, the DSP and the PnP registers.
 
 Machine runs the installer the way COMMAND.COM would, then calls the
 resident shims the way the memory manager does: qpi_io() is a QPI callback
-in V86 mode with a far frame, emm_io() EMM386's handler. PMMachine runs the
-32-bit protected-mode parts at ring 3: HDPMI32i's handler (hdpmi_io()),
-and the installer's code from the DPMI switch on (install()).
+in V86 mode with a far frame, emm_io() EMM386's handler as EmmCpu calls it.
+PMMachine runs the protected-mode parts at ring 3: HDPMI32i's handler
+(hdpmi_io()), and the installer's code from the DPMI switch on (install()).
+The three share the memory.
+
+The models keep what made the real thing fail: DOS reuses the memory past
+what the TSR keeps (resident() fills it with INT 3), EMM386 searches the
+program's dispatch table where the program left it at every trapped access
+and calls the handler at ring 0 through selectors as long as DI said, with
+the direction flag set, and HDPMI takes the client's real-mode stack at
+the switch and returns to it on a 16-bit code selector.
 
 Needs the unicorn package.
 """
 
+import ctypes
 import os
 import struct
 import sys
 
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_16, UC_MODE_32, UC_HOOK_INTR,
-                     UC_HOOK_INSN)
+                     UC_HOOK_INSN, UC_HOOK_CODE, UC_HOOK_MEM_READ,
+                     UC_HOOK_MEM_WRITE, UC_PROT_ALL)
 from unicorn.x86_const import (UC_X86_INS_IN, UC_X86_INS_OUT, UC_X86_REG_EAX,
                                UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX,
                                UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_EBP,
@@ -148,8 +158,11 @@ MCB_PARA = 0x0FFF           # the first memory control block
 COPY_PARA = 0x3000          # a copy that is resident already (loaded=True)
 GAME_SS, GAME_SP = 0x5000, 0x1000       # the stack a trapped access comes with
 STUB_PARA = 0x6000          # the stubs that interrupt
-HOST_PARA = 0x7000          # the DPMI host's data block (int 21h 48h)
+HOST_PARA = 0x7000          # a block that int 21h 48h gives
+DPMI_PARA = 0x6100          # the DPMI host's resident segment: its logo
 QPI_OFF, OLD_OFF, SENTINEL_OFF, DPMI_OFF = 0x00, 0x10, 0x20, 0x30
+HDPMI_LOGO = b"HDPMI\x03\x14\x01"     # HDPMI 3.20, 32-bit
+POISON = 0xCC               # INT 3: memory DOS or the host took back
 INT_QPI, INT_OLD, INT_SENTINEL, INT_DPMI, INT_VENDOR = 0xE0, 0xE1, 0xE2, 0xE4, 0xE5
 CF = 0x0001
 IF = 0x0200
@@ -166,14 +179,17 @@ class EmuError(Exception):
 
 
 class Cpu:
-    """register access by name, and the port hooks"""
+    """register access by name, and the port hooks; the first megabyte is
+    `memory`, shared with the other CPUs of the same machine"""
 
-    def __init__(self, mode, chip):
+    def __init__(self, mode, chip, memory=None):
         self.uc = Uc(UC_ARCH_X86, mode)
         self.chip = chip
         self.ports = []                 # every IN and OUT the code did itself
         self.stopped = None
-        self.uc.mem_map(0, 0x100000)
+        self.memory = memory or ctypes.create_string_buffer(0x100000)
+        self.uc.mem_map_ptr(0, 0x100000, UC_PROT_ALL,
+                            ctypes.addressof(self.memory))
         self.uc.hook_add(UC_HOOK_INSN, self._in, None, 1, 0, UC_X86_INS_IN)
         self.uc.hook_add(UC_HOOK_INSN, self._out, None, 1, 0, UC_X86_INS_OUT)
         self.uc.hook_add(UC_HOOK_INTR, self._intr)
@@ -260,9 +276,14 @@ class Machine(Cpu):
         self.noems = False              # EMM386 with NOEMS: EMMQXXX0
         self.emm_fail = set()           # the 4A15h calls that fail (0, 1, ...)
         self.emm_traps = []             # 4A15h: dicts
+        self.emm_out = 4                # EMM386's ECX for an out: 4, or 8
         self.dpmi = False               # int 2Fh 1687h answers
-        self.dpmi_paras = 0x20          # the host's data block
+        self.dpmi_logo = HDPMI_LOGO     # at the start of the host's segment
+        self.dpmi_paras = 0x20          # the host's data: its real-mode stack
+        self.dpmi_fails = False         # the switch fails: CF, real mode
         self.dpmi_call = None           # (ax, es, cs, ip, sp) at the entry
+        self.kept = None                # the paragraphs the TSR kept
+        self.sharers = [self]           # the CPUs on this memory
         self.windows = 0                # int 2Fh 1600h's AL
         self.umb_link = 0
         self.umb_links = []
@@ -291,7 +312,7 @@ class Machine(Cpu):
         self.put(s + QPI_OFF, bytes([0xCD, INT_QPI, 0xCB]))
         self.put(s + OLD_OFF, bytes([0xCD, INT_OLD, 0xCB]))
         self.put(s + SENTINEL_OFF, bytes([0xCD, INT_SENTINEL, 0xF4]))
-        self.put(s + DPMI_OFF, bytes([0xCD, INT_DPMI, 0xCB]))
+        self.put(DPMI_PARA * 16 + DPMI_OFF, bytes([0xCD, INT_DPMI, 0xCB]))
 
     def mcb(self, para, kind, owner, size):
         self.put(para * 16, kind + struct.pack("<HH", owner, size) + b"\0" * 11)
@@ -304,6 +325,18 @@ class Machine(Cpu):
         """a copy of the program at COPY_PARA, owned by its own PSP"""
         self.mcb(COPY_PARA - 1, b"Z", COPY_PARA, 0x1000)
         self.put(COPY_PARA * 16 + 0x100, self.image)
+
+    def flush(self):
+        """the code the CPUs translated, dropped after memory changed"""
+        for cpu in self.sharers:
+            cpu.uc.ctl_flush_tb()
+
+    def resident(self, paras):
+        """the TSR in: DOS reuses the rest of the program's block"""
+        self.kept = paras
+        start = PSP_PARA * 16 + paras * 16
+        self.put(start, bytes([POISON]) * (PSP_PARA * 16 + 0x10000 - start))
+        self.flush()
 
     def sym(self, name):
         return self.syms[name]
@@ -343,7 +376,15 @@ class Machine(Cpu):
         elif intno == INT_DPMI:
             ss, sp = self.r16("ss"), self.r16("esp")
             ip, cs = struct.unpack("<HH", self.mem(ss * 16 + sp, 4))
-            self.dpmi_call = (self.r16("eax"), self.r16("es"), cs, ip, sp + 4)
+            es = self.r16("es")
+            self.dpmi_call = (self.r16("eax"), es, cs, ip, sp + 4)
+            # the host takes its data, the client's real-mode stack
+            self.put(es * 16, bytes([POISON]) * (self.dpmi_paras * 16))
+            self.flush()
+            if self.dpmi_fails:
+                self.w16("eax", 0x8021)
+                self.carry(True)
+                return
             self.stop("dpmi")
         else:
             raise EmuError("int %02Xh at %04x:%04x" % (
@@ -435,14 +476,28 @@ class Machine(Cpu):
                 return
             edx = self.r("edx")
             cx, ds, si = self.r16("ecx"), self.r16("ds"), self.r16("esi")
+            size = self.r16("edi")
             table = [struct.unpack("<HH", self.mem(ds * 16 + si + 4 * i, 4))
                      for i in range(cx)]
             call = {"first": edx & 0xFFFF, "last": edx >> 16, "count": cx,
-                    "table": table, "size": self.r16("edi")}
+                    "table": table, "size": size, "ds": ds, "si": si,
+                    "handle": len(self.emm_traps) + 1}
             self.emm_traps.append(call)
             if len(self.emm_traps) - 1 in self.emm_fail:
                 call["failed"] = True
                 return
+            # EMM386 reaches the table and the handlers at ring 0 through
+            # selectors of DS as long as DI: beyond, they fault
+            if si + 4 * cx > size:
+                raise EmuError("the dispatch table (%04Xh-%04Xh) is beyond "
+                               "the %04Xh bytes EMM386 maps" %
+                               (si, si + 4 * cx - 1, size))
+            for port, handler in table:
+                if handler >= size:
+                    raise EmuError("the handler of port %03Xh (%04Xh) is "
+                                   "beyond the %04Xh bytes EMM386 maps" %
+                                   (port, handler, size))
+            self.w16("eax", call["handle"])
             self.carry(False)
         elif ax == 0x1687:
             if self.dpmi:
@@ -451,7 +506,7 @@ class Machine(Cpu):
                 self.w8("ecx", 4)
                 self.w16("edx", 0x005A)
                 self.w16("esi", self.dpmi_paras)
-                self.w16("es", STUB_PARA)
+                self.w16("es", DPMI_PARA)
                 self.w16("edi", DPMI_OFF)
         else:
             raise EmuError("int 2Fh AX=%04X" % ax)
@@ -495,6 +550,7 @@ class Machine(Cpu):
         self.noems = noems
         self.dpmi, self.windows = dpmi, windows
         self.qpi_callback = (STUB_PARA, OLD_OFF) if old_callback else (0, 0)
+        self.put(DPMI_PARA * 16, self.dpmi_logo)
         if loaded:
             self.copy_resident()
         self.tail(tail)
@@ -503,7 +559,10 @@ class Machine(Cpu):
         self.w("esp", 0xFFFE)
         self.w("eflags", IF | 2)
         self.w16("eip", 0x100)
-        return self.run(PSP_PARA * 16 + 0x100)
+        why = self.run(PSP_PARA * 16 + 0x100)
+        if self.exit and self.exit[0] == "tsr":
+            self.resident(self.exit[1])
+        return why
 
     # --- the shims -----------------------------------------------------------
     def _frame(self):
@@ -549,8 +608,35 @@ class Machine(Cpu):
         return al
 
     def emm_io(self, port, value=None):
-        """EMM386's handler: (AL, CF), CF set when EMM386 is to do it"""
-        return self._shim("emm_shim", port, value, 4, PSP_PARA)
+        """EMM386 on a trapped access: the dispatch table searched where
+        the program left it, its handler called at ring 0; (AL, CF), CF set
+        when EMM386 is to do the access itself, as for a port it traps but
+        the table doesn't have; (None, True) for a port it doesn't trap"""
+        for trap in self.emm_traps:
+            if not trap.get("failed") and \
+                    trap["first"] <= port <= trap["last"]:
+                break
+        else:
+            return None, True
+        size, base = trap["size"], trap["ds"] * 16
+        for i in range(trap["count"]):
+            entry = trap["si"] + 4 * i
+            if entry + 4 > size:
+                raise EmuError("EMM386 faults: the dispatch table's entry "
+                               "at %04Xh is beyond the %04Xh bytes it maps"
+                               % (entry, size))
+            p, handler = struct.unpack("<HH", self.mem(base + entry, 4))
+            if p == port:
+                break
+        else:
+            return None, True
+        if handler >= size:
+            raise EmuError("EMM386 faults: the handler of port %03Xh "
+                           "(%04Xh) is beyond the %04Xh bytes it maps"
+                           % (port, handler, size))
+        if "cpu" not in trap:
+            trap["cpu"] = EmmCpu(self, trap)
+        return trap["cpu"].call(handler, entry, port, value, self.emm_out)
 
     def out(self, port, value):
         if self.path == "qpi":
@@ -611,23 +697,113 @@ STUB32 = 0x300000           # the host's 32-bit stubs
 STACK32 = 0x400000          # the game's 32-bit stack
 SEL_CODE0, SEL_DATA0 = 0x08, 0x10       # ring 0, flat: the trampoline
 SEL_CODE32, SEL_DATA32 = 0x1B, 0x23     # ring 3, flat: the host, the stack
-SEL_CODE16, SEL_DATA = 0x2B, 0x33       # ring 3, the program's segment
-SEL_CLIENT, SEL_STACK = 0x3B, 0x43      # ring 3, its 32-bit code and stack
-SEL_NEW = 0x4B                          # what int 31h 0000h allocates
+# ring 3, the program's segment as HDPMI gives it: 16-bit code, data with
+# B set (a 32-bit client's DS and SS), the PSP; and what int 31h 0000h
+# allocates
+SEL_CODE16, SEL_DATA, SEL_PSP, SEL_NEW = 0x2B, 0x33, 0x3B, 0x43
 VENDOR_OFF, SENTINEL32_OFF, TRAMP_OFF = 0x00, 0x10, 0x100
+
+# EMM386's side: its flat ring 0 code and stack, the handler's CS, DS and
+# ES as long as DI said, and its caller, below 64 KB in its own segment so
+# that a 16-bit far call can come back to it
+EMM_GDT, EMM_STUB, EMM_STACK = 0x500000, 0x600000, 0x700000
+E_CODE0, E_DATA0, E_CODE16, E_DATA16, E_ES16, E_STUB = \
+    0x08, 0x10, 0x18, 0x20, 0x28, 0x30
+
+
+class EmmCpu(Cpu):
+    """EMM386's call of a handler, at ring 0: a 16-bit far call from its own
+    code, CS and DS (and ES) selectors of the program's segment as long as
+    the DI of its 4A15h call, its own 32-bit stack, interrupts off and the
+    direction flag set (nothing clears it). The CPU doesn't check the
+    selectors' limits, so hooks do"""
+
+    def __init__(self, machine, trap):
+        super().__init__(UC_MODE_32, machine.chip, machine.memory)
+        machine.sharers.append(self)
+        base, size = trap["ds"] * 16, trap["size"]
+        self.base, self.size = base, size
+        gdt = b"\0" * 8 + desc(0, 0xFFFFF, 0x9A, 0xC0) \
+            + desc(0, 0xFFFFF, 0x92, 0xC0) \
+            + desc(base, size - 1, 0x9A, 0x00) \
+            + desc(base, size - 1, 0x92, 0x00) \
+            + desc(base, size - 1, 0x92, 0x00) \
+            + desc(EMM_STUB, 0xFFFF, 0x9A, 0x40)
+        self.uc.mem_map(EMM_GDT, 0x1000)
+        self.uc.mem_map(EMM_STUB, 0x1000)
+        self.uc.mem_map(EMM_STACK, 0x10000)
+        self.put(EMM_GDT, gdt)
+        self.uc.reg_write(UC_X86_REG_GDTR, (0, EMM_GDT, len(gdt) - 1, 0))
+        end = base + 0xFFFF
+        self.uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, self._beyond,
+                         None, base + size, end)
+        self.uc.hook_add(UC_HOOK_CODE, self._beyond_code, None,
+                         base + size, end)
+
+    def _beyond(self, uc, access, addr, size, value, _user):
+        raise EmuError("EMM386's handler reached %04Xh, beyond the %04Xh "
+                       "bytes of its selectors" % (addr - self.base,
+                                                   self.size))
+
+    def _beyond_code(self, uc, addr, size, _user):
+        raise EmuError("EMM386's handler ran at %04Xh, beyond the %04Xh "
+                       "bytes of its code selector" % (addr - self.base,
+                                                       self.size))
+
+    def _intr(self, uc, intno, _user):
+        if intno == INT_SENTINEL:
+            self.stop("sentinel")
+            return
+        raise EmuError("EMM386's handler: interrupt or fault %02Xh at "
+                       "%04x:%08x" % (intno, self.r16("cs"), self.r("eip")))
+
+    def call(self, handler, entry, port, value, out):
+        """the handler at `handler` for the table's entry at `entry`: (AL,
+        CF); the registers EMM386 doesn't give back must come back"""
+        stub = b"\x66\x9A" + struct.pack("<HH", handler, E_CODE16) \
+            + bytes([0xCD, INT_SENTINEL, 0xF4])
+        self.put(EMM_STUB, stub)
+        self.uc.ctl_remove_cache(EMM_STUB, EMM_STUB + len(stub))
+        esp = EMM_STACK + 0xF000
+        regs = {"ebx": 0x11112222, "ecx": out if value is not None else 0,
+                "edx": port, "esi": 0x00000001, "edi": entry,
+                "ebp": 0x9999AAAA}
+        self.w16("ss", E_DATA0)
+        self.w("esp", esp)
+        self.w16("ds", E_DATA16)
+        self.w16("es", E_ES16)
+        self.w("eax", 0x5A5A0000 | (value if value is not None else 0xA5A5))
+        for reg, v in regs.items():
+            self.w(reg, v)
+        self.w("eflags", 0x0402)                # DF set, IF clear
+        self.w16("cs", E_STUB)
+        self.ports = []
+        self.run(0)
+        if (self.r16("ss"), self.r("esp")) != (E_DATA0, esp):
+            raise EmuError("the handler left EMM386's stack at %04x:%08x"
+                           % (self.r16("ss"), self.r("esp")))
+        if (self.r16("ds"), self.r16("es")) != (E_DATA16, E_ES16):
+            raise EmuError("the handler changed DS or ES")
+        for reg, v in regs.items():
+            if self.r(reg) != v:
+                raise EmuError("the handler changed %s" % reg)
+        return self.r8("eax"), bool(self.r("eflags") & CF)
 
 
 class PMMachine(Cpu):
     """the program's protected-mode code at ring 3, under a DPMI host and
-    HDPMI32i that are Python"""
+    HDPMI32i that are Python, on the machine's memory"""
 
     def __init__(self, machine):
-        super().__init__(UC_MODE_32, machine.chip)
+        super().__init__(UC_MODE_32, machine.chip, machine.memory)
+        machine.sharers.append(self)
+        self.machine = machine
         self.syms = machine.syms
-        self.put(0, machine.mem(0, 0x100000))
         self.output = ""
         self.vendor_calls = []          # (function, regs)
         self.vendor_io = []             # function 8: ("in", port, v) ...
+        self.trap_fail = set()          # the function 6 calls that fail
+        self.handler = None             # (CS, EIP, DS) of function 6
         self.hdpmi = True               # int 2Fh 168Ah answers
         self.dpmi_calls = []            # int 31h: (function, regs)
         self.rmcs = None                # int 31h 0300h's structure
@@ -636,9 +812,8 @@ class PMMachine(Cpu):
         gdt = b"\0" * 8 + desc(0, 0xFFFFF, 0x9A, 0xC0) \
             + desc(0, 0xFFFFF, 0x92, 0xC0) \
             + desc(0, 0xFFFFF, 0xFA, 0xC0) + desc(0, 0xFFFFF, 0xF2, 0xC0) \
-            + desc(base, 0xFFFF, 0xFA, 0x00) + desc(base, 0xFFFF, 0xF2, 0x00) \
-            + desc(base, 0xFFFF, 0xFA, 0x40) + desc(base, 0xFFFF, 0xF2, 0x40) \
-            + desc(0, 0, 0, 0)
+            + desc(base, 0xFFFF, 0xFA, 0x00) + desc(base, 0xFFFF, 0xF2, 0x40) \
+            + desc(base, 0xFF, 0xF2, 0x00) + desc(0, 0, 0, 0)
         self.uc.mem_map(GDT_BASE, 0x1000)
         self.uc.mem_map(STUB32, 0x1000)
         self.uc.mem_map(STACK32, 0x10000)
@@ -676,7 +851,7 @@ class PMMachine(Cpu):
         if intno == 13:
             eip = self.r("eip")
             cs = self.r16("cs")
-            base = PSP_PARA * 16 if cs in (SEL_CODE16, SEL_CLIENT) else 0
+            base = PSP_PARA * 16 if cs == SEL_CODE16 else 0
             op = self.mem(base + eip, 1)[0]
             if op not in (0xFA, 0xFB):
                 raise EmuError("privileged instruction %02X at %04x:%08x"
@@ -712,7 +887,14 @@ class PMMachine(Cpu):
                 self.w8("eax", v)
             self.carry(False)
         elif ax == 6:
-            self.w("eax", 0x1000 + 0x10 * len(self.vendor_calls))
+            n = len([c for c in self.vendor_calls if c[0] == 6]) - 1
+            if n in self.trap_fail:
+                self.carry(True)
+                return
+            self.handler = (self.r16("ecx"), self.r("edx"), self.r16("ebx"))
+            self.w("eax", 0x1000 + 0x10 * n)
+            self.carry(False)
+        elif ax == 7:
             self.carry(False)
         else:
             self.carry(True)
@@ -727,8 +909,10 @@ class PMMachine(Cpu):
             pass
         elif ax == 0x0300:
             es, edi = self.r16("es"), self.r("edi")
-            base = PSP_PARA * 16 if es == SEL_DATA else 0
-            self.rmcs = self.mem(base + edi, 0x32)
+            if es != SEL_DATA or edi >> 16:
+                raise EmuError("int 31h 0300h with ES:EDI %04x:%08x"
+                               % (es, edi))
+            self.rmcs = self.mem(PSP_PARA * 16 + edi, 0x32)
             self.stop("rmcs")
         else:
             raise EmuError("int 31h AX=%04X" % ax)
@@ -747,6 +931,9 @@ class PMMachine(Cpu):
     def _dos(self):
         ax = self.r16("eax")
         if ax >> 8 == 0x09:
+            if self.r16("ds") != SEL_DATA or self.r("edx") >> 16:
+                raise EmuError("int 21h 09h with DS:EDX %04x:%08x"
+                               % (self.r16("ds"), self.r("edx")))
             addr = PSP_PARA * 16 + self.r("edx")
             s = b""
             while self.mem(addr + len(s), 1) != b"$":
@@ -768,12 +955,19 @@ class PMMachine(Cpu):
         self.w("eflags", 0x3002)                # IOPL 3: cli and sti run
         return self.run(STUB32 + TRAMP_OFF)
 
-    def hdpmi_io(self, port, value=None):
-        """HDPMI32i's call of the handler: AL read, or the byte written"""
-        self.uc.context_restore(self.ring0)     # back from ring 3
+    def fake_install(self):
+        """what the installer leaves under HDPMI32i, for a program that was
+        installed without it: the selectors, the vendor entry, the trap"""
         self.set16("pm_data", SEL_DATA)
         self.set32("vendor", STUB32 + VENDOR_OFF)
         self.set16("vendor_sel", SEL_CODE32)
+        self.handler = (SEL_CODE16, self.sym("hdpmi_shim"), SEL_DATA)
+
+    def hdpmi_io(self, port, value=None):
+        """HDPMI32i's call of the handler function 6 registered: AL read, or
+        the byte written"""
+        cs, eip, ds = self.handler
+        self.uc.context_restore(self.ring0)     # back from ring 3
         top = STACK32 + 0x8000
         self.put(top - 8, struct.pack("<II", STUB32 + SENTINEL32_OFF, SEL_CODE32))
         self.w("eax", 0x5A5A0000 | (value if value is not None else 0xA5A5))
@@ -783,10 +977,10 @@ class PMMachine(Cpu):
         self.w("esi", 0x55556666)
         self.w("edi", 0x77778888)
         self.w("ebp", 0x9999AAAA)
-        self.w16("ds", SEL_DATA)
-        self.w16("es", SEL_DATA)
+        self.w16("ds", ds)
+        self.w16("es", ds)
         self.ports = []
-        self._ring3(SEL_DATA32, top - 8, SEL_CODE16, self.sym("hdpmi_shim"))
+        self._ring3(SEL_DATA32, top - 8, cs, eip)
         if (self.r16("ss"), self.r("esp")) != (SEL_DATA32, top):
             raise EmuError("the handler left the stack at %04x:%08x" % (
                 self.r16("ss"), self.r("esp")))
@@ -803,13 +997,19 @@ class PMMachine(Cpu):
         return self.r8("eax")
 
     def install(self, machine):
-        """the installer from the DPMI switch on: what it leaves for DOS"""
+        """the installer from the DPMI switch on, as HDPMI returns to a
+        32-bit client: CS a 16-bit code selector of the program's segment,
+        DS and SS its data selector with B set, ES the PSP's. What it
+        leaves for DOS, the real-mode call's structure; DOS keeps what it
+        asks for"""
         ax, es, cs, ip, sp = machine.dpmi_call
         if ax != 1 or cs != PSP_PARA:
             raise EmuError("the DPMI entry was called with AX=%d from %04x"
                            % (ax, cs))
         self.uc.context_restore(self.ring0)
         self.w16("ds", SEL_DATA)
-        self.w16("es", SEL_DATA)
-        self._ring3(SEL_STACK, sp, SEL_CLIENT, ip)
+        self.w16("es", SEL_PSP)
+        self._ring3(SEL_DATA, sp, SEL_CODE16, ip)
+        if self.rmcs is not None:
+            machine.resident(int.from_bytes(self.rmcs[0x14:0x16], "little"))
         return self.rmcs

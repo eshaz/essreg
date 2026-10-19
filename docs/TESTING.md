@@ -65,13 +65,18 @@ The Python tests, in `tests/test_*.py`, cover the following:
   where DOS, the memory managers, the DPMI host and HDPMI32i are Python
   behind the interrupt hook and the chip is `vxdemu`'s model. It installs
   the program under QEMM, QPIEMU, EMM386 and a DPMI host, including the
-  32-bit code after the DPMI switch at ring 3, and checks its refusals, its
-  options and `BLASTER`. Then it calls the resident shims as the memory
-  managers do, with their far frames, and checks the Sound Blaster 16 they
-  answer: the DSP's answers, 16-bit transfers on Audio 2 with the rates
-  ES1869.DRV would pick, 8-bit ones on Audio 1, the mixer's view and the
-  chip's levels, the interrupts, resets, and the chip's own commands going
-  through unchanged.
+  16-bit code after the DPMI switch at ring 3 on HDPMI's first selectors,
+  and checks its refusals, its options and `BLASTER`. Then it calls the
+  resident shims as the memory managers do: QPI's callback with its far
+  frame, EMM386's handler at ring 0 through selectors as long as the size
+  the program gave, found in the program's own dispatch table, and
+  HDPMI32i's handler at ring 3. DOS has reused the memory the TSR gave back
+  by then, and HDPMI its data, so code or data left there fails. It checks
+  the Sound Blaster 16 they answer: the DSP's answers, 16-bit and 8-bit
+  transfers on Audio 1 with the rates ES1869.DRV would pick, the game's
+  16-bit channel carried over to the card's, the mixer's view and the chip's
+  levels, the interrupts, resets, and the chip's own commands going through
+  unchanged.
 * Other tests run `esfmpat` on copies of `ESFM.DRV` and check that the
   generated documentation is current.
 
@@ -299,10 +304,10 @@ and stop at the first surprise. Each step says what you should see.
    Its digital sound and its FM music both play.
 3. With `LH HDPMI32I -r` before `esssb16` (`HDPMI32i.EXE` from
    `third_party\hdpmi32i`, HX's release), `esssb16` adds
-   `, HDPMI32i for protected-mode games`. A DOS/4GW game set to the Sound
-   Blaster 16 (Descent, Duke Nukem 3D, Quake) plays 16-bit sound. Without
-   HDPMI32i the same game plays 8-bit sound, or finds no Sound Blaster 16,
-   as before `esssb16`.
+   `, HDPMI32i for protected-mode games`, and `MEM /C` shows it with 3.8 KB.
+   A DOS/4GW game set to the Sound Blaster 16 (Descent, Duke Nukem 3D,
+   Quake) plays 16-bit sound. Without HDPMI32i the same game plays 8-bit
+   sound, or finds no Sound Blaster 16, as before `esssb16`.
 4. With QEMM, or with JEMMEX and `JLOAD QPIEMU.DLL`, step 2 again: the
    banner says `traps: QPI for real-mode games`.
 5. A program that knows the chip works as before: ESS's own DOS mixer, or

@@ -170,11 +170,17 @@ tools/wineshot.sh run ess3d.exe /sim tray
   call, and reaches the chip and the DMA controllers only through `chip_in`
   and `chip_out`, which go through HDPMI32i's untrapped I/O while its
   handler runs and keep AH, which callers use for a register number. The
-  shims run the front on its own stack, and the code after the DPMI switch
-  is 32-bit (`BITS 32`), entered through a short jump, which both modes
-  decode the same. A change to the Sound Blaster 16's translation goes into
-  the VxD's front and the TSR alike, with a test in `tests/test_esssb16.py`,
-  which also checks that `build/esssb16.com` is current.
+  shims run the front on its own stack. EMM386 searches the dispatch table
+  (`emm_table`) at every trapped access and calls the handlers at ring 0,
+  through selectors as long as the resident part, so both stay resident.
+  HDPMI's first CS after the DPMI switch is a 16-bit selector whatever the
+  client, so that code is 16-bit, with the 32-bit registers a 32-bit client
+  passes, and HDPMI's data take the paragraphs after the resident part, over
+  the routines between `host_area` and `host_code_end`, which run only
+  before the switch. A change to the Sound Blaster 16's translation goes
+  into the VxD's front and the TSR alike, with a test in
+  `tests/test_esssb16.py`, which also checks that `build/esssb16.com` is
+  current.
 * **Committed binaries.** After changing their sources, rebuild
   `build/ESFM.DRV`, `build/ES1869.VXD`, `build/ES1869.DRV` or
   `build/esssb16.com`, and copy the changed programs from `out/ow2/` to
