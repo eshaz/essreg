@@ -280,7 +280,8 @@ and stop at the first surprise. Each step says what you should see.
 
 ### D2. esssb16 (DOS)
 
-1. In real DOS with `EMM386.EXE` loaded
+1. Install `esssb16` as the [README](../README.md#installing-esssb16) says:
+   in real DOS with `EMM386.EXE` loaded
    (`DEVICE=C:\WINDOWS\EMM386.EXE NOEMS` or `RAM` in `CONFIG.SYS`), run
    `LH ESSSB16`. It prints the card's base, IRQ and channel, the `BLASTER`
    line to set, and `traps: EMM386 4.95 for real-mode games` (4.49 with
@@ -296,11 +297,12 @@ and stop at the first surprise. Each step says what you should see.
    offers 16-bit stereo. The game plays, with 16-bit sound at the game's
    rate (its setup may say 22, 44 or 48 kHz), and without the 8-bit hiss.
    Its digital sound and its FM music both play.
-3. With `LH HDPMI32I -r` before `esssb16` (HDPMI32i from SBEMU's release),
-   `esssb16` adds `, HDPMI32i for protected-mode games`. A DOS/4GW game set
-   to the Sound Blaster 16 (Descent, Duke Nukem 3D, Quake) plays 16-bit
-   sound. Without HDPMI32i the same game plays 8-bit sound, or finds no
-   Sound Blaster 16, as before `esssb16`.
+3. With `LH HDPMI32I -r` before `esssb16` (`HDPMI32i.zip` from HX's releases
+   page, or SBEMU's release zip), `esssb16` adds
+   `, HDPMI32i for protected-mode games`. A DOS/4GW game set to the Sound
+   Blaster 16 (Descent, Duke Nukem 3D, Quake) plays 16-bit sound. Without
+   HDPMI32i the same game plays 8-bit sound, or finds no Sound Blaster 16,
+   as before `esssb16`.
 4. With QEMM, or with JEMMEX and `JLOAD QPIEMU.DLL`, step 2 again: the
    banner says `traps: QPI for real-mode games`.
 5. A program that knows the chip works as before: ESS's own DOS mixer, or

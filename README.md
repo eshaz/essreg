@@ -719,19 +719,12 @@ programs without I/O privilege and traps ports for
 [SBEMU](https://github.com/crazii/sbemu), and `esssb16` registers its traps
 with it too. Without it, protected-mode games play 8-bit sound, as before.
 
-In `AUTOEXEC.BAT`:
-
-```
-SET BLASTER=A220 I5 D1 H5 P330 T6
-LH HDPMI32I -r
-LH ESSSB16
-```
-
-`esssb16` prints the card it found and the `BLASTER` line to set: the base,
-the IRQ and the 8-bit channel as the card's PnP registers have them, and
-`H5` for the game's 16-bit channel. It says which memory manager traps for
-it, with EMM386's version, and when none does, why: no EMM386 device, one
-older than 4.46, or one that refused the traps. The options:
+As it loads, `esssb16` prints the card it found and the `BLASTER` line to
+set: the base, the IRQ and the 8-bit channel as the card's PnP registers
+have them, and `H5` for the game's 16-bit channel. It says which memory
+manager traps for it, with EMM386's version, and when none does, why: no
+EMM386 device, one older than 4.46, or one that refused the traps.
+[Installing esssb16](#installing-esssb16) below has the steps. The options:
 * `/A220`: the card's base, otherwise `BLASTER`'s `A`, or 220h.
 * `/H5`, `/H6` or `/H7`: the game's 16-bit channel, otherwise `BLASTER`'s
   `H`, or 5. `/H0` offers none: the game then plays 16-bit sound through the
@@ -752,6 +745,60 @@ program was tested in a CPU emulator against models of the chip, the DMA
 controllers, DOS, the memory managers and HDPMI32i
 ([docs/TESTING.md](docs/TESTING.md#d2-esssb16-dos) has the steps for real
 hardware).
+
+### Installing esssb16
+
+The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
+`C:\DOS` in place of `C:\WINDOWS`.
+
+1. Copy `build\esssb16.com` to a folder on the machine, such as `C:\ESS`.
+2. For protected-mode games, put `HDPMI32I.EXE` next to it. It comes as
+   `HDPMI32i.zip` on the releases page of
+   [HX](https://github.com/crazii/HX/releases), and SBEMU's release zip
+   carries the same file. Real-mode games do without it.
+3. In `CONFIG.SYS`, load EMM386 after HIMEM.SYS, with upper memory for `LH`:
+   ```
+   DEVICE=C:\WINDOWS\HIMEM.SYS
+   DEVICE=C:\WINDOWS\EMM386.EXE NOEMS
+   DOS=HIGH,UMB
+   ```
+   Windows 98 doesn't load EMM386 on its own, so the line is usually new;
+   `RAM` in place of `NOEMS` also gives games expanded memory. With JEMMEX
+   the lines are `DEVICE=C:\JEMM\JEMMEX.EXE` and `DOS=HIGH,UMB`, and
+   `JLOAD C:\JEMM\QPIEMU.DLL` runs before `esssb16`; with QEMM,
+   `DEVICE=C:\QEMM\QEMM386.SYS RAM`.
+4. Set `BLASTER` and load the programs, HDPMI32i before `esssb16`, in
+   `AUTOEXEC.BAT` or in a batch file such as `C:\ESS\SB16.BAT`, to run at
+   the prompt before a game:
+   ```
+   SET BLASTER=A220 I5 D1 H5 P330 T6
+   LH C:\ESS\HDPMI32I.EXE -r -x
+   LH C:\ESS\ESSSB16.COM
+   ```
+   `-r` keeps HDPMI32i resident, which it has to be for `esssb16` to find it
+   when it loads, and `-x` makes it report 256 MB of memory at most, which
+   some games need. Leave its line out without the file. If the card's base,
+   IRQ or 8-bit channel differ from this `BLASTER` line, `esssb16` prints
+   the line to set.
+5. Start DOS with these files. On Windows 98, hold Ctrl as the machine
+   starts, or press F8 at *Starting Windows 98*, and choose *Command prompt
+   only*: `CONFIG.SYS` and `AUTOEXEC.BAT` run, and Windows doesn't. Since
+   the same `AUTOEXEC.BAT` runs before a normal start of Windows, where
+   `esssb16` has no work (the VxD traps the ports of a DOS box), the batch
+   file keeps it to DOS sessions. The other way is an MS-DOS mode shortcut
+   with its own files: right-click the game, or `C:\COMMAND.COM` for a
+   prompt, choose *Properties* > *Program* > *Advanced*, tick *MS-DOS mode*
+   and *Specify a new MS-DOS configuration*, and put the lines of steps 3
+   and 4 into its `CONFIG.SYS` and `AUTOEXEC.BAT` boxes. Windows restarts
+   into DOS with them when the shortcut runs, and comes back when the
+   program ends. *Restart in MS-DOS mode* in the Shut Down box runs such a
+   shortcut, `Exit To Dos.pif` in `C:\WINDOWS`, with the same settings.
+6. As it loads, `esssb16` prints the card, the `BLASTER` line and `traps:
+   EMM386 4.95 for real-mode games, HDPMI32i for protected-mode games`; the
+   HDPMI32i part is there only when HDPMI32i was resident first. `MEM /C`
+   lists `ESSSB16` in upper memory, 3.3 KB. A game's setup program then
+   detects a Sound Blaster 16, DSP version 4.05, and offers 16-bit sound. To
+   take `esssb16` out again, restart without its line.
 
 ## [`esfmpat.exe`](build)
 * Utility to write custom patch banks to the Windows ESFM VxD driver.
