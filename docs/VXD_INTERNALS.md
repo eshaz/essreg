@@ -181,19 +181,20 @@ again from wherever the DMA is. The DMA therefore plays what the time-out
 copied last, and a time-out that is late by more than DirectSound's own lead
 plays what the buffer held a lap ago.
 
-With `DirectSoundLock=1`, the default, the extension changes four entries of
-the two vtables. `ESSREG_DS_GetDriverDesc` runs ESS's `GetDriverDesc` and
-clears DSDDESC_DONTNEEDPRIMARYLOCK, so that DirectSound brackets each write
-to the primary buffer with `Lock` and `Unlock`. `ESSREG_DS_Lock` returns the
-part of the buffer that DirectSound asks for, in two pieces where it wraps.
+With `DirectSoundLock=1`, the extension changes four entries of the two
+vtables. `ESSREG_DS_GetDriverDesc` runs ESS's `GetDriverDesc` and clears
+DSDDESC_DONTNEEDPRIMARYLOCK, so that DirectSound brackets each write to the
+primary buffer with `Lock` and `Unlock`. `ESSREG_DS_Lock` returns the part
+of the buffer that DirectSound asks for, in two pieces where it wraps.
 `ESSREG_DS_Unlock` copies the pieces that DirectSound wrote into the 16-bit
 channel's buffer, at twice their offset, with `L5_3309`, once and at once;
 on an 8-bit channel it has nothing to do. `ESSREG_DS_Play` copies the whole
 buffer first, so that the DMA finds what DirectSound wrote before it
 started, sets no time-out, and continues in ESS's `Play` at o5:3178, which
 programs the DMA controller and starts Audio 2. `Stop`, `GetPosition` and
-the rest stay ESS's. With `DirectSoundLock=0`, the four entries run ESS's
-code.
+the rest stay ESS's. With `DirectSoundLock=0`, the default since version
+1.16, the four entries run ESS's code: a card played 8-bit with the lock on,
+which the emulator can't show, so the lock waits for a check on the card.
 
 The driver answers `QueryInterface` for `IDsDriverNotify`,
 `IDsDriverPropertySet` and `IDsCaptureDriver` with E_NOINTERFACE, so
@@ -505,9 +506,10 @@ In DOS itself, `esssb16.com` (`src/esssb16.asm`) is the same front as a
 resident program. There no driver sees a port access, so it traps the Sound
 Blaster ports through the memory manager: EMM386's port trap interface,
 QEMM's QPI, which JEMM gets from QPIEMU, and for protected-mode games
-HDPMI32i, with which it registers as a 32-bit client. Without VDMAD, a
-16-bit transfer goes to Audio 2 on the game's own 16-bit channel, through
-PnP register 75h, with the game's DMA programming untouched.
+HDPMI32i, with which it registers as a 32-bit client. Without VDMAD, it
+reads the game's programming of its 16-bit channel back from the DMA
+controller at the transfer command and puts it on Audio 1's channel in
+bytes, as VDMAD's callbacks do here.
 
 ## Hardware volume
 
@@ -656,7 +658,7 @@ it by hand:
    `ES1869VX.ORG` in the same directory, the name essinst uses too.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
 3. Restart Windows. essctl's *Device information* page now shows "Register
-   API: version 1.14".
+   API: version 1.16".
 
 If sound stops working, run `essinst /restore`. If Windows doesn't start,
 restart, press F8 at "Starting Windows 95", choose *Command prompt only*,

@@ -51,6 +51,7 @@ static const struct {
     {VXD_S_RESET_FM, "ResetDosFM", 0x0111},
     {VXD_S_REC_TAKES, "RecordTakesDSP", 0x0113},
     {VXD_S_FM_TIMED, "DosFMDelay", 0x0113},
+    // on by default until 1.15
     {VXD_S_DS_LOCK, "DirectSoundLock", 0x0114},
     {VXD_S_SB16, "SoundBlaster16", 0x0115},
 };
@@ -62,14 +63,20 @@ static void settings_text(char *p) {
   strcat(p, s & VXD_S_READ ? "VxD settings:\tfrom SYSTEM.INI"
                            : "VxD settings:\tthe defaults (loaded after "
                              "Windows started)");
-  for (i = 0; i < (int)(sizeof(vxd_keys) / sizeof(vxd_keys[0])); i++)
+  for (i = 0; i < (int)(sizeof(vxd_keys) / sizeof(vxd_keys[0])); i++) {
+    // 1.16 turned the DirectSound lock off by default
+    if (vxd_keys[i].bit == VXD_S_DS_LOCK && vxd.ext_version >= 0x0116)
+      continue;
     if (vxd.ext_version >= vxd_keys[i].version && !(s & vxd_keys[i].bit)) {
       strcat(p, off++ ? ", " : ", off: ");
       strcat(p, vxd_keys[i].key);
     }
-  // DrqLatch is off unless set
+  }
+  // DrqLatch, and the DirectSound lock since 1.16, are off unless set
   if (vxd.ext_version >= 0x0114 && (s & VXD_S_DRQ_LATCH))
     strcat(p, ", DRQ latch on");
+  if (vxd.ext_version >= 0x0116 && (s & VXD_S_DS_LOCK))
+    strcat(p, ", DirectSound lock on");
   sprintf(ADD, "\r\nVxD Audio 2:\t%s, filter %s\r\n",
           s & VXD_S_A2_4X ? "4x oversampling" : "not oversampled",
           s & VXD_S_A2_4X       ? "bypassed (4x)"

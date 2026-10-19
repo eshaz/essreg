@@ -282,11 +282,14 @@ and stop at the first surprise. Each step says what you should see.
 
 1. In real DOS with `EMM386.EXE` loaded
    (`DEVICE=C:\WINDOWS\EMM386.EXE NOEMS` or `RAM` in `CONFIG.SYS`), run
-   `LH ESSSB16`. It prints the card's base, IRQ and channels, the `BLASTER`
-   line to set, and `traps: EMM386 for real-mode games`. `MEM /C` shows it
-   in upper memory, 3.5 KB. Run it again: "already loaded". In a Windows DOS
-   box it refuses with "not for a Windows DOS box", and without a memory
-   manager with "no port traps".
+   `LH ESSSB16`. It prints the card's base, IRQ and channel, the `BLASTER`
+   line to set, and `traps: EMM386 4.95 for real-mode games` (4.49 with
+   MS-DOS 6.22). `MEM /C` shows it in upper memory, 3.3 KB. Run it again:
+   "already loaded". In a Windows DOS box it refuses with "not for a Windows
+   DOS box", and without a memory manager with "no EMM386: no EMMXXXX0 or
+   EMMQXXX0 device" and "no port traps". When EMM386 is there and it still
+   says "no port traps", the line before says why: the version it found, or
+   that EMM386 refused the traps.
 2. Set `BLASTER` as printed. Run a real-mode game that supports the Sound
    Blaster 16, such as one with the Miles Sound System's `SETUP` or
    `SOUNDSET`. Its setup detects a Sound Blaster 16 (DSP version 4.05) and
@@ -303,8 +306,10 @@ and stop at the first surprise. Each step says what you should see.
 5. A program that knows the chip works as before: ESS's own DOS mixer, or
    `essreg a`, which reads the chip's registers through E7h and the Extended
    mode.
-6. If sound breaks up, `ESSSB16 /S` (single DMA transfers); with `/H0` the
-   game plays its 16-bit sound through Audio 1 on the 8-bit channel.
+6. If sound breaks up, `ESSSB16 /S` (single DMA transfers); with `/H0`, or
+   with `BLASTER` without an `H`, the game programs the 8-bit channel for
+   its 16-bit sound itself, which rules out the carrying over of the 16-bit
+   channel's programming.
 
 ### E0. Installing with essinst
 
@@ -333,7 +338,7 @@ driver in a folder of their own.
    restart Windows.
 2. Try Windows sounds, MIDI, a DirectSound game and a DOS game in a window.
    They all work as before.
-3. Start essctl. Its title bar says "VxD register API 1.14", and the owners
+3. Start essctl. Its title bar says "VxD register API 1.16", and the owners
    line at the bottom right shows who owns the DSP, FM and the MPU.
 4. While a DOS game plays, change *Audio 2 volume* or *Master volume* in
    essctl. The change applies at once, and the game keeps its sound. This is

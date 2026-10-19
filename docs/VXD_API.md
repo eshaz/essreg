@@ -296,7 +296,7 @@ in another VM, or the driver's own interrupt code.
 
 The functions have these inputs and outputs:
 
-* **0400** takes nothing and returns AX = 0115h (version 1.15), BX = the
+* **0400** takes nothing and returns AX = 0116h (version 1.16), BX = the
   feature bits (FFFFh with every change on), CX = the SYSTEM.INI settings
   and DX = the number of functions (14).
 * **0401** takes BL = a mixer register and returns AL = its value.
@@ -384,7 +384,7 @@ the write also changes the value that Windows gets back afterwards.
 | 10  | Audio 1 filter, clear with `Audio1Filter=1` (version 1.12)    |
 | 11  | the DSP for a recording, clear with `RecordTakesDSP=0`        |
 | 12  | DOS FM on its own clock, clear with `DosFMDelay=0`            |
-| 13  | DirectSound's Lock and Unlock, clear with `DirectSoundLock=0` |
+| 13  | DirectSound's Lock and Unlock, set with `DirectSoundLock=1`   |
 | 14  | the DRQ latch, set with `DrqLatch=1` (version 1.14)           |
 | 15  | Sound Blaster 16 for DOS boxes, clear with `SoundBlaster16=0` |
 
@@ -412,24 +412,24 @@ CX holds the settings that the VxD read from SYSTEM.INI when it started
 ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings)).
 A set bit means that the change is on:
 
-| Bit | Key                               | Default |
-|-----|-----------------------------------|---------|
-| 0   | `[ES1869.VXD] RegisterAPI`        | 1       |
-| 1   | `VirtualFM`                       | 1       |
-| 2   | `DosTakesFM`                      | 1       |
-| 3   | `DosKeepsFM`                      | 1       |
-| 4   | `DosFMAudible`                    | 1       |
-| 5   | `DosMixerRestore`                 | 1       |
-| 6   | `ResetDosFM`                      | 1       |
-| 7   | `RecordTakesDSP` (version 1.13)   | 1       |
-| 8   | `[ES1869.DRV] Audio2Oversampling` | 0       |
-| 9   | `[ES1869.DRV] Audio2Filter`       | 0       |
-| 10  | `[ES1869.DRV] Audio1Filter`       | 0       |
-| 11  | `DosFMDelay` isn't 0 (1.13)       | 30      |
-| 12  | `DirectSoundLock` (1.14)          | 1       |
-| 13  | `DrqLatch` (1.14)                 | 0       |
-| 14  | `SoundBlaster16` (1.15)           | 1       |
-| 15  | SYSTEM.INI was read               |         |
+| Bit | Key                                | Default |
+|-----|------------------------------------|---------|
+| 0   | `[ES1869.VXD] RegisterAPI`         | 1       |
+| 1   | `VirtualFM`                        | 1       |
+| 2   | `DosTakesFM`                       | 1       |
+| 3   | `DosKeepsFM`                       | 1       |
+| 4   | `DosFMAudible`                     | 1       |
+| 5   | `DosMixerRestore`                  | 1       |
+| 6   | `ResetDosFM`                       | 1       |
+| 7   | `RecordTakesDSP` (version 1.13)    | 1       |
+| 8   | `[ES1869.DRV] Audio2Oversampling`  | 0       |
+| 9   | `[ES1869.DRV] Audio2Filter`        | 0       |
+| 10  | `[ES1869.DRV] Audio1Filter`        | 0       |
+| 11  | `DosFMDelay` isn't 0 (1.13)        | 30      |
+| 12  | `DirectSoundLock` (1.14, off 1.16) | 0       |
+| 13  | `DrqLatch` (1.14)                  | 0       |
+| 14  | `SoundBlaster16` (1.15)            | 1       |
+| 15  | SYSTEM.INI was read                |         |
 
 Bit 0 is always set here, because with `RegisterAPI=0`, 0400 fails. When bit
 15 is clear, the VxD was loaded after Windows started and runs with the

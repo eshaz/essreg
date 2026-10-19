@@ -46,10 +46,13 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   NT 4.0, Windows 95 and OS/2 in `driver/es1869f/`, and `build/` the
   committed binaries.
 * `src/esssb16.asm` is `esssb16.com`, the DOS TSR that answers games as a
-  Sound Blaster 16 and plays their 16-bit sound on Audio 2, through the port
-  traps of EMM386, QPI (QEMM, JEMM with QPIEMU) and HDPMI32i. It is the
-  VxD's front (`ESSREG_S16_*` in `essext.asm`) in DOS: the same commands,
-  operand table, transfer sequences and mixer mapping.
+  Sound Blaster 16 and plays their sound on Audio 1, through the port traps
+  of EMM386, QPI (QEMM, JEMM with QPIEMU) and HDPMI32i. It is the VxD's
+  front (`ESSREG_S16_*` in `essext.asm`) in DOS: the same commands, operand
+  table, transfer sequences and mixer mapping, with the game's 16-bit DMA
+  channel read back from the controller instead of VDMAD. The chip takes a
+  byte per DMA cycle on any channel, so no transfer may go to a 16-bit
+  channel as words.
 * `tools/` holds the builders, the RE tools, `guard.py`, `wineshot.sh` and
   `dualwav.py`, which makes 4-channel files for dual playback. `tests/`
   holds the Python tests (`esfmemu.py`, `vxdemu.py` and `drvemu.py` run the
@@ -162,13 +165,14 @@ tools/wineshot.sh run ess3d.exe /sim tray
   bytes of its node (`essext.inc`). `tests/test_vxddos.py` runs the DOS box
   paths in the emulator.
 * **esssb16.com.** The resident part ends at `resident_end`, makes no DOS
-  call, and reaches the chip only through `chip_in` and `chip_out`, which go
-  through HDPMI32i's untrapped I/O while its handler runs. The shims run the
-  front on its own stack, and the code after the DPMI switch is 32-bit
-  (`BITS 32`), entered through a short jump, which both modes decode the
-  same. A change to the Sound Blaster 16's translation goes into the VxD's
-  front and the TSR alike, with a test in `tests/test_esssb16.py`, which
-  also checks that `build/esssb16.com` is current.
+  call, and reaches the chip and the DMA controllers only through `chip_in`
+  and `chip_out`, which go through HDPMI32i's untrapped I/O while its
+  handler runs and keep AH, which callers use for a register number. The
+  shims run the front on its own stack, and the code after the DPMI switch
+  is 32-bit (`BITS 32`), entered through a short jump, which both modes
+  decode the same. A change to the Sound Blaster 16's translation goes into
+  the VxD's front and the TSR alike, with a test in `tests/test_esssb16.py`,
+  which also checks that `build/esssb16.com` is current.
 * **Committed binaries.** After changing their sources, rebuild
   `build/ESFM.DRV`, `build/ES1869.VXD`, `build/ES1869.DRV` or
   `build/esssb16.com`, and copy the changed programs from `out/ow2/` to

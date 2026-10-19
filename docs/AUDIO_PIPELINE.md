@@ -73,12 +73,12 @@ second buffer of twice the size, each byte of the primary buffer in the low
 byte of a word. ESS's driver fills it from a time-out: every 20 ms, 80 ms
 from wherever the DMA is. The DMA then plays what the last time-out copied,
 and a time-out that comes late by more than DirectSound's lead plays what
-the buffer held a lap ago, which is heard as a skip. The extended
-`ES1869.VXD` has DirectSound say what it wrote (its `Lock` and `Unlock`
-calls) and copies just that, at once, so the second buffer always holds what
-DirectSound has written, however late Windows runs anything else.
-`DirectSoundLock=0` gives ESS's time-out back
-([DRIVER_CONFIG.md](DRIVER_CONFIG.md#61-es1869vxd)).
+the buffer held a lap ago, which is heard as a skip. With
+`DirectSoundLock=1`, the extended `ES1869.VXD` has DirectSound say what it
+wrote (its `Lock` and `Unlock` calls) and copies just that, at once, so the
+second buffer always holds what DirectSound has written, however late
+Windows runs anything else. It is off by default, until it has been checked
+on the card ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#61-es1869vxd)).
 
 ## The Audio 2 DAC: oversampling and the filter
 

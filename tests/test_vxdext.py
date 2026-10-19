@@ -90,8 +90,9 @@ class ExtensionTest(VxDBuilds, unittest.TestCase):
         m, _hw = self.emu()
         out, cf = self.api(m, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0115)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0xBFFF)   # DrqLatch is off
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0116)
+        # DrqLatch and the DirectSound lock are off
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x9FFF)
         self.assertEqual(out["EDX"] & 0xFFFF, 14)
         out, cf = self.api(m, 0x0000)            # stock functions still work
         self.assertEqual((cf, out["EAX"] & 0xFFFF), (False, 0x0404))
@@ -518,10 +519,10 @@ def words(data):
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
 class DirectSoundTest(VxDBuilds, unittest.TestCase):
     """ESS's DirectSound driver, the IDsDriver and IDsDriverBuffer in PDAT,
-    in both builds: on a 16-bit DMA channel the extended driver asks for
-    Lock and Unlock, fills the channel's buffer in Unlock and starts
-    without ESS's time-out; on an 8-bit channel, and with
-    DirectSoundLock=0, it does as ESS's."""
+    in both builds: on a 16-bit DMA channel the extended driver with
+    DirectSoundLock=1 asks for Lock and Unlock, fills the channel's buffer
+    in Unlock and starts without ESS's time-out; on an 8-bit channel, and
+    with DirectSoundLock=0, the default, it does as ESS's."""
 
     A = 0x28000000          # DirectSound's buffer (64 KB mapped)
     B = 0x29000000          # the 16-bit channel's (128 KB)
@@ -533,14 +534,16 @@ class DirectSoundTest(VxDBuilds, unittest.TestCase):
            (DRV, "Audio2Filter"): "1", (DRV, "Audio1Filter"): "1"}
     E_NOTIMPL = 0x80004001
     DSERR_INVALIDPARAM = 0x80070057
+    LOCK = {(VXD, "DirectSoundLock"): "1"}
 
     def machine_ds(self, ext, channel, ini=None):
         """the driver with Audio 2 on the DMA channel, as ADI_Create leaves
-        it, and the IDsDriver object as L5_2D00 makes it"""
+        it, and the IDsDriver object as L5_2D00 makes it; the extended
+        driver with the DirectSound lock unless ini says otherwise"""
         import vxdemu
         m = self.machine(ext)
         if ext:
-            m.start(ini or {})
+            m.start(self.LOCK if ini is None else ini)
         e, adi = m.emu, vxdemu.ADI
         e.uc.mem_map(self.A, 0x10000)
         e.uc.mem_map(self.B, 0x20000)
@@ -584,11 +587,11 @@ class DirectSoundTest(VxDBuilds, unittest.TestCase):
         self.assertEqual(e.read32(out + 4), self.A)
         return e.read32(out + 8)
 
-    def lock(self, m, buf, pos, length):
+    def lock(self, m, buf, pos, length, flags=0):
         import vxdemu
         e, out = m.emu, vxdemu.LISTS + 0x940
         rc = self.call(m, buf, 3, out, out + 4, out + 8, out + 12, pos,
-                       length, 0)
+                       length, flags)
         return rc, tuple(e.read32(out + 4 * i) for i in range(4))
 
     def desc_flags(self, m, drv):
@@ -618,8 +621,12 @@ class DirectSoundTest(VxDBuilds, unittest.TestCase):
         # more than the buffer: the buffer, from the position
         self.assertEqual(self.lock(m, buf, 0x10, 0x9000),
                          (0, (self.A + 0x10, 0x7FF0, self.A, 0x10)))
-        self.assertEqual(self.lock(m, buf, 0x8000, 4)[0],
-                         self.DSERR_INVALIDPARAM)
+        # a position past the end wraps, and DSBLOCK_ENTIREBUFFER (2) is
+        # the buffer from its start
+        self.assertEqual(self.lock(m, buf, 0x8000, 4),
+                         (0, (self.A, 4, 0, 0)))
+        self.assertEqual(self.lock(m, buf, 0x100, 0x200, 2),
+                         (0, (self.A, 0x8000, 0, 0)))
         # ESS's: not implemented, as the description said
         for ext, ini in ((False, None),
                          (True, {(self.VXD, "DirectSoundLock"): "0"})):

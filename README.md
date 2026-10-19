@@ -449,12 +449,14 @@ DOS game expects it
   with a virtual Sound Blaster, which answers as the chip does and keeps the
   timing of the game's sound and its interrupts, but plays nothing. The
   game's FM music goes on to the chip, and so into the recording.
-* DirectSound on a 16-bit DMA channel plays what DirectSound writes, as it
-  is written. ESS's driver fills the DMA buffer from a time-out, 80 ms every
-  20 ms, and a late time-out plays a lap-old piece of the buffer, which is
-  heard as a skip. The extended driver has DirectSound say what it wrote and
-  copies just that, at once
+* With `DirectSoundLock=1` in `SYSTEM.INI`, DirectSound on a 16-bit DMA
+  channel plays what DirectSound writes, as it is written. ESS's driver
+  fills the DMA buffer from a time-out, 80 ms every 20 ms, and a late
+  time-out plays a lap-old piece of the buffer, which is heard as a skip.
+  The extended driver has DirectSound say what it wrote and copies just
+  that, at once
   ([docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md#the-path-of-a-directsound-sound)).
+  It is off until it has been checked on the card.
 * `DrqLatch=1` in `SYSTEM.INI` sets the chip's DRQ latch, which holds each
   DMA request until the DMA controller answers it, each time a program takes
   the chip. It is off unless you set it
@@ -676,17 +678,21 @@ chip answers a DOS program as a Sound Blaster Pro, version 3.01, and plays
 16-bit sound only through ESS's own commands, so a game written for the
 Sound Blaster 16 plays 8-bit sound on it at best. `esssb16` stays resident,
 in upper memory with `LH`, answers the game as a Sound Blaster 16, version
-4.05, and turns the game's commands into the chip's own:
-* A 16-bit transfer plays on Audio 2, the chip's 16-bit stereo DAC, on the
-  game's 16-bit DMA channel, at the rate the game asked for, up to 48 kHz,
-  with the DAC's 4x oversampling off and its filter bypassed, as the rebuilt
-  Windows drivers play. The game's DMA programming goes to the controller as
-  it is, and the game's interrupt comes from Audio 2 on the card's IRQ.
-* An 8-bit transfer plays or records on Audio 1 in ESS's Extended mode, as
-  the Windows driver's Sound Blaster 16 does.
+4.05, and turns the game's commands into the chip's own, as the Windows
+driver's Sound Blaster 16 does:
+* Every transfer plays or records on Audio 1 in ESS's Extended mode, at the
+  rate the game asked for, up to 48 kHz, 16-bit ones two bytes a sample on
+  the card's 8-bit DMA channel. The chip takes one byte per DMA cycle
+  whatever the channel (its audio channels map to channels 0, 1 and 3, DS
+  p.14), so a 16-bit channel can't carry a game's words: when the game
+  programs its 16-bit channel, the `H` of `BLASTER`, `esssb16` reads that
+  programming back at the transfer command and puts it on the 8-bit channel,
+  in bytes, with the same direction and auto-initialize. A game that picks
+  the 8-bit channel for 16-bit sound through mixer 81h, as a Sound Blaster
+  16 allows, programs that channel itself.
 * The Sound Blaster 16's mixer registers, 30h to 47h, keep the game's view
   and set the chip's levels and record source. Registers 80h to 82h give the
-  card's IRQ, its channels and which interrupt is pending.
+  card's IRQ, its channels and which transfer's interrupt is pending.
 * A game or tool that knows the chip, which it asks with E7h, gets the chip
   as it is, with ESS's own commands and mixer.
 
@@ -723,23 +729,27 @@ LH ESSSB16
 
 `esssb16` prints the card it found and the `BLASTER` line to set: the base,
 the IRQ and the 8-bit channel as the card's PnP registers have them, and
-`H5` for the 16-bit channel, which it gives to Audio 2. The options:
+`H5` for the game's 16-bit channel. It says which memory manager traps for
+it, with EMM386's version, and when none does, why: no EMM386 device, one
+older than 4.46, or one that refused the traps. The options:
 * `/A220`: the card's base, otherwise `BLASTER`'s `A`, or 220h.
-* `/H5`, `/H6` or `/H7`: the 16-bit channel, otherwise `BLASTER`'s `H`, or
-  5. `/H0` gives up the 16-bit channel: 16-bit sound then plays through
-     Audio 1 on the 8-bit channel, two bytes a sample, as a Sound Blaster 16
-     does without an `H`.
-* `/S`: single DMA transfers instead of demand transfers of four, ESS's own
-  *Single Mode DMA* setting, if sound breaks up.
+* `/H5`, `/H6` or `/H7`: the game's 16-bit channel, otherwise `BLASTER`'s
+  `H`, or 5. `/H0` offers none: the game then plays 16-bit sound through the
+  8-bit channel, as a Sound Blaster 16 does without an `H`.
+* `/S`: single DMA transfers instead of demand transfers of two bytes, ESS's
+  own *Single Mode DMA* setting, if sound breaks up.
 
-The resident part takes 3.5 KB with its PSP and makes no DOS call once it is
+The resident part takes 3.3 KB with its PSP and makes no DOS call once it is
 in. The exit codes are 1 for a bad option, 2 when no ES1869 answers at the
 base, 3 without port traps, 4 in a Windows DOS box and 5 when it is loaded
-already. Two limits: a 16-bit recording goes to Audio 1, which records on
-the 8-bit channel only, so a game that records 16-bit sound on the 16-bit
-channel gets nothing; and the FM ports aren't trapped, so a game plays FM as
-before. The program was tested in a CPU emulator against models of the chip,
-DOS, the memory managers and HDPMI32i
+already. The limits: the game must program its 16-bit channel before the
+transfer command, as Creative's guide says, and a game that reads that
+channel's count for its position sees it stand still, because the sound
+flows through the 8-bit channel; a 16-bit buffer that crosses a 64 KB
+boundary, which the 16-bit channel allows and the 8-bit one doesn't, plays
+wrong; and the FM ports aren't trapped, so a game plays FM as before. The
+program was tested in a CPU emulator against models of the chip, the DMA
+controllers, DOS, the memory managers and HDPMI32i
 ([docs/TESTING.md](docs/TESTING.md#d2-esssb16-dos) has the steps for real
 hardware).
 

@@ -728,13 +728,15 @@ ESS's driver:
   the bursts of its ticks. The queue takes its writes from the virtual FM
   chip's trap, so it needs `VirtualFM=1`: with `VirtualFM=0` the program
   writes directly whatever the delay.
-* **DirectSoundLock** (default 1). On a 16-bit DMA channel, the driver
-  copies what DirectSound writes into the channel's buffer as it is written,
-  in DirectSound's Lock and Unlock calls
+* **DirectSoundLock** (default 0). With 1, on a 16-bit DMA channel the
+  driver copies what DirectSound writes into the channel's buffer as it is
+  written, in DirectSound's Lock and Unlock calls
   ([VXD_INTERNALS.md](VXD_INTERNALS.md#directsound)). With 0, ESS's time-out
   copies 80 ms from the DMA's position every 20 ms, and a late time-out
   plays what the buffer held a lap ago. On an 8-bit channel the DMA plays
-  DirectSound's buffer itself, and the key changes nothing.
+  DirectSound's buffer itself, and the key changes nothing. It is off until
+  it has been checked on the card: a report of 8-bit playback came with it
+  on (version 1.16).
 * **DrqLatch** (default 0). With 1, the driver sets the chip's DRQ latch,
   card-level PnP register 25h bit 7, each time a VM takes the DSP, so that
   each DMA request stays up until the DMA controller answers it

@@ -43,7 +43,7 @@ KEYS = {                            # key: its bit in ESSREG_Opts
     (VXD, "DrqLatch"): 0x2000,
     (VXD, "SoundBlaster16"): 0x4000,
 }
-DEFAULT, READ = 0x58FF, 0x8000
+DEFAULT, READ = 0x48FF, 0x8000
 # every change off: ESS's driver
 ESS = {key: "0" for key in KEYS}
 ESS.update({(DRV, "Audio2Oversampling"): "1", (DRV, "Audio2Filter"): "1",
@@ -141,26 +141,26 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         m.start({})
         out, cf = m.api(VM_SYS, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0115)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0xBFFF)   # DrqLatch is off
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0116)
+        # DrqLatch and the DirectSound lock are off
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x9FFF)
         self.assertEqual(out["ECX"] & 0xFFFF, DEFAULT | READ)
         m = self.machine()
         m.start({(VXD, "VirtualFM"): "0", (VXD, "DosMixerRestore"): "0",
                  (VXD, "RecordTakesDSP"): "0",
                  (DRV, "Audio2Filter"): "1", (DRV, "Audio1Filter"): "1"})
         out, cf = m.api(VM_SYS, 0x0400)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0xBFFF & ~0x0D80)
-        self.assertEqual(out["ECX"] & 0xFFFF, 0x505D | 0x0E00 | READ)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x9FFF & ~0x0D80)
+        self.assertEqual(out["ECX"] & 0xFFFF, 0x405D | 0x0E00 | READ)
         m = self.machine()
-        m.start({(VXD, "DrqLatch"): "1", (VXD, "DirectSoundLock"): "0"})
+        m.start({(VXD, "DrqLatch"): "1", (VXD, "DirectSoundLock"): "1"})
         out, cf = m.api(VM_SYS, 0x0400)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0xFFFF & ~0x2000)
-        self.assertEqual(out["ECX"] & 0xFFFF, (DEFAULT & ~0x1000) | 0x2000
-                         | READ)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0xFFFF)
+        self.assertEqual(out["ECX"] & 0xFFFF, DEFAULT | 0x3000 | READ)
         m = self.machine()
         m.start({(VXD, "SoundBlaster16"): "0"})
         out, cf = m.api(VM_SYS, 0x0400)
-        self.assertEqual(out["EBX"] & 0xFFFF, 0x3FFF)
+        self.assertEqual(out["EBX"] & 0xFFFF, 0x1FFF)
         self.assertEqual(out["ECX"] & 0xFFFF, (DEFAULT & ~0x4000) | READ)
 
 

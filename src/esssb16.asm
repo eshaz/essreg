@@ -8,11 +8,13 @@
 ; the game's accesses to seven of the Sound Blaster ports (the mixer, the
 ; reset, the read data, the command, the status and the 16-bit acknowledge
 ; ports), answers as a Sound Blaster 16 (version 4.05), and turns the
-; game's commands into the chip's own: a 16-bit transfer plays on Audio 2,
-; the chip's 16-bit stereo DAC, on the game's 16-bit DMA channel (the H of
-; BLASTER), and an 8-bit one on Audio 1 in Extended mode. The game's own
-; DMA programming goes to the controller as it is. A game that knows the
-; chip (E7h) gets the chip as it is.
+; game's commands into the chip's own: every transfer plays or records on
+; Audio 1 in Extended mode, 16-bit ones two bytes a sample, on the card's
+; 8-bit DMA channel, because the chip takes a byte per DMA cycle whatever
+; the channel (DS p.14: the audio channels map to channels 0, 1 and 3). A
+; game that programs its 16-bit channel (the H of BLASTER, mixer 81h) has
+; that programming carried over to the 8-bit channel at each transfer
+; command. A game that knows the chip (E7h) gets the chip as it is.
 ;
 ; In DOS nothing sees a port access unless the processor traps it, so the
 ; TSR needs a V86 memory manager for real-mode games: QEMM (its QPI), JEMM
@@ -46,7 +48,6 @@ F_16            equ 0x04        ; the last transfer is 16-bit (mixer 82h bit 1)
 F_8             equ 0x08        ; it is 8-bit (bit 0)
 F_RUN           equ 0x10        ; a transfer of the front's runs on Audio 1
 F_AUTO          equ 0x20        ; it auto-initializes
-F_A2            equ 0x40        ; a transfer runs on Audio 2
 F_RESET         equ 0x80        ; the reset port is at 1
 
 ; the trap paths (how_io)
@@ -78,7 +79,6 @@ qcount:         db 0            ; bytes in the read queue
 qhead:          db 0            ; where its next byte is
 queue:          times QUEUE_LEN db 0
 mix:            times MIX_LEN db 0      ; the game's view of 30h-47h
-a2ctl:          db 0            ; 78h while Audio 2 plays
 how_io:         db IO_DIRECT    ; IO_*
 base:           dw 0x220        ; Audio_Base
 cfg:            dw 0            ; Config_Base, 0 if none
@@ -194,9 +194,12 @@ chip_in:
         in      al,dx
         ret
 .pm:    push    cx
-        xor     ch,ch
+        push    ax                      ; AH kept, as in keeps it: callers
+        xor     ch,ch                   ; carry a register number in it
         mov     ax,8
         o32 call far [vendor]
+        pop     cx
+        mov     ah,ch
         pop     cx
         ret
 chip_out:
@@ -374,12 +377,9 @@ s16_out:
         cmp     bl,0x06
         jne     .not
         test    al,1                    ; the reset's end: the chip is in
-        jnz     .high                   ; Compatibility mode again, Audio 2
-        test    byte [flags],F_RESET    ; stops and the front starts over,
-        jz      .through                ; for whatever program comes next
-        push    ax
-        call    a2_stop
-        pop     ax
+        jnz     .high                   ; Compatibility mode again, and
+        test    byte [flags],F_RESET    ; the front starts over, for
+        jz      .through                ; whatever program comes next
         mov     byte [flags],0
         mov     byte [need],0
         mov     byte [qcount],0
@@ -438,14 +438,9 @@ s16_in:
         or      al,0x80                 ; a byte to read
 .ok:    clc
         ret
-.ack16: push    ax                      ; the 16-bit acknowledge: Audio 2's
-        mov     ah,0x7A                 ; interrupt latch cleared
-        call    mix_read
-        and     al,0x7F
-        mov     ah,0x7A
-        call    mix_write
-        pop     ax
-        mov     al,0xFF
+.ack16: dec     dx                      ; the 16-bit acknowledge: Audio 1's
+        call    chip_in                 ; interrupt, acknowledged at +Eh
+        inc     dx
         clc
         ret
 .not:   stc
@@ -703,38 +698,15 @@ command:
         jnz     .str
         pop     si
         jmp     .out
-.pause: test    byte [flags],F_A2
-        jz      .pause1
-        xor     al,al                   ; Audio 2 waits: 78h cleared, as
-        mov     ah,0x78                 ; ES1869.DRV pauses
-        call    mix_write
-        jmp     .out
-.pause1:
-        mov     al,0xD0
+.pause: mov     al,0xD0                 ; Audio 1 halts, as for 8-bit
         call    dsp_put
         jmp     .out
 .continue:
-        test    byte [flags],F_A2
-        jz      .continue1
-        mov     al,[a2ctl]
-        mov     ah,0x78
-        call    mix_write
-        jmp     .out
-.continue1:
         mov     al,0xD4
         call    dsp_put
         jmp     .out
-.stop:  test    byte [flags],F_A2       ; the block that plays is the last
-        jz      .stop1
-        cmp     al,0xDA                 ; DAh is the 8-bit stop
-        je      .stop1
-        and     byte [a2ctl],~0x10 & 0xFF
-        mov     al,[a2ctl]
-        mov     ah,0x78
-        call    mix_write
-        jmp     .out
-.stop1: test    byte [flags],F_RUN
-        jz      .out
+.stop:  test    byte [flags],F_RUN      ; the block that plays is the last:
+        jz      .out                    ; auto-initialize off
         and     byte [flags],~F_AUTO & 0xFF
         mov     ah,0xB8
         call    dsp_read
@@ -742,18 +714,8 @@ command:
         mov     ah,0xB8
         call    dsp_reg
         jmp     .out
-.irq16: test    byte [flags],F_A2       ; the 16-bit interrupt: Audio 2's
-        jz      .irq16a1                ; latch set
-        mov     ah,0x7A
-        call    mix_read
-        or      al,0xC0
-        mov     ah,0x7A
-        call    mix_write
-        jmp     .irq16f
-.irq16a1:
-        mov     al,0xF2
-        call    dsp_put
-.irq16f:
+.irq16: mov     al,0xF2                 ; the 16-bit interrupt: the chip's,
+        call    dsp_put                 ; Audio 1's
         and     byte [flags],~F_8 & 0xFF
         or      byte [flags],F_16
         jmp     .out
@@ -769,24 +731,22 @@ copyright:
 
 ; a transfer command of the Sound Blaster 16 (Bxh 16-bit, Cxh 8-bit; bit 3
 ; records, bit 2 auto-initializes), its mode (bit 4 signed, bit 5 stereo)
-; and its length in samples less one: 16-bit output goes to Audio 2 on
-; the 16-bit channel, the rest to Audio 1 in Extended mode
+; and its length in samples less one: Audio 1 in Extended mode, two bytes
+; a sample for 16-bit; a 16-bit transfer on the game's 16-bit channel has
+; that channel's programming carried over first
 transfer:
         pushad
         movzx   bx,byte [cmd]           ; BL = the command
         movzx   cx,byte [ops]           ; CL = the mode
         movzx   esi,word [ops+1]        ; ESI = the samples
         inc     esi
-        test    bl,0x10                 ; Bxh: 16-bit
+        test    bl,0x10
         jz      .a1
-        test    bl,0x08                 ; recording: Audio 1's
-        jnz     .a1
-        cmp     byte [dma16],0          ; no 16-bit channel: Audio 1, two
-        je      .a1                     ; bytes a sample on the 8-bit one
-        call    a2_transfer
-        jmp     .done
+        cmp     byte [dma16],0
+        je      .a1
+        call    dma_mirror
 .a1:    call    a1_transfer
-.done:  popad
+        popad
         ret
 
 ; BX = the rate of the transfer (Hz): the rate of 41h/42h, the time
@@ -831,165 +791,95 @@ div_round:
 .done:  pop     edx
         ret
 
-; --- Audio 2: the game's 16-bit transfers --------------------------------
+; --- the game's 16-bit channel ---------------------------------------------
 
-; a 16-bit transfer on Audio 2: BL = the command, CL = the mode, ESI = the
-; samples. The sequence of ES1869.DRV (DRIVER_CONFIG.md 2.2): 71h for an
-; asynchronous DAC without 4x oversampling and with the filters bypassed,
-; 70h and 72h for the rate, 74h and 76h for minus the bytes of a block,
-; 7Ah for the format with the interrupt on, 7Ch for the volume, 78h to go
-a2_transfer:
-        call    a2_stop
-        or      byte [flags],F_A2 | F_16
-        and     byte [flags],~F_8 & 0xFF
-        mov     ah,0x71
-        call    mix_read
-        and     al,~0x10 & 0xFF
-        or      al,0x0E
-        mov     ah,0x71
-        call    mix_write
-        push    bx
-        push    cx
-        call    rate_hz                 ; BX = the rate
-        call    a2_clock                ; AL = 70h for it
-        mov     ah,0x70
-        call    mix_write
-        call    a2_filter               ; AL = 72h for it
-        mov     ah,0x72
-        call    mix_write
-        pop     cx
-        pop     bx
-        mov     eax,esi
-        shl     eax,1                   ; two bytes a sample
-        neg     eax
-        mov     edi,eax
-        mov     ah,0x74
-        call    mix_write
-        mov     eax,edi
-        shr     eax,8
-        mov     ah,0x76
-        call    mix_write
-        mov     al,0x41                 ; 16-bit, the interrupt on
-        test    cl,0x20
-        jz      .mono
-        or      al,0x02
-.mono:  test    cl,0x10
-        jz      .unsigned
-        or      al,0x04
-.unsigned:
-        mov     ah,0x7A
-        call    mix_write
-        call    a2_volume
-        mov     al,0x83                 ; demand transfers of 4, DMA and FIFO
-        cmp     byte [single],0
-        je      .demand
-        mov     al,0x03
-.demand:
-        test    bl,0x04
+; the page registers of the first controller's channels 0 to 3, and of the
+; second's channels 5 to 7
+page8:          db 0x87, 0x83, 0x81, 0x82
+page16:         db 0x8B, 0x89, 0x8A
+
+; the game's programming of its 16-bit channel, in the second controller's
+; registers, carried over to Audio 1's 8-bit channel: the word address and
+; the page's bits 7:1 as a byte address and page, the word count as a byte
+; count, demand transfers (single with /S), auto-initialize and the
+; direction from the command in BL. The chip takes a byte per DMA cycle
+; whatever the channel, so the game's channel can't carry its words. The
+; game's current registers are read right after it programmed them, so
+; they hold what it wrote, and its flip-flop is left cleared
+dma_mirror:
+        pushad
+        mov     dx,0xD8                 ; the second controller's flip-flop
+        call    chip_out
+        movzx   si,byte [dma16]
+        mov     dl,[page16+si-5]
+        xor     dh,dh
+        call    chip_in
+        and     al,0xFE
+        mov     bh,al                   ; BH = the page, bits 7:1
+        and     si,3
+        shl     si,2
+        lea     dx,[si+0xC0]            ; the channel's address, low then high
+        call    chip_in
+        mov     cl,al
+        call    chip_in
+        mov     ch,al                   ; CX = the word address
+        add     dx,2                    ; its count
+        call    chip_in
+        movzx   bp,al
+        call    chip_in
+        mov     ah,al
+        xor     al,al
+        or      bp,ax                   ; BP = the word count
+        mov     dx,0xD8
+        call    chip_out
+        mov     ax,cx
+        shl     ax,1                    ; AX = the byte address, its bit 16
+        adc     bh,0                    ; into the page
+        shl     bp,1
+        inc     bp                      ; BP = the byte count
+        movzx   si,byte [dma8]
+        push    ax
+        mov     ax,si
+        or      al,0x04                 ; the channel masked while it is set
+        mov     dx,0x0A
+        call    chip_out
+        mov     al,0x08                 ; demand transfers from memory
+        test    bl,0x08
+        jz      .play
+        mov     al,0x04                 ; into memory: a recording
+.play:  test    bl,0x04
         jz      .once
         or      al,0x10                 ; auto-initialize
-.once:  mov     [a2ctl],al
-        mov     ah,0x78
-        call    mix_write
-        ret
-
-; Audio 2 stopped, its interrupt latch cleared
-a2_stop:
-        test    byte [flags],F_A2
-        jz      .out
-        and     byte [flags],~F_A2 & 0xFF
-        push    ax
-        xor     al,al
-        mov     ah,0x78
-        call    mix_write
-        mov     ah,0x7A
-        call    mix_write
+.once:  cmp     byte [single],0
+        je      .mode
+        or      al,0x40                 ; single transfers
+.mode:  or      al,[dma8]
+        mov     dx,0x0B
+        call    chip_out
+        mov     dx,0x0C                 ; the first controller's flip-flop
+        call    chip_out
         pop     ax
-.out:   ret
-
-; Audio 2's volume 7Ch from the game's voice volume (32h, 33h)
-a2_volume:
-        push    ax
-        mov     al,[mix+2]
-        mov     ah,[mix+3]
-        call    nibbles
-        mov     ah,0x7C
-        call    mix_write
-        pop     ax
+        mov     dx,si
+        shl     dx,1                    ; the channel's address port
+        call    chip_out
+        mov     al,ah
+        call    chip_out
+        inc     dx                      ; its count port
+        mov     ax,bp
+        call    chip_out
+        mov     al,ah
+        call    chip_out
+        mov     dl,[page8+si]
+        xor     dh,dh
+        mov     al,bh
+        call    chip_out
+        mov     ax,si                   ; unmasked
+        mov     dx,0x0A
+        call    chip_out
+        popad
         ret
 
-; AL = 70h for the rate in BX, as ES1869.DRV picks it (6:24A0): the 768
-; kHz clock (48 kHz family) or the 793.8 kHz one (44.1 kHz family), with
-; the divider that comes closest; below 6 kHz the lowest rate
-a2_clock:
-        push    ebx
-        push    ecx
-        push    edx
-        push    esi
-        push    edi
-        movzx   ebx,bx
-        mov     eax,768000
-        call    .try                    ; CL = 128 - n, EDX = the error
-        mov     ch,cl
-        or      ch,0x80
-        mov     esi,edx
-        mov     eax,793800
-        call    .try
-        cmp     edx,esi
-        jb      .nearer
-        mov     cl,ch
-.nearer:
-        mov     al,cl
-        pop     edi
-        pop     esi
-        pop     edx
-        pop     ecx
-        pop     ebx
-        ret
-.try:   push    eax
-        call    div_round               ; EAX = n
-        or      eax,eax
-        jnz     .n
-        inc     eax
-.n:     cmp     eax,128
-        jbe     .fits
-        mov     eax,128
-.fits:  mov     cl,128
-        sub     cl,al
-        and     cl,0x7F
-        mov     edi,eax
-        pop     eax
-        push    ebx
-        mov     ebx,edi
-        xor     edx,edx
-        div     ebx                     ; the rate n gives
-        pop     ebx
-        mov     edx,eax
-        sub     edx,ebx
-        jns     .abs
-        neg     edx
-.abs:   ret
-
-; AL = 72h for the rate in BX, as ES1869.DRV computes it (6:259E): FDh at
-; 44100 and 48000 Hz, else 256 - round(199582 / rate)
-a2_filter:
-        cmp     bx,44100
-        je      .fixed
-        cmp     bx,48000
-        je      .fixed
-        push    ebx
-        push    edx
-        movzx   ebx,bx
-        mov     eax,199582
-        call    div_round
-        neg     al
-        pop     edx
-        pop     ebx
-        ret
-.fixed: mov     al,0xFD
-        ret
-
-; --- Audio 1: the game's 8-bit transfers, in Extended mode -------------
+; --- Audio 1: the game's transfers, in Extended mode ---------------------
 
 ; a transfer on Audio 1: BL = the command, CL = the mode, ESI = the
 ; samples. The sequence of the data sheet (p.48), as the VxD front sends
@@ -999,7 +889,6 @@ a2_filter:
 ; format, B1h and B2h for the interrupt and the DMA request, B8h bit 0 and
 ; D1h
 a1_transfer:
-        call    a2_stop                 ; one transfer at a time
         mov     al,[flags]
         and     al,F_ESS | F_EXT | F_RESET
         or      al,F_RUN | F_8
@@ -1027,10 +916,10 @@ a1_transfer:
         or      al,0x0A                 ; the ADC
 .dac:   mov     ah,0xB8
         call    dsp_reg
-        mov     ax,0xB902
-        cmp     byte [single],0
-        je      .b9
-        mov     al,0x01
+        mov     ax,0xB901               ; demand transfers of 2 bytes, as
+        cmp     byte [single],0         ; ESS's recording, or 02h with /S,
+        je      .b9                     ; ESS's "Single Mode DMA"
+        mov     al,0x02
 .b9:    call    dsp_reg
         mov     ah,0xA8                 ; mono or stereo: A8h bits 1:0
         call    dsp_read
@@ -1168,9 +1057,14 @@ mix_out:
         jmp     short .out
 .high:  cmp     cl,0x80
         jb      .chip
-        cmp     cl,0x82                 ; the card's IRQ, channels and status
+        cmp     cl,0x81                 ; the 16-bit channel the game picks
+        je      .select
+        cmp     cl,0x82                 ; the card's IRQ and status: kept
         jbe     .out
 .chip:  call    chip_out
+        jmp     short .out
+.select:
+        call    dma_select
         jmp     short .out
 .reset: call    chip_out                ; the chip's reset, and the view's
         call    mix_defaults
@@ -1205,20 +1099,14 @@ mix_in:
         jmp     short .out
 .dma:   call    dma_bits
         jmp     short .out
-.status:                                ; bit 0 an 8-bit interrupt (Audio
-        push    dx                      ; 1's, Audio_Base+Ch bit 0), bit 1
-        mov     dx,[base]               ; a 16-bit one (Audio 2's, 7Ah bit 7)
-        add     dx,0x0C
-        call    chip_in
-        pop     dx
-        and     al,0x01
-        mov     cl,al
-        mov     ah,0x7A
-        call    mix_read
-        test    al,0x80
-        jz      .st8
-        or      cl,0x02
-.st8:   mov     al,cl
+.status:                                ; bit 0 an 8-bit transfer's
+        xor     al,al                   ; interrupt, bit 1 a 16-bit one:
+        test    byte [flags],F_8        ; the running transfer's kind, as
+        jz      .st16                   ; the VxD's front answers
+        or      al,0x01
+.st16:  test    byte [flags],F_16
+        jz      .out
+        or      al,0x02
 .out:   pop     cx
         pop     bx
         clc
@@ -1262,6 +1150,25 @@ dma_bits:
         shl     ah,cl
         or      al,ah
 .out:   pop     cx
+        ret
+
+; the 16-bit channel from a write to mixer 81h: bit 5 channel 5, 6 and 7
+; theirs, none 0, as the Sound Blaster 16's DSP picks the channel of a
+; 16-bit transfer; the 8-bit channel's bits can't change the card's
+dma_select:
+        push    ax
+        xor     ah,ah
+        test    al,0x20
+        jz      .b6
+        mov     ah,5
+.b6:    test    al,0x40
+        jz      .b7
+        mov     ah,6
+.b7:    test    al,0x80
+        jz      .set
+        mov     ah,7
+.set:   mov     [dma16],ah
+        pop     ax
         ret
 
 ; the Sound Blaster 16's reset values into the view
@@ -1314,12 +1221,10 @@ mix_apply:
         mov     ah,0x62
         call    mix_write
         jmp     .out
-.voice: mov     al,[mix+2]              ; the Audio 1 volume 14h, and Audio
-        mov     ah,[mix+3]              ; 2's 7Ch
+.voice: mov     al,[mix+2]              ; the Audio 1 volume 14h
+        mov     ah,[mix+3]
         call    nibbles
         mov     ah,0x14
-        call    mix_write
-        mov     ah,0x7C
         call    mix_write
         jmp     .out
 .fm:    mov     al,[mix+4]              ; the music DAC (FM) volume 36h
@@ -1838,30 +1743,11 @@ pnp_read:
         in      al,dx
         ret
 
-; PnP register BL of logical device 1 = AL
-pnp_write:
-        mov     ah,al
-        mov     dx,[cfg]
-        mov     al,0x07
-        out     dx,al
-        inc     dx
-        mov     al,1
-        out     dx,al
-        dec     dx
-        mov     al,bl
-        out     dx,al
-        inc     dx
-        mov     al,ah
-        out     dx,al
-        ret
-
-; the card's IRQ and channels from its PnP registers, where the config
-; port was found: the 8-bit channel and the IRQ as they are, Audio 2 on
-; the 16-bit channel (75h) and on the same IRQ (72h); then the mixer: the
-; Audio 2 DAC's mode, its volume as Audio 1's, and the view's defaults
+; the card's IRQ and 8-bit channel from its PnP registers, where the
+; config port was found, else BLASTER's; then the view's defaults
 setup_card:
         cmp     word [cfg],0
-        je      .mixer
+        je      .view
         mov     bl,0x70
         call    pnp_read
         and     al,0x0F
@@ -1870,41 +1756,9 @@ setup_card:
         call    pnp_read
         and     al,0x07
         cmp     al,4                    ; 4 = none
-        jae     .dma16
+        jae     .view
         mov     [dma8],al
-.dma16: mov     al,[dma16]
-        or      al,al
-        jz      .mixer
-        mov     bl,0x75
-        call    pnp_write
-        call    pnp_read
-        and     al,0x07
-        cmp     al,[dma16]
-        je      .irq2
-        mov     byte [dma16],0          ; the chip didn't take it
-        jmp     short .mixer
-.irq2:  mov     bl,0x72
-        call    pnp_read
-        and     al,0x0F
-        cmp     al,[irq]
-        je      .mixer
-        mov     al,[irq]
-        mov     bl,0x72
-        call    pnp_write
-.mixer: mov     ah,0x71
-        call    mix_read
-        and     al,~0x10 & 0xFF
-        or      al,0x0E
-        mov     ah,0x71
-        call    mix_write
-        mov     ah,0x14
-        call    mix_read
-        or      al,al
-        jnz     .vol
-        mov     al,0xCC
-.vol:   mov     ah,0x7C
-        call    mix_write
-        call    mix_defaults
+.view:  call    mix_defaults
         ret
 
 ; what was found, and the BLASTER to set
@@ -1927,6 +1781,8 @@ report:
         call    print
         movzx   ax,byte [dma16]
         call    print_dec
+        mov     dx,msg_through
+        call    print
 .blaster:
         mov     dx,msg_blaster
         call    print
@@ -1951,7 +1807,7 @@ report:
         ret
 
 ; the traps for real-mode games: QPI (QEMM, or JEMM with QPIEMU), else
-; EMM386's API. CF set if neither is there
+; EMM386's API. CF set if neither is there, each having said why
 trap_v86:
         call    qpi_find
         jc      .emm
@@ -1965,17 +1821,51 @@ trap_v86:
         jc      .none
         mov     dx,msg_emm
         call    print
+        mov     ax,[emm_version]
+        xchg    al,ah
+        call    print_version
+        mov     dx,msg_emm2
+        call    print
         clc
         ret
 .none:  stc
         ret
 
+; AX = a handle on the device named at DX, CF set if there is none
+dev_open:
+        mov     ax,0x3D00
+        int     0x21
+        ret
+
+; "AH.AL", the minor version with two digits
+print_version:
+        push    ax
+        push    dx
+        push    ax
+        movzx   ax,ah
+        call    print_dec
+        mov     dl,'.'
+        mov     ah,0x02
+        int     0x21
+        pop     ax
+        cmp     al,10
+        jae     .minor
+        push    ax
+        mov     dl,'0'
+        mov     ah,0x02
+        int     0x21
+        pop     ax
+.minor: movzx   ax,al
+        call    print_dec
+        pop     dx
+        pop     ax
+        ret
+
 ; the QPI entry into qpi: QEMM's, through its device, or QPIEMU's (int 2Fh
 ; 1684h, device 4354h); CF set if neither answers
 qpi_find:
-        mov     ax,0x3D00
         mov     dx,qemm_device
-        int     0x21
+        call    dev_open
         jc      .emu
         mov     bx,ax
         mov     dx,qpi
@@ -1992,8 +1882,15 @@ qpi_find:
         mov     ah,0x03                 ; its version, 7.03 or later
         call    far [qpi]
         cmp     bx,0x0703
-        jb      .emu
-        clc
+        jae     .found
+        mov     dx,msg_qemm
+        call    print
+        mov     ax,bx
+        call    print_version
+        mov     dx,msg_qpi_old
+        call    print
+        jmp     short .emu
+.found: clc
         ret
 .emu:   mov     dword [qpi],0
         push    es
@@ -2043,22 +1940,22 @@ qpi_install:
         clc
         ret
 .fail:  pop     es
+        mov     dx,msg_qpi_refused
+        call    print
         stc
         ret
 
 ; the front's ports trapped through EMM386 (int 2Fh 4A15h, 4.46 or later):
-; the dispatch table of Audio_Base+4h to +6h, then of +Ah to +Fh, where
-; +Bh and +Dh pass; failing the second, one table of all twelve, which
-; also passes the FM ports +8h and +9h
+; one dispatch table of Audio_Base+4h to +Fh, where +7h to +9h, +Bh and
+; +Dh pass. CF set, having said why, without EMM386's device (EMMXXXX0, or
+; EMMQXXX0 with NOEMS), with an older one, or when it refuses
 emm_install:
-        mov     ax,0x3D00
-        mov     dx,emm_device           ; EMMXXXX0, or EMMQXXX0 with NOEMS,
-        int     0x21                    ; where EMM386 hides its device
+        mov     dx,emm_device
+        call    dev_open
         jnc     .open
-        mov     ax,0x3D00
         mov     dx,emm_device2
-        int     0x21
-        jc      .none
+        call    dev_open
+        jc      .nodev
 .open:  mov     bx,ax
         mov     dx,emm_version
         mov     cx,2
@@ -2068,12 +1965,12 @@ emm_install:
         mov     ah,0x3E
         int     0x21
         popf
-        jc      .none
+        jc      .nodev
         cmp     byte [emm_version],4
-        jb      .none
+        jb      .old
         ja      .ok
         cmp     byte [emm_version+1],46
-        jb      .none
+        jb      .old
 .ok:    mov     di,emm_table            ; each port with its handler
         mov     si,trap_handlers
         mov     cx,12
@@ -2083,27 +1980,30 @@ emm_install:
         movsw
         inc     ax
         loop    .fill
-        mov     si,emm_table            ; +4h to +6h
-        mov     cx,3
-        mov     dx,[base]
-        add     dx,4
-        call    emm_call
-        jc      .none
-        mov     si,emm_table + 6 * 4    ; +Ah to +Fh
-        mov     cx,6
-        mov     dx,[base]
-        add     dx,0x0A
-        call    emm_call
-        jnc     .done
-        mov     si,emm_table            ; all twelve
+        mov     si,emm_table
         mov     cx,12
         mov     dx,[base]
         add     dx,4
         call    emm_call
-        jc      .none
-.done:  clc
+        jc      .refused
+        clc
         ret
-.none:  stc
+.nodev: mov     dx,msg_emm_nodev
+        jmp     short .fail
+.old:   mov     dx,msg_emm_old
+        jmp     short .version
+.refused:
+        mov     dx,msg_emm_refused
+.version:
+        push    dx
+        mov     dx,msg_emm386
+        call    print
+        mov     ax,[emm_version]
+        xchg    al,ah
+        call    print_version
+        pop     dx
+.fail:  call    print
+        stc
         ret
 
 ; int 2Fh 4A15h for the CX ports from DX with the table at DS:SI
@@ -2269,7 +2169,7 @@ blaster_name:   db "BLASTER=", 0
 banner:         db "esssb16 1.0: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
 usage:          db "usage: esssb16 [/A220] [/H5|/H6|/H7|/H0] [/S]", 13, 10
                 db "  /A  the card's base, else BLASTER's A (220)", 13, 10
-                db "  /H  the 16-bit DMA channel, else BLASTER's H (5); 0: none", 13, 10
+                db "  /H  the game's 16-bit DMA channel, else BLASTER's H (5); 0: none", 13, 10
                 db "  /S  single DMA transfers (ESS's Single Mode DMA)", 13, 10
                 db "needs EMM386 4.46+, QEMM or JEMM with QPIEMU, and for", 13, 10
                 db "protected-mode games HDPMI32i, loaded resident first", 13, 10, "$"
@@ -2280,14 +2180,23 @@ msg_notrap:     db "no port traps: load EMM386 4.46+, QEMM, or JEMM with QPIEMU 
 msg_card:       db "ES1869 at $"
 msg_irq:        db "h, IRQ $"
 msg_dma:        db ", DMA $"
-msg_and:        db " and $"
+msg_and:        db ", the game's DMA $"
+msg_through:    db " through it$"
 msg_blaster:    db 13, 10, "set BLASTER=A$"
 msg_i:          db " I$"
 msg_d:          db " D$"
 msg_h:          db " H$"
 msg_t:          db " P330 T6", 13, 10, "$"
 msg_qpi:        db "traps: QPI for real-mode games$"
-msg_emm:        db "traps: EMM386 for real-mode games$"
+msg_emm:        db "traps: EMM386 $"
+msg_emm2:       db " for real-mode games$"
+msg_qemm:       db "QEMM's QPI $"
+msg_qpi_old:    db " is older than 7.03", 13, 10, "$"
+msg_qpi_refused: db "QPI refused the port traps", 13, 10, "$"
+msg_emm_nodev:  db "no EMM386: no EMMXXXX0 or EMMQXXX0 device", 13, 10, "$"
+msg_emm386:     db "EMM386 $"
+msg_emm_old:    db " is older than 4.46", 13, 10, "$"
+msg_emm_refused: db " refused the port traps", 13, 10, "$"
 msg_hdpmi:      db ", HDPMI32i for protected-mode games", 13, 10, "$"
 msg_nohdpmi:    db "; protected-mode games play 8-bit without HDPMI32i", 13, 10, "$"
 

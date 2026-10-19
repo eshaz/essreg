@@ -62,11 +62,12 @@
 ;     ticks, a few milliseconds late but evenly, whatever bursts Windows
 ;     hands the ticks over in (DosFMDelay)
 ;
-; DirectSound (docs/VXD_INTERNALS.md, "DirectSound"): on a 16-bit DMA
-; channel, the driver copies what DirectSound wrote into the channel's
-; buffer as it is written, in Unlock, in place of ESS's time-out that
-; copies 80 ms every 20 ms (DirectSoundLock). With DrqLatch=1, it sets the
-; chip's DRQ latch each time a VM takes the DSP (docs/AUDIO_PIPELINE.md).
+; DirectSound (docs/VXD_INTERNALS.md, "DirectSound"): with
+; DirectSoundLock=1, off by default, on a 16-bit DMA channel the driver
+; copies what DirectSound wrote into the channel's buffer as it is
+; written, in Unlock, in place of ESS's time-out that copies 80 ms every
+; 20 ms. With DrqLatch=1, it sets the chip's DRQ latch each time a VM
+; takes the DSP (docs/AUDIO_PIPELINE.md).
 ;
 ; A Sound Blaster 16 for DOS programs (SoundBlaster16, ESSREG_S16_*): a
 ; DOS VM that takes the DSP finds DSP version 4.05, and its Sound Blaster
@@ -84,7 +85,7 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0115
+ESSREG_VERSION          equ 0x0116
 ESSREG_FEATURES         equ 0xFFFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
@@ -118,7 +119,7 @@ OPT_DS_LOCK             equ 0x1000      ; DirectSoundLock: Lock and Unlock
 OPT_DRQ_LATCH           equ 0x2000      ; DrqLatch: 25h bit 7 at each acquisition
 OPT_SB16                equ 0x4000      ; SoundBlaster16: the front for DOS VMs
 OPT_READ                equ 0x8000      ; SYSTEM.INI was read
-OPT_DEFAULT             equ 0x58FF
+OPT_DEFAULT             equ 0x48FF
 
 S16_VERSION             equ 0x0405      ; the DSP version the front answers
 S16_CHAN                equ 5           ; SoundBlaster16DMA's default
@@ -5063,7 +5064,9 @@ ESSREG_Profile_Int:
 ; With DirectSoundLock=1 the driver asks DirectSound to bracket its writes
 ; with Lock and Unlock (DSDDESC_DONTNEEDPRIMARYLOCK clear), copies in
 ; Unlock what was written, once and at once, and starts without the
-; time-out. The vtables in pdat.asm point here.
+; time-out. It is off by default, until it has been checked on the card:
+; a report of 8-bit playback came with it on. The vtables in pdat.asm
+; point here.
 DSDDESC_DONTNEEDPRIMARYLOCK equ 0x08
 DSERR_GENERIC           equ 0x80004005
 DSERR_INVALIDPARAM      equ 0x80070057
@@ -5102,8 +5105,18 @@ ESSREG_DS_Lock:
         mov     esi,[edi+DSB_Size]
         mov     eax,[esp+36]            ; the position
         mov     ecx,[esp+40]            ; and the length
-        cmp     eax,esi
-        jae     .param
+        test    byte [esp+44],0x02      ; DSBLOCK_ENTIREBUFFER
+        jz      .given
+        xor     eax,eax
+        mov     ecx,esi
+.given: cmp     eax,esi
+        jb      .inside
+        push    edx                     ; a position past the end wraps
+        xor     edx,edx
+        div     esi
+        mov     eax,edx
+        pop     edx
+.inside:
         cmp     ecx,esi
         jbe     .fits
         mov     ecx,esi
@@ -5131,12 +5144,10 @@ ESSREG_DS_Lock:
         jz      .ok
         mov     [edx],ebx
 .ok:    xor     eax,eax
-.out:   pop     edi
+        pop     edi
         pop     esi
         pop     ebx
         ret     32
-.param: mov     eax,DSERR_INVALIDPARAM
-        jmp     .out
 
 ; IDsDriverBuffer::Unlock (this, piece 1 and its length, piece 2 and its
 ; length): what DirectSound wrote, into the 16-bit channel's buffer; an
