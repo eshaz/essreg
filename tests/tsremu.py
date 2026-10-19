@@ -379,8 +379,10 @@ class Machine(Cpu):
             bx, cx = self.r16("ebx"), self.r16("ecx")
             if bx == 5:
                 data = struct.pack("<HH", QPI_OFF, STUB_PARA)
+            elif self.mem(ds * 16 + dx, 1) == b"\x02":
+                data = bytes(self.emm386)   # subfunction 2: the version
             else:
-                data = bytes(self.emm386)
+                data = b"\0\0\0\0\0\0"   # subfunction 0: the entry point
             self.put(ds * 16 + dx, data[:cx])
             self.w16("eax", len(data[:cx]))
             self.carry(False)

@@ -1956,11 +1956,11 @@ emm_install:
         mov     dx,emm_device2
         call    dev_open
         jc      .nodev
-.open:  mov     bx,ax
-        mov     dx,emm_version
-        mov     cx,2
-        mov     ax,0x4402
-        int     0x21
+.open:  mov     bx,ax                   ; the version, read through the
+        mov     dx,emm_version          ; device's IOCTL: the buffer's first
+        mov     cx,2                    ; byte asks for subfunction 2, and
+        mov     ax,0x4402               ; comes back as the major version,
+        int     0x21                    ; the second as the minor
         pushf
         mov     ah,0x3E
         int     0x21
@@ -2150,7 +2150,7 @@ trap_handlers:  dw emm_shim, emm_shim, emm_shim, emm_pass    ; +4h to +7h
                 dw emm_pass, emm_pass, emm_shim, emm_pass    ; +8h to +Bh
                 dw emm_shim, emm_pass, emm_shim, emm_shim    ; +Ch to +Fh
 emm_table:      times 12 dw 0, 0
-emm_version:    db 0, 0
+emm_version:    db 2, 0         ; the IOCTL's subfunction 2, the version
 dpmi_entry:     dd 0
 pm_segment:     dw 0            ; CS, for the 32-bit code
 pm_code16:      dw 0            ; the front's code selector
