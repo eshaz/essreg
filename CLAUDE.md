@@ -44,7 +44,9 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
 * `driver/` holds ESS's original drivers, the reference for the
   byte-identical rebuilds, with ESS's ES1869F driver sets for Windows 3.1,
   NT 4.0, Windows 95 and OS/2 in `driver/es1869f/`, and `build/` the
-  committed binaries.
+  committed binaries. `third_party/hdpmi32i/` holds `HDPMI32i.EXE` as HX
+  released it, for esssb16's protected-mode games, with its origin and
+  hashes in its README.
 * `src/esssb16.asm` is `esssb16.com`, the DOS TSR that answers games as a
   Sound Blaster 16 and plays their sound on Audio 1, through the port traps
   of EMM386, QPI (QEMM, JEMM with QPIEMU) and HDPMI32i. It is the VxD's

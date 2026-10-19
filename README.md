@@ -752,10 +752,11 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
 `C:\DOS` in place of `C:\WINDOWS`.
 
 1. Copy `build\esssb16.com` to a folder on the machine, such as `C:\ESS`.
-2. For protected-mode games, put `HDPMI32I.EXE` next to it. It comes as
-   `HDPMI32i.zip` on the releases page of
-   [HX](https://github.com/crazii/HX/releases), and SBEMU's release zip
-   carries the same file. Real-mode games do without it.
+2. For protected-mode games, copy `third_party\hdpmi32i\HDPMI32i.EXE` next
+   to it. It is the file of `HDPMI32i.zip` from the releases page of
+   [HX](https://github.com/crazii/HX/releases), unchanged, and
+   [third_party/hdpmi32i/README.md](third_party/hdpmi32i/README.md) says
+   which release and gives its hashes. Real-mode games do without it.
 3. In `CONFIG.SYS`, load EMM386 after HIMEM.SYS, with upper memory for `LH`:
    ```
    DEVICE=C:\WINDOWS\HIMEM.SYS
