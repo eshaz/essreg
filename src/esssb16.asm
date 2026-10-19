@@ -82,6 +82,11 @@ qcount:         db 0            ; bytes in the read queue
 qhead:          db 0            ; where its next byte is
 queue:          times QUEUE_LEN db 0
 mix:            times MIX_LEN db 0      ; the game's view of 30h-47h
+ctrl:           times 32 db 0   ; the chip's registers A0h-BFh as the front
+                                ; last wrote or read them
+known:          dd 0            ; bit n set while ctrl+n holds A0h+n
+stale:          db 0            ; the view's levels a Sound Blaster Pro
+                                ; write changed (bit 0 master, then aliases)
 how_io:         db IO_DIRECT    ; IO_*
 base:           dw 0x220        ; Audio_Base
 cfg:            dw 0            ; Config_Base, 0 if none
@@ -306,7 +311,7 @@ dsp_reg:
         jmp     dsp_put
 
 ; AL = the chip's register AH (command C0h), with interrupts off so that
-; nothing reads the answer first; 0 if none comes
+; nothing reads the answer first; 0 and CF set if none comes
 dsp_read:
         push    cx
         push    dx
@@ -331,14 +336,89 @@ dsp_read:
         test    al,0x40
         jnz     .got
         loop    .wait
-        xor     al,al
-        jmp     short .out
-.got:   sub     dx,2
-        call    chip_in
-.out:   popf
+        popf
         pop     dx
         pop     cx
+        xor     al,al
+        stc
         ret
+.got:   sub     dx,2
+        call    chip_in
+        popf
+        pop     dx
+        pop     cx
+        clc
+        ret
+
+; The front keeps the chip's registers A0h-BFh that it wrote or read since
+; the chip's last reset (ctrl, known), so that a transfer writes only what
+; changes and reads each register once: a read waits for the chip's answer
+; with interrupts off. A reset and a command of the chip's that may change
+; them (passed) make them unknown again
+
+; the chip's register AH = AL, unless the chip has it already; reg_force
+; writes it in any case
+reg_set:
+        push    ebx
+        movzx   ebx,ah
+        sub     bx,0xA0
+        bt      dword [known],ebx
+        jnc     reg_force.keep
+        cmp     [ctrl+bx],al
+        jne     reg_force.keep
+        pop     ebx
+        ret
+reg_force:
+        push    ebx
+        movzx   ebx,ah
+        sub     bx,0xA0
+.keep:  mov     [ctrl+bx],al
+        bts     dword [known],ebx
+        pop     ebx
+        jmp     dsp_reg
+
+; AL = the chip's register AH: as the front knows it, or read and then
+; known; 0 if the chip doesn't answer
+reg_get:
+        push    ebx
+        movzx   ebx,ah
+        sub     bx,0xA0
+        bt      dword [known],ebx
+        jnc     .read
+        mov     al,[ctrl+bx]
+        pop     ebx
+        ret
+.read:  call    dsp_read
+        jc      .none
+        mov     [ctrl+bx],al
+        bts     dword [known],ebx
+.none:  pop     ebx
+        ret
+
+; a command of the chip's in AL goes to it: the front no longer knows the
+; chip's registers, unless the command leaves them alone: pause and
+; continue, the speaker, the tests, the version and identification, and
+; the interrupt request
+passed:
+        cmp     al,0xD0
+        je      .keep
+        cmp     al,0xD1
+        je      .keep
+        cmp     al,0xD3
+        je      .keep
+        cmp     al,0xD4
+        je      .keep
+        cmp     al,0xD8
+        je      .keep
+        cmp     al,0xF2
+        je      .keep
+        cmp     al,0xE0
+        jb      .forget
+        cmp     al,0xE8
+        jbe     .keep
+.forget:
+        mov     dword [known],0
+.keep:  ret
 
 ; --- the front ---------------------------------------------------------------
 
@@ -395,6 +475,7 @@ s16_out:
         mov     byte [pass],0
         mov     byte [tc],0
         mov     word [rate],0
+        mov     dword [known],0
         jmp     short .through
 .high:  or      byte [flags],F_RESET
 .through:
@@ -485,6 +566,7 @@ s16_write:
         mov     [pass],ch
         or      ch,ch
         jz      .mine
+        call    passed
         call    chip_out                ; as the game wrote it
 .mine:  cmp     byte [need],0
         jne     .ok
@@ -718,10 +800,10 @@ command:
         jz      .out                    ; auto-initialize off
         and     byte [flags],~F_AUTO & 0xFF
         mov     ah,0xB8
-        call    dsp_read
+        call    reg_get
         and     al,~0x04 & 0xFF
         mov     ah,0xB8
-        call    dsp_reg
+        call    reg_force
         jmp     .out
 .irq16: mov     al,0xF2                 ; the 16-bit interrupt: the chip's,
         call    dsp_put                 ; Audio 1's
@@ -896,7 +978,9 @@ dma_mirror:
 ; B9h for demand transfers of 2 bytes, A8h for mono or stereo, A1h and A2h
 ; for the rate, A4h and A5h for minus the bytes, B6h and B7h for the
 ; format, B1h and B2h for the interrupt and the DMA request, B8h bit 0 and
-; D1h
+; D1h. Only the registers that change are written, and the ones whose
+; other bits stay are read once after a reset, so a transfer like the
+; last costs B8h twice and D1h
 a1_transfer:
         mov     al,[flags]
         and     al,F_ESS | F_EXT | F_RESET
@@ -915,7 +999,7 @@ a1_transfer:
         call    dsp_put
         or      byte [flags],F_EXT
 .ext:   mov     ah,0xB8
-        call    dsp_read
+        call    reg_get
         and     al,0x30                 ; bits 5:4 kept, as ES1869.DRV keeps them
         test    bl,0x04
         jz      .once
@@ -924,75 +1008,92 @@ a1_transfer:
         jz      .dac
         or      al,0x0A                 ; the ADC
 .dac:   mov     ah,0xB8
-        call    dsp_reg
-        mov     ax,0xB901               ; demand transfers of 2 bytes, as
-        cmp     byte [single],0         ; ESS's recording, or 02h with /S,
-        je      .b9                     ; ESS's "Single Mode DMA"
-        mov     al,0x02
-.b9:    call    dsp_reg
+        call    reg_force
+        mov     ax,0xB902               ; demand transfers of 2 bytes, as
+        cmp     byte [single],0         ; ESS's driver writes them, or
+        je      .b9                     ; single ones (01h) with /S, ESS's
+        mov     al,0x01                 ; "Single Mode DMA"
+.b9:    call    reg_set
         mov     ah,0xA8                 ; mono or stereo: A8h bits 1:0
-        call    dsp_read
+        call    reg_get
         and     al,0xFC
         or      al,0x02
         test    cl,0x20
         jz      .mono
         xor     al,0x03
 .mono:  mov     ah,0xA8
-        call    dsp_reg
+        call    reg_set
         call    a1_clocks               ; A1h and A2h for the rate
         mov     eax,esi                 ; an interrupt every ESI bytes: A4h
         neg     eax                     ; and A5h, two's complement
         mov     ah,0xA4
-        call    dsp_reg
+        call    reg_set
         mov     eax,esi
         neg     eax
         shr     eax,8
         mov     ah,0xA5
-        call    dsp_reg
-        mov     ax,0xB680               ; the format: B6h, then B7h twice
-        test    cl,0x10                 ; (DS p.49, table 16)
-        jz      .b6
-        mov     al,0x00                 ; signed
-.b6:    call    dsp_reg
-        mov     ax,0xB751
-        test    cl,0x10
-        jz      .b7
-        mov     al,0x71
-.b7:    call    dsp_reg
-        mov     al,0xD0                 ; 8-bit mono unsigned
-        test    cl,0x10
+        call    reg_set
+        mov     dl,0xD0                 ; the format in DL: 8-bit mono
+        test    cl,0x10                 ; unsigned
         jz      .size
-        xor     al,0x20                 ; signed: F0h
+        xor     dl,0x20                 ; signed: F0h
 .size:  test    bl,0x10
         jz      .chans
-        xor     al,0x04                 ; 16-bit: D4h, F4h
+        xor     dl,0x04                 ; 16-bit: D4h, F4h
 .chans: test    cl,0x20
         jz      .fmt
-        xor     al,0x48                 ; stereo: 98h, B8h, 9Ch, BCh
-.fmt:   mov     ah,0xB7
-        call    dsp_reg
+        xor     dl,0x48                 ; stereo: 98h, B8h, 9Ch, BCh
+.fmt:   mov     dh,0x80                 ; and B6h in DH: 80h unsigned, 00h
+        test    cl,0x10                 ; signed
+        jz      .b6
+        mov     dh,0x00
+.b6:    call    a1_format
         mov     ah,0xB1                 ; its interrupt and DMA request on:
-        call    dsp_read                ; bits 6 and 4, 7 and 5 clear
+        call    reg_get                 ; bits 6 and 4, 7 and 5 clear
         and     al,0x0F
         or      al,0x50
         mov     ah,0xB1
-        call    dsp_reg
+        call    reg_set
         mov     ah,0xB2
-        call    dsp_read
+        call    reg_get
         and     al,0x0F
         or      al,0x50
         mov     ah,0xB2
-        call    dsp_reg
+        call    reg_set
         mov     ah,0xB8                 ; go, and the DAC into the mixer
-        call    dsp_read
+        call    reg_get
         or      al,0x01
         mov     ah,0xB8
-        call    dsp_reg
+        call    reg_force
         test    bl,0x08
         jnz     .done
         mov     al,0xD1
         call    dsp_put
 .done:  ret
+
+; the format, B6h = DH and B7h = DL: B6h, then B7h twice (DS p.49, table
+; 16), first 51h or 71h, unless the chip has the format
+a1_format:
+        bt      dword [known],0xB6 - 0xA0
+        jnc     .write
+        bt      dword [known],0xB7 - 0xA0
+        jnc     .write
+        cmp     [ctrl+0xB6-0xA0],dh
+        jne     .write
+        cmp     [ctrl+0xB7-0xA0],dl
+        je      .out
+.write: mov     al,dh
+        mov     ah,0xB6
+        call    reg_force
+        mov     ax,0xB771
+        or      dh,dh
+        jz      .first
+        mov     al,0x51
+.first: call    dsp_reg
+        mov     al,dl
+        mov     ah,0xB7
+        call    reg_force
+.out:   ret
 
 ; A1h and A2h for the rate, as ES1869.DRV computes them (6:1FF4): the
 ; 795.5 kHz clock above 22050 Hz, the 397.7 kHz one up to it, and the
@@ -1012,7 +1113,7 @@ a1_clocks:
         sub     esi,eax
         mov     eax,esi
         mov     ah,0xA1
-        call    dsp_reg
+        call    reg_set
         cmp     ebx,22050
         jbe     .general
         cmp     ebp,18
@@ -1033,7 +1134,7 @@ a1_clocks:
         call    div_round
 .a2:    neg     al
         mov     ah,0xA2
-        call    dsp_reg
+        call    reg_set
         popad
         ret
 
@@ -1045,38 +1146,48 @@ filter_mono:    db 3, 5, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 10, 10
 
 ; AL written to mixer register index, DX = the data port: the Sound
 ; Blaster 16's registers 30h-47h keep the game's view and give the chip
-; the volumes they stand for; the chip's own get it as it comes
+; the volumes they stand for; the chip's own get it as it comes. A reset is
+; the Sound Blaster 16's: its levels go to the chip, and the chip's other
+; registers stay (the 3-D effect, the DACs' mode, the music DAC's source,
+; Audio 2), which the chip's own reset would put back to their power-on
+; values
 mix_out:
         push    ax
         push    cx
+        mov     cl,[index]
         test    byte [flags],F_ESS      ; the chip's own mixer for a game
         jnz     .chip                   ; that knows the chip
-        mov     cl,[index]
         or      cl,cl
         jz      .reset
         cmp     cl,0x30
         jb      .chip
         cmp     cl,0x47
         ja      .high
+        call    mix_fresh
         push    bx
         movzx   bx,cl
         mov     [mix+bx-0x30],al
         pop     bx
         call    mix_apply
-        jmp     short .out
+        jmp     .out
 .high:  cmp     cl,0x80
         jb      .chip
         cmp     cl,0x81                 ; the 16-bit channel the game picks
         je      .select
         cmp     cl,0x82                 ; the card's IRQ and status: kept
         jbe     .out
-.chip:  call    chip_out
-        jmp     short .out
+.chip:  call    chip_out                ; the chip's own registers, and the
+        call    mix_stale               ; view follows the levels they change
+        jmp     .out
 .select:
         call    dma_select
-        jmp     short .out
-.reset: call    chip_out                ; the chip's reset, and the view's
-        call    mix_defaults
+        jmp     .out
+.reset: call    mix_defaults
+        call    mix_all
+        mov     ah,0x0E                 ; and the Sound Blaster Pro's stereo
+        call    mix_read                ; off, as after the chip's reset
+        and     al,~0x02 & 0xFF
+        call    mix_write
 .out:   pop     cx
         pop     ax
         clc
@@ -1093,6 +1204,7 @@ mix_in:
         jb      .chip
         cmp     cl,0x47
         ja      .high
+        call    mix_fresh
         movzx   bx,cl
         mov     al,[mix+bx-0x30]
         jmp     short .out
@@ -1120,6 +1232,164 @@ mix_in:
         pop     bx
         clc
         ret
+
+; a write of the chip's mixer register CL: the view's levels it changes are
+; stale until the game uses the Sound Blaster 16's registers (mix_fresh),
+; so that a game's accesses reach the chip as they come and the view
+; follows what another program set. The Sound Blaster Pro's registers are
+; translated by the chip into its own (04h voice, 22h master, 26h MIDI, 28h
+; CD, 2Eh line, 0Ah mic, 0Ch the record source); the chip's own are 32h
+; (the master, DS p.54), 60h and 62h, the extended ones of the aliases, 3Ch
+; and 1Ch, and its reset (00h, for a game that knows the chip) changes them
+; all
+mix_stale:
+        push    ax
+        push    si
+        mov     al,0xFF
+        or      cl,cl
+        jz      .set
+        mov     al,0x01                 ; the master
+        cmp     cl,0x22
+        je      .set
+        cmp     cl,0x32
+        je      .set
+        cmp     cl,0x60
+        je      .set
+        cmp     cl,0x62
+        je      .set
+        mov     si,mix_aliases
+.find:  shl     al,1
+        cmp     byte [si],0
+        je      .other
+        cmp     [si],cl
+        je      .set
+        cmp     [si+1],cl
+        je      .set
+        add     si,3
+        jmp     short .find
+.other: cmp     cl,0x3C                 ; AL = 40h: the PC speaker
+        je      .set
+        shl     al,1                    ; 80h: the record source
+        cmp     cl,0x0C
+        je      .set
+        cmp     cl,0x1C
+        jne     .out
+.set:   or      [stale],al
+.out:   pop     si
+        pop     ax
+        ret
+
+; the view's stale levels from the chip, before the game reads or writes
+; the Sound Blaster 16's registers; the output switches gate them again at
+; the next write. The record source becomes the input switches that pick
+; it: the mic, CD or line alone, the record mixer as the reset's several,
+; else none, so that writing them back keeps it
+mix_fresh:
+        cmp     byte [stale],0
+        jne     .fresh
+        ret
+.fresh: pusha
+        mov     bl,[stale]
+        mov     byte [stale],0
+        shr     bl,1
+        jnc     .pairs
+        call    mix_master
+.pairs: mov     si,mix_aliases
+.next:  cmp     byte [si],0
+        je      .speaker
+        shr     bl,1
+        jnc     .skip
+        mov     ah,[si+1]
+        movzx   cx,byte [si+2]
+        call    mix_pair
+.skip:  add     si,3
+        jmp     short .next
+.speaker:
+        shr     bl,1
+        jnc     .source
+        mov     ah,0x3C                 ; the PC speaker, 3 bits
+        call    mix_read
+        and     al,0x07
+        shl     al,5
+        mov     [mix+0x0B],al
+.source:
+        shr     bl,1
+        jnc     .done
+        mov     ah,0x1C
+        call    mix_read
+        and     al,0x07
+        mov     cx,0x0101               ; CH left, CL right: the mic
+        or      al,al
+        jz      .src
+        mov     cx,0x0402               ; CD
+        cmp     al,2
+        je      .src
+        mov     cx,0x1008               ; line
+        cmp     al,6
+        je      .src
+        mov     cx,0x150B               ; the record mixer
+        cmp     al,5
+        je      .src
+        xor     cx,cx
+.src:   mov     [mix+0x0D],ch
+        mov     [mix+0x0E],cl
+.done:  popa
+        ret
+
+; the Sound Blaster Pro's registers, the chip's they go to, the view's
+; offset of the left level
+mix_aliases:    db 0x04, 0x14, 2, 0x26, 0x36, 4, 0x28, 0x38, 6, 0x2E, 0x3E, 8
+                db 0x0A, 0x1A, 10, 0
+
+; the view's L and R at mix+CX from the nibbles of the chip's register AH
+; (mix+10, the mono mic, from 1Ah's left only); clobbers AX
+mix_pair:
+        push    bx
+        mov     bx,cx
+        call    mix_read
+        mov     ah,al
+        and     al,0xF0
+        mov     [mix+bx],al
+        cmp     bx,10
+        je      .out
+        shl     ah,4
+        mov     [mix+bx+1],ah
+.out:   pop     bx
+        ret
+
+; the view's master from the chip's 60h and 62h, 6 bits to the 8 of 30h
+; and 31h, 0 when muted; clobbers AX
+mix_master:
+        mov     ah,0x60
+        call    .one
+        mov     [mix+0],al
+        mov     ah,0x62
+        call    .one
+        mov     [mix+1],al
+        ret
+.one:   call    mix_read
+        test    al,0x40
+        jz      .on
+        xor     al,al
+.on:    and     al,0x3F
+        shl     al,2
+        ret
+
+; the view's levels and record source to the chip
+mix_all:
+        push    cx
+        push    si
+        mov     si,mix_all_regs
+.next:  mov     cl,[si]
+        or      cl,cl
+        jz      .done
+        call    mix_apply
+        inc     si
+        jmp     short .next
+.done:  pop     si
+        pop     cx
+        ret
+mix_all_regs:   db 0x30, 0x31, 0x32, 0x34, 0x3B, 0x3C, 0x3D, 0
 
 ; AL = mixer 80h: bit 0 IRQ 2, 1 IRQ 5, 2 IRQ 7, 3 IRQ 10
 irq_bits:
@@ -1182,6 +1452,7 @@ dma_select:
 
 ; the Sound Blaster 16's reset values into the view
 mix_defaults:
+        mov     byte [stale],0
         push    cx
         push    si
         push    di
@@ -1204,30 +1475,42 @@ mix_default:
         db 0x1F, 0x15, 0x0B, 0x00, 0x00, 0x00   ; the switches, the gains
         db 0x00, 0x00, 0x80, 0x80, 0x80, 0x80   ; AGC, treble, bass
 
-; the chip's volumes for the Sound Blaster 16's register CL, from the
-; game's view: the VxD front's mapping
+; the chip's volume for the Sound Blaster 16's register CL, from the
+; game's view, the VxD front's mapping: master left and right to 60h and
+; 62h, voice to 14h, MIDI to 36h, CD to 38h, line to 3Eh, the mic to 1Ah,
+; the PC speaker to 3Ch; the output switches gate CD, line and the mic, and
+; the input switches pick the record source of 1Ch
 mix_apply:
         push    ax
         push    cx
+        cmp     cl,0x30
+        je      .left
         cmp     cl,0x31
-        jbe     .master
+        je      .right
         cmp     cl,0x33
         jbe     .voice
         cmp     cl,0x35
         jbe     .fm
+        cmp     cl,0x37
+        jbe     .cd
+        cmp     cl,0x39
+        jbe     .line
+        cmp     cl,0x3A
+        je      .mic
+        cmp     cl,0x3B
+        je      .speaker
         cmp     cl,0x3C
-        jbe     .sources                ; CD, line, mic, the PC speaker and
-        cmp     cl,0x3E                 ; the output switches
-        jbe     .input                  ; the input switches
+        je      .switches
+        cmp     cl,0x3E
+        jbe     .input
         jmp     .out                    ; the gains, AGC and tone: kept only
-.master:                                ; 8 bits to the 6-bit 60h and 62h
-        mov     al,[mix+0]
-        shr     al,2
+.left:  mov     al,[mix+0]              ; 8 bits to the 6 of 60h and 62h
         mov     ah,0x60
-        call    mix_write
-        mov     al,[mix+1]
-        shr     al,2
+        jmp     short .master
+.right: mov     al,[mix+1]
         mov     ah,0x62
+.master:
+        shr     al,2
         call    mix_write
         jmp     .out
 .voice: mov     al,[mix+2]              ; the Audio 1 volume 14h
@@ -1242,37 +1525,18 @@ mix_apply:
         mov     ah,0x36
         call    mix_write
         jmp     .out
-.sources:
-        mov     al,[mix+6]              ; AuxA (CD) 38h, through the
-        mov     ah,[mix+7]              ; switches' bits 2 and 1
-        test    byte [mix+0x0C],0x04
-        jnz     .cdl
-        xor     al,al
-.cdl:   test    byte [mix+0x0C],0x02
-        jnz     .cdr
-        xor     ah,ah
-.cdr:   call    nibbles
-        mov     ah,0x38
-        call    mix_write
-        mov     al,[mix+8]              ; line 3Eh, through bits 4 and 3
-        mov     ah,[mix+9]
-        test    byte [mix+0x0C],0x10
-        jnz     .linel
-        xor     al,al
-.linel: test    byte [mix+0x0C],0x08
-        jnz     .liner
-        xor     ah,ah
-.liner: call    nibbles
-        mov     ah,0x3E
-        call    mix_write
-        mov     al,[mix+0x0A]           ; the mono mic 1Ah, through bit 0
-        test    byte [mix+0x0C],0x01
-        jnz     .mic
-        xor     al,al
-.mic:   mov     ah,al
-        call    nibbles
-        mov     ah,0x1A
-        call    mix_write
+.switches:
+        call    .cd_
+        call    .line_
+        call    .mic_
+        jmp     .out
+.cd:    call    .cd_
+        jmp     .out
+.line:  call    .line_
+        jmp     .out
+.mic:   call    .mic_
+        jmp     .out
+.speaker:
         mov     al,[mix+0x0B]           ; the PC speaker 3Ch, 3 bits
         shr     al,5
         mov     ah,0x3C
@@ -1310,6 +1574,36 @@ mix_apply:
 .out:   pop     cx
         pop     ax
         ret
+.cd_:   mov     al,[mix+6]              ; AuxA (CD) 38h, through the
+        mov     ah,[mix+7]              ; switches' bits 2 and 1
+        test    byte [mix+0x0C],0x04
+        jnz     .cdl
+        xor     al,al
+.cdl:   test    byte [mix+0x0C],0x02
+        jnz     .cdr
+        xor     ah,ah
+.cdr:   call    nibbles
+        mov     ah,0x38
+        jmp     mix_write
+.line_: mov     al,[mix+8]              ; line 3Eh, through bits 4 and 3
+        mov     ah,[mix+9]
+        test    byte [mix+0x0C],0x10
+        jnz     .linel
+        xor     al,al
+.linel: test    byte [mix+0x0C],0x08
+        jnz     .liner
+        xor     ah,ah
+.liner: call    nibbles
+        mov     ah,0x3E
+        jmp     mix_write
+.mic_:  mov     al,[mix+0x0A]           ; the mono mic 1Ah, through bit 0
+        test    byte [mix+0x0C],0x01
+        jnz     .micon
+        xor     al,al
+.micon: mov     ah,al
+        call    nibbles
+        mov     ah,0x1A
+        jmp     mix_write
 
 ; AL = the chip's two 4-bit volumes for the 8-bit left AL and right AH
 nibbles:
@@ -1656,7 +1950,7 @@ pnp_read:
         ret
 
 ; the card's IRQ and 8-bit channel from its PnP registers, where the
-; config port was found, else BLASTER's; then the view's defaults
+; config port was found, else BLASTER's; then the mixer's view
 setup_card:
         cmp     word [cfg],0
         je      .view
@@ -1670,8 +1964,9 @@ setup_card:
         cmp     al,4                    ; 4 = none
         jae     .view
         mov     [dma8],al
-.view:  call    mix_defaults
-        ret
+.view:  call    mix_defaults            ; the view as a Sound Blaster 16 shows
+        mov     byte [stale],0xFF       ; the levels it has: the chip's, the
+        jmp     mix_fresh               ; rest as after a reset
 
 ; what was found, and the BLASTER to set
 report:

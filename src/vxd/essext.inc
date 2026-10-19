@@ -78,7 +78,16 @@ EX_S16_Queue            equ 0x1C4       ; S16_QUEUE bytes: the read queue (the
                                         ; answers to E1h and E3h)
 EX_S16_Mix              equ 0x1F4       ; 24 bytes: the Sound Blaster 16's
                                         ; mixer registers 30h-47h
-ESSREG_ADI_SIZE         equ 0x20C       ; ESS allocated E9h
+EX_S16_Ctrl             equ 0x20C       ; 32 bytes: the chip's registers
+                                        ; A0h-BFh as the front last wrote or
+                                        ; read them
+EX_S16_Known            equ 0x22C       ; dword: bit n set while EX_S16_Ctrl+n
+                                        ; holds the chip's A0h+n
+EX_S16_Stale            equ 0x230       ; byte: the view's levels a write of
+                                        ; the Sound Blaster Pro's registers
+                                        ; changed on the chip (bit 0 master,
+                                        ; then ESSREG_S16_Aliases)
+ESSREG_ADI_SIZE         equ 0x234       ; ESS allocated E9h
 
 S16_QUEUE               equ 48          ; bytes of the read queue
 

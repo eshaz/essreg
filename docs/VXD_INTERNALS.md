@@ -465,6 +465,20 @@ interrupt and the DMA request, then B8h bit 0 and D1h. Mixer 82h answers
 with the transfer that interrupts, 8-bit or 16-bit, and the MPU-401's bit,
 80h with the card's IRQ and 81h with its channels.
 
+The whole sequence is about 30 bytes, and four of its registers are read
+first for the bits the front keeps, each read waiting for the chip's answer
+with interrupts off. A game that plays block by block sends a transfer
+command for every block, so the front keeps the chip's registers A0h-BFh
+that it wrote or read since the chip's last reset (`EX_S16_Ctrl`,
+`EX_S16_Known`): a transfer writes only the registers that change, reads
+each of the others once, and a transfer like the last costs B8h twice and
+D1h. The registers become unknown again at a reset, at the front's start,
+and at any command of the chip's that may change them, which is every one
+but pause, continue, the speaker, the tests, the version, the identification
+and the interrupt request (`ESSREG_S16_Passed`). The work stays in the port
+trap, where the program waits for it: the chip takes each byte within
+microseconds, and a time-out would start the transfer later.
+
 The DMA runs on Audio 1's 8-bit channel, where a 16-bit sample is two bytes.
 A program that uses the 16-bit channel (`SoundBlaster16DMA`, 5 by default,
 the `H5` of `BLASTER`) programs it as ever. When that channel is Audio 2's,
@@ -479,13 +493,31 @@ tells the front when the program reads the channel's count
 (`VDMAD_Set_Channel_Callbacks`), and the front answers with Audio 1's count
 (`VDMAD_Get_Phys_Count` and `VDMAD_Set_Virt_Count`, `ESSREG_S16_Position`),
 also at the end of each block and at each acknowledge, so a program that
-polls the position sees it move. The Sound Blaster 16's mixer registers
-30h-47h keep what the program writes, and the chip gets the volumes they
-stand for (`ESSREG_S16_Mix_Apply`): master in 60h/62h, voice in 14h, MIDI in
-36h, CD in 38h, line in 3Eh, the mic in 1Ah and the PC speaker in 3Ch,
-through the output switches of 3Ch, and the record source of 1Ch from the
-input switches of 3Dh/3Eh. The Sound Blaster Pro's registers below 30h reach
-the chip as they are.
+polls the position sees it move.
+
+The Sound Blaster 16's mixer registers 30h-47h are the program's view
+(`EX_S16_Mix`), and the chip gets the volumes they stand for, each register
+its own (`ESSREG_S16_Mix_Apply`): master in 60h/62h, voice in 14h, MIDI in
+36h, CD in 38h, line in 3Eh, the mic in 1Ah and the PC speaker in 3Ch, with
+CD, line and the mic through the output switches of 3Ch, and the record
+source of 1Ch from the input switches of 3Dh/3Eh. A program that starts sees
+the levels the chip has, which are Windows' (`ESSREG_S16_Mix_Chip`), so a
+program that reads its volumes and writes them back changes nothing. A mixer
+reset (00h) is the Sound Blaster 16's: the view gets the Sound Blaster 16's
+reset values and the chip their levels, and the chip's other registers stay
+as Windows and the VxD set them: the 3-D effect, the DACs' modes, the music
+DAC's source and Audio 2, which the chip's own reset would put back to their
+power-on values.
+
+Every other mixer register reaches the chip as it comes. Some of them change
+a level of the view: the Sound Blaster Pro's 04h, 0Ah, 0Ch, 22h, 26h, 28h
+and 2Eh, which the chip translates into its own, and the chip's own volume
+registers. The front marks that level stale and reads it back from the chip
+the next time the program uses the Sound Blaster 16's registers
+(`ESSREG_S16_Mix_Stale`, `ESSREG_S16_Mix_Fresh`), so a Sound Blaster Pro
+program's port accesses stay the same as before. When a recording takes the
+DSP, the view keeps the program's levels, and they go back to the chip when
+the program gets the DSP again.
 
 A program that identifies the chip with E7h, or that uses Extended mode
 itself, gets the chip throughout: its commands, Bxh and Cxh included, its
@@ -509,7 +541,11 @@ QEMM's QPI, which JEMM gets from QPIEMU, and for protected-mode games
 HDPMI32i, with which it registers as a 32-bit client. Without VDMAD, it
 reads the game's programming of its 16-bit channel back from the DMA
 controller at the transfer command and puts it on Audio 1's channel in
-bytes, as VDMAD's callbacks do here.
+bytes, as VDMAD's callbacks do here. Its view of the mixer starts from the
+chip's levels when it loads. Nothing tells it when a game starts, so a DSP
+reset makes the front a Sound Blaster 16 again for the next game, even after
+a game that identified the chip, and the levels that another program set
+through the chip's own registers reach the view when the next game reads it.
 
 ## Hardware volume
 

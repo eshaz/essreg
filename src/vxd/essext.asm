@@ -3321,14 +3321,19 @@ ESSREG_S16_Start:
         jnz     .out
         pushad
         mov     [edi+EX_S16_VM],ebx
+        mov     dword [edi+EX_S16_Known],0      ; the chip's registers unknown
         cmp     [edi+EX_S16_Last],ebx   ; the same program back (after a
-        je      .same                   ; recording): its settings stay
-        mov     [edi+EX_S16_Last],ebx
+        je      .same                   ; recording): its settings stay,
+        mov     [edi+EX_S16_Last],ebx   ; its levels go back to the chip
         mov     byte [edi+EX_S16_Flags],0
         mov     word [edi+EX_S16_Rate],0
         mov     byte [edi+EX_S16_TC],0
-        call    ESSREG_S16_Mix_Reset
-.same:  and     byte [edi+EX_S16_Flags],S16_ESS ; the chip was reset
+        call    ESSREG_S16_Mix_Chip     ; a new one sees the chip's levels
+        jmp     short .reset
+.same:  test    byte [edi+EX_S16_Flags],S16_ESS
+        jnz     .reset
+        call    ESSREG_S16_Mix_All
+.reset: and     byte [edi+EX_S16_Flags],S16_ESS ; the chip was reset
         mov     byte [edi+EX_S16_Need],0
         mov     byte [edi+EX_S16_Count],0
         mov     byte [edi+EX_S16_Pass],0
@@ -3392,6 +3397,7 @@ ESSREG_S16_Unhook:
 ESSREG_S16_End:
         cmp     [edi+EX_S16_VM],ebx
         jne     .out
+        call    ESSREG_S16_Mix_Fresh    ; its levels, for its return
         push    eax
         push    ecx
         test    byte [edi+EX_S16_Flags],S16_DMA16
@@ -3510,6 +3516,7 @@ ESSREG_S16_Out:
         mov     byte [edi+EX_S16_Pass],0
         mov     word [edi+EX_S16_Rate],0 ; 22050 Hz again
         mov     byte [edi+EX_S16_TC],0
+        mov     dword [edi+EX_S16_Known],0      ; and its registers
         jmp     ESSREG_S16_Chip_Out
 .index: mov     [edi+EX_S16_Index],al   ; the chip gets the index too
         jmp     ESSREG_S16_Chip_Out
@@ -3608,8 +3615,54 @@ ESSREG_S16_Reg:
         pop     eax
         jmp     ESSREG_S16_DSP
 
+; The front keeps the chip's registers A0h-BFh that it wrote or read since
+; the chip's last reset (EX_S16_Ctrl, EX_S16_Known), so that a transfer
+; writes only what changes and reads each register once: a register read
+; (C0h) waits for the chip's answer with interrupts off. A reset, the
+; front's start and a command of the chip's that may change them
+; (ESSREG_S16_Passed) make them unknown again
+
+; the chip's register AH = AL, EDI = ADI, unless the chip has it already;
+; ESSREG_S16_Force writes it in any case
+ESSREG_S16_Set:
+        push    ecx
+        movzx   ecx,ah
+        sub     ecx,0xA0
+        bt      dword [edi+EX_S16_Known],ecx
+        jnc     ESSREG_S16_Force.keep
+        cmp     [edi+EX_S16_Ctrl+ecx],al
+        jne     ESSREG_S16_Force.keep
+        pop     ecx
+        ret
+ESSREG_S16_Force:
+        push    ecx
+        movzx   ecx,ah
+        sub     ecx,0xA0
+.keep:  mov     [edi+EX_S16_Ctrl+ecx],al
+        bts     dword [edi+EX_S16_Known],ecx
+        pop     ecx
+        jmp     ESSREG_S16_Reg
+
+; AL = the chip's register AH, EDI = ADI: as the front knows it, or read
+; and then known; 0 if the chip doesn't answer
+ESSREG_S16_Get:
+        push    ecx
+        movzx   ecx,ah
+        sub     ecx,0xA0
+        bt      dword [edi+EX_S16_Known],ecx
+        jnc     .read
+        mov     al,[edi+EX_S16_Ctrl+ecx]
+        pop     ecx
+        ret
+.read:  call    ESSREG_S16_Read
+        jc      .none
+        mov     [edi+EX_S16_Ctrl+ecx],al
+        bts     dword [edi+EX_S16_Known],ecx
+.none:  pop     ecx
+        ret
+
 ; AL = the chip's register AH (command C0h), EDI = ADI, with interrupts off
-; so that nothing reads the answer first; 0 if none comes
+; so that nothing reads the answer first; 0 and CF set if none comes
 ESSREG_S16_Read:
         push    ecx
         push    edx
@@ -3625,11 +3678,42 @@ ESSREG_S16_Read:
         mov     ecx,S16_POLL
         call    ESSREG_DSP_Get
         jnc     .got
+        popfd
+        pop     edx
+        pop     ecx
         xor     al,al
+        stc
+        ret
 .got:   popfd
         pop     edx
         pop     ecx
+        clc
         ret
+
+; a command of the chip's in AL goes to it, EDI = ADI: the front no longer
+; knows the chip's registers, unless the command leaves them alone: pause
+; and continue, the speaker, the tests, the version and identification,
+; and the interrupt request
+ESSREG_S16_Passed:
+        cmp     al,0xD0
+        je      .keep
+        cmp     al,0xD1
+        je      .keep
+        cmp     al,0xD3
+        je      .keep
+        cmp     al,0xD4
+        je      .keep
+        cmp     al,0xD8
+        je      .keep
+        cmp     al,0xF2
+        je      .keep
+        cmp     al,0xE0
+        jb      .forget
+        cmp     al,0xE8
+        jbe     .keep
+.forget:
+        mov     dword [edi+EX_S16_Known],0
+.keep:  ret
 
 ; AL written to the command port by the VM, EDI = ADI: the Sound Blaster
 ; 16's commands are the front's; the chip's own go to it as they come,
@@ -3646,6 +3730,7 @@ ESSREG_S16_Write:
         mov     [edi+EX_S16_Pass],ch
         or      ch,ch
         jz      .mine
+        call    ESSREG_S16_Passed
         call    ESSREG_S16_Chip_Out     ; as the program wrote it
 .mine:  cmp     byte [edi+EX_S16_Need],0
         jne     .out
@@ -3878,10 +3963,10 @@ ESSREG_S16_Command:
         jz      .out
         and     byte [edi+EX_S16_Flags],~S16_AUTO & 0xFF
         mov     ah,0xB8                 ; the block that plays is the last
-        call    ESSREG_S16_Read
+        call    ESSREG_S16_Get
         and     al,~0x04 & 0xFF
         mov     ah,0xB8
-        call    ESSREG_S16_Reg
+        call    ESSREG_S16_Force
         jmp     .out
 .irq16: mov     al,0xF2
         call    ESSREG_S16_DSP
@@ -3902,7 +3987,10 @@ ESSREG_S16_Copyright:
 ; records, bit 2 auto-initializes, bit 1 the FIFO), its mode (bit 4
 ; signed, bit 5 stereo) and its length in samples less one, EDI = ADI: the
 ; chip's Extended mode transfer of the same bytes (DS p.48), on the
-; program's DMA programming
+; program's DMA programming. Only the registers that change are written,
+; and the ones whose other bits stay are read once after a reset, so a
+; transfer like the last costs B8h twice and D1h; B8h stops the chip's
+; transfer first and starts it last
 ESSREG_S16_Transfer:
         pushad
         movzx   ebx,byte [edi+EX_S16_Cmd]       ; BL = the command
@@ -3933,7 +4021,7 @@ ESSREG_S16_Transfer:
         ; transfers of 2 bytes, as ESS's recording, or single ones with
         ; ESS's "Single Mode DMA" (ADI flag 10000h clear)
         mov     ah,0xB8
-        call    ESSREG_S16_Read
+        call    ESSREG_S16_Get
         and     al,0x30                 ; bits 5:4 kept, as ES1869.DRV keeps them
         test    bl,0x04
         jz      .once
@@ -3942,75 +4030,94 @@ ESSREG_S16_Transfer:
         jz      .dac
         or      al,0x0A
 .dac:   mov     ah,0xB8
-        call    ESSREG_S16_Reg
+        call    ESSREG_S16_Force
         mov     ax,0xB902
         test    byte [edi+ADI_CfgFlags+2],0x01
         jnz     .b9
         mov     al,0x01
-.b9:    call    ESSREG_S16_Reg
+.b9:    call    ESSREG_S16_Set
         mov     ah,0xA8                 ; mono or stereo: A8h bits 1:0
-        call    ESSREG_S16_Read
+        call    ESSREG_S16_Get
         and     al,0xFC
         or      al,0x02
         test    cl,0x20
         jz      .mono
         xor     al,0x03
 .mono:  mov     ah,0xA8
-        call    ESSREG_S16_Reg
+        call    ESSREG_S16_Set
         call    ESSREG_S16_Clocks       ; A1h and A2h for the rate
         mov     eax,esi                 ; an interrupt every ESI bytes: A4h
         neg     eax                     ; and A5h, two's complement
         mov     ah,0xA4
-        call    ESSREG_S16_Reg
+        call    ESSREG_S16_Set
         mov     eax,esi
         neg     eax
         shr     eax,8
         mov     ah,0xA5
-        call    ESSREG_S16_Reg
-        mov     ax,0xB680               ; the format: B6h, then B7h twice
-        test    cl,0x10                 ; (DS p.49, table 16)
-        jz      .b6
-        mov     al,0x00                 ; signed
-.b6:    call    ESSREG_S16_Reg
-        mov     ax,0xB751
-        test    cl,0x10
-        jz      .b7
-        mov     al,0x71
-.b7:    call    ESSREG_S16_Reg
-        mov     al,0xD0                 ; 8-bit mono unsigned
-        test    cl,0x10
+        call    ESSREG_S16_Set
+        mov     dl,0xD0                 ; the format in DL: 8-bit mono
+        test    cl,0x10                 ; unsigned
         jz      .size
-        xor     al,0x20                 ; signed: F0h
+        xor     dl,0x20                 ; signed: F0h
 .size:  test    bl,0x10
         jz      .chans
-        xor     al,0x04                 ; 16-bit: D4h, F4h
+        xor     dl,0x04                 ; 16-bit: D4h, F4h
 .chans: test    cl,0x20
         jz      .fmt
-        xor     al,0x48                 ; stereo: 98h, B8h, 9Ch, BCh
-.fmt:   mov     ah,0xB7
-        call    ESSREG_S16_Reg
+        xor     dl,0x48                 ; stereo: 98h, B8h, 9Ch, BCh
+.fmt:   mov     dh,0x80                 ; and B6h in DH: 80h unsigned, 00h
+        test    cl,0x10                 ; signed
+        jz      .b6
+        mov     dh,0x00
+.b6:    call    ESSREG_S16_Format
         mov     ah,0xB1                 ; its interrupt and DMA request on:
-        call    ESSREG_S16_Read         ; bits 6 and 4, 7 and 5 clear
+        call    ESSREG_S16_Get          ; bits 6 and 4, 7 and 5 clear
         and     al,0x0F
         or      al,0x50
         mov     ah,0xB1
-        call    ESSREG_S16_Reg
+        call    ESSREG_S16_Set
         mov     ah,0xB2
-        call    ESSREG_S16_Read
+        call    ESSREG_S16_Get
         and     al,0x0F
         or      al,0x50
         mov     ah,0xB2
-        call    ESSREG_S16_Reg
+        call    ESSREG_S16_Set
         mov     ah,0xB8                 ; go, and the DAC into the mixer,
-        call    ESSREG_S16_Read         ; which a Sound Blaster 16 program
+        call    ESSREG_S16_Get          ; which a Sound Blaster 16 program
         or      al,0x01                 ; doesn't ask for
         mov     ah,0xB8
-        call    ESSREG_S16_Reg
+        call    ESSREG_S16_Force
         test    bl,0x08
         jnz     .done
         mov     al,0xD1
         call    ESSREG_S16_DSP
 .done:  popad
+        ret
+
+; the format, B6h = DH and B7h = DL, EDI = ADI: B6h, then B7h twice (DS
+; p.49, table 16), first 51h or 71h, unless the chip has the format
+ESSREG_S16_Format:
+        push    eax
+        bt      dword [edi+EX_S16_Known],0xB6 - 0xA0
+        jnc     .write
+        bt      dword [edi+EX_S16_Known],0xB7 - 0xA0
+        jnc     .write
+        cmp     [edi+EX_S16_Ctrl+0xB6-0xA0],dh
+        jne     .write
+        cmp     [edi+EX_S16_Ctrl+0xB7-0xA0],dl
+        je      .out
+.write: mov     al,dh
+        mov     ah,0xB6
+        call    ESSREG_S16_Force
+        mov     ax,0xB771
+        or      dh,dh
+        jz      .first
+        mov     al,0x51
+.first: call    ESSREG_S16_Reg
+        mov     al,dl
+        mov     ah,0xB7
+        call    ESSREG_S16_Force
+.out:   pop     eax
         ret
 
 ; A1h and A2h for the rate of 41h/42h, or of the time constant of 40h (1
@@ -4057,7 +4164,7 @@ ESSREG_S16_Clocks:
         sub     esi,eax
         mov     eax,esi
         mov     ah,0xA1
-        call    ESSREG_S16_Reg
+        call    ESSREG_S16_Set
         cmp     ebx,22050
         jbe     .general
         cmp     ebp,byte 18
@@ -4080,7 +4187,7 @@ ESSREG_S16_Clocks:
         inc     eax
 .a2:    neg     eax
         mov     ah,0xA2
-        call    ESSREG_S16_Reg
+        call    ESSREG_S16_Set
         popad
         ret
 
@@ -4095,7 +4202,10 @@ ESSREG_S16_Filter_Mono:
 ; EX_S16_Mix, and the chip's volumes they stand for. AL written to the
 ; mixer register the VM selected, ESI = the data port, EDI = ADI; the
 ; chip's own registers get it as it comes, at the index the VM gave the
-; chip
+; chip. A reset is the Sound Blaster 16's: its levels go to the chip, and
+; the chip's other registers stay as Windows and the VxD have them (the 3-D
+; effect, the DACs' mode, the music DAC's source, Audio 2), which the
+; chip's own reset would put back to the power-on values
 ESSREG_S16_Mix_Write:
         push    eax
         push    ecx
@@ -4111,6 +4221,7 @@ ESSREG_S16_Mix_Write:
         jb      .chip
         cmp     ch,0x47
         ja      .high
+        call    ESSREG_S16_Mix_Fresh
         movzx   eax,ch
         mov     [edi+EX_S16_Mix+eax-0x30],cl
         call    ESSREG_S16_Mix_Apply
@@ -4119,13 +4230,193 @@ ESSREG_S16_Mix_Write:
         jb      .chip
         cmp     ch,0x82                 ; the card's IRQ, channels and status
         jbe     .out
-.chip:  call    ESSREG_S16_Chip_Out
+.chip:  call    ESSREG_S16_Chip_Out     ; the chip's own registers, and the
+        call    ESSREG_S16_Mix_Stale    ; view follows the levels they change
         jmp     .out
-.reset: call    ESSREG_S16_Chip_Out     ; the chip's reset, and the view's
-        call    ESSREG_S16_Mix_Reset
+.reset: call    ESSREG_S16_Mix_Reset
+        call    ESSREG_S16_Mix_All
+        mov     ah,0x0E                 ; and the Sound Blaster Pro's stereo
+        call    ESSREG_Mix_Read         ; off, as after the chip's reset
+        and     al,~0x02 & 0xFF
+        call    ESSREG_Mix_Write
 .out:   pop     edx
         pop     ecx
         pop     eax
+        ret
+
+; a write of the chip's mixer register CH, EDI = ADI: the view's levels it
+; changes are stale until the program uses the Sound Blaster 16's
+; registers (ESSREG_S16_Mix_Fresh), so that a program's accesses reach the
+; chip as they come and the view follows what another program set. The
+; Sound Blaster Pro's registers are translated by the chip into its own
+; (04h voice, 22h master, 26h MIDI, 28h CD, 2Eh line, 0Ah mic, 0Ch the
+; record source); the chip's own are 32h (the master, DS p.54), 60h and
+; 62h, the extended ones of the aliases, 3Ch and 1Ch, and its reset (00h,
+; for a program that knows the chip) changes them all
+ESSREG_S16_Mix_Stale:
+        push    eax
+        push    ebx
+        mov     al,0xFF
+        or      ch,ch
+        jz      .set
+        mov     al,0x01                 ; the master
+        cmp     ch,0x22
+        je      .set
+        cmp     ch,0x32
+        je      .set
+        cmp     ch,0x60
+        je      .set
+        cmp     ch,0x62
+        je      .set
+        mov     ebx,ESSREG_S16_Aliases
+.find:  shl     al,1
+        cmp     byte [ebx],0
+        je      .other
+        cmp     [ebx],ch
+        je      .set
+        cmp     [ebx+1],ch
+        je      .set
+        add     ebx,byte 3
+        jmp     .find
+.other: cmp     ch,0x3C                 ; AL = 40h: the PC speaker
+        je      .set
+        shl     al,1                    ; 80h: the record source
+        cmp     ch,0x0C
+        je      .set
+        cmp     ch,0x1C
+        jne     .out
+.set:   or      [edi+EX_S16_Stale],al
+.out:   pop     ebx
+        pop     eax
+        ret
+
+; the view's stale levels from the chip, EDI = ADI: before the program
+; reads or writes the Sound Blaster 16's registers, and when its front
+; ends; the output switches gate them again at the next write. The record
+; source becomes the input switches that pick it: the mic, CD or line
+; alone, the record mixer as the reset's several, else none, so that
+; writing them back keeps it
+ESSREG_S16_Mix_Fresh:
+        cmp     byte [edi+EX_S16_Stale],0
+        jne     .fresh
+        ret
+.fresh: pushad
+        movzx   edx,word [edi+ADI_AudioBase]
+        mov     bl,[edi+EX_S16_Stale]
+        mov     byte [edi+EX_S16_Stale],0
+        shr     bl,1
+        jnc     .pairs
+        call    ESSREG_S16_Mix_Master
+.pairs: mov     esi,ESSREG_S16_Aliases
+.next:  cmp     byte [esi],0
+        je      .speaker
+        shr     bl,1
+        jnc     .skip
+        mov     ah,[esi+1]
+        movzx   ecx,byte [esi+2]
+        call    ESSREG_S16_Mix_Pair
+.skip:  add     esi,byte 3
+        jmp     .next
+.speaker:
+        shr     bl,1
+        jnc     .source
+        mov     ah,0x3C                 ; the PC speaker, 3 bits
+        call    ESSREG_Mix_Read
+        and     al,0x07
+        shl     al,5
+        mov     [edi+EX_S16_Mix+0x0B],al
+.source:
+        shr     bl,1
+        jnc     .done
+        mov     ah,0x1C
+        call    ESSREG_Mix_Read
+        and     al,0x07
+        mov     cx,0x0101               ; CH left, CL right: the mic
+        or      al,al
+        jz      .src
+        mov     cx,0x0402               ; CD
+        cmp     al,2
+        je      .src
+        mov     cx,0x1008               ; line
+        cmp     al,6
+        je      .src
+        mov     cx,0x150B               ; the record mixer
+        cmp     al,5
+        je      .src
+        xor     ecx,ecx
+.src:   mov     [edi+EX_S16_Mix+0x0D],ch
+        mov     [edi+EX_S16_Mix+0x0E],cl
+.done:  popad
+        ret
+
+; the Sound Blaster Pro's register, the chip's it goes to, the view's
+; offset of its left level
+ESSREG_S16_Aliases:
+        db 0x04, 0x14, 2, 0x26, 0x36, 4, 0x28, 0x38, 6, 0x2E, 0x3E, 8
+        db 0x0A, 0x1A, 10, 0
+
+; the view's L and R at EX_S16_Mix+ECX from the nibbles of the chip's
+; register AH (EX_S16_Mix+10, the mono mic, from 1Ah's left only), EDX =
+; Audio_Base, EDI = ADI; clobbers EAX
+ESSREG_S16_Mix_Pair:
+        call    ESSREG_Mix_Read
+        mov     ah,al
+        and     al,0xF0
+        mov     [edi+EX_S16_Mix+ecx],al
+        cmp     ecx,byte 10
+        je      .out
+        shl     ah,4
+        mov     [edi+EX_S16_Mix+ecx+1],ah
+.out:   ret
+
+; the view's master from the chip's 60h and 62h, 6 bits to the 8 of 30h
+; and 31h, 0 when muted; EDX = Audio_Base, EDI = ADI; clobbers EAX
+ESSREG_S16_Mix_Master:
+        mov     ah,0x60
+        call    .one
+        mov     [edi+EX_S16_Mix+0],al
+        mov     ah,0x62
+        call    .one
+        mov     [edi+EX_S16_Mix+1],al
+        ret
+.one:   call    ESSREG_Mix_Read
+        test    al,0x40
+        jz      .on
+        xor     al,al
+.on:    and     al,0x3F
+        shl     al,2
+        ret
+
+; the view as a Sound Blaster 16 shows the levels it has, for a program
+; that starts: master, voice, MIDI, CD, line, mic and the PC speaker from
+; the chip, the input switches from its record source, the rest as after
+; a reset; EDI = ADI
+ESSREG_S16_Mix_Chip:
+        call    ESSREG_S16_Mix_Reset
+        mov     byte [edi+EX_S16_Stale],0xFF
+        jmp     ESSREG_S16_Mix_Fresh
+
+; the view's levels and record source to the chip, EDI = ADI
+ESSREG_S16_Mix_All:
+        push    ecx
+        push    edx
+        movzx   edx,word [edi+ADI_AudioBase]
+        mov     ch,0x30                 ; master
+        call    ESSREG_S16_Mix_Apply
+        mov     ch,0x31
+        call    ESSREG_S16_Mix_Apply
+        mov     ch,0x32                 ; voice
+        call    ESSREG_S16_Mix_Apply
+        mov     ch,0x34                 ; MIDI
+        call    ESSREG_S16_Mix_Apply
+        mov     ch,0x3B                 ; the PC speaker
+        call    ESSREG_S16_Mix_Apply
+        mov     ch,0x3C                 ; CD, line and the mic, switched
+        call    ESSREG_S16_Mix_Apply
+        mov     ch,0x3D                 ; the record source
+        call    ESSREG_S16_Mix_Apply
+        pop     edx
+        pop     ecx
         ret
 
 ; CH = the mixer register the VM selected, EDI = ADI, ESI = the data port:
@@ -4147,6 +4438,7 @@ ESSREG_S16_Index:
 
 ; the Sound Blaster 16's reset values into the view, EDI = ADI
 ESSREG_S16_Mix_Reset:
+        mov     byte [edi+EX_S16_Stale],0
         push    ecx
         push    esi
         push    edi
@@ -4178,6 +4470,7 @@ ESSREG_S16_Mix_Read:
         jb      .chip
         cmp     cl,0x47
         ja      .high
+        call    ESSREG_S16_Mix_Fresh
         mov     al,[edi+EX_S16_Mix+ecx-0x30]
         jmp     .out
 .high:  cmp     cl,0x80
@@ -4255,30 +4548,43 @@ ESSREG_S16_MPU_Bit:
         or      al,0x04
 .out:   ret
 
-; the chip's volumes for the Sound Blaster 16's register CH, from the
-; program's view, EDI = ADI, EDX = Audio_Base; keeps ECX
+; the chip's volume for the Sound Blaster 16's register CH, from the
+; program's view, EDI = ADI, EDX = Audio_Base; keeps ECX. Each register
+; goes to its own: master left and right to 60h and 62h, voice to 14h,
+; MIDI to 36h, CD to 38h, line to 3Eh, the mic to 1Ah, the PC speaker to
+; 3Ch; the output switches gate CD, line and the mic, and the input
+; switches pick the record source of 1Ch
 ESSREG_S16_Mix_Apply:
         push    eax
         push    ecx
+        cmp     ch,0x30
+        je      .left
         cmp     ch,0x31
-        jbe     .master
+        je      .right
         cmp     ch,0x33
         jbe     .voice
         cmp     ch,0x35
         jbe     .fm
+        cmp     ch,0x37
+        jbe     .cd
+        cmp     ch,0x39
+        jbe     .line
+        cmp     ch,0x3A
+        je      .mic
+        cmp     ch,0x3B
+        je      .speaker
         cmp     ch,0x3C
-        jbe     .sources                ; CD, line, mic, the PC speaker and
-        cmp     ch,0x3E                 ; the output switches
-        jbe     .input                  ; the input switches
+        je      .switches
+        cmp     ch,0x3E
+        jbe     .input
         jmp     .out                    ; the gains, AGC and tone: kept only
-.master:                                ; 8 bits to the 6-bit 60h and 62h
-        mov     al,[edi+EX_S16_Mix+0]
-        shr     al,2
+.left:  mov     al,[edi+EX_S16_Mix+0]   ; 8 bits to the 6 of 60h and 62h
         mov     ah,0x60
-        call    ESSREG_Mix_Write
-        mov     al,[edi+EX_S16_Mix+1]
-        shr     al,2
+        jmp     short .master
+.right: mov     al,[edi+EX_S16_Mix+1]
         mov     ah,0x62
+.master:
+        shr     al,2
         call    ESSREG_Mix_Write
         jmp     .out
 .voice: mov     al,[edi+EX_S16_Mix+2]   ; the Audio 1 (wave) volume 14h
@@ -4293,37 +4599,18 @@ ESSREG_S16_Mix_Apply:
         mov     ah,0x36
         call    ESSREG_Mix_Write
         jmp     .out
-.sources:
-        mov     al,[edi+EX_S16_Mix+6]   ; AuxA (CD) 38h, through the
-        mov     ah,[edi+EX_S16_Mix+7]   ; switches' bits 2 and 1
-        test    byte [edi+EX_S16_Mix+0x0C],0x04
-        jnz     .cdl
-        xor     al,al
-.cdl:   test    byte [edi+EX_S16_Mix+0x0C],0x02
-        jnz     .cdr
-        xor     ah,ah
-.cdr:   call    ESSREG_S16_Nibbles
-        mov     ah,0x38
-        call    ESSREG_Mix_Write
-        mov     al,[edi+EX_S16_Mix+8]   ; line 3Eh, through bits 4 and 3
-        mov     ah,[edi+EX_S16_Mix+9]
-        test    byte [edi+EX_S16_Mix+0x0C],0x10
-        jnz     .linel
-        xor     al,al
-.linel: test    byte [edi+EX_S16_Mix+0x0C],0x08
-        jnz     .liner
-        xor     ah,ah
-.liner: call    ESSREG_S16_Nibbles
-        mov     ah,0x3E
-        call    ESSREG_Mix_Write
-        mov     al,[edi+EX_S16_Mix+0x0A] ; the mono mic 1Ah, through bit 0
-        test    byte [edi+EX_S16_Mix+0x0C],0x01
-        jnz     .mic
-        xor     al,al
-.mic:   mov     ah,al
-        call    ESSREG_S16_Nibbles
-        mov     ah,0x1A
-        call    ESSREG_Mix_Write
+.switches:
+        call    .cd_
+        call    .line_
+        call    .mic_
+        jmp     .out
+.cd:    call    .cd_
+        jmp     .out
+.line:  call    .line_
+        jmp     .out
+.mic:   call    .mic_
+        jmp     .out
+.speaker:
         mov     al,[edi+EX_S16_Mix+0x0B] ; the PC speaker 3Ch, 3 bits
         shr     al,5
         mov     ah,0x3C
@@ -4361,6 +4648,36 @@ ESSREG_S16_Mix_Apply:
 .out:   pop     ecx
         pop     eax
         ret
+.cd_:   mov     al,[edi+EX_S16_Mix+6]   ; AuxA (CD) 38h, through the
+        mov     ah,[edi+EX_S16_Mix+7]   ; switches' bits 2 and 1
+        test    byte [edi+EX_S16_Mix+0x0C],0x04
+        jnz     .cdl
+        xor     al,al
+.cdl:   test    byte [edi+EX_S16_Mix+0x0C],0x02
+        jnz     .cdr
+        xor     ah,ah
+.cdr:   call    ESSREG_S16_Nibbles
+        mov     ah,0x38
+        jmp     ESSREG_Mix_Write
+.line_: mov     al,[edi+EX_S16_Mix+8]   ; line 3Eh, through bits 4 and 3
+        mov     ah,[edi+EX_S16_Mix+9]
+        test    byte [edi+EX_S16_Mix+0x0C],0x10
+        jnz     .linel
+        xor     al,al
+.linel: test    byte [edi+EX_S16_Mix+0x0C],0x08
+        jnz     .liner
+        xor     ah,ah
+.liner: call    ESSREG_S16_Nibbles
+        mov     ah,0x3E
+        jmp     ESSREG_Mix_Write
+.mic_:  mov     al,[edi+EX_S16_Mix+0x0A] ; the mono mic 1Ah, through bit 0
+        test    byte [edi+EX_S16_Mix+0x0C],0x01
+        jnz     .micon
+        xor     al,al
+.micon: mov     ah,al
+        call    ESSREG_S16_Nibbles
+        mov     ah,0x1A
+        jmp     ESSREG_Mix_Write
 
 ; AL = the chip's two 4-bit volumes for the 8-bit left AL and right AH
 ESSREG_S16_Nibbles:

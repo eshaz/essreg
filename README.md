@@ -469,8 +469,13 @@ DOS game expects it
   chip's own, on Audio 1. Set `BLASTER=A220 I5 D1 H5 P330 T6` with the
   card's address, IRQ and 8-bit channel, and `H5` for the 16-bit channel
   ([docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#a-sound-blaster-16-for-dos-programs)).
-  A game or tool that knows the ESS chip, which it asks with E7h, gets the
-  chip as before. In DOS itself, [`esssb16.com`](#esssb16com) does the same.
+  The game finds Windows' volumes in the Sound Blaster 16's mixer, and its
+  mixer reset sets the Sound Blaster 16's levels without undoing the chip's
+  other settings, such as the 3-D effect and the DACs' modes. A transfer
+  writes only the chip's registers that change, so a game that starts one
+  for every block spends little time on it. A game or tool that knows the
+  ESS chip, which it asks with E7h, gets the chip as before. In DOS itself,
+  [`esssb16.com`](#esssb16com) does the same.
 
 The Sound Blaster part and the MPU-401 still belong to one program at a
 time, as with ESS's driver. A DOS game that starts while Windows plays a
@@ -690,9 +695,14 @@ driver's Sound Blaster 16 does:
   in bytes, with the same direction and auto-initialize. A game that picks
   the 8-bit channel for 16-bit sound through mixer 81h, as a Sound Blaster
   16 allows, programs that channel itself.
-* The Sound Blaster 16's mixer registers, 30h to 47h, keep the game's view
-  and set the chip's levels and record source. Registers 80h to 82h give the
-  card's IRQ, its channels and which transfer's interrupt is pending.
+* The Sound Blaster 16's mixer registers, 30h to 47h, show the levels the
+  chip has, also those a mixer program set, and set the chip's levels and
+  record source. A mixer reset sets the Sound Blaster 16's levels and leaves
+  the chip's other settings, such as the 3-D effect. Registers 80h to 82h
+  give the card's IRQ, its channels and which transfer's interrupt is
+  pending.
+* A transfer writes only the chip's registers that change, so a game that
+  starts one for every block spends little time on it.
 * A game or tool that knows the chip, which it asks with E7h, gets the chip
   as it is, with ESS's own commands and mixer.
 
@@ -732,7 +742,7 @@ EMM386 device, one older than 4.46, or one that refused the traps.
 * `/S`: single DMA transfers instead of demand transfers of two bytes, ESS's
   own *Single Mode DMA* setting, if sound breaks up.
 
-The resident part takes 3.3 KB with its PSP, 3.8 KB with HDPMI32i, whose
+The resident part takes 3.9 KB with its PSP, 4.4 KB with HDPMI32i, whose
 data for it stay too, and makes no DOS call once it is in. The exit codes
 are 1 for a bad option, 2 when no ES1869 answers at the base, 3 without port
 traps, 4 in a Windows DOS box and 5 when it is loaded already. The limits:

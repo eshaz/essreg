@@ -248,7 +248,23 @@ class FakeES1869:
         self.pnp = {}              # (ldn or None for card level, reg) -> value
         self.cfg_ports = [0] * 8
         self.fm_resets = 0
-        self.log = []
+        self.sbpro_alias = False   # the Sound Blaster Pro's registers write
+        self.log = []              # the chip's own (_sbpro)
+
+    # the chip's translation of the Sound Blaster Pro's volumes into its own
+    # registers (DS p.53-54): 04h, 26h, 28h and 2Eh with bits 0 and 4
+    # cleared, 0Ah's two bits to four, 22h and 32h to 60h/62h (a sketch of
+    # the data sheet's table: 4 bits scaled to 6)
+    SBPRO_ALIAS = {0x04: 0x14, 0x26: 0x36, 0x28: 0x38, 0x2E: 0x3E}
+
+    def _sbpro(self, reg, v):
+        if reg in self.SBPRO_ALIAS:
+            self.mixer[self.SBPRO_ALIAS[reg]] = v & 0xEE
+        elif reg == 0x0A:
+            self.mixer[0x1A] = (0x00, 0x55, 0xAA, 0xFF)[(v >> 1) & 3]
+        elif reg in (0x22, 0x32):
+            for nib, out in ((v >> 4, 0x60), (v & 0x0F, 0x62)):
+                self.mixer[out] = (nib << 2) | (nib >> 2)
 
     def _fm_off(self, port):
         off = port - self.base
@@ -314,6 +330,8 @@ class FakeES1869:
             self.id_seq = 0
         elif off == 5:
             self.mixer[self.index] = v
+            if self.sbpro_alias:
+                self._sbpro(self.index, v)
         elif off == 6:
             if self.ports[6] & 1 and not v & 1:     # reset released
                 self.ext_mode = False

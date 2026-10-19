@@ -110,6 +110,22 @@ class NoConfig(Chip):
         self.id_cfg = 0
 
 
+# the levels a DOS mixer program left: master 3Ah, muted on the right,
+# voice ABh, FM CDh, CD 12h, line 34h, mic 50h, PC speaker 5, the record
+# source line; and the chip's own registers a mixer reset would clear
+DOS_MIXER = {0x60: 0x3A, 0x62: 0x7A, 0x14: 0xAB, 0x36: 0xCD, 0x38: 0x12,
+             0x3E: 0x34, 0x1A: 0x55, 0x3C: 0x05, 0x1C: 0x16, 0x50: 0x0C,
+             0x52: 0x2A, 0x71: 0x2E, 0x7C: 0x99, 0x0E: 0x22, 0x00: 0x77}
+
+
+def mixer_chip(levels=None):
+    """an ES1869 whose mixer has DOS_MIXER, or `levels`"""
+    chip = Chip()
+    for reg, v in (DOS_MIXER if levels is None else levels).items():
+        chip.mixer[reg] = v
+    return chip
+
+
 @unittest.skipUnless(have_nasm(), "needs nasm")
 class BuildTest(unittest.TestCase):
     def test_build_is_current(self):
@@ -434,7 +450,11 @@ class FrontTest(unittest.TestCase):
     """the Sound Blaster 16 through the QPI callback"""
 
     def setUp(self):
-        self.m = installed()
+        self.m = self.install()
+
+    def install(self, **kw):
+        """the program resident, the front reached as this class reaches it"""
+        return installed(qpiemu=True, **kw)
 
     def mixer(self, *regs_):
         return [self.m.chip.mixer[r] for r in regs_]
@@ -468,6 +488,7 @@ class FrontTest(unittest.TestCase):
         self.assertEqual((r[0xA4], r[0xA5]), (0x00, 0xF0))      # 4096 bytes
         self.assertEqual((r[0xB6], r[0xB7]), (0x00, 0xBC))
         self.assertEqual((r[0xA8], r[0xB8]), (0x01, 0x05))
+        self.assertEqual(r[0xB9], 0x02)         # demand, 2 bytes: ESS's
         self.assertEqual(m.chip.commands[-1], (0xD1,))
         self.assertEqual(m.chip.dma[1], {"mask": False, "mode": 0x19,
                                          "addr": 0x2468, "count": 0x0FFF,
@@ -526,12 +547,12 @@ class FrontTest(unittest.TestCase):
         m.dsp(0xD6)
         self.assertEqual(m.chip.commands, [(0xD0,), (0xD4,)])
         m.chip.commands = []
-        m.dsp(0xD9)                             # the block that plays is the last
-        self.assertEqual(m.chip.commands, [(0xC0, 0xB8), (0xB8, 0x01)])
+        m.dsp(0xD9)                             # the block that plays is the
+        self.assertEqual(m.chip.commands, [(0xB8, 0x01)])       # last
         self.assertEqual(m.flags() & F_AUTO, 0)
         m.chip.commands = []
         m.dsp(0xDA)                             # the 8-bit stop does the same
-        self.assertEqual(m.chip.commands, [(0xC0, 0xB8), (0xB8, 0x01)])
+        self.assertEqual(m.chip.commands, [(0xB8, 0x01)])
 
     def test_irq16(self):
         m = self.m
@@ -566,11 +587,11 @@ class FrontTest(unittest.TestCase):
         m.dsp(0x40, 0xA6)                       # 11111 Hz
         m.dsp(0xC6, 0x00, 0xFF, 0x03)           # 1024 samples, auto-init
         self.assertEqual(m.chip.commands, [
-            (0x40, 0xA6), (0xC6,), (0xC0, 0xB8), (0xB8, 0x04), (0xB9, 0x01),
+            (0x40, 0xA6), (0xC6,), (0xC0, 0xB8), (0xB8, 0x04), (0xB9, 0x02),
             (0xC0, 0xA8), (0xA8, 0x02), (0xA1, 0x5C), (0xA2, 0xEE),
             (0xA4, 0x00), (0xA5, 0xFC), (0xB6, 0x80), (0xB7, 0x51),
             (0xB7, 0xD0), (0xC0, 0xB1), (0xB1, 0x50), (0xC0, 0xB2),
-            (0xB2, 0x50), (0xC0, 0xB8), (0xB8, 0x05), (0xD1,)])
+            (0xB2, 0x50), (0xB8, 0x05), (0xD1,)])      # B8h known by now
         self.assertEqual(m.flags(), F_EXT | F_RUN | F_8 | F_AUTO)
         self.assertEqual(m.chip.dma_log, [])    # the game's own channel
         self.assertEqual(m.mix_get(0x82), 0x01)
@@ -599,7 +620,7 @@ class FrontTest(unittest.TestCase):
         self.assertEqual(m.chip.commands, [(0xD0,), (0xD4,)])
         m.chip.commands = []
         m.dsp(0xDA)                             # auto-init off: the last block
-        self.assertEqual(m.chip.commands, [(0xC0, 0xB8), (0xB8, 0x01)])
+        self.assertEqual(m.chip.commands, [(0xB8, 0x01)])
         self.assertEqual(m.flags() & F_AUTO, 0)
 
     def test_recording(self):
@@ -621,7 +642,7 @@ class FrontTest(unittest.TestCase):
     def test_16bit_without_channel(self):
         """without a 16-bit channel the game programs the 8-bit one, as a
         Sound Blaster 16 plays 16-bit without an H"""
-        m = installed(tail="/H0", qpiemu=True)
+        m = self.install(tail="/H0")
         m.dsp(0xB6, 0x30, 0xFF, 0x03)           # 1024 samples
         r = regs(m)
         self.assertEqual((r[0xA4], r[0xA5]), (0x00, 0xF8))      # 2048 bytes
@@ -659,13 +680,16 @@ class FrontTest(unittest.TestCase):
                                          "page": 0x03})
 
     def test_mirror_single_mode(self):
-        m = installed(tail="/S", qpiemu=True)
+        """/S: single transfers on the card's channel and on the chip's
+        side (B9h 01h, as the data sheet's register page has it)"""
+        m = self.install(tail="/S")
         game_dma(m.chip, 5, 0x0100, 0x00FF, 0x00, SINGLE | AUTO | PLAY)
         m.dsp(0xB6, 0x30, 0xFF, 0x01)
         self.assertEqual(m.chip.dma[1]["mode"], 0x59)
-        self.assertIn((0xB9, 0x02), m.chip.commands)
+        self.assertEqual(regs(m)[0xB9], 0x01)
+        m.chip.commands = []
         m.dsp(0xC6, 0x00, 0xFF, 0x03)
-        self.assertIn((0xB9, 0x02), m.chip.commands)
+        self.assertNotIn(0xB9, regs(m))         # the chip has it already
 
     def test_mirror_order(self):
         """the card's channel is masked while it is programmed, and the
@@ -748,7 +772,10 @@ class FrontTest(unittest.TestCase):
         self.assertEqual(m.flags(), F_ESS)
 
     def test_mixer_view(self):
+        """the Sound Blaster 16's volumes become the chip's, from the
+        reset's"""
         m = self.m
+        m.mix_set(0x00, 0x00)
         self.assertEqual([m.mix_get(r) for r in range(0x30, 0x48)],
                          [0xC0] * 6 + [0] * 6 + [0x1F, 0x15, 0x0B] + [0] * 5
                          + [0x80] * 4)
@@ -796,13 +823,154 @@ class FrontTest(unittest.TestCase):
         m.mix_set(0x3D, 0x15)                   # several: the record mixer
         self.assertEqual(self.mixer(0x1C), [0x0D])
 
+    def test_the_mixer_a_game_finds(self):
+        """a Sound Blaster 16 shows the levels it has: the chip's"""
+        m = self.install(chip=mixer_chip())
+        view = [m.mix_get(r) for r in range(0x30, 0x48)]
+        self.assertEqual(view, [
+            0xE8, 0x00,                 # master, the right muted
+            0xA0, 0xB0, 0xC0, 0xD0,     # voice, MIDI
+            0x10, 0x20, 0x30, 0x40,     # CD, line
+            0x50, 0xA0,                 # mic, PC speaker
+            0x1F, 0x10, 0x08,           # the switches: line records
+            0, 0, 0, 0, 0, 0x80, 0x80, 0x80, 0x80])
+        # writing back what it read changes nothing; each register goes to
+        # its own, so the muted right master stays muted
+        before = list(m.chip.mixer)
+        for r, v in zip(range(0x30, 0x48), view):
+            if r != 0x31:               # the muted master can't come back
+                m.mix_set(r, v)         # muted
+        self.assertEqual([(r, v) for r, v in enumerate(m.chip.mixer)
+                          if v != before[r]], [])
+
     def test_mixer_reset(self):
-        m = self.m
-        m.mix_set(0x30, 0x00)
+        """a game's mixer reset gives the chip the Sound Blaster 16's reset
+        levels and leaves the chip's other registers"""
+        m = self.install(chip=mixer_chip())
+        m.mix_set(0x30, 0x10)
         m.mix_set(0x00, 0x00)
-        self.assertEqual(m.chip.index, 0)
-        self.assertEqual(m.chip.log[-1], ("out", BASE + 5, 0))
-        self.assertEqual(m.mix_get(0x30), 0xC0)
+        self.assertEqual(m.chip.index, 0x00)        # the game's index kept
+        hw = m.chip.mixer
+        self.assertEqual(hw[0x00], 0x77)            # never the chip's reset
+        self.assertEqual(m.mix_get(0x30), 0xC0)     # the view's reset
+        self.assertEqual(m.mix_get(0x3C), 0x1F)
+        self.assertEqual((hw[0x60], hw[0x62]), (0x30, 0x30))  # C0h, 6 bits
+        self.assertEqual((hw[0x14], hw[0x36]), (0xCC, 0xCC))
+        self.assertEqual((hw[0x38], hw[0x3E], hw[0x1A], hw[0x3C]),
+                         (0, 0, 0, 0))
+        self.assertEqual(hw[0x1C], 0x15)    # mic, CD and line: the record mix
+        self.assertEqual(hw[0x0E], 0x20)    # the Sound Blaster Pro's stereo off
+        for reg in (0x50, 0x52, 0x71, 0x7C):
+            self.assertEqual(hw[reg], DOS_MIXER[reg], hex(reg))
+
+    def test_the_sound_blaster_pros_volumes(self):
+        """the Sound Blaster Pro's registers are the chip's, as they come,
+        and the Sound Blaster 16's view follows them when the game uses
+        it"""
+        m = self.install(chip=mixer_chip())
+        m.chip.sbpro_alias = True
+        m.chip.log = []
+        m.mix_set(0x04, 0x99)                       # voice
+        self.assertEqual(m.chip.log, [("out", BASE + 4, 0x04),
+                                      ("out", BASE + 5, 0x99)])
+        self.assertEqual(m.chip.mixer[0x14], 0x88)
+        self.assertEqual((m.mix_get(0x32), m.mix_get(0x33)), (0x80, 0x80))
+        m.mix_set(0x22, 0xF5)                       # master
+        self.assertEqual((m.chip.mixer[0x60], m.chip.mixer[0x62]),
+                         (0x3F, 0x15))
+        self.assertEqual((m.mix_get(0x30), m.mix_get(0x31)), (0xFC, 0x54))
+        m.mix_set(0x3C, 0x1F & ~0x04)               # CD left off
+        m.mix_set(0x28, 0xEE)                       # CD: to the chip
+        self.assertEqual(m.chip.mixer[0x38], 0xEE)  # as it comes
+        self.assertEqual((m.mix_get(0x36), m.mix_get(0x37)), (0xE0, 0xE0))
+        m.mix_set(0x3C, 0x1F & ~0x04)               # gated again by
+        self.assertEqual(m.chip.mixer[0x38], 0x0E)  # the next write
+        m.mix_set(0x0A, 0x04)                       # mic: AAh
+        self.assertEqual(m.mix_get(0x3A), 0xA0)
+        self.assertEqual(m.chip.mixer[0x1A], 0xAA)
+
+    def test_the_chips_own_volumes(self):
+        """a mixer program sets the chip's own registers between games, or
+        a game that knows the chip does: the next view shows them"""
+        m = self.install(chip=mixer_chip())
+        m.chip.log = []
+        for reg, v in ((0x60, 0x20), (0x14, 0x5A), (0x1A, 0x99),
+                       (0x1C, 0x12)):
+            m.mix_set(reg, v)
+            self.assertEqual(m.chip.mixer[reg], v)
+        self.assertEqual([e for e in m.chip.log if e[0] == "in"], [])
+        self.assertEqual([m.mix_get(r) for r in (0x30, 0x31, 0x32, 0x33,
+                                                 0x3A, 0x3D, 0x3E)],
+                         [0x80, 0x00, 0x50, 0xA0, 0x90, 0x04, 0x02])
+        m.dsp(0xE7)
+        self.assertEqual((m.dsp_read(), m.dsp_read()), (0x68, 0x89))
+        m.chip.sbpro_alias = True
+        m.mix_set(0x36, 0x77)                       # the chip's FM volume
+        self.assertEqual(m.chip.mixer[0x36], 0x77)
+        m.mix_set(0x32, 0x88)                       # and its master
+        self.assertEqual(m.chip.mixer[0x60], 0x22)
+        m.reset()                                   # the next game
+        self.assertEqual(m.dsp_read(), 0xAA)
+        self.assertEqual([m.mix_get(r) for r in (0x30, 0x34, 0x35)],
+                         [0x88, 0x70, 0x70])
+        m.dsp(0xE7)                                 # and one that knows the
+        m.mix_set(0x00, 0x00)                       # chip resets the mixer,
+        self.assertEqual(m.chip.mixer[0x00], 0x00)  # which gives the chip
+        m.chip.mixer[0x14] = 0x88                   # its power-on levels
+        m.chip.mixer[0x3C] = 0x04
+        m.reset()
+        self.assertEqual(m.dsp_read(), 0xAA)
+        self.assertEqual([m.mix_get(r) for r in (0x32, 0x3B)], [0x80, 0x80])
+
+    def test_a_transfer_like_the_last(self):
+        """the registers the chip has already aren't written again, and
+        none is read again until a reset or a command of the chip's that
+        may change them"""
+        m = self.m
+        m.dsp(0x41, 0xAC, 0x44)
+        m.dsp(0xB6, 0x30, 0xFF, 0x0F)
+        m.chip.commands = []
+        m.dsp(0xB6, 0x30, 0xFF, 0x0F)
+        self.assertEqual(m.chip.commands,
+                         [(0xB8, 0x04), (0xB8, 0x05), (0xD1,)])
+        m.chip.commands = []
+        m.dsp(0x41, 0x56, 0x22)                 # 22050 Hz, 2048 samples
+        m.dsp(0xB6, 0x30, 0xFF, 0x07)
+        self.assertEqual(m.chip.commands, [
+            (0xB8, 0x04), (0xA1, 0x6E), (0xA2, 0xF7), (0xA5, 0xF0),
+            (0xB8, 0x05), (0xD1,)])
+        m.chip.commands = []
+        m.dsp(0xB2, 0x10, 0xFF, 0x07)           # once, mono: B8h, A8h, the
+        self.assertEqual(m.chip.commands, [     # format
+            (0xB8, 0x00), (0xA8, 0x02), (0xB6, 0x00), (0xB7, 0x71),
+            (0xB7, 0xF4), (0xB8, 0x01), (0xD1,)])
+        self.assertEqual(m.chip.ctrl, {**m.chip.ctrl, 0xA1: 0x6E,
+                                       0xA2: 0xF7, 0xA4: 0x00, 0xA5: 0xF0,
+                                       0xB6: 0x00, 0xB7: 0xF4, 0xA8: 0x02,
+                                       0xB8: 0x01})
+        # the speaker and pause go through and change nothing the front
+        # knows; the time constant may: the next transfer reads again
+        m.dsp(0xD1, 0xD0, 0xD4)
+        m.chip.commands = []
+        m.dsp(0xB2, 0x10, 0xFF, 0x07)
+        self.assertNotIn(0xC0, [c[0] for c in m.chip.commands])
+        m.dsp(0x40, 0xA5)
+        m.chip.commands = []
+        m.dsp(0xB2, 0x10, 0xFF, 0x07)
+        self.assertEqual(m.chip.commands[0], (0xC0, 0xB8))
+        # a reset: the chip's registers are its reset values again
+        m.reset()
+        self.assertEqual(m.dsp_read(), 0xAA)
+        m.chip.commands = []
+        m.dsp(0xB2, 0x10, 0xFF, 0x07)
+        cmds = [c[0] for c in m.chip.commands]
+        self.assertEqual(cmds[:2], [0xC6, 0xC0])
+        self.assertEqual(cmds.count(0xC0), 4)   # B8h, A8h, B1h, B2h
+        # the stop of an auto-initializing transfer writes B8h, no read
+        m.dsp(0xB6, 0x30, 0xFF, 0x0F)
+        m.chip.commands = []
+        m.dsp(0xD9)
+        self.assertEqual(m.chip.commands, [(0xB8, 0x01)])
 
     def test_mixer_passthrough(self):
         m = self.m
@@ -818,9 +986,9 @@ class FrontTest(unittest.TestCase):
         self.assertEqual((m.mix_get(0x80), m.mix_get(0x82)), (0x02, 0x00))
 
     def test_card_registers(self):
-        m = installed(chip=Chip(irq=7, dma8=3), tail="/H6", qpiemu=True)
+        m = self.install(chip=Chip(irq=7, dma8=3), tail="/H6")
         self.assertEqual((m.mix_get(0x80), m.mix_get(0x81)), (0x04, 0x48))
-        m = installed(chip=Chip(irq=10, dma8=0), tail="/H7", qpiemu=True)
+        m = self.install(chip=Chip(irq=10, dma8=0), tail="/H7")
         self.assertEqual((m.mix_get(0x80), m.mix_get(0x81)), (0x08, 0x81))
 
     def test_other_ports(self):
@@ -894,9 +1062,10 @@ class FrontTest(unittest.TestCase):
 class EMM386FrontTest(FrontTest):
     """the Sound Blaster 16 through EMM386's handler at ring 0"""
 
-    def setUp(self):
-        self.m = installed(emm386=(4, 95), noems=True)
-        self.m.path = "emm"
+    def install(self, **kw):
+        m = installed(emm386=(4, 95), noems=True, **kw)
+        m.path = "emm"
+        return m
 
     def test_other_ports(self):
         """the ports QPI chains are EMM386's to do"""
