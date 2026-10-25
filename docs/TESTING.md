@@ -342,14 +342,14 @@ and stop at the first surprise. Each step says what you should see.
 5. With QEMM, or with JEMMEX and `JLOAD QPIEMU.DLL`, step 2 again: the
    banner says `traps: QPI for real-mode games`.
 6. A program that uses the chip's Extended mode works as before, such as
-   `essreg a`, which reads the chip's registers with C6h and C0h. Set the
-   volumes and the 3-D effect with `essreg` or ESS's mixer, then start the
-   game of step 2: its sound setup, where it shows the volumes, shows those
-   levels, and the 3-D effect stays on while it plays. Run
-   `essreg r=before.txt` before the game and `essreg r=after.txt` after it:
-   of the mixer registers, only the volumes the game set differ. A program
-   that identifies the chip with E7h finds a Sound Blaster 16 instead, as on
-   a real one; note any that then fails.
+   `essreg a`, which reads the chip's registers with C6h and C0h. Once
+   `esssb16` is in, set the volumes and the 3-D effect with `essreg` or
+   ESS's mixer, then start the game of step 2: its sound setup, where it
+   shows the volumes, shows those levels, and the 3-D effect stays on while
+   it plays. Run `essreg r=before.txt` before the game and
+   `essreg r=after.txt` after it: of the mixer registers, only the volumes
+   the game set differ. A program that identifies the chip with E7h finds a
+   Sound Blaster 16 instead, as on a real one; note any that then fails.
 7. If sound breaks up, `ESSSB16 /S` (single DMA transfers); with `/H0`, or
    with `BLASTER` without an `H`, the game programs the 8-bit channel for
    its 16-bit sound itself, which rules out the carrying over of the 16-bit
@@ -366,6 +366,12 @@ and stop at the first surprise. Each step says what you should see.
    that starts last ends the other. If the card gives Audio 2 no 8-bit
    channel, `esssb16` says so as it loads; `/21` or `/23` then gives it one,
    if a DMA pin of the card is wired to it.
+10. With the 3-D effect on in Windows, as ESS's driver turns it on, choose
+    *Restart in MS-DOS mode* and load `esssb16`: the chip kept the effect,
+    and `esssb16` prints `3-D effect off (/3 keeps it)`. `essreg` shows
+    mixer 50h bit 3 clear, and a game plays without the effect, as on a
+    Sound Blaster 16. Do it again with `ESSSB16 /3`: no message, bit 3 stays
+    set, and the game plays with the effect.
 
 ### D3. sb16test
 
@@ -379,19 +385,34 @@ so set the speakers to a normal level first.
    rates, pause and continue, an 8-bit and a 16-bit transfer at once,
    recording, ADPCM and the direct DAC, FM, the MPU-401 and timing. Then
    each listening check plays a sound and asks what you heard. Answer with
-   one of the keys it shows; `g` plays the sound again and `s` skips the
-   question. Esc stops the program at any time.
-2. Send `SB16TEST.TXT` back, with a note of anything you heard that no
+   one of the keys it shows; `d` says that the sound was distorted or looped
+   rather than steady, `g` plays the sound again and `s` skips the question.
+   Esc stops the program at any time.
+2. Nine of the tones, near the end, are of about 440 Hz. The first is 8-bit
+   mono at 22 kHz, and each of the others differs from it in one thing: odd
+   blocks, demand DMA, a 4 times longer buffer, 11 kHz, 44 kHz, 8-bit stereo
+   and 16-bit mono; the last is 16-bit stereo at 44 kHz. Answer `y` for a
+   steady tone and `d` for one that sounds distorted or looping: which tones
+   are steady shows what the fault depends on.
+3. Send `SB16TEST.TXT` back, with a note of anything you heard that no
    question asked about. Each check has a line: PASS, FAIL, KNOWN (a
    difference of the ES1869 that [SB16.md](SB16.md) lists), INFO or SKIP,
    and what it measured. The report also has the chip's registers before and
-   after the checks, and `esssb16`'s variables after each section.
-3. Run it in a Windows 98 DOS box with the extended driver too, with
+   after the checks, with the 3-D effect's state in `chip.3d`, and
+   `esssb16`'s variables after each section. Under EMM386 the 16-bit
+   transfers' lines are KNOWN with `dma=still, ch 1 moved`: EMM386 doesn't
+   trap the DMA controllers, so the 16-bit channel's count stands still
+   while the 8-bit channel plays. On a card whose Audio 2 has no 8-bit
+   channel of its own (`route.audio2`), the two transfers at once are KNOWN,
+   `one at a time on Audio 1`.
+4. If a tone sounded distorted or looping, restart, load `ESSSB16 /S` and
+   run `SB16TEST /L /O:SB16S.TXT`, and send both reports.
+5. Run it in a Windows 98 DOS box with the extended driver too, with
    `BLASTER` as in [E2](#e2-dos-boxes-with-the-extended-driver) step 9, and
    send that report as well. It has the VxD's version and settings.
-4. If a real Sound Blaster 16 is at hand, run it there too: that report
+6. If a real Sound Blaster 16 is at hand, run it there too: that report
    shows what the checks expect.
-5. `/A` runs only the automatic checks, `/L` only the listening ones, `/Q`
+7. `/A` runs only the automatic checks, `/L` only the listening ones, `/Q`
    measures fewer rates and `/O:file` names the report. If the computer
    stops during a run, the next run puts the mixer back from `SB16TEST.RST`
    before it starts, and its report says so.

@@ -49,6 +49,14 @@ O_AUTO, O_LISTEN, O_SHORT, O_QUICK = 0x01, 0x02, 0x04, 0x08
 IDLE_US = 25                # the time an idle() of the checks takes
 # what the fronts can't do as the card does (docs/SB16.md)
 KNOWN = {"dsp.ram", "dsp.e2", "dsp.reset_held", "ctl.unacknowledged"}
+# esssb16 under EMM386, which doesn't trap the DMA controllers: the 16-bit
+# channel's count stands still, the transfer runs on the 8-bit one's
+EMM_KNOWN = {"p16.b0h", "p16.b6h_mono", "p16.b6h_stereo", "p16.b6h_unsigned",
+             "p16.b6h_stunsign", "rate.16bit_22050", "rate.16bit_11025",
+             "rate.16bit_8000", "ctl.count16", "rec.beh_mono",
+             "rec.beh_stereo"}
+# a front whose Audio 2 has no 8-bit channel: one transfer at a time
+ALONE_KNOWN = {"dual.play", "dual.end16", "dual.duplex"}
 
 u8, u16, ul = ctypes.c_uint8, ctypes.c_uint16, ctypes.c_ulong
 INB = ctypes.CFUNCTYPE(u8, u16)
@@ -123,6 +131,16 @@ def crossings_hz(samples, rate):
     if len(at) < 2:
         return 0
     return (len(at) - 1) * rate / (at[-1] - at[0])
+
+
+def glitched(xs, rate):
+    """a sample of a steady tone lost, repeated or out of place: the tone's
+    own recurrence, x[n+1] + x[n-1] = 2 cos(w) x[n], fails by more than the
+    steps of 8-bit samples make it; a silent channel has none"""
+    if rms(xs) < 300:
+        return False
+    k = 2 * math.cos(2 * math.pi * crossings_hz(xs, rate) / rate)
+    return any(abs(b + d - k * a) > 1200 for d, a, b in zip(xs, xs[1:], xs[2:]))
 
 
 class Input:
@@ -305,6 +323,15 @@ class Run:
     def present(self, seg):
         return rms([s for f in self.frames(seg) for s in f]) > 300
 
+    def glitchy(self, seg):
+        """a steady tone, on either DAC, with a glitch (glitched)"""
+        for part in self.parts(seg):
+            body = part[64:-64]
+            for c in range(len(body[0]) if body else 0):
+                if glitched([f[c] for f in body], seg[0]):
+                    return True
+        return False
+
     def tone_hz(self, frames, rate):
         return crossings_hz([f[0] for f in frames], rate)
 
@@ -354,7 +381,11 @@ class Run:
             fr = self.frames(seg)
             hz = self.tone_hz(fr, seg[0]) if fr else 0
             return "y" if self.present(seg) and hz > 0 else "n"
-        return "y" if self.present(seg) else "n"
+        if not self.present(seg):
+            return "n"
+        if id_.startswith("l.clean.") or id_ == "l.tone8":
+            return "d" if self.glitchy(seg) else "y"
+        return "y"
 
     @_guard
     def _ask(self, id_, question, keys):
@@ -372,6 +403,23 @@ class Run:
 
     def report(self):
         return "\n".join(self.lines)
+
+
+class GlitchTest(unittest.TestCase):
+    """the listener's ear for a distorted or looping tone"""
+
+    def test_glitched(self):
+        tone = [int(12000 * math.sin(2 * math.pi * 441 * i / 22050))
+                for i in range(2000)]
+        eight = [(s >> 8) << 8 for s in tone]
+        self.assertFalse(glitched(tone, 22050))
+        self.assertFalse(glitched(eight, 22050))        # 8-bit steps
+        self.assertFalse(glitched([0] * 2000, 22050))
+        self.assertTrue(glitched(tone[:1000] + tone[1001:], 22050))  # lost
+        self.assertTrue(glitched(tone[:1000] + tone[999:], 22050))   # again
+        # a loop back to another phase; 6 whole cycles would join cleanly
+        self.assertTrue(glitched(tone[:1000] + tone[1325:], 22050))
+        self.assertFalse(glitched(tone[:1000] + tone[1300:], 22050))
 
 
 class RateTest(unittest.TestCase):
@@ -458,6 +506,26 @@ class TSRTest(Checks, unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class TSREmmTest(Checks, unittest.TestCase):
+    """esssb16.com under EMM386, Audio 2 on DMA 5, as on the card of the
+    first report: the 16-bit count stands still, and everything plays on
+    Audio 1, one transfer at a time"""
+
+    known = KNOWN | EMM_KNOWN | ALONE_KNOWN
+
+    def card(self):
+        return TSRCard("emm", dma2=5)
+
+    def test_limits_known(self):
+        res = self.run_.results()
+        for k in EMM_KNOWN | ALONE_KNOWN:
+            self.assertEqual(res[k][0], "KNOWN", (k, res[k]))
+        self.assertIn("still, ch 1 moved", res["p16.b6h_mono"][1])
+        self.assertIn("Audio 2's DMA is 5 (PnP 75h)", res["route.audio2"][1])
+        self.assertIn("one at a time", res["dual.play"][1])
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
 class VxDTest(Checks, unittest.TestCase):
     """ES1869.VXD's front in a DOS box, Audio 2 on channel 3"""
 
@@ -469,15 +537,15 @@ class VxDTest(Checks, unittest.TestCase):
 
 # --- the program --------------------------------------------------------------
 
-def exe_run(card, tail, keys="", files=None, vxd=None):
+def exe_run(card, tail, keys="", files=None, vxd=None, umb=None):
     """build/sb16test.exe on card until it exits, with files on the disk
-    (and in a DOS box with vxd, as dosrun has it): the runner and the exit
-    code"""
+    (in a DOS box with vxd, and a program in upper memory with umb, as
+    dosrun has them): the runner and the exit code"""
     from dosrun import Dos
     with open(EXE, "rb") as f:
         exe = f.read()
     card.record_from(Input(card))
-    d = Dos(exe, card, keys=keys, vxd=vxd)
+    d = Dos(exe, card, keys=keys, vxd=vxd, umb=umb)
     for name, data in (files or {}).items():
         d.files[name] = bytearray(data)
     return d, d.run(tail)
@@ -501,7 +569,7 @@ class Person:
             return "\x1b"
         if not output.endswith("> "):
             return None
-        asked = re.findall(r"\n(l\.\w+): ", output)
+        asked = re.findall(r"\n(l\.[\w.]+): ", output)
         return self.answers[asked[-1]][asked.count(asked[-1]) - 1]
 
 
@@ -593,12 +661,14 @@ class ExePersonTest(unittest.TestCase):
     """build/sb16test.exe with a person: the listening checks' questions
     and answers, Esc, and the restore file of a run that didn't finish"""
 
+    CLEAN = ("base", "odd_block", "demand", "long", "11k", "44k", "stereo8",
+             "16bit", "stereo16")
     ANSWERS = {"l.tone8": "gy", "l.left16": "l", "l.right16": "r",
                "l.left8": "l", "l.right8": "r", "l.pitch": "y",
                "l.dual": "h", "l.pause": "y", "l.volume": "y",
                "l.balance": "y", "l.adpcm": "y", "l.direct": "y",
                "l.speaker": "y", "l.blocks": "y", "l.fm": "y",
-               "l.record": "s"}
+               "l.record": "s", **{"l.clean." + c: "y" for c in CLEAN}}
 
     def test_listening(self):
         d, code = exe_run(ModelCard(), "/L /T", keys=Person(self.ANSWERS))
@@ -612,6 +682,16 @@ class ExePersonTest(unittest.TestCase):
         self.assertEqual(d.output.count("\nl.tone8: "), 2)     # again
         self.assertIn("answer y (y expected)", res["l.tone8"][1])
         self.assertEqual(code, 0)
+        # each question and its answers on a line of their own, within the
+        # screen's 80 columns
+        lines = d.output.split("\n")
+        asked = [i for i, s in enumerate(lines) if re.match(r"l\.[\w.]+: ", s)]
+        # l.tone8 twice (again), and l.fm not at all (the model has no FM)
+        self.assertEqual(len(asked), len(self.ANSWERS))
+        for i in asked:
+            self.assertLess(len(lines[i]), 80, lines[i])
+            self.assertTrue(lines[i + 1].startswith("  ["), lines[i + 1])
+            self.assertLess(len(lines[i + 1]), 80, lines[i + 1])
 
     def test_escape_and_restore(self):
         """SB16TEST.RST puts the mixer back before the checks; Esc stops
@@ -649,6 +729,24 @@ class ExePersonTest(unittest.TestCase):
             self.assertEqual([(c[0], c[3]) for c in d.vxd_calls],
                              [(0x0001, 0xE9), (0x0400, None)])
             self.assertEqual(d.vxd_calls[1][2], 0x00012345)
+
+    def test_tsr_in_upper_memory(self):
+        """esssb16 loaded high (LH): found with the UMBs linked into the
+        chain, and the link put back; its variables in the report"""
+        image = bytearray(0x110 * 16)
+        image[0x103:0x10B] = b"ESSSB16\0"
+        image[0x10B:0x10F] = b"\x12\x34\x56\x78"
+        d, _ = exe_run(ModelCard(), "/A /T",
+                       keys=Person({}, "the DSP's commands"),
+                       umb=(bytes(image), 0x110))
+        lines = report(d)
+        self.assertIn("esssb16: resident at C801h, 4352 bytes", lines)
+        self.assertEqual(d.umb_calls, [1, 0])
+        self.assertFalse(d.umb_linked)
+        state = [line for line in lines if line.startswith("esssb16 env 0:")]
+        self.assertEqual(len(state), 1)
+        self.assertTrue(state[0].endswith(":" + (b"ESSSB16\0\x12\x34\x56\x78"
+                                                 + bytes(84)).hex().upper()))
 
 
 if __name__ == "__main__":

@@ -541,8 +541,10 @@ class FrontChecks:
             keep[0x7C] = 0xCC
         for reg in (0x50, 0x52, 0x7C):
             self.assertEqual(hw[reg], keep[reg], hex(reg))
-        self.assertEqual((hw[0x50], hw[0x52]), (DOS_MIXER[0x50],
-                                                DOS_MIXER[0x52]))
+        three_d = DOS_MIXER[0x50]
+        if isinstance(c, TSRCard):
+            three_d &= ~0x08        # esssb16 bypasses the effect as it loads
+        self.assertEqual((hw[0x50], hw[0x52]), (three_d, DOS_MIXER[0x52]))
 
     def test_the_mixer_a_game_finds(self):
         """the view at the start shows the levels the chip has"""

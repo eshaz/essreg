@@ -304,13 +304,22 @@ static int device_there(const char *name) {
 }
 
 // esssb16's resident block: a program's own block with its signature at
-// 103h, as its installed check finds it
+// 103h, as its installed check finds it, also in upper memory (LH): the
+// UMBs are linked into the chain while it looks, and the link put back
 static u16 find_tsr(void) {
   union REGS r;
   struct SREGS sr;
-  u16 mcb, owner, size;
+  u16 mcb, owner, size, found = 0, link;
   const char __far *sig;
 
+  r.x.ax = 0x5802;
+  intdos(&r, &r);
+  link = r.x.cflag ? 0xFFFF : r.h.al;
+  if (link != 0xFFFF) {
+    r.x.ax = 0x5803;
+    r.x.bx = 1;
+    intdos(&r, &r);
+  }
   segread(&sr);
   r.h.ah = 0x52;
   intdosx(&r, &r, &sr);
@@ -323,14 +332,21 @@ static u16 find_tsr(void) {
     size = *(u16 __far *)MK_FP(mcb, 3);
     if (owner == mcb + 1 && size >= 0x20) {
       sig = (const char __far *)MK_FP(owner, 0x103);
-      if (_fmemcmp(sig, "ESSSB16", 8) == 0 && owner != _psp)
-        return owner;
+      if (_fmemcmp(sig, "ESSSB16", 8) == 0 && owner != _psp) {
+        found = owner;
+        break;
+      }
     }
     if (kind == 'Z')
       break;
     mcb = (u16)(mcb + size + 1);
   }
-  return 0;
+  if (link != 0xFFFF) {
+    r.x.ax = 0x5803;
+    r.x.bx = link;
+    intdos(&r, &r);
+  }
+  return found;
 }
 
 // ES1869.VXD's register API in a DOS box: its version and settings. A

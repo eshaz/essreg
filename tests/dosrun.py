@@ -22,7 +22,9 @@ includes the TSR's block, and the trapped ports run the TSR's shims on
 their own CPU. With `vxd`, the program runs in a Windows 98 DOS box, as
 far as int 2Fh tells, where ES1869.VXD's API answers functions 0001 and
 0400 (VXD_API.md) with vxd["adi"] and vxd["info"], AX, BX and CX, or None
-for ESS's driver, which fails 0400.
+for ESS's driver, which fails 0400. With `umb`, (image, paragraphs), a
+program is resident in upper memory, as LH loads one: its block joins the
+MCB chain while the program links the UMBs (int 21h 5803h).
 
 usage: from dosrun import Dos; Dos(exe_bytes, card).run("/A")
 """
@@ -50,6 +52,7 @@ PIT_HZ = 1193182
 PIT_US = 4                  # a PIT access, with the loop around it
 KEY_US = 20                 # the BIOS's look at the keyboard
 VXD_PARA = 0x9F00           # ES1869.VXD's API entry: int E6h, retf
+UMB_PARA = 0xC801           # the program in upper memory, its MCB before
 INT_VXD = 0xE6
 ADI_DEVNODE = 0x55
 
@@ -58,7 +61,7 @@ class Dos(Cpu):
     """the program, DOS and the BIOS; `files` are the files it wrote"""
 
     def __init__(self, exe, card, env="BLASTER=A220 I5 D1 H5 P330 T6",
-                 keys="", memory=None, vxd=None):
+                 keys="", memory=None, vxd=None, umb=None):
         tsr = getattr(card, "m", None)
         if memory is None and tsr is not None and hasattr(tsr, "memory"):
             memory = tsr.memory     # the TSR's machine: one first megabyte
@@ -77,6 +80,7 @@ class Dos(Cpu):
         self.allocated = []
         self.tsr = tsr
         self.vxd, self.vxd_calls = vxd, []
+        self.umb, self.umb_linked, self.umb_calls = umb, False, []
         card.isr = self._raise
         if tsr is None:
             self.card_memory(card)
@@ -124,6 +128,23 @@ class Dos(Cpu):
         self.bios_ticks(0)
         if self.vxd is not None:
             self.put(VXD_PARA * 16, bytes((0xCD, INT_VXD, 0xCB)))
+        if self.umb is not None:
+            image, paras = self.umb
+            self.mcb(UMB_PARA - 1, b"M", UMB_PARA, paras)
+            self.put(UMB_PARA * 16, image)
+            self.mcb(UMB_PARA + paras, b"Z", 0, 0x100)
+
+    def link_umbs(self, on):
+        """the UMBs in the chain: the last block of conventional memory
+        'M', followed by the system's block over the adapters' memory up to
+        the first UMB's MCB; else 'Z' again"""
+        last = ALLOC - 1
+        kind = b"M" if on else b"Z"
+        self.put(last * 16, kind)
+        if on:
+            hole = last + 0x1000 + 1
+            self.mcb(hole, b"M", 0x0008, UMB_PARA - 1 - hole - 1)
+        self.umb_linked = on
 
     def mcb(self, para, kind, owner, size):
         self.put(para * 16, kind + struct.pack("<HH", owner, size) +
@@ -431,6 +452,14 @@ class Dos(Cpu):
                 self.files[new] = self.files.pop(old)
                 ok(False)
         elif ah == 0x68:
+            ok(False)
+        elif ax == 0x5802:          # the UMB link
+            self.w8("eax", int(self.umb_linked))
+            ok(False)
+        elif ax == 0x5803:
+            self.umb_calls.append(bx)
+            if self.umb is not None:
+                self.link_umbs(bool(bx & 1))
             ok(False)
         elif ax == 0x6601:          # the code page: 437
             self.w16("ebx", 437)

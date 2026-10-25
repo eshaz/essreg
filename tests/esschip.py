@@ -101,6 +101,7 @@ class Stream:
         self.debt = 0.0
         self.counter = 0
         self.halted = False
+        self.credit = 0             # the bus time for DMA cycles, in bytes
 
 
 class FwTransfer:
@@ -478,20 +479,31 @@ class ES1869Audio:
         self.mixer[0x78] &= ~0x02
         return True
 
+    # a DMA request moves 1 byte (single transfers) or 2, 4 or 8 (demand
+    # transfers, 78h bits 7:6), and the chip asks only with room in its
+    # FIFO; the DMA controller holds the bus for a whole burst, so a CPU's
+    # write to 78h lands between bursts, never inside one
     def _a2_step(self):
         s, r78 = self.a2, self.mixer[0x78]
         if r78 & 0x02:
             ch = self.a2_channel()
             if r78 & 0x20:
                 self.violate("78h bit 5, which the data sheet reserves")
-            for _ in range(DMA_PER_US):
-                if len(s.fifo) >= s.size or ch == 4 or ch > 7:
-                    break
-                data = self.dmac.read(ch, 1)
-                if not data:
-                    break
-                s.fifo += data[:1]          # a word's low byte
-                if self._a2_count():
+            burst = (1, 2, 4, 8)[r78 >> 6]
+            s.credit = min(s.credit + DMA_PER_US, max(burst, DMA_PER_US))
+            while s.credit >= burst and len(s.fifo) + burst <= s.size and \
+                    ch != 4 and ch <= 7 and self.mixer[0x78] & 0x02:
+                s.credit -= burst
+                moved = 0
+                for _ in range(burst):
+                    data = self.dmac.read(ch, 1)
+                    if not data:
+                        break
+                    s.fifo += data[:1]      # a word's low byte
+                    moved += 1
+                    if self._a2_count():
+                        break
+                if moved < burst:
                     break
         s.debt += self.a2_rate() / 1e6
         while s.debt >= 1:

@@ -149,9 +149,10 @@ class BuildTest(unittest.TestCase):
 
     def test_small(self):
         """the resident part, with the PSP, stays within its 280
-        paragraphs"""
+        paragraphs, and the file, which LH loads whole into upper memory
+        before it shrinks, within 9 KB"""
         image, syms = build()
-        self.assertLess(len(image), 8192)
+        self.assertLess(len(image), 9216)
         self.assertLessEqual(paragraphs(syms), MAX_PARAS)
         self.assertEqual(syms["RESIDENT_PARAS"], paragraphs(syms))
         self.assertLess(syms["resident_end"], syms["install"] + 1)
@@ -374,6 +375,22 @@ class InstallTest(unittest.TestCase):
             self.assertEqual((m.data8("keep71"), m.data8("set71")),
                              (keep, put), tail)
             self.assertEqual(m.chip.mixer[0x71], after, tail)
+
+    def test_3d_off(self):
+        """the 3-D effect bypassed at the start (mixer 50h bit 3), as after
+        a hardware reset; /3 keeps it, and an effect that is off stays
+        so"""
+        for tail, before, after, said in (("", 0x0D, 0x05, True),
+                                          ("/3", 0x0D, 0x0D, False),
+                                          ("", 0x04, 0x04, False)):
+            chip = Chip()
+            chip.mixer[0x50] = chip.mixer[0x52] = before
+            m = machine(chip)
+            m.install(tail=tail, qpiemu=True)
+            self.assertEqual(m.exit[0], "tsr", tail)
+            self.assertEqual(m.chip.mixer[0x50], after, tail)
+            self.assertEqual(m.chip.mixer[0x52], before, tail)  # the level
+            self.assertEqual("3-D effect off" in m.output, said, tail)
 
     def test_blaster(self):
         """BLASTER's A and H; I and D come from the card's PnP registers"""

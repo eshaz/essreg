@@ -39,9 +39,10 @@
 #define FSG 0x04 // signed
 
 // the 8237's modes, with the channel's bits 1:0 clear
-#define DMA_PLAY 0x58 // single, auto-initialize, from memory
-#define DMA_REC 0x54  // single, auto-initialize, into memory
-#define DMA_E2 0x44   // single, into memory, once
+#define DMA_PLAY 0x58   // single, auto-initialize, from memory
+#define DMA_DEMAND 0x18 // demand, auto-initialize, from memory
+#define DMA_REC 0x54    // single, auto-initialize, into memory
+#define DMA_E2 0x44     // single, into memory, once
 
 #define TOL 0.03 // a rate's tolerance: the ES1869's divisors
 
@@ -502,6 +503,7 @@ struct xfer {
   u16 frames; // a block
   u8 nb;      // the blocks in the buffer, which loops
   u8 rec;     // a recording
+  u8 dmode;   // the 8237's mode, else DMA_PLAY or DMA_REC
   u32 addr;   // the buffer
 };
 
@@ -510,6 +512,7 @@ struct meas {
   u16 other;  // of the other kind
   double hz;  // the rate their times give
   u8 moving;  // the DMA count moved
+  u8 moving8; // the 8-bit channel's, of a transfer on the 16-bit one
   u8 started; // the command went in
   u32 first;  // the first interrupt, us after the command
 };
@@ -527,7 +530,10 @@ static int x_start(const struct xfer *x) {
   u16 bytes = (u16)(x->frames * frame_bytes(x->fmt) * x->nb);
   u16 blen = (u16)(x->frames * frame_bytes(x->fmt) - 1);
 
-  dma_set(x->ch, x->addr, bytes, x->rec ? DMA_REC : DMA_PLAY);
+  dma_set(x->ch, x->addr, bytes,
+          x->dmode ? x->dmode
+          : x->rec ? DMA_REC
+                   : DMA_PLAY);
   if (generic(x->cmd))
     return cmd(4, x->cmd, x->mode, len & 0xFF, len >> 8);
   if (x->cmd == 0x14 || x->cmd == 0x24)
@@ -556,9 +562,10 @@ static double log_rate(u8 kind, u16 frames) {
 // the transfer runs until want interrupts of its kind came, or time out
 static void x_run(const struct xfer *x, u16 want, struct meas *m) {
   u32 t0, lim, step, ts;
-  u16 c0, c;
+  u16 c0, c, d0 = 0;
   double block_us = x->frames * 1e6 / sbt_v_hz(cur_v);
   volatile u16 *n;
+  int other8 = x->ch != C->dma8;
 
   memset(m, 0, sizeof(*m));
   n = kind_of(x) == 2 ? &n16 : &n8;
@@ -568,6 +575,8 @@ static void x_run(const struct xfer *x, u16 want, struct meas *m) {
   lim = tk((u32)(block_us * (want + 2) * 2) + 200000UL);
   step = tk((u32)(block_us / 8) + 1);
   c0 = dma_left(x->ch);
+  if (other8)
+    d0 = dma_left(C->dma8);
   ts = t0;
   while (*n < want && H->now() - t0 < lim && !escaped()) {
     H->idle();
@@ -576,6 +585,8 @@ static void x_run(const struct xfer *x, u16 want, struct meas *m) {
       c = dma_left(x->ch);
       if (c != c0)
         m->moving = 1;
+      if (other8 && dma_left(C->dma8) != d0)
+        m->moving8 = 1;
     }
   }
   m->ints = *n;
@@ -589,6 +600,24 @@ static double err_of(double got, double want) {
   return want > 0 ? (got - want) / want : 0;
 }
 
+// the DMA count as a line has it; KNOWN where the 16-bit channel's stands
+// still while the 8-bit one's moves: the front plays the transfer through
+// that one without trapping the game's (esssb16 under EMM386, SB16.md)
+static const char *dma_word(const struct meas *m) {
+  static char s[24];
+
+  if (m->moving)
+    return "moving";
+  if (!m->moving8)
+    return "still";
+  sprintf(s, "still, ch %u moved", C->dma8);
+  return s;
+}
+
+static int still_known(const struct meas *m) {
+  return front && !m->moving && m->moving8;
+}
+
 // a measured transfer's line: PASS when its interrupts came at the rate
 // the Sound Blaster 16 plays
 static int x_check(const char *id, const struct xfer *x, u16 want) {
@@ -598,14 +627,17 @@ static int x_check(const char *id, const struct xfer *x, u16 want) {
 
   x_run(x, want, &m);
   e = err_of(m.hz, sb);
-  ok = m.started && m.ints >= want && m.moving && (want < 3 || fabs(e) <= TOL);
-  res(id, ok ? R_PASS : R_FAIL,
+  ok = m.started && m.ints >= want && (want < 3 || fabs(e) <= TOL);
+  res(id,
+      ok && m.moving          ? R_PASS
+      : ok && still_known(&m) ? R_KNOWN
+                              : R_FAIL,
       "ints=%u/%u other=%u rate=%.0f sb16=%.0f err=%+.2f%% dma=%s "
       "first=%luus 82h=%02X",
-      m.ints, want, m.other, m.hz, sb, e * 100, m.moving ? "moving" : "still",
+      m.ints, want, m.other, m.hz, sb, e * 100, dma_word(&m),
       (unsigned long)m.first, last82);
   quiet();
-  return ok;
+  return ok && m.moving;
 }
 
 // --- the ES1869 behind a front -----------------------------------------------
@@ -686,6 +718,13 @@ static void chip_dump(const char *when) {
         p += sprintf(p, " %02X", mix_get((u8)n));
     H->line(text);
   }
+  v = mix_get(0x50);
+  n = mix_get(0x52);
+  res("chip.3d", R_INFO,
+      "%s 50h=%02X 52h=%02X: the 3-D effect %s, level %u, "
+      "limit %s",
+      when, v, n, (v & 0x0C) == 0x0C ? "on" : "off", n & 0x3F,
+      (v & 0x01) ? "on" : "off");
   H->lock();
   H->outb(B + 4, 0x40);
   for (i = 0; i < 4; i++)
@@ -1148,8 +1187,14 @@ static void check_routing(void) {
   r78 = mix_get(0x78);
   audio2 = (r78 & 0x03) == 0x03;
   chip_now("route.16bit");
-  res("route.audio2", R_INFO, "78h=%02X: 16-bit sound plays on %s", r78,
-      audio2 ? "Audio 2" : "Audio 1");
+  if (audio2 || !cfg)
+    res("route.audio2", R_INFO, "78h=%02X: 16-bit sound plays on %s", r78,
+        audio2 ? "Audio 2" : "Audio 1");
+  else
+    res("route.audio2", R_INFO,
+        "78h=%02X: 16-bit sound plays on Audio 1; Audio 2's DMA is %u (PnP "
+        "75h), and it needs an 8-bit one of its own (esssb16 /2)",
+        r78, pnp_get(1, 0x75) & 7);
   quiet();
   rate41(22050);
   x_init(&x, 0xC6, 0x00, 0, 22050);
@@ -1281,24 +1326,34 @@ static void check_queue(int sixteen) {
   quiet();
 }
 
-// the DMA count a game reads moves through the buffer
+// the DMA count a game reads moves through the buffer; KNOWN where the
+// 16-bit channel's stands still while the 8-bit one's moves (dma_word)
 static void check_count(int sixteen) {
   struct xfer x;
+  struct meas m;
   volatile u16 *n = sixteen ? &n16 : &n8;
   double bus = block_frames(22050, 0) * 1e6 / sbt_v_hz(sbt_rate_to_v(22050));
-  u16 c[6], i, moves = 0;
+  u16 c[6], i, moves = 0, d0 = 0;
 
   ctl_start(&x, sixteen);
   wait_n(n, 1, (u32)(bus * 4) + 100000UL);
+  memset(&m, 0, sizeof(m));
+  if (x.ch != C->dma8)
+    d0 = dma_left(C->dma8);
   for (i = 0; i < 6; i++) {
     c[i] = dma_left(x.ch);
     if (i && c[i] != c[i - 1])
       moves++;
     pass_time((u32)(bus / 3));
   }
-  res(sixteen ? "ctl.count16" : "ctl.count8", moves >= 4 ? R_PASS : R_FAIL,
-      "channel %u: %04X %04X %04X %04X %04X %04X", x.ch, c[0], c[1], c[2], c[3],
-      c[4], c[5]);
+  m.moving = moves >= 4;
+  m.moving8 = x.ch != C->dma8 && dma_left(C->dma8) != d0;
+  res(sixteen ? "ctl.count16" : "ctl.count8",
+      m.moving          ? R_PASS
+      : still_known(&m) ? R_KNOWN
+                        : R_FAIL,
+      "channel %u: %04X %04X %04X %04X %04X %04X, dma=%s", x.ch, c[0], c[1],
+      c[2], c[3], c[4], c[5], dma_word(&m));
   quiet();
 }
 
@@ -1360,12 +1415,19 @@ static void dual_start(struct xfer *a, struct xfer *b, int rec8) {
   x_start(b);
 }
 
+// a dual check's result: KNOWN on a front whose Audio 2 has no 8-bit
+// channel, where a transfer of one kind ends the other kind's (SB16.md)
+static int dual_res(int ok) {
+  return ok ? R_PASS : front && !audio2 ? R_KNOWN : R_FAIL;
+}
+
 static void check_dual(void) {
   struct xfer a, b;
   double bus = block_frames(44100, 0) * 1e6 / sbt_v_hz(sbt_rate_to_v(44100));
   u16 k8, k16, i, j, changed;
   u8 buf[64];
   int ok;
+  const char *alone = front && !audio2 ? ", one at a time on Audio 1" : "";
 
   if (!C->dma16)
     return;
@@ -1376,8 +1438,8 @@ static void check_dual(void) {
   chip_now("dual.chip");
   k8 = n8;
   k16 = n16;
-  res("dual.play", k8 >= blocks() && k16 >= blocks() ? R_PASS : R_FAIL,
-      "C6h and B6h: %u 8-bit and %u 16-bit interrupts", k8, k16);
+  res("dual.play", dual_res(k8 >= blocks() && k16 >= blocks()),
+      "C6h and B6h: %u 8-bit and %u 16-bit interrupts%s", k8, k16, alone);
   // D9h ends the 16-bit transfer, the 8-bit one plays on
   cmd(1, 0xD9);
   pass_time((u32)(bus * 3));
@@ -1385,9 +1447,9 @@ static void check_dual(void) {
   k16 = n16;
   pass_time((u32)(bus * 3));
   ok = n16 == k16 && n8 >= k8 + 2;
-  res("dual.end16", ok ? R_PASS : R_FAIL,
-      "after D9h: %u more 16-bit and %u more 8-bit interrupts", n16 - k16,
-      n8 - k8);
+  res("dual.end16", dual_res(ok),
+      "after D9h: %u more 16-bit and %u more 8-bit interrupts%s", n16 - k16,
+      n8 - k8, alone);
   // a reset ends both
   dsp_reset(NULL);
   k8 = n8;
@@ -1409,10 +1471,9 @@ static void check_dual(void) {
       if (buf[j] != 0x5A)
         changed++;
   }
-  res("dual.duplex",
-      k8 >= blocks() && k16 >= blocks() && changed ? R_PASS : R_FAIL,
-      "B6h and CEh: %u 16-bit and %u 8-bit interrupts, %u bytes recorded", k16,
-      k8, changed);
+  res("dual.duplex", dual_res(k8 >= blocks() && k16 >= blocks() && changed),
+      "B6h and CEh: %u 16-bit and %u 8-bit interrupts, %u bytes recorded%s",
+      k16, k8, changed, alone);
   quiet();
 }
 
@@ -1484,13 +1545,16 @@ static void record(const char *id, u8 c, u8 mode, u8 fmt, u16 hz, u8 tc) {
   x_run(&x, want, &m);
   rec_stats(x.addr, (u16)(x.frames * frame_bytes(fmt)), fmt, &s);
   e = err_of(m.hz, rate);
-  ok = m.started && m.ints >= want && m.moving && s.changed > 0 &&
+  ok = m.started && m.ints >= want && s.changed > 0 &&
        (want < 3 || fabs(e) <= TOL);
-  res(id, ok ? R_PASS : R_FAIL,
+  res(id,
+      ok && m.moving          ? R_PASS
+      : ok && still_known(&m) ? R_KNOWN
+                              : R_FAIL,
       "ints=%u/%u rate=%.0f sb16=%.0f err=%+.2f%% dma=%s written=%u/%u "
       "min=%d max=%d mean=%.1f rms=%.1f",
-      m.ints, want, m.hz, rate, e * 100, m.moving ? "moving" : "still",
-      s.changed, s.n, s.lo, s.hi, s.mean, s.rms);
+      m.ints, want, m.hz, rate, e * 100, dma_word(&m), s.changed, s.n, s.lo,
+      s.hi, s.mean, s.rms);
   quiet();
 }
 
@@ -1963,11 +2027,13 @@ static void s_dual(void) {
   quiet();
 }
 
+// short, the pause still outlasts what Audio 1's FIFO holds (5.8 ms)
 static void s_pause(void) {
   struct xfer x;
   struct tone t;
   double rate;
   u16 frames = (O & SBT_O_SHORT) ? 256 : 4096;
+  u32 part = (O & SBT_O_SHORT) ? 20000UL : sound_us() / 3;
 
   dsp_reset(NULL);
   rate41(22050);
@@ -1978,11 +2044,11 @@ static void s_pause(void) {
   fill(x.addr, frames, x.fmt, &t);
   sound_on(rate);
   x_start(&x);
-  pass_time(sound_us() / 3);
+  pass_time(part);
   cmd(1, 0xD5);
-  pass_time(sound_us() / 3);
+  pass_time(part);
   cmd(1, 0xD6);
-  pass_time(sound_us() / 3);
+  pass_time(part);
   sound_off();
   quiet();
 }
@@ -2233,45 +2299,129 @@ static void s_record(void) {
   quiet();
 }
 
+// tones that differ from the first in one thing each, and the last in
+// three (16-bit stereo at 44 kHz), so that the ones that sound distorted or
+// looping on a card show what does it: the length of a block, the 8237's
+// mode, the buffer's length, the rate, the bits and the channels
+struct clean {
+  u8 cmd, mode, fmt;
+  u16 rate;
+  u16 frames, block; // the buffer, which loops, and a block, in frames
+  u8 dmode;          // the 8237's mode, else single transfers
+};
+
+static const struct clean cleans[] = {
+    {0xC6, 0x00, 0, 22050, 4096, 2048, 0},
+    {0xC6, 0x00, 0, 22050, 4058, 2029, 0},
+    {0xC6, 0x00, 0, 22050, 4096, 2048, DMA_DEMAND},
+    {0xC6, 0x00, 0, 22050, 16384, 8192, 0},
+    {0xC6, 0x00, 0, 11025, 4096, 2048, 0},
+    {0xC6, 0x00, 0, 44100, 4096, 2048, 0},
+    {0xC6, 0x20, FST, 22050, 4096, 2048, 0},
+    {0xB6, 0x10, F16 | FSG, 22050, 4096, 2048, 0},
+    {0xB6, 0x30, F16 | FST | FSG, 44100, 2048, 1024, 0},
+};
+
+static u8 play_arg; // the clean tone that s_clean plays
+
+// short, a sixteenth of the buffer, and an odd block stays odd
+static void s_clean(void) {
+  const struct clean *c = &cleans[play_arg];
+  struct xfer x;
+  struct tone t;
+  double rate, hz;
+  u16 frames = c->frames, block = c->block;
+
+  if (O & SBT_O_SHORT) {
+    block = (u16)(block / 16);
+    if ((c->block & 1) && !(block & 1))
+      block++;
+    frames = (u16)(block * (c->frames / c->block));
+  }
+  dsp_reset(NULL);
+  rate41(c->rate);
+  rate = sbt_v_hz(cur_v);
+  x_init(&x, c->cmd, c->mode, c->fmt, rate);
+  x.frames = block;
+  x.nb = (u8)(frames / block);
+  x.dmode = c->dmode;
+  hz = fit_hz(440, frames, rate);
+  tone_set(&t, hz, (c->fmt & FST) ? hz : 0, rate, 12000);
+  fill(x.addr, frames, c->fmt, &t);
+  sound_on(rate);
+  x_start(&x);
+  pass_time(sound_us() / 2);
+  sound_off();
+  quiet();
+}
+
 struct listen {
   const char *id;
   void (*play)(void);
   const char *question;
-  const char *keys; // the answers, then r (again) and s (skip)
+  const char *keys; // the answers, then g (again) and s (skip)
   const char *want; // the answers that pass
   u8 needs;         // 1: the 16-bit channel, 2: FM, 4: a person to speak
+  u8 arg;           // s_clean's tone
 };
 
 static const char ANS_YN[] = "yn";
-static const char ANS_SIDE[] = "lrbn";
+static const char ANS_YND[] = "ynd";
+static const char ANS_SIDE[] = "lrbnd";
+static const char ANS_DUAL[] = "blhnd";
+static const char ANS_CLEAN[] = "ydn";
 
 static const struct listen listens[] = {
-    {"l.tone8", s_tone8, "You should hear a steady tone. Did you?", "ynd", "y",
+    {"l.tone8", s_tone8, "You should hear a steady tone. Did you?", ANS_YND,
+     "y", 0, 0},
+    {"l.left16", s_left16, "Where did the tone come from?", ANS_SIDE, "l", 1,
      0},
-    {"l.left16", s_left16, "Where did the tone come from?", ANS_SIDE, "l", 1},
-    {"l.right16", s_right16, "Where did the tone come from?", ANS_SIDE, "r", 1},
-    {"l.left8", s_left8, "Where did the tone come from?", ANS_SIDE, "l", 0},
-    {"l.right8", s_right8, "Where did the tone come from?", ANS_SIDE, "r", 0},
+    {"l.right16", s_right16, "Where did the tone come from?", ANS_SIDE, "r", 1,
+     0},
+    {"l.left8", s_left8, "Where did the tone come from?", ANS_SIDE, "l", 0, 0},
+    {"l.right8", s_right8, "Where did the tone come from?", ANS_SIDE, "r", 0,
+     0},
     {"l.pitch", s_pitch, "Three tones played. Did they have the same pitch?",
-     ANS_YN, "y", 1},
-    {"l.dual", s_dual, "What did you hear?", "blhn", "", 1},
+     ANS_YND, "y", 1, 0},
+    {"l.dual", s_dual,
+     "Which tones did you hear, a low one, a high one or both?", ANS_DUAL, "",
+     1, 0},
     {"l.pause", s_pause, "Did the tone stop for a moment and then go on?",
-     ANS_YN, "y", 1},
-    {"l.volume", s_volume, "Did the tone get quieter in steps?", ANS_YN, "y",
-     0},
+     ANS_YND, "y", 1, 0},
+    {"l.volume", s_volume, "Did the tone get quieter in steps?", ANS_YND, "y",
+     0, 0},
     {"l.balance", s_balance, "Did the tone move from the left to the right?",
-     ANS_YN, "y", 1},
+     ANS_YND, "y", 1, 0},
     {"l.adpcm", s_adpcm, "Did you hear a tone? It may sound rough.", ANS_YN,
-     "y", 0},
-    {"l.direct", s_direct, "Did you hear a tone? It may buzz.", ANS_YN, "y", 0},
-    {"l.speaker", s_speaker, "Did you hear a tone?", ANS_YN, "y", 0},
-    {"l.blocks", s_blocks, "Did the tone play without clicks or gaps?", ANS_YN,
-     "y", 0},
-    {"l.fm", s_fm, "Did you hear an organ note?", ANS_YN, "y", 2},
+     "y", 0, 0},
+    {"l.direct", s_direct, "Did you hear a tone? It may buzz.", ANS_YN, "y", 0,
+     0},
+    {"l.speaker", s_speaker, "Did you hear a tone?", ANS_YND, "y", 0, 0},
+    {"l.blocks", s_blocks, "Did the tone play without clicks or gaps?", ANS_YND,
+     "y", 0, 0},
+    {"l.clean.base", s_clean, "8-bit mono, 22 kHz: was it a steady tone?",
+     ANS_CLEAN, "y", 0, 0},
+    {"l.clean.odd_block", s_clean,
+     "The same with odd blocks: was it a steady tone?", ANS_CLEAN, "y", 0, 1},
+    {"l.clean.demand", s_clean,
+     "The same with demand DMA: was it a steady tone?", ANS_CLEAN, "y", 0, 2},
+    {"l.clean.long", s_clean,
+     "The same with a 4 times longer buffer: was it a steady tone?", ANS_CLEAN,
+     "y", 0, 3},
+    {"l.clean.11k", s_clean, "8-bit mono, 11 kHz: was it a steady tone?",
+     ANS_CLEAN, "y", 0, 4},
+    {"l.clean.44k", s_clean, "8-bit mono, 44 kHz: was it a steady tone?",
+     ANS_CLEAN, "y", 0, 5},
+    {"l.clean.stereo8", s_clean, "8-bit stereo, 22 kHz: was it a steady tone?",
+     ANS_CLEAN, "y", 0, 6},
+    {"l.clean.16bit", s_clean, "16-bit mono, 22 kHz: was it a steady tone?",
+     ANS_CLEAN, "y", 1, 7},
+    {"l.clean.stereo16", s_clean,
+     "16-bit stereo, 44 kHz: was it a steady tone?", ANS_CLEAN, "y", 1, 8},
+    {"l.fm", s_fm, "Did you hear an organ note?", ANS_YN, "y", 2, 0},
     {"l.record", s_record,
-     "Speak into the microphone while the first sound plays: did you hear "
-     "your voice after it?",
-     ANS_YN, "y", 4},
+     "Speak into the mic during the first sound: did your voice play back?",
+     ANS_YN, "y", 4, 0},
 };
 
 static const char *legend(const char *keys) {
@@ -2282,13 +2432,16 @@ static const char *legend(const char *keys) {
   for (k = keys; *k; k++) {
     switch (*k) {
     case 'y':
-      strcat(s, " [y]es");
+      strcat(s, keys == ANS_CLEAN ? " [y]es, steady" : " [y]es");
       break;
     case 'n':
-      strcat(s, keys == ANS_SIDE ? " [n]owhere" : " [n]o");
+      strcat(s, keys == ANS_SIDE    ? " [n]owhere"
+                : keys == ANS_DUAL  ? " [n]one"
+                : keys == ANS_CLEAN ? " [n]o tone"
+                                    : " [n]o");
       break;
     case 'd':
-      strcat(s, " [d]istorted");
+      strcat(s, " [d]istorted or looping");
       break;
     case 'l':
       strcat(s, keys == ANS_SIDE ? " [l]eft" : " [l]ow only");
@@ -2297,7 +2450,7 @@ static const char *legend(const char *keys) {
       strcat(s, " [r]ight");
       break;
     case 'b':
-      strcat(s, keys == ANS_SIDE ? " [b]oth" : " [b]oth, a low and a high one");
+      strcat(s, " [b]oth");
       break;
     case 'h':
       strcat(s, " [h]igh only");
@@ -2327,7 +2480,8 @@ static void check_listen(void) {
       want = front && audio2 ? "b" : "h"; // a Sound Blaster 16 has one DAC
     strcpy(keys, l->keys);
     strcat(keys, "gs");
-    sprintf(question, "%s%s", l->question, legend(l->keys));
+    sprintf(question, "%s\n %s", l->question, legend(l->keys));
+    play_arg = l->arg;
     do {
       l->play();
       a = H->ask(l->id, question, keys);
@@ -2336,7 +2490,8 @@ static void check_listen(void) {
       res(l->id, R_SKIP, "skipped");
     else
       res(l->id, strchr(want, a) != NULL ? R_PASS : R_FAIL,
-          "answer %c (%s expected): %s", a, want, l->question);
+          "answer %c%s (%s expected): %s", a,
+          a == 'd' ? ", distorted or looping" : "", want, l->question);
   }
 }
 

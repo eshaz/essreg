@@ -2247,8 +2247,8 @@ host_area:
 ; the options on the command line (/S single transfers, /H5 /H6 /H7 /H0 the
 ; 16-bit channel, /20 /21 /23 Audio 2's channel, /2- no Audio 2, /A220 the
 ; base, /F0 /F1 the DACs' filters off or on, /O0 /O1 Audio 2's 4x
-; oversampling off or on) and BLASTER's A, I, D and H; CF set for /? or an
-; unknown option
+; oversampling off or on, /3 the 3-D effect kept) and BLASTER's A, I, D and
+; H; CF set for /? or an unknown option
 parse_options:
         call    blaster
         mov     si,0x81
@@ -2279,7 +2279,11 @@ parse_options:
         je      .o
         cmp     al,'2' & ~0x20
         je      .two
+        cmp     al,'3' & ~0x20
+        je      .three
         jmp     .bad
+.three: mov     byte [keep3d],1
+        jmp     .next
 .two:   test    cx,cx                   ; /2n: Audio 2's channel, 0, 1 or 3,
         jz      .bad                    ; and /2- none
         lodsb
@@ -2744,6 +2748,22 @@ setup_card:
         jmp     pair_out
 .out:   ret
 
+; the 3-D effect bypassed (mixer 50h bit 3), as after a hardware reset and
+; on a Sound Blaster 16, which has none: Windows' driver turns it on, and
+; the chip keeps it through a restart to DOS. /3 keeps it as it is
+three_d_off:
+        cmp     byte [keep3d],0
+        jne     .out
+        mov     ah,0x50
+        call    mix_read
+        test    al,0x08
+        jz      .out
+        and     al,~0x08 & 0xFF
+        call    mix_write
+        mov     dx,msg_3d_off
+        call    print
+.out:   ret
+
 ; Audio 2 for the 16-bit playback (dma2): on the channel /2 gives it, when
 ; one of the card's four DMA pin pairs is wired to that channel (card
 ; registers 23h and 24h, a channel in each nibble), else on the card's
@@ -2883,6 +2903,7 @@ install:
         jc      .nocard
         call    setup_card
         call    report
+        call    three_d_off
         call    trap_v86                ; QPI, else EMM386
         jc      .notrap
         call    free_environment
@@ -3395,6 +3416,7 @@ dma_trapped:
         ret
 want2:          db 0xFF         ; /2's channel for Audio 2, 4 for /2-,
                                 ; FFh for the card's
+keep3d:         db 0            ; /3: the 3-D effect as it is
 irq:            db 5            ; the card's IRQ, and its bit in mixer 80h
 irq_bit:        db 0xF0, 0xF0, 0xF1, 0xF0, 0xF0, 0xF2, 0xF0, 0xF4
                 db 0xF0, 0xF1, 0xF8, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0
@@ -3415,13 +3437,14 @@ blaster_name:   db "BLASTER=", 0
 
 banner:         db "esssb16 1.0: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
 usage:          db "usage: esssb16 [/A220] [/H5|/H6|/H7|/H0] [/20|/21|/23|/2-] [/S] [/F0|/F1]", 13, 10
-                db "       [/O0|/O1]", 13, 10
+                db "       [/O0|/O1] [/3]", 13, 10
                 db "  /A  the card's base, else BLASTER's A (220)", 13, 10
                 db "  /H  the game's 16-bit DMA channel, else BLASTER's H (5); 0: none", 13, 10
                 db "  /2  Audio 2's DMA channel, for 16-bit sound, else the card's; -: none", 13, 10
                 db "  /S  single DMA transfers (ESS's Single Mode DMA)", 13, 10
                 db "  /F  the DACs' filters off (0) or on (1), else as they are", 13, 10
                 db "  /O  Audio 2's 4x oversampling off (0) or on (1), else as it is", 13, 10
+                db "  /3  the 3-D effect kept as it is, else off", 13, 10
                 db "needs EMM386 4.46+, QEMM or JEMM with QPIEMU, and for", 13, 10
                 db "protected-mode games HDPMI32i, loaded resident first", 13, 10, "$"
 msg_windows:    db "not for a Windows DOS box: ES1869.VXD does this there", 13, 10, "$"
@@ -3436,6 +3459,7 @@ msg_through:    db " through it$"
 msg_audio2:     db " on Audio 2's DMA $"
 msg_no_audio2:  db 13, 10, "16-bit sound plays on Audio 1: Audio 2 has no 8-bit DMA channel of its own (/2)$"
 msg_unwired:    db "Audio 2 can't have that DMA channel: no DMA pin of the card is wired to it", 13, 10, "$"
+msg_3d_off:     db "3-D effect off (/3 keeps it)", 13, 10, "$"
 msg_blaster:    db 13, 10, "set BLASTER=A$"
 msg_i:          db " I$"
 msg_d:          db " D$"

@@ -694,10 +694,10 @@ Blaster 16:
   16-bit sound takes two bytes a sample on an 8-bit channel. When the game
   programs its 16-bit channel, the `H` of `BLASTER`, `esssb16` carries the
   programming over to Audio 2's channel, in bytes, and the count that the
-  game reads from its channel moves with the sound. Where Audio 2 has no
-  8-bit channel of its own, 16-bit sound plays on Audio 1, one transfer at a
-  time. A game that picks the 8-bit channel for 16-bit sound through mixer
-  81h, as a Sound Blaster 16 allows, programs that channel itself.
+  game reads moves with the sound. Where Audio 2 has no 8-bit channel of its
+  own, 16-bit sound plays on Audio 1, one transfer at a time. A game that
+  picks the 8-bit channel for 16-bit sound through mixer 81h, as a Sound
+  Blaster 16 allows, programs that channel itself.
 * The direct DAC and ADC, ADPCM, silence and MIDI, which Extended mode
   lacks, go to the chip in its Compatibility mode.
 * The Sound Blaster 16's mixer registers, 30h to 47h, show the levels the
@@ -753,21 +753,22 @@ has the steps. The options:
   each transfer. Without it they stay as they are.
 * `/O0` or `/O1`: Audio 2's 4x oversampling off or on (mixer 71h bit 4) at
   each transfer. Without it, it stays as it is.
+* `/3`: the 3-D effect kept as Windows left it. Without it, `esssb16` turns
+  it off, since a Sound Blaster 16 has none.
 
-The resident part makes no DOS call once it is in. The exit codes are 1 for
-a bad option, 2 when no ES1869 answers at the base, 3 without port traps, 4
-in a Windows DOS box and 5 when it is loaded already. The limits: EMM386
-doesn't trap the DMA controllers, so under it the game must program its
-16-bit channel before the transfer command, as Creative's guide says, and
-its count stands still for a game that reads it; with QEMM, JEMM and
+The exit codes are 1 for a bad option, 2 when no ES1869 answers at the base,
+3 without port traps, 4 in a Windows DOS box and 5 when it is loaded
+already. The limits: EMM386 doesn't trap the DMA controllers, so under it
+the game must program its 16-bit channel before the transfer command, as
+Creative's guide says, and its count stands still; with QEMM, JEMM and
 HDPMI32i neither applies. A 16-bit buffer that crosses a 64 KB boundary
 plays wrong, E2h writes no byte through the DMA, and the FM ports aren't
 trapped, so a game plays FM as before.
 
 It was tested in a CPU emulator against models of the Sound Blaster 16, the
-chip, the DMA controllers, DOS, the memory managers and HDPMI32i.
-[docs/TESTING.md](docs/TESTING.md#d2-esssb16-dos) has the steps for real
-hardware, and [`sb16test`](#sb16testexe) checks it there.
+chip, the DMA controllers, DOS, the memory managers and HDPMI32i, and
+[`sb16test`](#sb16testexe) checks it on real hardware
+([docs/TESTING.md](docs/TESTING.md#d2-esssb16-dos)).
 
 ### Installing esssb16
 
