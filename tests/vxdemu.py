@@ -452,6 +452,9 @@ class VxDEmu:
         self.dma_callbacks = {}         # handle: VDMAD_Callbacks_*
         self.dma_masks = []             # ("mask"/"unmask", handle)
         self.dma_states = []            # (handle, VM, linear, bytes, DL, DH)
+        # a model of VDMAD (sbfronts.VDMAD) that answers its services in
+        # place of the records above, None for them
+        self.vdmad = None
         self.timeouts = {}              # handle: (due ms, callback, data)
         self.next_timeout = 1
         self.vm_events = {}             # handle: (VM, callback, data)
@@ -677,6 +680,8 @@ class VxDEmu:
             self.messages.append(ebx)
         elif svc == SVC_VPICD_STATUS:
             uc.reg_write(UC_X86_REG_ECX, 0)
+        elif self.vdmad is not None and self.vdmad.service(svc, self):
+            pass
         elif svc == SVC_VDMAD_GET_PHYS_COUNT:
             # a transfer that plays: the count goes down on every look
             self.dma_count = (self.dma_count - 0x123) & 0xFFFF
@@ -855,10 +860,10 @@ ADI_DEVNODE = 0x55
 class Machine:
     """One ES1869 (ADI at ADI), the system VM and two DOS VMs."""
 
-    def __init__(self, le, elf, ext=True):
+    def __init__(self, le, elf, ext=True, hw=None):
         self.syms = load_syms(elf, le)
         self.ext = ext
-        self.hw = FakeES1869()
+        self.hw = hw if hw is not None else FakeES1869()
         self.emu = VxDEmu(le, self.hw, self.syms)
         e, s = self.emu, self.syms
         e.write32(s["ADI_List"], 0x5000)

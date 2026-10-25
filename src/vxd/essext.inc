@@ -54,9 +54,10 @@ EX_FMQ_Direct           equ 0x1A8       ; dword: a VM whose program plays
                                         ; directly, its writes off its ticks
 EX_VSB_Ops3             equ 0x1AC       ; byte: the third operand of a Sound
                                         ; Blaster 16 transfer command
-; the Sound Blaster 16 front of the DOS VM that owns the DSP (ESSREG_S16_*)
+; the Sound Blaster 16 front of the DOS VM that owns the DSP (ESSREG_S16_*),
+; the same as esssb16.com's
 EX_S16_Flags            equ 0x1AD       ; byte: S16_*
-EX_S16_Cmd              equ 0x1AE       ; byte: the command whose operands come
+EX_S16_State            equ 0x1AE       ; byte: S16S_*, the DSP's state
 EX_S16_Need             equ 0x1AF       ; byte: operands still to come
 EX_S16_VM               equ 0x1B0       ; dword: the VM it serves, 0 if none
 EX_S16_Last             equ 0x1B4       ; dword: the VM it served last, whose
@@ -65,31 +66,39 @@ EX_S16_Got              equ 0x1B8       ; byte: operands so far
 EX_S16_Ops              equ 0x1B9       ; 3 bytes: the operands
 EX_S16_Index            equ 0x1BC       ; byte: the mixer index the VM wrote,
                                         ; FFh for the chip's (not yet seen)
-EX_S16_Chan             equ 0x1BD       ; byte: its 16-bit DMA channel (5-7),
-                                        ; 0 if none
-EX_S16_Count            equ 0x1BE       ; byte: bytes in the read queue
-EX_S16_Head             equ 0x1BF       ; byte: where the queue's next byte is
-EX_S16_TC               equ 0x1C0       ; byte: the time constant of 40h
-EX_S16_Pass             equ 0x1C1       ; byte: 1 while the command's bytes go
-                                        ; to the chip
-EX_S16_Rate             equ 0x1C2       ; word: the rate of 41h/42h (Hz), 0
-                                        ; before one came
-EX_S16_Queue            equ 0x1C4       ; S16_QUEUE bytes: the read queue (the
-                                        ; answers to E1h and E3h)
-EX_S16_Mix              equ 0x1F4       ; 24 bytes: the Sound Blaster 16's
+EX_S16_Chan             equ 0x1BD       ; byte: the 16-bit DMA channel (5-7)
+                                        ; the front carries over, 0 if none
+EX_S16_Cmd              equ 0x1BE       ; byte: the last command
+EX_S16_Prev             equ 0x1BF       ; byte: the one before it (FDh)
+EX_S16_Aptr             equ 0x1C0       ; dword: the answer's bytes after the
+                                        ; latch
+EX_S16_Alen             equ 0x1C4       ; byte: how many
+EX_S16_Latch            equ 0x1C5       ; byte: the byte the read port gives
+EX_S16_Abuf             equ 0x1C6       ; byte: a one-byte answer
+EX_S16_Held             equ 0x1C7       ; byte: a byte written while an
+                                        ; answer blocks
+EX_S16_RateV            equ 0x1C8       ; byte: the rate generator's value
+EX_S16_Test             equ 0x1C9       ; byte: E4h's, which a reset keeps
+EX_S16_Block8           equ 0x1CA       ; word: the 8-bit block, less one
+                                        ; (48h, Cxh)
+EX_S16_Xbits            equ 0x1CC       ; byte: the transfer's bits (BL of
+                                        ; ESSREG_S16_Xfer)
+EX_S16_DMA              equ 0x1CD       ; byte: 1 while Audio 1's channel runs
+                                        ; the 16-bit channel's programming
+EX_S16_Stale            equ 0x1CE       ; byte: the view's levels a write of
+                                        ; the chip's own registers changed
+                                        ; (bit 0 master, then
+                                        ; ESSREG_S16_Aliases)
+EX_S16_Sel              equ 0x1CF       ; byte: the 16-bit channel the program
+                                        ; picked (mixer 81h), 0 for none
+EX_S16_Mix              equ 0x1D0       ; 24 bytes: the Sound Blaster 16's
                                         ; mixer registers 30h-47h
-EX_S16_Ctrl             equ 0x20C       ; 32 bytes: the chip's registers
+EX_S16_Ctrl             equ 0x1E8       ; 32 bytes: the chip's registers
                                         ; A0h-BFh as the front last wrote or
                                         ; read them
-EX_S16_Known            equ 0x22C       ; dword: bit n set while EX_S16_Ctrl+n
+EX_S16_Known            equ 0x208       ; dword: bit n set while EX_S16_Ctrl+n
                                         ; holds the chip's A0h+n
-EX_S16_Stale            equ 0x230       ; byte: the view's levels a write of
-                                        ; the Sound Blaster Pro's registers
-                                        ; changed on the chip (bit 0 master,
-                                        ; then ESSREG_S16_Aliases)
-ESSREG_ADI_SIZE         equ 0x234       ; ESS allocated E9h
-
-S16_QUEUE               equ 48          ; bytes of the read queue
+ESSREG_ADI_SIZE         equ 0x20C       ; ESS allocated E9h
 
 VSB_RESET               equ 0x01        ; the reset port is at 1
 VSB_SPEAKER             equ 0x02        ; the speaker is on (D1h)
@@ -101,22 +110,37 @@ VSB_IRQ                 equ 0x40        ; its interrupt request is set
 VSB_NOIRQ               equ 0x80        ; Extended mode without B1h bit 6
 
 VSB2_MININT             equ 0x01        ; VTD gives it 1 ms timer interrupts
-VSB2_ESS                equ 0x02        ; the program identified the chip (E7h):
+VSB2_ESS                equ 0x02        ; the program knows the chip (S16_ESS):
                                         ; Bxh and Cxh are the chip's commands
 VSB2_16                 equ 0x04        ; its transfer is 16-bit (mixer 82h)
 VSB2_STEREO             equ 0x08        ; and stereo (two samples a frame)
 
-; the Sound Blaster 16 front (EX_S16_Flags)
-S16_ESS                 equ 0x01        ; the program identified the chip (E7h):
-                                        ; every command is the chip's
-S16_EXT                 equ 0x02        ; the chip is in Extended mode (C6h)
-S16_16                  equ 0x04        ; the transfer is 16-bit (mixer 82h bit 1)
-S16_8                   equ 0x08        ; it is 8-bit (bit 0)
-S16_RUN                 equ 0x10        ; a transfer of the front's runs
-S16_AUTO                equ 0x20        ; it auto-initializes
-S16_DMA16               equ 0x40        ; Audio 1's channel runs the 16-bit
-                                        ; channel's programming
-S16_IN                  equ 0x80        ; it records
+; the Sound Blaster 16 front (EX_S16_Flags), as esssb16.com's F_*; S16_AUTO
+; and S16_16 are the bits of ESSREG_S16_Xfer's BL
+S16_ESS                 equ 0x01        ; the program knows the chip (C6h and a
+                                        ; register): every access is the chip's
+S16_EXT                 equ 0x02        ; the chip is in Extended mode, its DAC on
+S16_AUTO                equ 0x04        ; the transfer auto-initializes
+S16_RUN                 equ 0x08        ; a transfer of the front's is on Audio 1
+S16_16                  equ 0x10        ; it is 16-bit (the 16-bit interrupt)
+S16_LAST                equ 0x20        ; a single-cycle block is queued: the
+                                        ; auto-initialize ends at the next
+                                        ; acknowledge
+S16_PAUSE               equ 0x40        ; it is paused
+S16_RESET               equ 0x80        ; the reset port is at 1
+
+; the front's DSP (EX_S16_State), as esssb16.com's S_*
+S16S_FULL               equ 0x01        ; the read latch has a byte
+S16S_HELD               equ 0x02        ; a written byte waits for the answer's
+                                        ; end
+S16S_UART               equ 0x04        ; MIDI UART: the DSP is the chip's until
+                                        ; a reset
+S16S_MIDI               equ 0x08        ; MIDI input: the next write ends it
+S16S_COMP               equ 0x10        ; the chip is in Compatibility mode
+S16S_WARM               equ 0x20        ; the next reset is a warm boot
+S16S_SPKR               equ 0x40        ; D1h's flag, for D8h
+S16S_T16                equ 0x80        ; the chip's processor interrupt is the
+                                        ; 16-bit one (F3h)
 
 ; the queue of a DOS program's FM writes and the clock of its ticks, a
 ; block allocated while its FM plays from the queue

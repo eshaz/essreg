@@ -2,9 +2,9 @@
 #
 # Licensed under GPL Version 3.0
 """The Sound Blaster 16 fronts against the Sound Blaster 16 model: every
-scene of sbscenes runs on the model (sb16.SB16) and on esssb16.com in
-front of the ES1869 model (esschip), under QPIEMU, EMM386 and HDPMI32i,
-and what the game saw has to be the same.
+scene of sbscenes runs on the model (sb16.SB16), on esssb16.com in front
+of the ES1869 model (esschip), under QPIEMU, EMM386 and HDPMI32i, and on
+ES1869.VXD's front in a DOS box, and what the game saw has to be the same.
 
 Where the chip itself differs, the comparison allows for it. Audio 1's
 FIFO (256 bytes) takes the DMA ahead of the DAC, so a block's interrupt
@@ -18,7 +18,8 @@ the transfer's command, and each command carries it over anew, from the
 buffer's start.
 
 The chip model also has to see no undefined use (esschip's violations),
-and every DMA cycle has to move data (dma8237's bad).
+every DMA cycle has to move data (dma8237's bad), and the VxD has to ask
+VDMAD nothing it wouldn't do (sbfronts.VDMAD's errors).
 
 usage: python3 -m unittest tests.test_sb16conf   (needs nasm and unicorn)
 """
@@ -34,7 +35,7 @@ from sbgame import ModelCard  # noqa: E402
 from sbscenes import SCENES  # noqa: E402
 
 if HAVE_UNICORN:
-    from sbfronts import TSRCard  # noqa: E402
+    from sbfronts import TSRCard, VxDCard  # noqa: E402
 
 FIFO = 256                  # Audio 1's FIFO, in bytes and so at most frames
 _MODEL = {}
@@ -86,6 +87,7 @@ class Conformance:
         self.assertEqual(diffs, [], name)
         self.assertEqual(card.chip.violations, [], name)
         self.assertEqual(card.chip.dmac.bad[:1], [], name)
+        self.assertEqual(getattr(card, "errors", []), [], name)
         return card
 
 
@@ -127,6 +129,32 @@ class EMM386Test(Conformance, unittest.TestCase):
 
     def card(self):
         return TSRCard("emm")
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class VxDTest(Conformance, unittest.TestCase):
+    """ES1869.VXD's front in a DOS box, with the 16-bit channel the VxD's
+    own (VDMAD_Virtualize_Channel)"""
+
+    def card(self):
+        return VxDCard()
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class VxDAudio2Test(Conformance, unittest.TestCase):
+    """the 16-bit channel is Audio 2's, which ESS's handler has"""
+
+    def card(self):
+        return VxDCard(dma2=5)
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class VxDSingleTest(Conformance, unittest.TestCase):
+    """ESS's "Single Mode DMA": the DMA's single transfers as the game
+    programs them"""
+
+    def card(self):
+        return VxDCard(demand=False)
 
 
 if __name__ == "__main__":

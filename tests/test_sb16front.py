@@ -1,0 +1,440 @@
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""The side of the Sound Blaster 16 fronts that a game doesn't see, for
+esssb16.com through QPI and for ES1869.VXD's front in a DOS box, each in
+front of the ES1869 model (esschip): the chip's Extended mode registers
+behind each transfer with the rates ES1869.DRV would pick, the game's
+16-bit DMA channel carried over to Audio 1's, the chip's Compatibility mode
+for the firmware's commands, and the chip's mixer behind the Sound Blaster
+16's view. What the game sees is tests/test_sb16conf.py's, against the
+Sound Blaster 16 model; what only one front does is tests/test_esssb16.py's
+and tests/test_vxddos.py's.
+
+usage: python3 -m unittest tests.test_sb16front   (needs nasm and unicorn)
+"""
+
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from test_vxdext import HAVE_UNICORN, have_nasm  # noqa: E402
+from sb16 import rate_to_v, tc_to_v  # noqa: E402
+from sbgame import (BASE, reset, write, read, read_all, mixer,  # noqa: E402
+                    program_dma)
+
+if HAVE_UNICORN:
+    from sbfronts import (TSRCard, VxDCard, DOS_MIXER, F_ESS,  # noqa: E402
+                          F_EXT, F_AUTO, F_RUN, F_16, clocks, written,
+                          play16)
+
+
+def fresh(c):
+    """the card with the chip's logs emptied of what came before the game:
+    the TSR's installer, or ESS's taking of the DSP for the VM"""
+    c.chip.commands, c.chip.log, c.chip.dma_log = [], [], []
+    c.chip.resets = 0
+    return c
+
+
+class FrontChecks:
+    """the checks; the subclass gives card(**kw), a game's card on its
+    front with the chip's logs empty (mixer=: the chip's levels before)"""
+
+    def setUp(self):
+        self.c = self.card()
+        self.chip = self.c.chip
+
+    def assertClean(self):
+        self.assertEqual(self.chip.violations, [])
+
+    def test_the_front_answers(self):
+        """the DSP's answers come from the front: the chip sees no command,
+        and a reset of the front's DSP leaves the chip as it is"""
+        c = self.c
+        self.assertTrue(reset(c))
+        write(c, 0xE1)
+        self.assertEqual(read_all(c), [4, 5])
+        write(c, 0xE3)
+        self.assertEqual(bytes(read_all(c)),
+                         b"COPYRIGHT (C) CREATIVE TECHNOLOGY LTD, 1992.\0")
+        write(c, 0xE0, 0x5A, 0xE4, 0x77, 0xE8)
+        self.assertEqual(read_all(c), [0xA5, 0x77])
+        write(c, 0x40, 0xA5, 0x48, 0x00, 0x10, 0xD1, 0xD8)
+        self.assertEqual(read_all(c), [0xFF])
+        write(c, 0x0F, 0x81)
+        self.assertEqual(read_all(c), [0xFF])
+        write(c, 0xF8)
+        self.assertEqual(read_all(c), [0x00])
+        write(c, 0xE7)                      # no ESS chip on a Sound Blaster
+        self.assertEqual(read_all(c), [])
+        self.assertEqual(self.chip.commands, [])
+        self.assertEqual(self.chip.resets, 0)
+        self.assertClean()
+
+    def test_16bit_stereo(self):
+        """B6h, 44100 Hz: Extended mode once, the FIFO emptied for the first
+        transfer, and the data sheet's order with only what changes; the
+        game's channel 5 carried over to channel 1 in bytes"""
+        c, chip = self.c, self.chip
+        play16(c)
+        cmds = chip.commands
+        self.assertEqual(cmds[:2], [(0xC6,), (0xD1,)])
+        w = written(chip)
+        self.assertEqual((w[0xA1], w[0xA2]), clocks(248, True))
+        self.assertEqual((w[0xA4], w[0xA5]), (0x00, 0xF0))      # 4096 bytes
+        self.assertEqual((w[0xB6], w[0xB7]), (0x00, 0xBC))
+        self.assertEqual((w[0xB9], chip.ctrl[0xA8] & 3), (0x02, 0x01))
+        self.assertEqual(chip.ctrl[0xB8], 0x05)
+        self.assertEqual(chip.ctrl[0xB1] & 0x50, 0x50)
+        self.assertEqual(chip.ctrl[0xB2] & 0x50, 0x50)
+        self.assertEqual(chip.mixer[0x71] & 0x20, 0)
+        self.assertEqual([e[2] for e in chip.log if e[1] == BASE + 6][:2],
+                         [0x02, 0x00])
+        self.assertEqual(chip.dma[1], {"mask": False, "mode": 0x19,
+                                       "addr": 0x4680, "count": 0x1FFF,
+                                       "page": 0x02})
+        self.assertEqual(c.flags(), F_EXT | F_RUN | F_16 | F_AUTO)
+        c.wait(30000)
+        self.assertGreater(len(chip.played), 1000)
+        self.assertClean()
+
+    def test_rates(self):
+        """A1h and A2h for the Sound Blaster 16's rate, which 41h and 40h
+        give through its rate generator"""
+        for rate in (48000, 44100, 32000, 22050, 23000, 16000, 11025, 8000,
+                     5000, 2000):
+            c = self.card()
+            play16(c, mode=0x10, samples=256, rate=rate)
+            w = c.chip.ctrl
+            self.assertEqual((w[0xA1], w[0xA2]),
+                             clocks(rate_to_v(rate), False), rate)
+            self.assertEqual(c.chip.violations, [])
+        for tc in (0x06, 0x83, 0xA5, 0xC8, 0xD3, 0xEB, 0xFF):
+            c = self.card()
+            write(c, 0x40, tc, 0xC6, 0x30, 0xFF, 0x00)
+            w = c.chip.ctrl
+            self.assertEqual((w[0xA1], w[0xA2]), clocks(tc_to_v(tc), True),
+                             hex(tc))
+
+    def test_a_transfer_like_the_last(self):
+        """the registers the chip has already aren't written again, and
+        none is read twice until the chip's own reset"""
+        c, chip = self.c, self.chip
+        play16(c)
+        write(c, 0xD9)
+        c.wait(50000)
+        chip.commands = []
+        play16(c)
+        self.assertEqual(chip.commands, [(0xB8, 0x04), (0xB8, 0x05)])
+        chip.commands = []
+        write(c, 0x41, 0x56, 0x22, 0xD9)
+        c.wait(50000)
+        chip.commands = []
+        write(c, 0xB2, 0x10, 0xFF, 0x07)        # once, mono, 22050 Hz
+        self.assertEqual([x for x in chip.commands if x[0] == 0xC0], [])
+        self.assertEqual(written(chip)[0xB8], 0x01)
+        self.assertEqual(chip.ctrl[0xA8] & 3, 0x02)
+        self.assertEqual((chip.ctrl[0xA1], chip.ctrl[0xB7]), (0x6E, 0xF4))
+        self.assertClean()
+
+    def test_pause_continue_end(self):
+        """D5h and D6h: Audio 1's DMA requests off and on (B2h bit 6); D9h:
+        the block that plays is the last (B8h bit 2)"""
+        c, chip = self.c, self.chip
+        play16(c)
+        chip.commands = []
+        write(c, 0xD5)
+        self.assertEqual(chip.ctrl[0xB2] & 0x40, 0)
+        write(c, 0xD0)                      # the 8-bit kind: nothing
+        write(c, 0xD6)
+        self.assertEqual(chip.ctrl[0xB2] & 0x40, 0x40)
+        self.assertEqual([x[0] for x in chip.commands], [0xB2, 0xB2])
+        write(c, 0xD9)
+        self.assertEqual(chip.ctrl[0xB8], 0x01)
+        self.assertEqual(c.flags() & F_AUTO, 0)
+        self.assertClean()
+
+    def test_acknowledges(self):
+        """82h says the kind of the chip's interrupt; +Fh and +Eh
+        acknowledge it when it is theirs, through a read of the chip's
+        +Eh"""
+        c, chip = self.c, self.chip
+        play16(c, samples=64)
+        c.wait(2000)
+        self.assertTrue(chip.a1_flags & 1)
+        self.assertEqual(mixer(c, 0x82), 0x22)
+        c.inp(BASE + 0x0E)                  # the 8-bit one: not this
+        self.assertTrue(chip.a1_flags & 1)
+        c.inp(BASE + 0x0F)
+        self.assertFalse(chip.a1_flags & 1)
+        self.assertEqual(mixer(c, 0x82), 0x20)
+        self.assertClean()
+
+    def test_reset_keeps_extended_mode(self):
+        """the game's reset stops the front's transfer and leaves the chip
+        in Extended mode, its registers known"""
+        c, chip = self.c, self.chip
+        play16(c)
+        self.assertTrue(reset(c))
+        self.assertEqual(chip.resets, 0)
+        self.assertTrue(chip.ext_mode)
+        self.assertEqual(chip.ctrl[0xB8] & 1, 0)
+        self.assertEqual(c.flags() & (F_EXT | F_RUN | F_AUTO), F_EXT)
+        chip.commands = []
+        play16(c)
+        self.assertNotIn((0xC6,), chip.commands)
+        self.assertEqual([x for x in chip.commands if x[0] == 0xC0], [])
+        self.assertClean()
+
+    def test_firmware_commands(self):
+        """the direct DAC, ADPCM and silence need Compatibility mode: the
+        chip's own reset first, then the rate as a time constant; the next
+        Extended transfer resets it again"""
+        c, chip = self.c, self.chip
+        play16(c)
+        reset(c)
+        write(c, 0x10, 0x80)
+        self.assertEqual(chip.resets, 1)
+        self.assertFalse(chip.ext_mode)
+        self.assertEqual(chip.commands[-2:], [(0xD1,), (0x10, 0x80)])
+        chip.commands = []
+        # 4-bit ADPCM with its reference byte, at A5h's rate on a Sound
+        # Blaster 16 (v 3Dh, 10847 Hz): 1 MHz over 92
+        write(c, 0x40, 0xA5, 0x75, 0xFF, 0x01)
+        self.assertEqual(chip.commands, [(0x40, 0xA4), (0x75, 0xFF, 0x01)])
+        c.wait(20000)
+        chip.commands = []
+        write(c, 0x80, 0x10, 0x00)                  # silence
+        self.assertEqual(chip.commands, [(0x40, 0xA4), (0x80, 0x10, 0x00)])
+        c.wait(20000)
+        reset(c)
+        chip.commands = []
+        write(c, 0xC6, 0x00, 0xFF, 0x03)
+        self.assertEqual(chip.resets, 2)
+        self.assertEqual(chip.commands[:2], [(0xC6,), (0xD1,)])
+        self.assertClean()
+
+    def test_midi(self):
+        """MIDI goes through the chip in Compatibility mode: 38h a byte, 30h
+        input until the next write, 35h the UART mode until a reset, which
+        resets the chip too"""
+        c, chip = self.c, self.chip
+        write(c, 0x38, 0x90)
+        self.assertEqual(chip.commands[-1], (0x38, 0x90))
+        write(c, 0x35)
+        self.assertEqual(chip.commands[-1], (0x35,))
+        write(c, 0x90, 0x3C, 0x7F)
+        self.assertEqual(chip.midi_out[-3:], [0x90, 0x3C, 0x7F])
+        resets = chip.resets
+        self.assertTrue(reset(c))
+        self.assertEqual(chip.resets, resets + 1)
+        write(c, 0xE1)
+        self.assertEqual(read_all(c), [4, 5])
+        self.assertClean()
+
+    def test_a_program_that_knows_the_chip(self):
+        """C6h with a register command after it is the chip's Extended
+        mode: from then on every access is the chip's, until a reset, whose
+        AAh the front takes from the chip and answers itself"""
+        c, chip = self.c, self.chip
+        write(c, 0xC6, 0xA1, 0x6E)
+        self.assertEqual(chip.commands, [(0xC6,), (0xA1, 0x6E)])
+        self.assertEqual(c.flags(), F_ESS | F_EXT)
+        write(c, 0xC0, 0xA1)
+        self.assertEqual(read(c), 0x6E)
+        mixer(c, 0x30, 0x55)                # the chip's mixer as it is
+        self.assertEqual(chip.mixer[0x30], 0x55)
+        self.assertEqual(mixer(c, 0x30), 0x55)
+        self.assertTrue(reset(c))           # the chip's own reset
+        self.assertEqual(chip.resets, 1)
+        c.wait(100)
+        self.assertEqual(chip.out, [])
+        self.assertEqual(c.flags(), 0)
+        write(c, 0xE1)
+        self.assertEqual(read_all(c), [4, 5])
+        self.assertClean()
+
+    def test_masked_channel(self):
+        """the game's channel masked at the command: Audio 1's waits for its
+        unmasking; programmed anew, it is carried over again"""
+        c, chip = self.c, self.chip
+        program_dma(c, 5, 0x30000, 4096)
+        c.out(0xD4, 0x05)                   # masked again
+        write(c, 0x41, 0xAC, 0x44, 0xB6, 0x30, 0xFF, 0x03)
+        self.assertTrue(chip.dma[1]["mask"])
+        c.out(0xD4, 0x01)
+        self.assertFalse(chip.dma[1]["mask"])
+        program_dma(c, 5, 0x50000, 4096)
+        self.assertEqual(chip.dma[1]["page"], 0x05)
+        self.assertFalse(chip.dma[1]["mask"])
+        self.assertClean()
+
+    def test_mirror_above_64k(self):
+        """a word address with bit 15 set: byte address bit 16, the page"""
+        c, chip = self.c, self.chip
+        play16(c, addr=0x32468)
+        self.assertEqual((chip.dma[1]["addr"], chip.dma[1]["page"]),
+                         (0x2468, 0x03))
+        play16(c, addr=0x2A468)
+        self.assertEqual((chip.dma[1]["addr"], chip.dma[1]["page"]),
+                         (0xA468, 0x02))
+
+    def test_mixer_levels(self):
+        """the Sound Blaster 16's levels become the chip's"""
+        c, chip = self.c, self.chip
+
+        def hw(*regs):
+            return [chip.mixer[r] for r in regs]
+        mixer(c, 0x00, 0x00)
+        mixer(c, 0x30, 0xF0)
+        mixer(c, 0x31, 0x80)
+        self.assertEqual(hw(0x60, 0x62), [0x3C, 0x20])
+        mixer(c, 0x32, 0xA0)
+        mixer(c, 0x33, 0x50)
+        self.assertEqual(hw(0x14), [0xA5])
+        mixer(c, 0x34, 0x70)
+        mixer(c, 0x35, 0x30)
+        self.assertEqual(hw(0x36), [0x73])
+        mixer(c, 0x36, 0xF0)                    # CD: through the switches
+        mixer(c, 0x37, 0xF0)
+        self.assertEqual(hw(0x38), [0xFF])
+        mixer(c, 0x3C, 0x1F & ~0x02)            # CD right off
+        self.assertEqual(hw(0x38), [0xF0])
+        mixer(c, 0x38, 0x80)                    # line
+        mixer(c, 0x39, 0x40)
+        self.assertEqual(hw(0x3E), [0x84])
+        mixer(c, 0x3A, 0xE0)                    # mic
+        self.assertEqual(hw(0x1A), [0xEE])
+        mixer(c, 0x3C, 0x1F & ~0x01)            # mic off
+        self.assertEqual(hw(0x1A), [0x00])
+        mixer(c, 0x3B, 0xC0)                    # the PC speaker
+        self.assertEqual(hw(0x3C), [0x06])
+        chip.mixer[0x1C] = 0x08                 # the record source
+        for left, right, src in ((0x01, 0x01, 0x08), (0x04, 0x02, 0x0A),
+                                 (0x10, 0x08, 0x0E), (0x40, 0x20, 0x0D),
+                                 (0x15, 0x00, 0x0D)):
+            mixer(c, 0x3D, left)
+            mixer(c, 0x3E, right)
+            self.assertEqual(hw(0x1C), [src], hex(left))
+        self.assertEqual(chip.commands, [])
+
+    def test_sound_blaster_pro_registers(self):
+        """the Sound Blaster Pro's levels are views of the Sound Blaster
+        16's, as on the CT1745; 0Ch and 0Eh aren't there"""
+        c, chip = self.c, self.chip
+        mixer(c, 0x04, 0x99)                    # voice
+        self.assertEqual(chip.mixer[0x14], 0x99)
+        self.assertEqual((mixer(c, 0x32), mixer(c, 0x33)), (0x98, 0x98))
+        mixer(c, 0x22, 0xF5)                    # master
+        self.assertEqual((chip.mixer[0x60], chip.mixer[0x62]), (0x3E, 0x16))
+        self.assertEqual(mixer(c, 0x22), 0xF5)
+        mixer(c, 0x0A, 0x04)                    # mic
+        self.assertEqual((mixer(c, 0x3A), chip.mixer[0x1A]), (0x98, 0x99))
+        self.assertEqual(mixer(c, 0x0A), 0x04)
+        hw = chip.mixer[0x0E]
+        mixer(c, 0x0E, 0x02)
+        self.assertEqual((chip.mixer[0x0E], mixer(c, 0x0E), mixer(c, 0x0C)),
+                         (hw, 0x00, 0x00))
+
+    def test_the_chips_own_registers(self):
+        """the chip's own mixer registers go to it as they come (what the
+        view shows then is each front's)"""
+        c, chip = self.c, self.chip
+        for reg, v in ((0x60, 0x20), (0x14, 0x5A), (0x1A, 0x99),
+                       (0x1C, 0x12), (0x7C, 0x55)):
+            mixer(c, reg, v)
+            self.assertEqual((chip.mixer[reg], mixer(c, reg)), (v, v))
+
+    def test_card_registers_kept(self):
+        c, chip = self.c, self.chip
+        chip.log = []
+        mixer(c, 0x80, 0x0F)
+        mixer(c, 0x82, 0xFF)
+        self.assertNotIn(("out", BASE + 5, 0x0F), chip.log)
+        self.assertNotIn(("out", BASE + 5, 0xFF), chip.log)
+        self.assertEqual((mixer(c, 0x80), mixer(c, 0x81), mixer(c, 0x82)),
+                         (0xF2, 0x22, 0x20))
+
+    def test_mixer_reset(self):
+        """a game's mixer reset: the Sound Blaster 16's levels to the chip,
+        its other registers left"""
+        c = self.card(mixer=DOS_MIXER)
+        mixer(c, 0x30, 0x10)
+        mixer(c, 0x00, 0x00)
+        self.assertEqual(c.chip.index, 0x00)        # the game's index kept
+        hw = c.chip.mixer
+        self.assertEqual(hw[0x00], 0x77)            # never the chip's reset
+        self.assertEqual(mixer(c, 0x30), 0xC0)      # the view's reset
+        self.assertEqual(mixer(c, 0x3C), 0x1F)
+        self.assertEqual((hw[0x60], hw[0x62]), (0x30, 0x30))  # C0h, 6 bits
+        self.assertEqual((hw[0x14], hw[0x36]), (0xCC, 0xCC))
+        self.assertEqual((hw[0x38], hw[0x3E], hw[0x1A], hw[0x3C]),
+                         (0, 0, 0, 0))
+        self.assertEqual(hw[0x1C], 0x15)    # mic, CD and line: the record mix
+        self.assertEqual(hw[0x0E], 0x20)    # the Sound Blaster Pro's stereo off
+        for reg in (0x50, 0x52, 0x7C):
+            self.assertEqual(hw[reg], DOS_MIXER[reg], hex(reg))
+
+    def test_the_mixer_a_game_finds(self):
+        """the view at the start shows the levels the chip has"""
+        c = self.card(mixer=DOS_MIXER)
+        view = [mixer(c, r) for r in range(0x30, 0x48)]
+        self.assertEqual(view, [
+            0xE8, 0x00,                 # master, the right muted
+            0xA0, 0xB0, 0xC0, 0xD0,     # voice, MIDI
+            0x10, 0x20, 0x30, 0x40,     # CD, line
+            0x50, 0xC0,                 # mic, PC speaker
+            0x1F, 0x10, 0x08,           # the switches: line records
+            0, 0, 0, 0, 0, 0x80, 0x80, 0x80, 0x80])
+        # writing back what it read changes nothing
+        before = list(c.chip.mixer)
+        for r, v in zip(range(0x30, 0x48), view):
+            if r != 0x31:               # the muted master can't come back
+                mixer(c, r, v)          # muted
+        self.assertEqual([(r, v) for r, v in enumerate(c.chip.mixer)
+                          if v != before[r]], [])
+        # the master's 6 bits in the 5 of the CT1745
+        c = self.card(mixer={0x60: 0x2D, 0x62: 0x13})
+        self.assertEqual((mixer(c, 0x30), mixer(c, 0x31)), (0xB0, 0x48))
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class TSRFrontTest(FrontChecks, unittest.TestCase):
+    """esssb16.com through QPI, with a callback before the program's"""
+
+    def card(self, **kw):
+        return fresh(TSRCard("qpi", **kw))
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class TSRUntrappedFrontTest(FrontChecks, unittest.TestCase):
+    """esssb16.com through QPI, without a callback before the program's:
+    QPI's untrapped I/O for the ports the front passes on"""
+
+    def card(self, **kw):
+        return fresh(TSRCard("qpi", old_callback=False, **kw))
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class TSRProtectedFrontTest(FrontChecks, unittest.TestCase):
+    """esssb16.com through HDPMI32i's handler, for a protected-mode game"""
+
+    def card(self, **kw):
+        return fresh(TSRCard("pm", **kw))
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class VxDFrontTest(FrontChecks, unittest.TestCase):
+    """ES1869.VXD's front, for a game in a DOS box that has taken the DSP"""
+
+    def card(self, **kw):
+        c = VxDCard(**kw)
+        c.inp(BASE + 0x0E)
+        return fresh(c)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -679,6 +679,7 @@ reset_port:
         call    chip_out
         test    al,1
         jnz     .done
+        call    chip_answer             ; the chip's AAh: the front answers
         and     byte [V(flags)],~(F_ESS | F_EXT | F_RUN) & 0xFF
         and     dword [V(known)],0
         jmp     short boot
@@ -2330,7 +2331,8 @@ mix_fresh:
         test    al,0x40
         jz      .on
         mov     al,0
-.on:    shl     al,2
+.on:    and     al,0x3E                 ; 6 bits to the 5 of 30h and 31h
+        shl     al,2
         mov     [bx],al
         inc     bx
         add     ah,2

@@ -187,6 +187,22 @@ def play16_dma_after(card):
 
 
 @scene
+def play16_dma_before_reset(card):
+    """the 16-bit channel programmed before the DSP's reset"""
+    prepare(card)
+    block = 1024
+    data = words(samples16(2 * block, start=0x0777))
+    card.poke(BUF, data)
+    program_dma(card, 5, BUF, len(data))
+    reset(card)
+    write(card, 0x41, 0xAC, 0x44, 0xB6, 0x30, (block - 1) & 0xFF,
+          (block - 1) >> 8)
+    ok = wait_blocks(card, 3)
+    flat = [s for f in played(card) for s in f]
+    return {"ok": ok, "seen": card.seen[:3], "data": flat[:2 * block]}
+
+
+@scene
 def play16_single_each_block(card):
     """the DMA runs over the buffer in auto-initialize; each block is a
     single-cycle B0h that the handler sends for the next"""

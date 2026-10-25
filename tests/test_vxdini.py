@@ -16,6 +16,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_vxdext import HAVE_UNICORN, VxDBuilds, have_nasm  # noqa: E402
+import sbgame  # noqa: E402
 import test_vxddos  # noqa: E402
 from test_vxddos import adlib, note, opl3  # noqa: E402
 
@@ -225,6 +226,7 @@ class EachSettingTest(VxDBuilds, unittest.TestCase):
     def test_dos_mixer_restore(self):
         stock = self.machine(False)
         m = self.machine_with({(VXD, "DosMixerRestore"): "0",
+                               (VXD, "SoundBlaster16"): "0",
                                (DRV, "Audio2Oversampling"): "1",
                                (DRV, "Audio2Filter"): "1"})
         for x in (stock, m):
@@ -239,7 +241,8 @@ class EachSettingTest(VxDBuilds, unittest.TestCase):
     def test_sound_blaster_16(self):
         # off: the chip answers a DOS program itself, through untrapped
         # ports, as with ESS's driver; on: the front answers the version,
-        # and a Sound Blaster Pro program's accesses reach the chip the same
+        # and the mixer is the CT1745's, whose Sound Blaster Pro registers
+        # read back as on a Sound Blaster 16
         def program(m, mixer=dos_mixer):
             m.outb(VM_DOS, 0x226, 1)
             m.outb(VM_DOS, 0x226, 0)
@@ -254,23 +257,28 @@ class EachSettingTest(VxDBuilds, unittest.TestCase):
             return version, m.hw.log[n:]
 
         def pro_mixer(m):
-            """a Sound Blaster Pro program's mixer: its registers, which
-            the chip has at the same places"""
+            """a Sound Blaster Pro program's mixer: its registers, written
+            and read back"""
+            reads = []
             for reg in (0x04, 0x0A, 0x0C, 0x0E, 0x22, 0x26, 0x28, 0x2E):
                 m.outb(VM_DOS, 0x224, reg)
                 m.outb(VM_DOS, 0x225, 0x11 if reg != 0x0E else 0x02)
-                m.inb(VM_DOS, 0x225)
+                reads.append(m.inb(VM_DOS, 0x225))
+            m.reads = reads
         stock = self.machine(False)
         off = self.machine_with({(VXD, "SoundBlaster16"): "0"})
         self.assertEqual(program(stock), program(off))
         self.assertEqual(program(off)[0], (0x03, 0x01))
         self.assertIn((VM_DOS, 0x22C), off.emu.trap_off)
-        stock = self.machine(False)
         on = self.machine_with({})
-        version, log = program(on, pro_mixer)
+        version, _log = program(on, pro_mixer)
         self.assertEqual(version, (0x04, 0x05))
-        self.assertEqual(log, program(stock, pro_mixer)[1])
         self.assertNotIn((VM_DOS, 0x22C), on.emu.trap_off)
+        sb16 = sbgame.ModelCard()
+        for reg in (0x04, 0x0A, 0x0C, 0x0E, 0x22, 0x26, 0x28, 0x2E):
+            sbgame.mixer(sb16, reg, 0x11 if reg != 0x0E else 0x02)
+        self.assertEqual(on.reads, [sbgame.mixer(sb16, reg) for reg in (
+            0x04, 0x0A, 0x0C, 0x0E, 0x22, 0x26, 0x28, 0x2E)])
         # the channel: 5 to 7, or none
         for value, channel in (("5", 5), ("6", 6), ("7", 7), ("0", 0),
                                ("1", 0), ("8", 0), ("", 0)):
