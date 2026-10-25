@@ -791,17 +791,20 @@ class ExePersonTest(unittest.TestCase):
         recorded = [(k, v[1]) for k, v in res.items()
                     if v[1].startswith("recorded: ")]
         self.assertGreater(len(recorded), 20)
-        last = 0
+        last = None
         for i, (k, det) in enumerate(recorded):
             m = re.match(r"recorded: marker \*(\d\d)# at (\d+) us, "
                          r"sound((?: \d+-\d+)+) us, (\w+) expected", det)
             self.assertIsNotNone(m, det)
             at = int(m.group(2))
-            self.assertGreater(at, last, k)
+            if last is not None:        # 50 ms of quiet before a marker
+                self.assertGreaterEqual(at - last, 50000, k)
             spans = [tuple(map(int, s.split("-")))
                      for s in m.group(3).split()]
             self.assertTrue(all(at < a < b for a, b in spans), det)
             last = spans[-1][1]
+        end = int(res["rec.end"][1].split()[3])
+        self.assertGreaterEqual(end - last, 50000)
         self.assertEqual(res["l.record"],
                          ("SKIP", "no one to speak in a recorded run"))
 

@@ -50,6 +50,7 @@ CENTS = 10                  # a pitch's tolerance
 CLEAN_DB = 25               # a steady tone's least median of tone to rest
 WORST_DB = 15               # and its least in any 20 ms
 SIDE_DB = 15                # the side a tone came from, louder by this
+OFF_S = 0.010               # a marker farther off the clock is left out
 CHECKS = {
     "l.tone8": "tone", "l.left16": "side", "l.right16": "side",
     "l.left8": "side", "l.right8": "side", "l.pitch": "pitch",
@@ -201,18 +202,28 @@ def read_report(path):
 
 
 def fit_clock(marks, found):
-    """the recording's time of the report's us: (a, b) for t = a * us + b,
-    and the worst error in s, from the markers both have"""
-    pairs = []
-    for text, start, _lv in found:
-        if text in marks:
-            pairs.append((marks[text] / 1e6, start))
+    """the recording's time of the report's us, from the markers both have:
+    (a, b) for t = a * us + b, the worst error in s, how many markers fit,
+    and those left out, as (text, how much later than the line it was found,
+    in s). A marker more than OFF_S off the line, which something still
+    sounding hid the start of, is left out, the farthest first, while three
+    or more remain"""
+    pairs = [(marks[text] / 1e6, start, text) for text, start, _lv in found
+             if text in marks]
     if len(pairs) < 2:
         return None
-    u = np.array([p[0] for p in pairs])
-    t = np.array([p[1] for p in pairs])
-    a, b = np.polyfit(u, t, 1)
-    return a, b, float(np.max(np.abs(a * u + b - t))), len(pairs)
+    out = []
+    while True:
+        u = np.array([p[0] for p in pairs])
+        t = np.array([p[1] for p in pairs])
+        a, b = np.polyfit(u, t, 1)
+        err = np.abs(a * u + b - t)
+        k = int(np.argmax(err))
+        if err[k] <= OFF_S or len(pairs) <= 3:
+            break
+        out.append(pairs.pop(k))
+    late = [(text, float(start - (a * us + b))) for us, start, text in out]
+    return a, b, float(err[k]), len(pairs), late
 
 
 # --- the measures --------------------------------------------------------------
@@ -381,15 +392,20 @@ def quarters(on, off, n):
     return [(on + i * d, on + (i + 1) * d) for i in range(n)]
 
 
+VOLUME_LEVELS = (31, 22, 14, 6)     # s_volume's master: F8h, B0h, 70h, 30h
+
+
 def check_volume(rec, spans, want):
-    """the master level in four steps, each 16 dB or more down"""
+    """the master level in four steps, each 6 dB or more down, and the dB
+    a level of the master gives, which is 2 on a Sound Blaster 16"""
     xs = [rec.part(*q) for q in quarters(*spans[0], 4)]
     levels = [level_db(x) for x in xs]
     steps = [a - b for a, b in zip(levels, levels[1:])]
     ok, text = tone_text(xs[0], HZ)
+    each = (levels[0] - levels[-1]) / (VOLUME_LEVELS[0] - VOLUME_LEVELS[-1])
     return ok and all(s >= 6 for s in steps), \
-        "%s; the steps %s dBFS" % (text, ", ".join("%.1f" % v
-                                                   for v in levels))
+        "%s; the steps %s dBFS, %.2f dB a level" % (
+            text, ", ".join("%.1f" % v for v in levels), each)
 
 
 def check_balance(rec, spans, want):
@@ -472,9 +488,12 @@ def analyze(report, wav, out=sys.stdout):
         print("too few of the report's markers in the recording: %s" %
               " ".join(t for t, _s, _lv in found), file=out)
         return 1
-    a, b, err, n = clock
+    a, b, err, n, late = clock
     print("the clock: %d markers, %.1f ppm, %.1f ms the worst" % (
         n, (a - 1) * 1e6, err * 1e3), file=out)
+    for text, d in late:
+        print("  marker %s left out: found %.1f ms %s" % (
+            text, abs(d) * 1e3, "late" if d > 0 else "early"), file=out)
     # a marker's two tones, each half the sounds' one, have 3 dB less power
     ref = float(np.median([lv for _t, _s, lv in found])) + 3.0
     print("the markers' level: a sound's tone would be %.1f dBFS" % ref,

@@ -1980,8 +1980,10 @@ static u32 rec_t0; // the clock as the start marker began
 static u32 rec_us(u32 t) { return us_of(t - rec_t0); }
 
 // a marker's symbols, each 60 ms of its two tones and 40 ms of silence (30
-// and 20 in the short run), 8-bit mono at 22050 Hz, played once; the clock
-// as it began
+// and 20 in the short run), 8-bit mono at 22050 Hz, played once, after 200
+// ms of quiet (50 in the short run) for what played before to die away: the
+// FM note's release has harmonics in the markers' bands that hide the
+// first symbol; the clock as it began
 static u32 marker(const char *syms) {
   static u8 buf[128];
   struct xfer x;
@@ -1992,6 +1994,7 @@ static u32 marker(const char *syms) {
   const char *s, *p;
   u32 t0;
 
+  pass_time((O & SBT_O_SHORT) ? 50000UL : 200000UL);
   dsp_reset(NULL);
   rate41(22050);
   rate = sbt_v_hz(cur_v);

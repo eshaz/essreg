@@ -123,11 +123,27 @@ class MarkerTest(unittest.TestCase):
         marks = {"ABCD": 0, "*00#": 1000000, "DCBA": 3000000}
         found = [("ABCD", 2.0, -9), ("*00#", 3.0001, -9),
                  ("DCBA", 5.0003, -9)]
-        a, b, err, n = sb16rec.fit_clock(marks, found)
-        self.assertEqual(n, 3)
+        a, b, err, n, late = sb16rec.fit_clock(marks, found)
+        self.assertEqual((n, late), (3, []))
         self.assertAlmostEqual(a, 1.0001, delta=2e-5)
         self.assertAlmostEqual(b, 2.0, delta=1e-4)
         self.assertLess(err, 1e-4)
+
+    def test_a_marker_found_late(self):
+        """the end marker over the FM note's release, as in the first
+        recording: its first symbol hidden, found 32 ms late and left out"""
+        marks = {"*%02d#" % i: 1000000 * (i + 1) for i in range(24)}
+        marks.update({"ABCD": 0, "DCBA": 26000000})
+        found = [(text, 2.0 + 1.00012 * us / 1e6 + 0.002 * (i % 3 - 1), -9)
+                 for i, (text, us) in enumerate(sorted(marks.items(),
+                                                       key=lambda m: m[1]))]
+        found[-1] = ("DCBA", found[-1][1] + 0.032, -9)
+        a, b, err, n, late = sb16rec.fit_clock(marks, found)
+        self.assertEqual(n, 25)
+        self.assertEqual([m for m, _d in late], ["DCBA"])
+        self.assertAlmostEqual(late[0][1], 0.032, delta=0.003)
+        self.assertAlmostEqual((a - 1) * 1e6, 120, delta=10)
+        self.assertLess(err, 0.003)
 
 
 @unittest.skipIf(np is None, "needs numpy")
@@ -289,7 +305,7 @@ class Recorded:
         checks, sounds, marks = sb16rec.read_report(self.report)
         found = sb16rec.markers(sb16rec.band_limit(self.frames.mean(axis=1),
                                                    RATE))
-        a, b, _err, _n = sb16rec.fit_clock(marks, found)
+        a, b = sb16rec.fit_clock(marks, found)[:2]
         spans = sounds[name][2]
         t0, t1 = a * spans[0][0] / 1e6 + b, a * spans[-1][1] / 1e6 + b
         return int(t0 * RATE), int(t1 * RATE)
