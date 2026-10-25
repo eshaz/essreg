@@ -18,6 +18,7 @@ rate, so these scenes give both the same rate.
 """
 
 import os
+import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -313,6 +314,54 @@ def position16(card):
         counts.append(dma_count(card, 5))
     moving = sum(1 for a, b in zip(counts, counts[1:]) if a != b)
     return {"moving": moving >= 6}
+
+
+def _mix16(card, again_us=None):
+    """a game that mixes up to the position it reads from the 16-bit
+    channel's count, as Pinball Fantasies' driver does: a buffer of two
+    ticks of 10 ms, and at each tick a counter of the frames, which goes
+    on, into the slots behind the position, each the frame it plays next
+    time round. The DAC plays the counter in order while what it plays
+    stays ahead of the position, or a tick behind it; else a slot plays
+    before the game wrote it, or after it wrote it again, and the counter
+    steps back. With again_us, B6h comes again then, the channel as it
+    was"""
+    prepare(card)
+    reset(card)
+    frames = 882                    # 16-bit stereo at 44.1 kHz
+    card.poke(BUF, b"".join(struct.pack("<hh", f, f) for f in range(frames)))
+    program_dma(card, 5, BUF, 4 * frames)
+    write(card, 0x41, 0xAC, 0x44, 0xB6, 0x30, 0xFF, 0xFF)
+    done = last = laps = 0          # done: the frames mixed for
+    for t in range(5000, 150001, 5000):
+        card.wait(5000)
+        if t == again_us:
+            write(card, 0xB6, 0x30, 0xFF, 0xFF)
+        if t % 10000:
+            continue
+        moved = (2 * frames - 1 - dma_count(card, 5)) % (2 * frames)
+        pos = moved // 2
+        laps += pos < last
+        last = pos
+        for f in range(done, laps * frames + pos):
+            card.poke(BUF + 4 * (f % frames),
+                      struct.pack("<hh", f + frames, f + frames))
+        done = max(done, laps * frames + pos)
+    got = [f[0] for f in card.dac(16)]
+    return {"back": sum(1 for a, b in zip(got, got[1:]) if b < a),
+            "mixed": done > 4 * frames}
+
+
+@scene
+def mix16(card):
+    return _mix16(card)
+
+
+@scene
+def mix16_again(card):
+    """B6h again between two ticks, the 16-bit channel as it was: the DMA
+    goes on where it is"""
+    return _mix16(card, again_us=25000)
 
 
 # --- 8-bit playback -----------------------------------------------------------

@@ -148,10 +148,25 @@ class EMM386Test(Conformance, unittest.TestCase):
     without the DMA controller's traps"""
 
     known = {**Conformance.known, "position16": {"moving"},
+             "mix16": {"back", "mixed"}, "mix16_again": {"back", "mixed"},
              "play16_dma_after": {"data", "ok", "per_block", "seen"}}
 
     def card(self):
         return TSRCard("emm", dma2=3)
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class EMM386Audio1Test(Conformance, unittest.TestCase):
+    """the same with Audio 2 on the 16-bit channel 5, the game's: every
+    transfer on Audio 1, and Audio 2 takes the channel's words as Audio 1
+    plays, so that its count moves"""
+
+    known = {**Conformance.known,
+             "play16_dma_after": {"data", "ok", "per_block", "seen"}}
+    audio2 = False
+
+    def card(self):
+        return TSRCard("emm", dma2=5)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")

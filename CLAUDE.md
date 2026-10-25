@@ -192,10 +192,12 @@ tools/wineshot.sh run ess3d.exe /sim tray
   into the VxD's front and the TSR alike, and both answer as the model in
   `tests/sb16.py` does ([SB16.md](docs/SB16.md)). A 16-bit playback plays on
   Audio 2 where it has an 8-bit channel of its own (`dma2` in the TSR,
-  `EX_S16_A2` in the VxD), and everything else on Audio 1. Test it with a
-  scene in `tests/sbscenes.py` (`@dual` for two transfers at once), which
+  `EX_S16_A2` in the VxD), and everything else on Audio 1; where Audio 2's
+  channel is the game's 16-bit one, the TSR runs Audio 2 muted on it, so
+  that its count moves under EMM386 (`pace`). Test it with a scene in
+  `tests/sbscenes.py` (`@dual` for two transfers at once), which
   `tests/test_sb16conf.py` plays on the model and on both fronts, or a check
-  in `tests/test_sb16front.py`; the resident part stays within the 284
+  in `tests/test_sb16front.py`; the resident part stays within the 290
   paragraphs of `MAX_PARAS`, and `tests/test_esssb16.py` checks that
   `build/esssb16.com` is current.
 * **sb16test.** Its checks (`src/sb16t.c`) reach the card only through

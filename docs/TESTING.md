@@ -410,8 +410,10 @@ so set the speakers to a normal level first.
    `esssb16`'s variables after each section. Under EMM386 the 16-bit
    transfers' lines are KNOWN with `dma=still, ch 1 moved`: EMM386 doesn't
    trap the DMA controllers, so the 16-bit channel's count stands still
-   while the 8-bit channel plays. On a card whose Audio 2 has no 8-bit
-   channel of its own (`route.audio2`), the two transfers at once are KNOWN,
+   while the 8-bit channel plays. Where Audio 2's DMA is that channel, the
+   auto-initialized ones pass, `dma=moving`, since Audio 2 moves it, and
+   `route.audio2` says so. On a card whose Audio 2 has no 8-bit channel of
+   its own (`route.audio2`), the two transfers at once are KNOWN,
    `one at a time on Audio 1`.
 4. If a tone sounded distorted or looping, restart, load `ESSSB16 /S` and
    run `SB16TEST /L /O:SB16S.TXT`, and send both reports.

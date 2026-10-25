@@ -709,8 +709,7 @@ Blaster 16:
   channels and which transfer's interrupt is pending.
 * A program that uses the chip's Extended mode itself, such as `essreg`,
   gets the chip as it is, with ESS's own commands and mixer, until its next
-  reset. One that asks for the chip's identification with E7h finds a Sound
-  Blaster 16, which has no E7h.
+  reset.
 
 In a Windows DOS box the rebuilt
 [`ES1869.VXD`](#es1869vxd-with-a-register-interface-and-better-dos-boxes)
@@ -760,10 +759,11 @@ The exit codes are 1 for a bad option, 2 when no ES1869 answers at the base,
 3 without port traps, 4 in a Windows DOS box and 5 when it is loaded
 already. The limits: EMM386 doesn't trap the DMA controllers, so under it
 the game must program its 16-bit channel before the transfer command, as
-Creative's guide says, and its count stands still; with QEMM, JEMM and
-HDPMI32i neither applies. A 16-bit buffer that crosses a 64 KB boundary
-plays wrong, E2h writes no byte through the DMA, and the FM ports aren't
-trapped, so a game plays FM as before.
+Creative's guide says, and its count moves only where Audio 2's DMA is that
+channel, in an auto-initialized playback, which Audio 2 then paces; with
+QEMM, JEMM and HDPMI32i neither applies. A 16-bit buffer across a 64 KB
+boundary plays wrong, E2h writes no byte through the DMA, and the FM ports
+aren't trapped.
 
 It was tested in a CPU emulator against models of the Sound Blaster 16, the
 chip, the DMA controllers, DOS, the memory managers and HDPMI32i, and

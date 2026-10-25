@@ -37,7 +37,7 @@ IO_DIRECT, IO_HDPMI, IO_QPI, IO_CHAIN = 0, 1, 2, 3
 BASE = 0x220
 SB_PORTS = {BASE + o for o in (4, 5, 6, 0xA, 0xC, 0xE, 0xF)}
 DMA5_PORTS = {0xC4, 0xC6, 0x8B, 0xD4, 0xD6, 0xD8, 0xDA, 0xDC, 0xDE}
-MAX_PARAS = 284         # the resident part with the PSP: 4.4 KB in MEM /C
+MAX_PARAS = 290         # the resident part with the PSP: 4.5 KB in MEM /C
 # the 8237's mode register: demand or single transfers, auto-initialize,
 # from memory (playback) or into it (recording)
 DEMAND, SINGLE, AUTO, PLAY, RECORD = 0x00, 0x40, 0x10, 0x08, 0x04
@@ -148,7 +148,7 @@ class BuildTest(unittest.TestCase):
                              "tools/build_esssb16.py")
 
     def test_small(self):
-        """the resident part, with the PSP, stays within its 280
+        """the resident part, with the PSP, stays within MAX_PARAS
         paragraphs, and the file, which LH loads whole into upper memory
         before it shrinks, within 9 KB"""
         image, syms = build()
