@@ -46,17 +46,41 @@ from unicorn.x86_const import (UC_X86_INS_IN, UC_X86_INS_OUT, UC_X86_REG_EAX,
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from vxdemu import FakeES1869  # noqa: E402
+from dma8237 import DMA8237  # noqa: E402
 
 
 PAGE_PORTS = {0: 0x87, 1: 0x83, 2: 0x81, 3: 0x82, 5: 0x8B, 6: 0x89, 7: 0x8A}
+
+
+class BufferMemory:
+    """the emulator's first megabyte as the DMA's memory"""
+
+    def __init__(self, buf):
+        self.buf = buf
+
+    def read(self, addr, n):
+        return bytes(self.buf[addr:addr + n])
+
+    def write(self, addr, data):
+        self.buf[addr:addr + len(data)] = bytes(data)
+
+
+class _Channels:
+    """chip.dma[ch]: a channel as the tests compare it"""
+
+    def __init__(self, dmac):
+        self.dmac = dmac
+
+    def __getitem__(self, ch):
+        return self.dmac.ch[ch].view()
 
 
 class Chip(FakeES1869):
     """FakeES1869 with Audio 1's interrupt bit (Audio_Base+Ch bit 0, cleared
     by a read of +Eh), the chip's own commands with an operand, E0h's
     answer, the PnP registers the installer reads, and the two 8237 DMA
-    controllers with their page registers: a game programs its channel and
-    the program reads it back and programs the card's"""
+    controllers with their page registers (dma8237): a game programs its
+    channel and the program reads it back and programs the card's"""
 
     SB_OPERANDS = {**FakeES1869.SB_OPERANDS, 0x41: 1, 0x42: 1, 0xCF: 1}
 
@@ -65,10 +89,18 @@ class Chip(FakeES1869):
         self.a1_irq = False
         self.pnp.update({(1, 0x70): irq, (1, 0x72): 0, (1, 0x74): dma8,
                          (1, 0x75): 4})
-        self.dma = {ch: {"mask": True, "mode": 0, "addr": 0, "count": 0,
-                         "page": 0} for ch in PAGE_PORTS}
-        self.ff = [0, 0]                # the controllers' flip-flops
+        self.dmac = DMA8237()
+        self.dma = _Channels(self.dmac)
         self.dma_log = []
+
+    @property
+    def ff(self):
+        """the controllers' flip-flops"""
+        return self.dmac.ff
+
+    @ff.setter
+    def ff(self, v):
+        self.dmac.ff = list(v)
 
     def _dsp(self, v):
         n = len(self.commands)
@@ -76,29 +108,9 @@ class Chip(FakeES1869):
         if len(self.commands) > n and self.commands[-1][0] == 0xE0:
             self.out.append(~self.commands[-1][1] & 0xFF)   # E0h: the inverse
 
-    @staticmethod
-    def _dma_port(port):
-        """(controller, register) of a DMA controller port, or None"""
-        if port < 0x10:
-            return 0, port
-        if 0xC0 <= port < 0xE0 and not port & 1:
-            return 1, (port - 0xC0) >> 1
-        return None
-
     def _inb(self, port):
-        for ch, p in PAGE_PORTS.items():
-            if p == port:
-                return self.dma[ch]["page"]
-        at = self._dma_port(port)
-        if at is not None:
-            hi, reg = at
-            if reg < 8:
-                d = self.dma[4 * hi + (reg >> 1)]
-                v = d["count" if reg & 1 else "addr"]
-                v = (v >> 8) if self.ff[hi] else v
-                self.ff[hi] ^= 1
-                return v & 0xFF
-            return 0
+        if self.dmac.handles(port):
+            return self.dmac.inb(port)
         v = super()._inb(port)
         if port == self.base + 0x0C and self.a1_irq:
             v |= 0x01
@@ -107,38 +119,12 @@ class Chip(FakeES1869):
         return v
 
     def outb(self, port, v):
-        at = self._dma_port(port)
-        if at is None and port not in PAGE_PORTS.values():
+        if not self.dmac.handles(port):
             super().outb(port, v)
             return
         self.log.append(("out", port, v))
         self.dma_log.append((port, v))
-        for ch, p in PAGE_PORTS.items():
-            if p == port:
-                self.dma[ch]["page"] = v
-                return
-        hi, reg = at
-        base = 4 * hi
-        if reg == 0x0A:
-            ch = base + (v & 3)
-            if ch in self.dma:
-                self.dma[ch]["mask"] = bool(v & 4)
-        elif reg == 0x0B:
-            ch = base + (v & 3)
-            if ch in self.dma:
-                self.dma[ch]["mode"] = v
-        elif reg == 0x0C:
-            self.ff[hi] = 0
-        elif reg < 8:
-            ch = base + (reg >> 1)
-            key = "count" if reg & 1 else "addr"
-            if ch not in self.dma:
-                return
-            if self.ff[hi]:
-                self.dma[ch][key] = (self.dma[ch][key] & 0x00FF) | (v << 8)
-            else:
-                self.dma[ch][key] = (self.dma[ch][key] & 0xFF00) | v
-            self.ff[hi] ^= 1
+        self.dmac.outb(port, v)
 
 
 class DeadChip(Chip):
@@ -260,6 +246,8 @@ class Machine(Cpu):
 
     def __init__(self, image, syms, chip=None, env="BLASTER=A220 I5 D1 H5 P330 T6"):
         super().__init__(UC_MODE_16, chip or Chip())
+        if hasattr(self.chip, "dmac"):  # the DMA reaches the first megabyte
+            self.chip.dmac.memory = BufferMemory(self.memory)
         self.image, self.syms = image, syms
         self.output = ""                # what the program printed
         self.exit = None                # ("tsr", paragraphs) or ("exit", code)
