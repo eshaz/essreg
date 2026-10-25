@@ -8,7 +8,10 @@ word count, and the page register's bit 0 left out. A program programs a
 channel through the ports; a card moves data with read() (memory to the
 card) and write() (the card to memory), one byte or word per DMA cycle. At
 terminal count the channel's status bit is set, and the channel either
-reloads its base address and count (auto-initialize) or masks itself.
+reloads its base address and count (auto-initialize) or masks itself. A
+cycle whose mode doesn't move data that way (verify, the other direction,
+or the undefined 0Ch) reads FFh, the floating bus, and writes nothing,
+and goes into `bad`.
 """
 
 PAGE_PORTS = {0: 0x87, 1: 0x83, 2: 0x81, 3: 0x82, 4: 0x8F, 5: 0x8B,
@@ -72,6 +75,7 @@ class DMA8237:
         self.temp = [0, 0]
         self.log = []                   # (port, value) of every write
         self.reads = []                 # (port, value) of every read
+        self.bad = []                   # (channel, mode): no data moved
 
     @staticmethod
     def register(port):
@@ -196,7 +200,11 @@ class DMA8237:
         for _ in range(units):
             if not self.ready(n):
                 break
-            out += self.memory.read(c.phys(), size)
+            if c.mode & 0x0C == MODE_READ:
+                out += self.memory.read(c.phys(), size)
+            else:
+                self.bad.append((n, c.mode))
+                out += b"\xFF" * size
             self._step(c)
         return bytes(out)
 
@@ -209,7 +217,10 @@ class DMA8237:
         while done + size <= len(data):
             if not self.ready(n):
                 break
-            self.memory.write(c.phys(), data[done:done + size])
+            if c.mode & 0x0C == MODE_WRITE:
+                self.memory.write(c.phys(), data[done:done + size])
+            else:
+                self.bad.append((n, c.mode))
             done += size
             self._step(c)
         return done

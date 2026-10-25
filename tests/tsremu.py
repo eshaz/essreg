@@ -181,13 +181,22 @@ class Cpu:
         self.uc.hook_add(UC_HOOK_INTR, self._intr)
 
     def _in(self, uc, port, size, _user):
+        self._direct(port)
         v = self.chip.inb(port)
         self.ports.append(("in", port, v))
         return v
 
     def _out(self, uc, port, size, value, _user):
+        self._direct(port)
         self.ports.append(("out", port, value & 0xFF))
         self.chip.outb(port, value & 0xFF)
+
+    def _direct(self, port):
+        """a port the code reaches itself: inside the QPI callback, a port
+        QPI traps would call the callback again"""
+        if getattr(self, "in_callback", False) and port in self.qpi_trapped:
+            raise EmuError("the QPI callback reached port %03Xh, which QPI "
+                           "traps, directly" % port)
 
     def _intr(self, uc, intno, _user):
         raise NotImplementedError
@@ -255,6 +264,7 @@ class Machine(Cpu):
         self.qpiemu = False             # int 2Fh 1684h/4354h answers
         self.qpi_version = 0x0703
         self.qpi_fail = set()           # QPI functions that fail
+        self.qpi_fail_after = {}        # function: the calls that succeed
         self.qpi_calls = []             # (function, dx, es:di)
         self.qpi_trapped = set()        # ports trapped through 1A09h
         self.qpi_callback = (0, 0)      # the I/O callback: seg, off
@@ -503,7 +513,8 @@ class Machine(Cpu):
         ax, dx = self.r16("eax"), self.r16("edx")
         fn = 0x0300 if ax >> 8 == 3 else ax
         self.qpi_calls.append((fn, dx, (self.r16("es"), self.r16("edi"))))
-        if fn in self.qpi_fail:
+        calls = sum(1 for c in self.qpi_calls if c[0] == fn)
+        if fn in self.qpi_fail or calls > self.qpi_fail_after.get(fn, calls):
             self.carry(True)
             return
         self.carry(False)
@@ -590,7 +601,11 @@ class Machine(Cpu):
 
     def qpi_io(self, port, value=None):
         """a QPI callback: AL read, or the byte written; QPIEMU's CL"""
-        al, _cf = self._shim("qpi_shim", port, value, 4, 0xCCCC)
+        self.in_callback = True
+        try:
+            al, _cf = self._shim("qpi_shim", port, value, 4, 0xCCCC)
+        finally:
+            self.in_callback = False
         if value is not None and al != value:
             raise EmuError("the QPI callback changed AL on an out")
         return al

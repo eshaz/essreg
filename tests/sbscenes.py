@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sbgame import (BASE, reset, write, read, read_all, mixer,  # noqa: E402
                     program_dma, dma_count, samples16, words)
 
-BUF = 0x20000               # the game's DMA buffer, below 1 MB
+BUF = 0x40000               # the game's DMA buffer, below 1 MB
 SCENES = {}
 
 
