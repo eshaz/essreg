@@ -39,6 +39,34 @@ def fresh(c):
     return c
 
 
+def mixer_writes(chip):
+    """the chip's mixer registers in the order the log wrote them"""
+    out, index = [], None
+    for op, port, v in chip.log:
+        if op != "out":
+            continue
+        if port == BASE + 4:
+            index = v
+        elif port == BASE + 5:
+            out.append((index, v))
+    return out
+
+
+def a2_regs(v):
+    """70h and 72h for the rate generator's value v: the divisor of the
+    clock that comes nearer (793.8 kHz, or 768 kHz with bit 7), 128 at most,
+    and the filter clock FDh from 44.1 kHz on, else as for A2h"""
+    picks = []
+    for k, bit in ((4464, 0x00), (4319, 0x80)):
+        d = k // v + (1 if 2 * (k % v) >= v else 0)
+        picks.append((abs(k - d * v), d, bit))
+    (e1, d1, b1), (e2, d2, b2) = picks
+    d, bit = (d2, b2) if e2 < e1 else (d1, b1)
+    r70 = ((-min(d, 128)) & 0x7F) | bit
+    r72 = 0xFD if v >= 0xF8 else (256 - ((2245 // v + 1) >> 1)) & 0xFF
+    return r70, r72
+
+
 class FrontChecks:
     """the checks; the subclass gives card(**kw), a game's card on its
     front with the chip's logs empty (mixer=: the chip's levels before)"""
@@ -272,6 +300,131 @@ class FrontChecks:
         self.assertFalse(chip.dma[1]["mask"])
         self.assertClean()
 
+    # --- Audio 2 on channel 3: the 16-bit playback's -------------------------
+    def a2(self, **kw):
+        c = self.card(dma2=3, **kw)
+        self.assertTrue(c.audio2)
+        return c
+
+    def test_audio2_16bit(self):
+        """B6h, 44100 Hz, on Audio 2 as ES1869.DRV starts it: no DSP
+        command, 78h stopped first and started last, with the rate, the
+        bytes, the voice's volume, the format and its own rate (71h bit 1)
+        between; the game's channel 5 carried over to channel 3"""
+        c = self.a2()
+        chip = c.chip
+        play16(c)
+        self.assertEqual(chip.commands, [])
+        a2 = [w for w in mixer_writes(chip) if 0x70 <= w[0] <= 0x7C]
+        self.assertEqual((a2[0], a2[-1]), ((0x78, 0x00), (0x78, 0x93)))
+        m = chip.mixer
+        self.assertEqual((m[0x70], m[0x72]), (0x6E, 0xFD))
+        self.assertEqual((m[0x74], m[0x76]), (0x00, 0xF0))      # 4096 bytes
+        self.assertEqual((m[0x7A], m[0x7C]), (0x47, 0x88))
+        self.assertEqual(m[0x71] & 0x22, 0x02)
+        self.assertEqual(chip.dma[3], {"mask": False, "mode": 0x1B,
+                                       "addr": 0x4680, "count": 0x1FFF,
+                                       "page": 0x02})
+        c.wait(30000)
+        self.assertGreater(len(chip.played2), 1000)
+        self.assertEqual(chip.played, [])
+        self.assertClean()
+
+    def test_audio2_rates(self):
+        """70h and 72h for the Sound Blaster 16's rate: the clock whose
+        divisor comes nearer, as ES1869.DRV picks it, 6 kHz at the least"""
+        for rate in (48000, 44100, 32000, 22050, 23000, 16000, 11025, 8000,
+                     5000):
+            c = self.a2()
+            play16(c, mode=0x10, samples=256, rate=rate)
+            m = c.chip.mixer
+            self.assertEqual((m[0x70], m[0x72]), a2_regs(rate_to_v(rate)),
+                             rate)
+
+    def test_audio2_pause_continue_end(self):
+        """D5h and D6h: Audio 2's FIFO off and on its DAC (78h bit 0), the
+        DMA waiting in between; D9h: the block that plays is the last (78h
+        bit 4)"""
+        c = self.a2()
+        chip = c.chip
+        play16(c)
+        c.wait(3000)
+        write(c, 0xD5)
+        self.assertEqual(chip.mixer[0x78], 0x92)
+        n = len(chip.played2)
+        c.wait(10000)
+        self.assertEqual(len(chip.played2), n)
+        write(c, 0xD0)                      # the 8-bit kind: nothing
+        self.assertEqual(chip.mixer[0x78], 0x92)
+        write(c, 0xD6)
+        self.assertEqual(chip.mixer[0x78], 0x93)
+        write(c, 0xD9)
+        self.assertEqual(chip.mixer[0x78], 0x83)
+        self.assertEqual(chip.commands, [])
+        self.assertClean()
+
+    def test_audio2_acknowledge(self):
+        """82h bit 1 for Audio 2's latch (7Ah bit 7), which +Fh clears and
+        +Eh doesn't"""
+        c = self.a2()
+        chip = c.chip
+        play16(c, samples=64)
+        c.wait(2000)
+        self.assertTrue(chip.mixer[0x7A] & 0x80)
+        self.assertEqual(mixer(c, 0x82), 0x22)
+        c.inp(BASE + 0x0E)
+        self.assertTrue(chip.mixer[0x7A] & 0x80)
+        c.inp(BASE + 0x0F)
+        self.assertEqual(chip.mixer[0x7A], 0x47)
+        self.assertEqual(mixer(c, 0x82), 0x20)
+        self.assertClean()
+
+    def test_audio2_through_a_chip_reset(self):
+        """a firmware command while Audio 2 plays and Audio 1 is in Extended
+        mode: the chip's own reset clears 7Ah and 7Ch (DS p.51, p.65),
+        which go back at once, and Audio 2 plays on; without Extended mode
+        no reset is needed"""
+        c = self.a2()
+        chip = c.chip
+        play16(c)
+        write(c, 0x10, 0x80)                # the direct DAC: no reset
+        self.assertEqual(chip.resets, 0)
+        program_dma(c, 1, 0x60000, 256, auto=False)
+        write(c, 0xC0, 0x00, 0xFF, 0x00)    # 8-bit on Audio 1, Extended
+        c.wait(15000)
+        write(c, 0x10, 0x80)                # the direct DAC: the reset
+        self.assertEqual(chip.resets, 2)    # and the one into Extended mode
+        self.assertEqual((chip.mixer[0x78], chip.mixer[0x7A],
+                          chip.mixer[0x7C]), (0x93, 0x47, 0x88))
+        n = len(chip.played2)
+        c.wait(10000)
+        self.assertGreater(len(chip.played2), n + 300)
+        self.assertClean()
+
+    def test_audio2_reset(self):
+        """the game's reset stops Audio 2 (78h bits 4 and 1) and turns its
+        interrupt off (7Ah)"""
+        c = self.a2()
+        chip = c.chip
+        play16(c)
+        c.wait(3000)
+        self.assertTrue(reset(c))
+        self.assertEqual((chip.mixer[0x78], chip.mixer[0x7A]), (0x81, 0x00))
+        self.assertClean()
+
+    def test_audio2_one_16bit_transfer(self):
+        """a 16-bit recording records on Audio 1, and Audio 2's playback
+        ends: a card has one 16-bit transfer"""
+        c = self.a2()
+        chip = c.chip
+        play16(c)
+        program_dma(c, 5, 0x60000, 4096, record=True)
+        write(c, 0xBE, 0x30, 0xFF, 0x03)
+        self.assertEqual(chip.mixer[0x78] & 0x12, 0)
+        self.assertEqual(chip.ctrl[0xB8] & 0x0F, 0x0F)
+        self.assertEqual(chip.dma[1]["mode"] & 0x0C, 0x04)
+        self.assertClean()
+
     def test_mirror_above_64k(self):
         """a word address with bit 15 set: byte address bit 16, the page"""
         c, chip = self.c, self.chip
@@ -360,9 +513,11 @@ class FrontChecks:
 
     def test_mixer_reset(self):
         """a game's mixer reset: the Sound Blaster 16's levels to the chip,
-        its other registers left"""
+        its other registers left (Audio 2's volume follows the voice where
+        Audio 2 plays the game's 16-bit sound)"""
         c = self.card(mixer=DOS_MIXER)
         mixer(c, 0x30, 0x10)
+        keep = {r: c.chip.mixer[r] for r in (0x50, 0x52, 0x7C)}
         mixer(c, 0x00, 0x00)
         self.assertEqual(c.chip.index, 0x00)        # the game's index kept
         hw = c.chip.mixer
@@ -375,8 +530,12 @@ class FrontChecks:
                          (0, 0, 0, 0))
         self.assertEqual(hw[0x1C], 0x15)    # mic, CD and line: the record mix
         self.assertEqual(hw[0x0E], 0x20)    # the Sound Blaster Pro's stereo off
+        if c.audio2:
+            keep[0x7C] = 0xCC
         for reg in (0x50, 0x52, 0x7C):
-            self.assertEqual(hw[reg], DOS_MIXER[reg], hex(reg))
+            self.assertEqual(hw[reg], keep[reg], hex(reg))
+        self.assertEqual((hw[0x50], hw[0x52]), (DOS_MIXER[0x50],
+                                                DOS_MIXER[0x52]))
 
     def test_the_mixer_a_game_finds(self):
         """the view at the start shows the levels the chip has"""

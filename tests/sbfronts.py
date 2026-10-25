@@ -8,7 +8,9 @@ TSRCard installs the TSR under QPIEMU, EMM386 or HDPMI32i, and sends the
 game's accesses of the ports the memory manager traps through the front;
 the others reach the chip and the DMA controllers directly, as on the
 machine. Time passes on the chip, which stops at a rising edge of the
-game's interrupt so that the game's handler runs then.
+game's interrupt so that the game's handler runs then. What the game
+hears is what both DACs played; where Audio 2 has an 8-bit channel, the
+16-bit transfers play there and the 8-bit ones on Audio 1.
 
 VxDCard puts the game in a DOS box of Windows with the extended
 ES1869.VXD (vxdemu). Its accesses of the chip's ports go to the VxD's trap
@@ -195,8 +197,17 @@ class TSRCard(Card):
         self.chip.source = source
 
     @property
+    def audio2(self):
+        """the TSR plays 16-bit sound on Audio 2"""
+        return self.m.data8("dma2") < 4
+
+    @property
     def played(self):
-        return self.chip.played
+        return self.chip.heard
+
+    def dac(self, kind):
+        return self.chip.played2 if kind == 16 and self.audio2 else \
+            self.chip.played
 
     @property
     def midi_out(self):
@@ -252,7 +263,7 @@ class VDMAD:
         if n == e.read8(vxdemu.ADI + vxdemu.ADI_DMA1_CHANNEL):
             return vxdemu.DMA1, s["L1_0518"]
         dma2 = e.read8(vxdemu.ADI + vxdemu.ADI_DMA2_CHANNEL)
-        if dma2 and n == dma2:
+        if dma2 != 0xFF and n == dma2:
             return vxdemu.DMA2, s["L1_0870"]
         return e.dma_virt.get(n)
 
@@ -411,24 +422,26 @@ class VDMAD:
 
 class VxDCard(Card):
     """the game in a DOS box on ES1869.VXD's front: the card at IRQ irq,
-    Audio 1 on channel dma8 and Audio 2 on dma2 (0: none), ESS's demand
-    transfers on unless Single Mode DMA, SYSTEM.INI as `ini` has it, the
-    chip's mixer as `mixer` has it when the game starts"""
+    Audio 1 on channel dma8 and Audio 2 on dma2 (None: none, which ESS's
+    ADI has as FFh), ESS's demand transfers on unless Single Mode DMA,
+    SYSTEM.INI as `ini` has it, the chip's mixer as `mixer` has it when the
+    game starts"""
 
-    def __init__(self, irq=5, dma8=1, dma2=0, demand=True, ini=None,
+    def __init__(self, irq=5, dma8=1, dma2=None, demand=True, ini=None,
                  mixer=None):
         import vxdemu
         super().__init__()
         self._game_isr = None
         le, elf = vxd_build()
-        self.chip = TSRChip(irq, dma8, dma2 or None)
+        self.chip = TSRChip(irq, dma8, dma2)
         m = self.m = vxdemu.Machine(le, elf, True, hw=self.chip)
         for reg, v in (mixer or {}).items():
             self.chip.mixer[reg] = v
         e = m.emu
         m.start(ini or {})
         e.uc.mem_write(vxdemu.ADI + vxdemu.ADI_IRQ, bytes((irq, dma8)))
-        e.uc.mem_write(vxdemu.ADI + vxdemu.ADI_DMA2_CHANNEL, bytes((dma2,)))
+        e.uc.mem_write(vxdemu.ADI + vxdemu.ADI_DMA2_CHANNEL,
+                       bytes((0xFF if dma2 is None else dma2,)))
         e.write32(vxdemu.ADI + vxdemu.ADI_DMA1, vxdemu.DMA1)
         e.write32(vxdemu.ADI + vxdemu.ADI_DMA2, vxdemu.DMA2)
         if demand:
@@ -509,8 +522,17 @@ class VxDCard(Card):
         self.m.eoi(vxdemu.VM_DOS)
 
     @property
+    def audio2(self):
+        """the front plays 16-bit sound on Audio 2"""
+        return self.m.adi8(self.m.syms["EX_S16_A2"]) < 4
+
+    @property
     def played(self):
-        return self.chip.played
+        return self.chip.heard
+
+    def dac(self, kind):
+        return self.chip.played2 if kind == 16 and self.audio2 else \
+            self.chip.played
 
     @property
     def midi_out(self):

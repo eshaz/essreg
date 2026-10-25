@@ -183,11 +183,14 @@ tools/wineshot.sh run ess3d.exe /sim tray
   the routines between `host_area` and `host_code_end`, which run only
   before the switch. A change to the Sound Blaster 16's translation goes
   into the VxD's front and the TSR alike, and both answer as the model in
-  `tests/sb16.py` does ([SB16.md](docs/SB16.md)). Test it with a scene in
-  `tests/sbscenes.py`, which `tests/test_sb16conf.py` plays on the model and
-  on both fronts, or a check in `tests/test_sb16front.py`; the resident part
-  stays within the 248 paragraphs of `OLD_PARAS`, and
-  `tests/test_esssb16.py` checks that `build/esssb16.com` is current.
+  `tests/sb16.py` does ([SB16.md](docs/SB16.md)). A 16-bit playback plays on
+  Audio 2 where it has an 8-bit channel of its own (`dma2` in the TSR,
+  `EX_S16_A2` in the VxD), and everything else on Audio 1. Test it with a
+  scene in `tests/sbscenes.py` (`@dual` for two transfers at once), which
+  `tests/test_sb16conf.py` plays on the model and on both fronts, or a check
+  in `tests/test_sb16front.py`; the resident part stays within the 280
+  paragraphs of `MAX_PARAS`, and `tests/test_esssb16.py` checks that
+  `build/esssb16.com` is current.
 * **Committed binaries.** After changing their sources, rebuild
   `build/ESFM.DRV`, `build/ES1869.VXD`, `build/ES1869.DRV` or
   `build/esssb16.com`, and copy the changed programs from `out/ow2/` to

@@ -270,15 +270,19 @@ class CompatibilityTest(unittest.TestCase):
 
 
 class Audio2Test(unittest.TestCase):
-    def test_plays_and_latches_its_interrupt(self):
-        chip = Chip()
+    def start(self, chip, ch=0, volume=0x88):
+        chip.pnp[(1, 0x75)] = ch
         chip.dmac.memory.write(BUF, bytes(range(256)) * 4)
-        program_dma(Card(chip), 0, BUF, 1024)
+        program_dma(Card(chip), ch, BUF, 1024)
         mix = {0x71: 0x02, 0x70: 0xF0, 0x74: 0x00, 0x76: 0xFF, 0x7A: 0x40,
-               0x78: 0x93}
+               0x7C: volume, 0x78: 0x93}
         for r, v in mix.items():
             chip.outb(BASE + 4, r)
             chip.outb(BASE + 5, v)
+
+    def test_plays_and_latches_its_interrupt(self):
+        chip = Chip()
+        self.start(chip)
         run(chip, 30000)
         self.assertEqual(len(chip.irq_edges), 1)
         self.assertTrue(chip.mixer[0x7A] & 0x80)
@@ -287,13 +291,32 @@ class Audio2Test(unittest.TestCase):
         chip.outb(BASE + 5, 0x40)       # bit 7 = 0 acknowledges
         self.assertFalse(chip.irq_line)
         self.assertEqual([f[0] for f in chip.played2][:2], [-0x8000, -0x7F00])
+        self.assertEqual(chip.heard, chip.played2)
 
-    def test_reset_clears_7a(self):
+    def test_its_volume_at_0_is_silence(self):
         chip = Chip()
-        chip.outb(BASE + 4, 0x7A)
-        chip.outb(BASE + 5, 0x47)
+        self.start(chip, volume=0)
+        run(chip, 5000)
+        self.assertEqual(chip.played2, [])
+        self.assertNotEqual(chip.muted2, [])
+
+    def test_a_word_channel_gives_it_the_low_bytes(self):
+        """on a 16-bit channel a DMA cycle moves a word, and the chip keeps
+        its low byte (docs/VXD_INTERNALS.md)"""
+        chip = Chip()
+        self.start(chip, ch=5)
+        run(chip, 5000)
+        self.assertEqual([f[0] for f in chip.played2][:3],
+                         [-0x8000, -0x7E00, -0x7C00])
+
+    def test_reset_clears_7a_and_7c(self):
+        chip = Chip()
+        for r, v in ((0x7A, 0x47), (0x7C, 0x88), (0x78, 0x93)):
+            chip.outb(BASE + 4, r)
+            chip.outb(BASE + 5, v)
         reset(chip)
-        self.assertEqual(chip.mixer[0x7A], 0)
+        self.assertEqual((chip.mixer[0x7A], chip.mixer[0x7C]), (0, 0))
+        self.assertEqual(chip.mixer[0x78], 0x93)
 
 
 if __name__ == "__main__":

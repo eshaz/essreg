@@ -10,6 +10,11 @@ the DAC played, cut at the blocks the game counted, and whether a
 recording holds what the ADC heard, none of it left out. The conformance
 tests (test_sb16conf.py) run a scene on the Sound Blaster 16 model and on
 a front with the chip model, and compare the two.
+
+The scenes of two transfers at once (DUAL) run an 8-bit and a 16-bit
+transfer together, and look at what each kind played (Card.dac). A Sound
+Blaster 16's DAC plays only one of the two, and both run at the DSP's one
+rate, so these scenes give both the same rate.
 """
 
 import os
@@ -22,12 +27,19 @@ from sbgame import (BASE, reset, write, read, read_all, mixer,  # noqa: E402
                     program_dma, dma_count, samples16, words)
 
 BUF = 0x40000               # the game's DMA buffer, below 1 MB
+BUF8 = 0x50000              # and its 8-bit one, while both play
 SCENES = {}
+DUAL = set()                # the scenes of two transfers at once
 
 
 def scene(fn):
     SCENES[fn.__name__] = fn
     return fn
+
+
+def dual(fn):
+    DUAL.add(fn.__name__)
+    return scene(fn)
 
 
 def blocks_isr(kind=16):
@@ -610,3 +622,209 @@ def mixer_sb16(card):
     mixer(card, 0x00, 0)
     out["again"] = [mixer(card, r) for r in (0x30, 0x3C, 0x3D)]
     return out
+
+
+# --- two transfers at once -------------------------------------------------------
+
+def dual_isr(card):
+    """a driver that runs both kinds: 82h, then each kind's acknowledge,
+    each kind's blocks counted where its own frames are"""
+    card.out(BASE + 4, 0x82)
+    st = card.inp(BASE + 5)
+    card.seen.append(st)
+    if st & 2:
+        card.marks16.append(len(card.dac(16)))
+        card.inp(BASE + 0x0F)
+        card.blocks16 += 1
+    if st & 1:
+        card.marks8.append(len(card.dac(8)))
+        card.inp(BASE + 0x0E)
+        card.blocks8 += 1
+
+
+def dual_prepare(card):
+    prepare(card)
+    card.marks8, card.marks16 = [], []
+    card.blocks8 = card.blocks16 = 0
+    card.isr = dual_isr
+
+
+def wait_both(card, n8, n16, limit_us=600000):
+    """time passes until the handler counted n8 8-bit and n16 16-bit
+    blocks"""
+    t = 0
+    while (card.blocks8 < n8 or card.blocks16 < n16) and t < limit_us:
+        card.wait(250)
+        t += 250
+    return card.blocks8 >= n8 and card.blocks16 >= n16
+
+
+def kind_data(card, kind, n):
+    """the samples the kind played up to its last block mark, n at most"""
+    marks = card.marks16 if kind == 16 else card.marks8
+    frames = card.dac(kind)
+    end = marks[-1] if marks else len(frames)
+    return [s for f in frames[:end] for s in f][:n]
+
+
+def kind_blocks(card, kind):
+    """the kind's frames between its block marks"""
+    marks = [0] + (card.marks16 if kind == 16 else card.marks8)
+    return [b - a for a, b in zip(marks, marks[1:])]
+
+
+def _both(card, b16, b8, rate=44100, auto8=True, n8=None):
+    """16-bit stereo music, auto-initialized over two blocks of b16 samples
+    on the 16-bit channel, and 8-bit mono sound of b8 samples a block on
+    the 8-bit channel, n8 bytes of it, at one rate"""
+    music = words(samples16(2 * b16, start=0x1357))
+    n8 = n8 or 2 * b8
+    card.poke(BUF, music)
+    card.poke(BUF8, _bytes(n8, 0x29))
+    program_dma(card, 5, BUF, len(music))
+    program_dma(card, 1, BUF8, n8, auto=auto8)
+    write(card, 0x41, rate >> 8, rate & 0xFF)
+    write(card, 0xB6, 0x30, (b16 - 1) & 0xFF, (b16 - 1) >> 8)
+    write(card, 0xC6 if auto8 else 0xC0, 0x00, (b8 - 1) & 0xFF,
+          (b8 - 1) >> 8)
+
+
+@dual
+def dual_play(card):
+    """16-bit stereo music and 8-bit mono sound together, each
+    auto-initialized on its own channel, each with its own interrupt"""
+    dual_prepare(card)
+    reset(card)
+    _both(card, 1024, 600)
+    ok = wait_both(card, 4, 4)
+    return {"ok": ok, "spurious": [st for st in card.seen if not st & 3],
+            "per_block16": kind_blocks(card, 16)[:4],
+            "per_block8": kind_blocks(card, 8)[:4],
+            "data16": kind_data(card, 16, 4096),
+            "data8": kind_data(card, 8, 1200)}
+
+
+@dual
+def duplex_rec8(card):
+    """full duplex: 16-bit stereo playback and an 8-bit mono recording at
+    once, as a voice chat program plays and records"""
+    dual_prepare(card)
+    reset(card)
+    b16, size = 1024, 1500
+    music = words(samples16(2 * b16, start=0x2468))
+    card.poke(BUF, music)
+    card.poke(BUF8, b"\x5A" * size)
+    card.record_from(ramp())
+    program_dma(card, 5, BUF, len(music))
+    program_dma(card, 1, BUF8, size, auto=False, record=True)
+    write(card, 0x41, 0x56, 0x22)
+    write(card, 0xB6, 0x30, (b16 - 1) & 0xFF, (b16 - 1) >> 8)
+    write(card, 0xC8, 0x00, (size - 1) & 0xFF, (size - 1) >> 8)
+    ok = wait_both(card, 1, 3)
+    card.wait(2000)
+    return {"ok": ok, "blocks8": card.blocks8,
+            "per_block16": kind_blocks(card, 16)[:3],
+            "data16": kind_data(card, 16, 3 * b16),
+            "unbroken": unbroken(card.peek(BUF8, size), 8, False, False)}
+
+
+@dual
+def sfx8_over16(card):
+    """a game's 16-bit music goes on while an 8-bit sound effect plays
+    once on the 8-bit channel"""
+    dual_prepare(card)
+    reset(card)
+    b16, sfx = 1024, 700
+    music = words(samples16(2 * b16, start=0x0BAD))
+    card.poke(BUF, music)
+    card.poke(BUF8, _bytes(sfx, 0x3C))
+    program_dma(card, 5, BUF, len(music))
+    write(card, 0x41, 0xAC, 0x44, 0xB6, 0x30, (b16 - 1) & 0xFF,
+          (b16 - 1) >> 8)
+    wait_both(card, 0, 1)
+    program_dma(card, 1, BUF8, sfx, auto=False)
+    write(card, 0xC0, 0x00, (sfx - 1) & 0xFF, (sfx - 1) >> 8)
+    ok = wait_both(card, 1, 5)
+    return {"ok": ok, "blocks8": card.blocks8,
+            "per_block16": kind_blocks(card, 16)[:5],
+            "data16": kind_data(card, 16, 5 * b16),
+            "data8": kind_data(card, 8, sfx)}
+
+
+@dual
+def pause16_keep8(card):
+    """D5h pauses the 16-bit transfer while the 8-bit one plays on; D6h
+    continues it"""
+    dual_prepare(card)
+    reset(card)
+    _both(card, 1024, 1500)
+    wait_both(card, 1, 1)
+    write(card, 0xD5)
+    n16, n8 = len(card.dac(16)), len(card.dac(8))
+    card.wait(20000)
+    held = len(card.dac(16)) - n16
+    went8 = len(card.dac(8)) - n8
+    write(card, 0xD6)
+    ok = wait_both(card, card.blocks8 + 1, card.blocks16 + 2)
+    return {"held": held, "went8": went8 > 600, "ok": ok,
+            "data16": kind_data(card, 16, 4096)}
+
+
+@dual
+def exit16_keep8(card):
+    """D9h ends the 16-bit transfer with the block that plays, and the
+    8-bit one plays on"""
+    dual_prepare(card)
+    reset(card)
+    _both(card, 512, 600)
+    card.wait(2000)
+    write(card, 0xD9)
+    card.wait(40000)
+    return {"blocks16": card.blocks16, "frames16": len(card.dac(16)),
+            "more8": card.blocks8 >= 3}
+
+
+@dual
+def exit8_keep16(card):
+    """DAh ends the 8-bit transfer with the block that plays, and the
+    16-bit one plays on"""
+    dual_prepare(card)
+    reset(card)
+    _both(card, 1024, 400)
+    card.wait(2000)
+    write(card, 0xDA)
+    card.wait(40000)
+    return {"blocks8": card.blocks8, "frames8": len(card.dac(8)),
+            "more16": card.blocks16 >= 3}
+
+
+@dual
+def reset_stops_both(card):
+    """the DSP's reset stops both transfers, and neither interrupts any
+    more"""
+    dual_prepare(card)
+    reset(card)
+    _both(card, 1024, 600)
+    wait_both(card, 1, 1)
+    out = {"reset": reset(card)}
+    n16, n8 = len(card.dac(16)), len(card.dac(8))
+    blocks = card.blocks8 + card.blocks16
+    card.wait(30000)
+    out.update({"held": len(card.dac(16)) - n16,
+                "held8": len(card.dac(8)) - n8,
+                "after": card.blocks8 + card.blocks16 - blocks})
+    return out
+
+
+@dual
+def last_block16_with8(card):
+    """a single-cycle B2h while B6h runs auto-initialized, with an 8-bit
+    transfer running too: the 16-bit one ends after its queued block"""
+    dual_prepare(card)
+    reset(card)
+    _both(card, 512, 700)
+    wait_both(card, 0, 1)
+    write(card, 0xB2, 0x10, 0xFF, 0x01)
+    card.wait(60000)
+    return {"blocks16": card.blocks16, "frames16": len(card.dac(16)),
+            "more8": card.blocks8 >= 3}

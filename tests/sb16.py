@@ -13,8 +13,10 @@ the mixer; docs/SB16.md lists what it does and the sources.
 
 Time passes in advance(us): a running transfer moves one sample a sample
 period, a block's end raises the engine's interrupt, and what the DAC
-plays is kept in `played` as frames of signed 16-bit samples. The ADPCM
-decoders are DOSBox-X's (GPL-2.0 or later).
+plays is kept in `played` as frames of signed 16-bit samples. The DAC
+plays one engine, the one the mode register routes to it, and `out` keeps
+what each engine put out, heard or not. The ADPCM decoders are DOSBox-X's
+(GPL-2.0 or later).
 """
 
 COPYRIGHT = b"COPYRIGHT (C) CREATIVE TECHNOLOGY LTD, 1992.\0"
@@ -146,6 +148,7 @@ class SB16:
         self.mixer_unknown = mixer_unknown
         self.played = []            # the DAC's frames
         self.unheard = []           # an engine's output not routed to it
+        self.out = {8: [], 16: []}  # each engine's output, heard or not
         self.recorded = []          # the ADC's frames, from `source`
         self.source = None          # callable(n) -> n frames to record
         self.midi_out = []
@@ -859,6 +862,7 @@ class SB16:
     def _out(self, e, frame):
         heard = (self.mode & M_ROUTE16) == (1 if e is self.e16 else 0)
         (self.played if heard else self.unheard).append(frame)
+        self.out[e.kind].append(frame)
 
     def _block_end(self, e):
         if e.switch:                # (a) the queued single-cycle block

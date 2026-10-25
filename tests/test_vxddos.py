@@ -951,17 +951,20 @@ class SoundBlaster16Test(VxDBuilds, unittest.TestCase):
 
     PLAY, MASKED = 0x58, 0x59           # auto-init, from memory; masked
 
-    def game(self, ini=None, irq=5, dma=1, dma2=0, demand=True, mixer=None):
+    def game(self, ini=None, irq=5, dma=1, dma2=None, demand=True,
+             mixer=None):
         """a DOS game resets the DSP, on a card at IRQ irq with Audio 1 on
-        channel dma and Audio 2 on dma2 (0: none), ESS's demand transfers
-        on unless Single Mode DMA, the chip's mixer as `mixer` has it"""
+        channel dma and Audio 2 on dma2 (None: none, ESS's FFh), ESS's
+        demand transfers on unless Single Mode DMA, the chip's mixer as
+        `mixer` has it"""
         m = self.machine()
         if ini is not None:
             m.start(ini)
         for reg, v in (mixer or {}).items():
             m.hw.mixer[reg] = v
         m.emu.uc.mem_write(ADI + ADI_IRQ, bytes((irq, dma)))
-        m.emu.uc.mem_write(ADI + ADI_DMA2_CHANNEL, bytes((dma2,)))
+        m.emu.uc.mem_write(ADI + ADI_DMA2_CHANNEL,
+                           bytes((0xFF if dma2 is None else dma2,)))
         m.emu.write32(ADI + 0x4D, DMA1)         # the channels' handles
         m.emu.write32(ADI + 0x7A, DMA2)
         if demand:

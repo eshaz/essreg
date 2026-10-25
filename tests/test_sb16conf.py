@@ -5,17 +5,22 @@
 scene of sbscenes runs on the model (sb16.SB16), on esssb16.com in front
 of the ES1869 model (esschip), under QPIEMU, EMM386 and HDPMI32i, and on
 ES1869.VXD's front in a DOS box, and what the game saw has to be the same.
+Audio 2 is on channel 3, where the fronts play 16-bit sound, and the 8-bit
+transfers play on Audio 1; the classes named Audio1 put Audio 2 where the
+fronts can't use it, and everything plays on Audio 1, one transfer at a
+time, so the scenes of two transfers at once (sbscenes.DUAL) don't run
+there.
 
 Where the chip itself differs, the comparison allows for it. Audio 1's
-FIFO (256 bytes) takes the DMA ahead of the DAC, so a block's interrupt
-comes when its last byte is in the FIFO, up to 256 bytes before the DAC
-has played it: the frames heard at the first interrupt, at a pause and
-at the end of a scene can be that many fewer. E2h's byte doesn't reach
-memory: the front has no way to write it through the DMA. Under EMM386
-the TSR doesn't trap the DMA controller, so a game's 16-bit channel keeps
-the position it was programmed with, its programming has to come before
-the transfer's command, and each command carries it over anew, from the
-buffer's start.
+FIFO (256 bytes) and Audio 2's (64) take the DMA ahead of the DACs, so a
+block's interrupt comes when its last byte is in the FIFO, up to 256 bytes
+before the DAC has played it: the frames heard at the first interrupt, at
+a pause and at the end of a scene can be that many fewer. E2h's byte
+doesn't reach memory: the front has no way to write it through the DMA.
+Under EMM386 the TSR doesn't trap the DMA controller, so a game's 16-bit
+channel keeps the position it was programmed with, its programming has to
+come before the transfer's command, and each command carries it over anew,
+from the buffer's start.
 
 The chip model also has to see no undefined use (esschip's violations),
 every DMA cycle has to move data (dma8237's bad), and the VxD has to ask
@@ -32,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_vxdext import HAVE_UNICORN, have_nasm  # noqa: E402
 from sbgame import ModelCard  # noqa: E402
-from sbscenes import SCENES  # noqa: E402
+from sbscenes import DUAL, SCENES  # noqa: E402
 
 if HAVE_UNICORN:
     from sbfronts import TSRCard, VxDCard  # noqa: E402
@@ -53,10 +58,10 @@ def differences(want, got):
     out = []
     for key in sorted(set(want) | set(got)):
         w, g = want.get(key), got.get(key)
-        if key == "per_block":
+        if key.startswith("per_block"):
             ok = w[1:] == g[1:] and len(w) == len(g) and \
                 w[0] - FIFO <= g[0] <= w[0] if w and g else w == g
-        elif key == "data":
+        elif key.startswith("data"):
             ok = g == w[:len(g)] and len(g) >= len(w) - 2 * FIFO
         elif key == "held":
             ok = g <= FIFO // 4         # 16-bit stereo: 4 bytes a frame
@@ -73,17 +78,22 @@ def differences(want, got):
 
 class Conformance:
     """the scenes on one front; `known` maps a scene to the keys it may
-    differ in, as the module's text says"""
+    differ in, as the module's text says; `audio2` the front plays 16-bit
+    sound on Audio 2"""
 
     known = {"dma_ident": {"bytes"}}
+    audio2 = True
 
     def card(self):
         raise NotImplementedError
 
     def check(self, name):
+        if name in DUAL and not self.audio2:
+            self.skipTest("one transfer at a time on Audio 1")
         want = model(name)
         card = self.card()
         got = SCENES[name](card)
+        self.assertEqual(card.audio2, self.audio2)
         diffs = [d for d in differences(want, got)
                  if d[0] not in self.known.get(name, ())]
         self.assertEqual(diffs, [], name)
@@ -109,7 +119,18 @@ class QPITest(Conformance, unittest.TestCase):
     """esssb16.com through QPIEMU's callback (QEMM's QPI): a real-mode game"""
 
     def card(self):
-        return TSRCard("qpi")
+        return TSRCard("qpi", dma2=3)
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class QPIAudio1Test(Conformance, unittest.TestCase):
+    """the same with Audio 2 on the 16-bit channel 5, where the chip takes
+    a byte of each word: every transfer on Audio 1"""
+
+    audio2 = False
+
+    def card(self):
+        return TSRCard("qpi", dma2=5)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
@@ -117,7 +138,7 @@ class HDPMITest(Conformance, unittest.TestCase):
     """esssb16.com through HDPMI32i's handler: a protected-mode game"""
 
     def card(self):
-        return TSRCard("pm")
+        return TSRCard("pm", dma2=3)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
@@ -130,7 +151,7 @@ class EMM386Test(Conformance, unittest.TestCase):
              "play16_single_each_block": {"data"}}
 
     def card(self):
-        return TSRCard("emm")
+        return TSRCard("emm", dma2=3)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
@@ -139,12 +160,15 @@ class VxDTest(Conformance, unittest.TestCase):
     own (VDMAD_Virtualize_Channel)"""
 
     def card(self):
-        return VxDCard()
+        return VxDCard(dma2=3)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
-class VxDAudio2Test(Conformance, unittest.TestCase):
-    """the 16-bit channel is Audio 2's, which ESS's handler has"""
+class VxDAudio1Test(Conformance, unittest.TestCase):
+    """the 16-bit channel is Audio 2's, which ESS's handler has, and the
+    chip takes a byte of each of its words: every transfer on Audio 1"""
+
+    audio2 = False
 
     def card(self):
         return VxDCard(dma2=5)
@@ -156,7 +180,7 @@ class VxDSingleTest(Conformance, unittest.TestCase):
     programs them"""
 
     def card(self):
-        return VxDCard(demand=False)
+        return VxDCard(dma2=3, demand=False)
 
 
 if __name__ == "__main__":

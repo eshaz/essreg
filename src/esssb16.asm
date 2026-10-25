@@ -14,24 +14,30 @@
 ; and 16-bit transfers have their own interrupts in mixer 82h and their own
 ; acknowledges (+Eh and +Fh).
 ;
-; Every PCM transfer, the Sound Blaster 16's Bxh and Cxh and the older
-; 8-bit commands alike, plays or records on Audio 1 in the chip's Extended
-; mode. A DSP reset would take the chip out of it, so the front emulates
-; the game's reset instead: the transfer stops, the interrupt is
-; acknowledged, the FIFO empties and AAh comes back, and the chip stays in
+; The 8-bit transfers, the Sound Blaster 16's Cxh and the older commands
+; alike, and every recording play or record on Audio 1 in the chip's
+; Extended mode; the 16-bit playback plays on Audio 2, where Audio 2 has
+; an 8-bit DMA channel, so that both kinds play at once, each with its own
+; rate, as on a Sound Blaster 16 they run together. Without one, the
+; 16-bit playback plays on Audio 1 too, one transfer at a time. A DSP
+; reset would take the chip out of Extended mode, so the front emulates
+; the game's reset instead: the transfers stop, the interrupts are
+; acknowledged, the FIFOs empty and AAh comes back, and the chip stays in
 ; Extended mode. The chip takes a byte per DMA cycle whatever the channel
-; (DS p.14: the audio channels map to channels 0, 1 and 3), so the game's
-; programming of its 16-bit channel (the H of BLASTER, mixer 81h) is
-; carried over to the card's 8-bit one. Where the TSR traps that channel's
-; ports (QPI, HDPMI32i), it follows the game's programming as it comes, and
-; the channel's address and count follow the card's channel, as the game
-; reads them for its position; under EMM386, which has no traps for the
-; DMA controllers, it reads the channel back at each 16-bit command. The
-; firmware's commands that Extended mode doesn't have (the direct DAC and
-; ADC, ADPCM, silence and MIDI) go to the chip in its Compatibility mode,
-; after a reset of its own. Mixer 71h gets bit 5 cleared for each
-; transfer, and the DACs' filters (/F) and Audio 2's 4x oversampling (/O)
-; as the command line says.
+; (DS p.14: the audio channels map to channels 0, 1 and 3; on a 16-bit
+; channel it keeps a word's low byte), so the game's programming of its
+; 16-bit channel (the H of BLASTER, mixer 81h) is carried over to the 8-bit
+; channel that plays it, Audio 2's or Audio 1's. Where the TSR traps that
+; channel's ports (QPI, HDPMI32i), it follows the game's programming as it
+; comes, and the channel's address and count follow the card's channel, as
+; the game reads them for its position; under EMM386, which has no traps
+; for the DMA controllers, it reads the channel back at each 16-bit
+; command. The firmware's commands that Extended mode doesn't have (the
+; direct DAC and ADC, ADPCM, silence and MIDI) go to the chip in its
+; Compatibility mode, after a reset of its own, which Audio 2 plays on
+; through. Mixer 71h gets bit 5 cleared for each transfer, bit 1 for Audio
+; 2's own rate, and the DACs' filters (/F) and Audio 2's 4x oversampling
+; (/O) as the command line says.
 ;
 ; A program that knows the chip (C6h, then a register command) gets the
 ; chip as it is until its next reset.
@@ -69,7 +75,8 @@ stack_top       equ 0x100       ; Audio_Base+4h to +Fh, each with its
                                 ; under QPI and HDPMI32i
 
 ; the state flags (S16 in the VxD front); F_AUTO and F_16 are the bits of
-; xfer's BL
+; xfer's BL. Audio 2's transfer has F_RUN, F_AUTO, F_LAST and F_PAUSE in
+; flags2, and is always 16-bit
 F_ESS           equ 0x01        ; the program knows the chip (C6h and a
                                 ; register): every access is the chip's
 F_EXT           equ 0x02        ; the chip is in Extended mode, its DAC on
@@ -142,6 +149,8 @@ ctrl:           times 25 db 0   ; the chip's registers A1h-B9h as the front
                                 ; last wrote or read them
 known:          dd 0            ; bit n set while ctrl+n holds A0h+n
 flags:          db 0            ; F_*
+flags2:         db 0            ; Audio 2's transfer: F_RUN, F_AUTO,
+                                ; F_LAST, F_PAUSE
 state:          db 0            ; S_*
 cmd:            db 0            ; the last command
 prev:           db 0            ; the one before it (FDh)
@@ -167,6 +176,10 @@ mix81:          db 0x02         ; mixer 81h's bit of the 8-bit channel
 dma8:           db 1            ; Audio 1's channel
 dma16:          db 5            ; the Sound Blaster 16's 16-bit channel, 0
                                 ; for none (16-bit on Audio 1's then)
+dma2:           db 4            ; Audio 2's channel, 4 for none: the 16-bit
+                                ; playback's when it has one
+mchan:          db 1            ; the channel the game's 16-bit one is
+                                ; carried over to, Audio 1's or Audio 2's
 b9:             db 2            ; B9h: 2 demand transfers, 0 single (/S)
 keep71:         db 0xDF         ; mixer 71h at a transfer: the bits kept
 set71:          db 0            ; and the ones set (/F, /O)
@@ -331,6 +344,22 @@ mix_at:
         pop     ax
         ret
 
+; mixer register AH with AL's bits set (mix_or) or kept (mix_and)
+mix_or:
+        push    cx
+        mov     cl,al
+        call    mix_read
+        or      al,cl
+        jmp     short mix_change
+mix_and:
+        push    cx
+        mov     cl,al
+        call    mix_read
+        and     al,cl
+mix_change:
+        pop     cx
+        jmp     mix_write
+
 ; DX = Audio_Base + AL
 port_of:
         movzx   dx,al
@@ -469,10 +498,20 @@ reg_change:
         jmp     reg_set
 
 ; the chip's own reset (DS p.43): +6 = 3, a few microseconds, 0, then AAh;
-; it is in Compatibility mode, its registers unknown
+; it is in Compatibility mode, its registers unknown. The reset clears
+; Audio 2's format and interrupt (7Ah) and its volume (7Ch, DS p.51), which
+; go back while Audio 2 plays
 chip_reset:
         pusha
-        mov     al,6
+        test    byte [V(flags2)],F_RUN
+        jz      .reset
+        mov     ah,0x7C
+        call    mix_read
+        push    ax
+        mov     ah,0x7A
+        call    mix_read
+        push    ax
+.reset: mov     al,6
         call    port_of
         mov     al,3
         call    chip_out
@@ -484,7 +523,13 @@ chip_reset:
         call    chip_answer             ; the AAh
         and     byte [V(flags)],~(F_EXT | F_RUN) & 0xFF
         and     dword [V(known)],0
-        popa
+        test    byte [V(flags2)],F_RUN
+        jz      .out
+        pop     ax                      ; 7Ah, then 7Ch
+        call    mix_write
+        pop     ax
+        call    mix_write
+.out:   popa
         ret
 
 ; the chip in Extended mode for a transfer, its DAC into the mixer; after
@@ -711,20 +756,50 @@ boot:
         clc
         ret
 
-; the DSP held in reset: the front's transfer stops (B8h bit 0), what the
-; FIFO holds plays out, the chip's interrupt is acknowledged, and nothing
+; the DSP held in reset: the front's transfers stop, the chip's interrupts
+; are acknowledged (Audio 2's off until its next transfer), and nothing
 ; waits in the latches
 halt:
-        test    byte [V(flags)],F_RUN
-        jz      .idle
-        and     byte [V(flags)],~(F_RUN | F_AUTO | F_LAST | F_PAUSE) & 0xFF
-        mov     ax,0xB8FE
-        call    reg_and
+        call    a1_stop
+        call    a2_stop
+        cmp     byte [V(dma2)],4
+        jae     .idle
+        mov     ax,0x7A00
+        call    mix_write
 .idle:  mov     al,0x0E
         call    port_of
         call    chip_in
         and     byte [V(state)],S_WARM | S_SPKR | S_UART | S_COMP
         jmp     short boot.clear
+
+; Audio 1's transfer of the front's stops (B8h bit 0), at once, as a Sound
+; Blaster 16's: its FIFO empties (a1_flush), so that nothing of it plays
+; on while Audio 2 plays the next
+a1_stop:
+        test    byte [V(flags)],F_RUN
+        jz      a2_stop.ret
+        and     byte [V(flags)],~(F_RUN | F_AUTO | F_LAST | F_PAUSE) & 0xFF
+        mov     ax,0xB8FE
+        call    reg_and
+
+; Audio 1's FIFO empties (+6 bit 1, DS p.48)
+a1_flush:
+        mov     al,6
+        call    port_of
+        mov     al,2
+        call    chip_out
+        mov     al,0
+        jmp     chip_out
+
+; Audio 2's transfer of the front's stops (78h bits 4 and 1), and what its
+; FIFO holds plays out
+a2_stop:
+        test    byte [V(flags2)],F_RUN
+        jz      .ret
+        mov     byte [V(flags2)],0
+        mov     ax,0x78ED
+        jmp     mix_and
+.ret:   ret
 
 ; AL written to the command port, DX = the port: the front's DSP takes
 ; it, or waits for its answer to be read; the chip takes it in MIDI modes
@@ -1009,14 +1084,18 @@ gx:     mov     bl,[V(cmd)]
 ; Dxh: D1h D3h the speaker flag, which D8h answers (D1h and D3h change no
 ; sound on DSP 4.xx); D0h D4h DAh pause, continue and end the 8-bit
 ; transfer's auto-initialize, D5h D6h D9h the 16-bit one's, when that kind
-; runs (dx_ops: the kind and the action of each)
+; runs, on Audio 1 or Audio 2 (dx_ops: the kind and the action of each)
 gd:     cmp     al,8
         je      .status
         movzx   bx,al
         mov     ah,[dx_ops+bx]
         test    ah,ah
         jns     .speaker                ; bit 7 clear: the speaker, or nothing
-        mov     dl,[V(flags)]
+        test    ah,F_16
+        jz      .a1
+        test    byte [V(flags2)],F_RUN
+        jnz     .a2
+.a1:    mov     dl,[V(flags)]
         xor     dl,ah
         test    dl,F_RUN | F_16         ; not the kind that runs: nothing
         jnz     none
@@ -1036,6 +1115,23 @@ gd:     cmp     al,8
         call    a1_clocks               ; the rate as it is now
         mov     ax,0xB240
         jmp     reg_or
+.a2:    shl     ah,2                    ; Audio 2: the same with 78h
+        jc      .pause2
+        js      .cont2
+        btr     word [V(flags2)],F_AUTO_BIT
+        jnc     none
+        and     byte [V(flags2)],~F_LAST & 0xFF
+        mov     ax,0x78EF               ; bit 4: auto-initialize
+        jmp     mix_and
+.pause2:
+        or      byte [V(flags2)],F_PAUSE ; the FIFO off the DAC (bit 0): the
+        mov     ax,0x78FE               ; DMA fills it and waits
+        jmp     mix_and
+.cont2: btr     word [V(flags2)],F_PAUSE_BIT
+        jnc     none
+        call    a2_rate
+        mov     ax,0x7801
+        jmp     mix_or
 .speaker:
         dec     ah                      ; 1 on, 2 off, 0 nothing
         js      none
@@ -1199,25 +1295,35 @@ a1_clocks:
 filter_stereo:  db 3, 5, 5, 5, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9
 filter_mono:    db 3, 5, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 10, 10
 
-; --- Audio 1: the game's transfers, in Extended mode ---------------------
+; --- the game's transfers: Audio 1 in Extended mode, and Audio 2 ----------
 
 ; a transfer: BL = bit 4 16-bit, bit 3 recording, bit 2 auto-initialize,
 ; bit 0 never queued; CL = the mode (bit 4 signed, bit 5 stereo); AX = the
 ; length less one, in samples. A single-cycle one while this kind
 ; auto-initializes is queued, as on the Sound Blaster 16: the counter
 ; gets its length for the next block, the last (its mode doesn't count).
-; Else the sequence of the data sheet (p.48): B8h stopped with the
-; direction and auto-initialize, B9h for demand transfers of 2 bytes, A8h
-; for mono or stereo, A1h and A2h for the rate, A4h and A5h for minus the
-; bytes, B6h and B7h for the format, B1h and B2h for the interrupt and the
-; DMA request, mixer 71h, the DMA, then B8h bit 0. Only the registers that
-; change are written
+; A 16-bit playback goes to Audio 2 when it has a channel and the game a
+; 16-bit one (a2_xfer). Else the sequence of the data sheet (p.48) on Audio
+; 1: B8h stopped with the direction and auto-initialize, B9h for demand
+; transfers of 2 bytes, A8h for mono or stereo, A1h and A2h for the rate,
+; A4h and A5h for minus the bytes, B6h and B7h for the format, B1h and B2h
+; for the interrupt and the DMA request, mixer 71h, the DMA, then B8h bit
+; 0. Only the registers that change are written. There is one transfer of
+; each kind, so a 16-bit one ends the other engine's
 xfer:
         mov     si,ax
         inc     si                      ; SI = the samples (0: 65536)
         test    bl,0x05
         jnz     .start
-        mov     dl,bl
+        test    bl,F_16
+        jz      .q1
+        mov     al,[V(flags2)]
+        and     al,F_RUN | F_AUTO
+        cmp     al,F_RUN | F_AUTO
+        jne     .q1
+        or      byte [V(flags2)],F_LAST
+        jmp     a2_count
+.q1:    mov     dl,bl
         and     dl,F_16
         or      dl,F_RUN | F_AUTO
         mov     al,[V(flags)]
@@ -1227,15 +1333,19 @@ xfer:
         or      byte [V(flags)],F_LAST
         jmp     a1_count
 .start: mov     [V(xbits)],bl
-        test    byte [V(flags)],F_RUN   ; the first after a reset: the FIFO
-        jnz     .ext                    ; empties (+6 bit 1, DS p.48), so
-        mov     al,6                    ; that nothing of another stream
-        call    port_of                 ; plays in this one's format
-        mov     al,2
-        call    chip_out
-        mov     al,0
-        call    chip_out
-.ext:   call    ensure_ext
+        test    bl,F_16
+        jz      .a1
+        test    bl,0x08                 ; 16-bit playback: Audio 2's, with
+        jnz     .not2                   ; its channel and the game's 16-bit
+        cmp     byte [V(dma16)],0       ; one
+        je      .not2
+        cmp     byte [V(dma2)],4
+        jb      a2_xfer
+.not2:  call    a2_stop
+.a1:    test    byte [V(flags)],F_RUN   ; the first after a reset: the FIFO
+        jnz     .ext                    ; empties, so that nothing of
+        call    a1_flush                ; another stream plays in this
+.ext:   call    ensure_ext              ; one's format
         mov     al,bl                   ; F_16 and F_AUTO from BL
         or      al,F_RUN
         and     al,F_16 | F_RUN | F_AUTO
@@ -1280,9 +1390,127 @@ xfer:
         mov     ax,0xB250               ; kept, as ES1869.DRV keeps them
         call    reg_or
         call    dac_options
+        mov     al,[V(dma8)]
         call    xfer_dma
         mov     ax,0xB801               ; go
         jmp     reg_or
+
+; a 16-bit playback on Audio 2: SI = the samples, CL = the mode. As
+; ES1869.DRV starts Audio 2 (6:2C1A, docs/DRIVER_CONFIG.md): stopped (78h),
+; for a start anew, the rate and filter clock (70h, 72h), minus the bytes
+; (74h, 76h), the volume of the view's voice (7Ch, which a reset of the
+; chip clears), the format and the interrupt (7Ah), the DACs' mode (71h),
+; the game's 16-bit channel carried over to Audio 2's, then 78h:
+; auto-initialize as the command says, demand transfers of 4 bytes, or
+; single ones with /S. Audio 1's 16-bit transfer, if one runs, ends first
+a2_xfer:
+        mov     al,[V(flags)]
+        and     al,F_RUN | F_16
+        cmp     al,F_RUN | F_16
+        jne     .go
+        call    a1_stop
+.go:    mov     ax,0x7800
+        call    mix_write
+        mov     al,bl
+        and     al,F_AUTO
+        or      al,F_RUN
+        mov     [V(flags2)],al
+        call    a2_count
+        call    a2_rate
+        push    bx
+        mov     al,5                    ; the voice, on Audio 2 (pairs)
+        call    pair_out
+        pop     bx
+        mov     al,0x41                 ; 7Ah: the interrupt on, 16-bit,
+        test    cl,0x10                 ; signed (bit 2) and stereo (bit 1)
+        jz      .unsigned               ; as the mode says
+        or      al,0x04
+.unsigned:
+        test    cl,0x20
+        jz      .mono
+        or      al,0x02
+.mono:  mov     ah,0x7A
+        call    mix_write
+        call    dac_options
+        mov     al,[V(dma2)]
+        call    xfer_dma
+        mov     al,0x03                 ; the DMA, and the FIFO to the DAC
+        test    bl,F_AUTO
+        jz      .single
+        or      al,0x10
+.single:
+        cmp     byte [V(b9)],0
+        je      .go78
+        or      al,0x80
+.go78:  mov     ah,0x78
+        jmp     mix_write
+
+; 74h and 76h, Audio 2's counter reload: minus the bytes of SI 16-bit
+; samples
+a2_count:
+        shl     si,1
+        neg     si
+        mov     ax,si
+        mov     ah,0x74
+        call    mix_write
+        mov     ax,si
+        mov     al,ah
+        mov     ah,0x76
+        jmp     mix_write
+
+; 70h and 72h for the rate v * 44100 / 248 Hz, as ES1869.DRV picks them
+; (6:2436): the divisor of the 793.8 kHz clock, round(4464 / v), or of the
+; 768 kHz one, round(4319 / v) with bit 7, whichever comes nearer, 128 at
+; most (6 kHz); the filter clock FDh from 44.1 kHz on, else 7.16 MHz over
+; 35.9 times the rate, as for A2h
+a2_rate:
+        pusha
+        movzx   bx,byte [V(rate_v)]
+        mov     ax,4464                 ; 793.8 kHz
+        call    .div
+        mov     cx,ax
+        mov     bp,dx
+        mov     ax,4319                 ; 768 kHz
+        call    .div
+        mov     ah,0x80
+        cmp     dx,bp
+        jb      .clock
+        mov     ax,cx
+.clock: cmp     al,128
+        jbe     .d
+        mov     al,128
+.d:     neg     al                      ; 128 - the divisor, with the clock's
+        and     al,0x7F                 ; bit
+        or      al,ah
+        mov     ah,0x70
+        call    mix_write
+        mov     al,0xFD
+        cmp     bl,0xF8
+        jae     .filter
+        mov     ax,2245
+        call    a1_clocks.div
+        neg     al
+.filter:
+        mov     ah,0x72
+        call    mix_write
+        popa
+        ret
+; AX = round(AX / v), DX = how far that times v is from AX; BX = v
+.div:   push    ax
+        xor     dx,dx
+        div     bx
+        shl     dx,1
+        cmp     dx,bx
+        jb      .down
+        inc     ax
+.down:  pop     dx
+        push    ax
+        imul    ax,bx
+        sub     dx,ax
+        jns     .pos
+        neg     dx
+.pos:   pop     ax
+        ret
 
 ; A4h and A5h, the counter's reload: minus the bytes of SI samples
 a1_count:
@@ -1336,17 +1564,22 @@ dac_options:
 
 ; --- the game's 16-bit channel ---------------------------------------------
 
-; the DMA of a transfer: an 8-bit one, or a 16-bit one without a 16-bit
-; channel, runs on Audio 1's own channel as the game programmed it; a
-; 16-bit one has the game's 16-bit channel carried over to it. Where the
-; front traps that channel, it is carried over when the game programmed
-; it anew, and Audio 1's channel waits while the game's is masked
+; the DMA of a transfer, AL = the channel that plays it: an 8-bit one, or
+; a 16-bit one without a 16-bit channel, runs on Audio 1's own channel as
+; the game programmed it; a 16-bit one has the game's 16-bit channel
+; carried over to AL's, Audio 1's or Audio 2's. Where the front traps that
+; channel, it is carried over when the game programmed it anew or it goes
+; to the other channel, and AL's waits while the game's is masked
 xfer_dma:
         test    bl,0x10
         jz      .own
         cmp     byte [V(dma16)],0
         je      .own
-        call    vtrapped
+        cmp     al,[V(mchan)]
+        je      .same
+        mov     [V(mchan)],al
+        and     byte [V(vbits)],~V_LIVE & 0xFF
+.same:  call    vtrapped
         jc      mirror
         test    byte [V(vbits)],V_MASK
         jnz     ch8_mask
@@ -1355,8 +1588,11 @@ xfer_dma:
         cmp     al,V_LIVE
         jne     mirror
         ret
-.own:   and     byte [V(vbits)],~V_LIVE & 0xFF
-        ret
+.own:   mov     al,[V(dma8)]            ; the game programs Audio 1's channel
+        cmp     al,[V(mchan)]           ; itself: what it carried is gone,
+        jne     .ret                    ; but on Audio 2's
+        and     byte [V(vbits)],~V_LIVE & 0xFF
+.ret:   ret
 
 ; CF clear if this trap path traps the game's 16-bit channel (the one the
 ; TSR was installed for, which mixer 81h may have changed)
@@ -1370,13 +1606,13 @@ vtrapped:
         stc
 .ret:   ret
 
-; the game's 16-bit channel carried over to Audio 1's 8-bit one: the word
-; address and the page's bits 7:1 as a byte address and page, the word
-; count as a byte count, demand transfers (single with /S), the direction
-; of the transfer, auto-initialize as the game's channel has it. Without
-; the traps, the channel's registers are read back (right after the game
-; programmed them they hold what it wrote) and auto-initialize is the
-; command's. The game's flip-flop is left cleared
+; the game's 16-bit channel carried over to the 8-bit one that plays it
+; (mchan): the word address and the page's bits 7:1 as a byte address and
+; page, the word count as a byte count, demand transfers (single with /S),
+; the direction of the transfer, auto-initialize as the game's channel has
+; it. Without the traps, the channel's registers are read back (right
+; after the game programmed them they hold what it wrote) and
+; auto-initialize is the command's. The game's flip-flop is left cleared
 mirror:
         call    vtrapped
         jnc     .have
@@ -1405,8 +1641,8 @@ mirror:
 .play:  cmp     byte [V(b9)],0
         jne     .mode
         or      ah,0x40                 ; single transfers
-.mode:  movzx   si,byte [V(dma8)]
-        mov     al,[V(dma8)]            ; AL = the channel
+.mode:  movzx   si,byte [V(mchan)]
+        mov     al,[V(mchan)]           ; AL = the channel
         or      ah,al                   ; AH = the mode
         or      al,0x04                 ; masked while it is set
         mov     dx,0x0A
@@ -1445,7 +1681,7 @@ ch8_mask:
 ch8_unmask:
         mov     al,0
 ch8_set:
-        or      al,[V(dma8)]
+        or      al,[V(mchan)]
         push    dx
         mov     dx,0x0A
         call    chip_out
@@ -1494,9 +1730,9 @@ dma_port:
         ret
 
 ; AL = the game's read of port DX of its 16-bit channel: the controller's,
-; except the channel's address and count while Audio 1's channel carries
-; its programming: they follow that channel, the high byte read with the
-; low one. Only while this path traps the channel (vtrapped)
+; except the channel's address and count while the card's channel carries
+; its programming (mchan): they follow that channel, the high byte read
+; with the low one. Only while this path traps the channel (vtrapped)
 dma_in:
         call    chip_in                 ; the flip-flop moves as on the machine
         call    vtrapped
@@ -1512,10 +1748,10 @@ dma_in:
         jz      .ret
         test    byte [V(vbits)],V_FF
         jz      .high
-        push    dx                      ; Audio 1's channel: the bytes it
+        push    dx                      ; the card's channel: the bytes it
         mov     dx,0x0C                 ; moved, halved
         call    chip_out
-        movzx   dx,byte [V(dma8)]
+        movzx   dx,byte [V(mchan)]
         shl     dx,1
         add     dl,bl
         call    chip_in
@@ -1597,14 +1833,16 @@ dma_regs:       dw dma_out.single, dma_out.mode, dma_out.ff, dma_out.clear
                 dw dma_out.unmask, dma_out.all
 
 ; the game masked or unmasked its 16-bit channel: while a 16-bit transfer
-; of the front's runs, Audio 1's channel follows, and an unmasking after
-; new programming carries it over
+; of the front's runs, on Audio 1 or Audio 2, the card's channel follows,
+; and an unmasking after new programming carries it over
 vmask_changed:
+        test    byte [V(flags2)],F_RUN
+        jnz     .runs
         mov     al,[V(flags)]
         and     al,F_RUN | F_16
         xor     al,F_RUN | F_16
         jnz     .ret
-        test    byte [V(vbits)],V_MASK
+.runs:  test    byte [V(vbits)],V_MASK
         jnz     ch8_mask
         mov     al,[V(vbits)]
         and     al,V_NEW | V_LIVE
@@ -1615,16 +1853,16 @@ vmask_changed:
 
 ; --- the interrupts ----------------------------------------------------------
 
-; AL = the kinds of the chip's interrupts that are pending: bit 0 8-bit,
-; bit 1 16-bit. The counter's (+Ch bit 0) is the transfer's kind, the
-; processor's (bit 2: F2h, the firmware's transfers, MIDI input) the
-; 8-bit one unless F3h asked for it
+; AL = the kinds of Audio 1's interrupts that are pending, AH Audio 2's:
+; bit 0 8-bit, bit 1 16-bit. Audio 1's counter (+Ch bit 0) is its
+; transfer's kind, its processor's (bit 2: F2h, the firmware's transfers,
+; MIDI input) the 8-bit one unless F3h asked for it; Audio 2's latch (7Ah
+; bit 7) is the 16-bit one
 irq_src:
         push    dx
         mov     al,0x0C
         call    port_of
         call    chip_in
-        pop     dx
         mov     ah,al
         mov     al,0
         test    ah,0x01
@@ -1634,31 +1872,54 @@ irq_src:
         jz      .proc
         inc     ax
 .proc:  test    ah,0x04
-        jz      .ret
+        jz      .a2
         mov     ah,1
         test    byte [V(state)],S_T16
         jz      .or
         inc     ah
 .or:    or      al,ah
-.ret:   ret
+.a2:    mov     dl,al
+        mov     dh,0
+        cmp     byte [V(dma2)],4
+        jae     .ret
+        mov     ah,0x7A
+        call    mix_read
+        shl     al,1                    ; the latch, into CF
+        jnc     .ret
+        mov     dh,2
+.ret:   mov     ax,dx
+        pop     dx
+        ret
 
-; the acknowledge of the kind CL (1 8-bit, 2 16-bit): the chip's interrupt,
-; when one of that kind is pending (a read of +Eh acknowledges them all).
-; A queued block's turn has come: the auto-initialize ends with it
+; the acknowledge of the kind CL (1 8-bit, 2 16-bit): Audio 1's interrupt
+; when one of that kind is pending (a read of +Eh acknowledges them all),
+; and Audio 2's for the 16-bit kind (7Ah bit 7 cleared). A queued block's
+; turn has come: the auto-initialize ends with it
 ack:
         call    irq_src
+        push    ax
         test    al,cl
-        jz      .ret
+        jz      .a2
         push    dx
         mov     al,0x0E
         call    port_of
         call    chip_in
         pop     dx
         btr     word [V(flags)],F_LAST_BIT
-        jnc     .ret
+        jnc     .a2
         and     byte [V(flags)],~F_AUTO & 0xFF
         mov     ax,0xB8FB
-        jmp     reg_and
+        call    reg_and
+.a2:    pop     ax
+        test    ah,cl
+        jz      .ret
+        mov     ax,0x7A7F
+        call    mix_and
+        btr     word [V(flags2)],F_LAST_BIT
+        jnc     .ret
+        and     byte [V(flags2)],~F_AUTO & 0xFF
+        mov     ax,0x78EF
+        jmp     mix_and
 .ret:   ret
 
 ; --- the mixer -------------------------------------------------------------
@@ -1768,7 +2029,8 @@ mix_in:
         cmp     cl,0x82
         jne     .chip
         call    irq_src                 ; 82h: 20h, the interrupts that are
-        or      al,0x20                 ; pending, and the MPU-401's
+        or      al,ah                   ; pending, and the MPU-401's
+        or      al,0x20
         mov     dx,[V(cfg)]             ; (Config_Base+6 bit 3)
         or      dx,dx
         jz      .out
@@ -1821,15 +2083,19 @@ mix_mask:       times 11 db 0xF8        ; 30h-3Ah
 
 ; the chip's level registers for the view's pairs: the register, the
 ; view's offset of the left level, the output switch bits that gate the
-; left and the right (none for voice and MIDI); the mic's is mono
-pairs:          db 0x14, 2, 0, 0        ; voice
+; left and the right (none for voice and MIDI); the mic's is mono. The
+; voice is both DACs': Audio 2's comes last, apart from the levels the
+; view takes from the chip (mix_fresh)
+pairs:          db 0x14, 2, 0, 0        ; voice (Audio 1)
                 db 0x36, 4, 0, 0        ; MIDI (FM)
                 db 0x38, 6, 0x04, 0x02  ; CD (AuxA)
                 db 0x3E, 8, 0x10, 0x08  ; line
                 db 0x1A, 10, 0x01, 0x01 ; mic
+                db 0x7C, 2, 0, 0        ; voice (Audio 2)
 
 ; the chip's level for the Sound Blaster 16's register CL, from the view:
-; master left and right to 60h and 62h (6 bits), the pairs, the PC
+; master left and right to 60h and 62h (6 bits), the pairs, the voice to
+; both DACs' (14h, and 7Ch when Audio 2 plays the game's sound), the PC
 ; speaker to 3Ch (3 bits); the output switches gate CD, line and the mic,
 ; the input switches pick the record source of 1Ch
 mix_apply:
@@ -1859,6 +2125,12 @@ mix_apply:
 .pair:  sub     al,2                    ; 32h-3Ah: the pair
         shr     al,1
         call    pair_out
+        or      al,al
+        jnz     .out
+        cmp     byte [V(dma2)],4
+        jae     .out
+        mov     al,5                    ; the voice: Audio 2's too, when it
+        call    pair_out                ; plays the game's sound
         jmp     short .out
 .switches:                              ; CD, line and the mic again
         mov     al,2
@@ -1973,9 +2245,10 @@ RESIDENT_PARAS  equ (resident_end - $$ + 0x100 + 15) >> 4   ; with the PSP
 host_area:
 
 ; the options on the command line (/S single transfers, /H5 /H6 /H7 /H0 the
-; 16-bit channel, /A220 the base, /F0 /F1 the DACs' filters off or on, /O0
-; /O1 Audio 2's 4x oversampling off or on) and BLASTER's A, I, D and H; CF
-; set for /? or an unknown option
+; 16-bit channel, /20 /21 /23 Audio 2's channel, /2- no Audio 2, /A220 the
+; base, /F0 /F1 the DACs' filters off or on, /O0 /O1 Audio 2's 4x
+; oversampling off or on) and BLASTER's A, I, D and H; CF set for /? or an
+; unknown option
 parse_options:
         call    blaster
         mov     si,0x81
@@ -2004,7 +2277,24 @@ parse_options:
         je      .f
         cmp     al,'O'
         je      .o
+        cmp     al,'2' & ~0x20
+        je      .two
         jmp     .bad
+.two:   test    cx,cx                   ; /2n: Audio 2's channel, 0, 1 or 3,
+        jz      .bad                    ; and /2- none
+        lodsb
+        dec     cx
+        mov     ah,4
+        cmp     al,'-'
+        je      .set2
+        sub     al,'0'
+        mov     ah,al
+        cmp     al,3
+        ja      .bad
+        cmp     al,2
+        je      .bad
+.set2:  mov     [want2],ah
+        jmp     .next
 .f:     mov     ah,0x0C                 ; mixer 71h bits 3 and 2: the filters
         mov     bl,'0'                  ; bypassed, set for /F0
         jmp     short .stage
@@ -2389,8 +2679,18 @@ mix_fresh:
         popa
         ret
 
-; AL = PnP register BL of logical device 1, through the config port
+; AL = PnP register BL of logical device 1 (pnp_read), and the register =
+; AL (pnp_write), through the config port; DX = its data port
 pnp_read:
+        call    pnp_at
+        in      al,dx
+        ret
+pnp_write:
+        call    pnp_at
+        out     dx,al
+        ret
+pnp_at:
+        push    ax
         mov     dx,[cfg]
         mov     al,0x07
         out     dx,al
@@ -2401,11 +2701,11 @@ pnp_read:
         mov     al,bl
         out     dx,al
         inc     dx
-        in      al,dx
+        pop     ax
         ret
 
 ; the card's IRQ and 8-bit channel from its PnP registers, where the
-; config port was found, else BLASTER's; then the mixer's view
+; config port was found, else BLASTER's, and Audio 2; then the mixer's view
 setup_card:
         cmp     word [cfg],0
         je      .view
@@ -2417,9 +2717,12 @@ setup_card:
         call    pnp_read
         and     al,0x07
         cmp     al,4                    ; 4 = none
-        jae     .view
+        jae     .a2
         mov     [dma8],al
-.view:  movzx   bx,byte [irq]           ; mixer 80h and 81h's 8-bit channel
+.a2:    call    audio2_setup
+.view:  mov     al,[dma8]               ; the 16-bit channel goes to Audio
+        mov     [mchan],al              ; 1's until Audio 2 plays it
+        movzx   bx,byte [irq]           ; mixer 80h and 81h's 8-bit channel
         and     bl,0x0F
         mov     al,[irq_bit+bx]
         mov     [mix80],al
@@ -2434,8 +2737,75 @@ setup_card:
         and     al,~0x02 & 0xFF
         call    mix_write
         call    mix_defaults            ; the view as a Sound Blaster 16 shows
-        jmp     mix_fresh               ; the levels it has: the chip's, the
-                                        ; rest as after a reset
+        call    mix_fresh               ; the levels it has: the chip's, the
+        cmp     byte [dma2],4           ; rest as after a reset; Audio 2's
+        jae     .out                    ; volume the voice's
+        mov     al,5
+        jmp     pair_out
+.out:   ret
+
+; Audio 2 for the 16-bit playback (dma2): on the channel /2 gives it, when
+; one of the card's four DMA pin pairs is wired to that channel (card
+; registers 23h and 24h, a channel in each nibble), else on the card's
+; (PnP 75h), if it is an 8-bit channel other than Audio 1's; its interrupt
+; on the card's (PnP 72h = 70h) and unmasked (Config_Base+7 bit 1, which a
+; DOS program may have cleared, DS p.18), and its own rate (71h bit 1).
+; /2- leaves Audio 2 alone
+audio2_setup:
+        mov     al,[want2]
+        cmp     al,4
+        je      .out
+        ja      .card
+        mov     bl,0x23
+        call    .wired
+        je      .move
+        mov     bl,0x24
+        call    .wired
+        je      .move
+        mov     dx,msg_unwired
+        call    print
+        jmp     short .card
+.move:  mov     bl,0x75
+        call    pnp_write
+.card:  mov     bl,0x75
+        call    pnp_read
+        and     al,0x07
+        cmp     al,3
+        ja      .out                    ; none (4), or a 16-bit channel
+        cmp     al,2
+        je      .out
+        cmp     al,[dma8]
+        je      .out
+        mov     [dma2],al
+        mov     bl,0x72
+        call    pnp_read
+        and     al,0x0F
+        cmp     al,[irq]
+        je      .irq
+        mov     al,[irq]
+        call    pnp_write
+.irq:   mov     dx,[cfg]
+        add     dx,byte 7
+        in      al,dx
+        or      al,0x02
+        out     dx,al
+        or      byte [set71],0x02
+        mov     ax,0x7800               ; stopped, its interrupt off
+        call    mix_write
+        mov     ax,0x7A00
+        jmp     mix_write
+.out:   ret
+; ZF set if a nibble of card register BL is channel AL, AL kept
+.wired: mov     ah,al
+        call    pnp_read
+        mov     bh,al
+        and     al,0x0F
+        cmp     al,ah
+        je      .w
+        shr     bh,4
+        cmp     bh,ah
+.w:     mov     al,ah
+        ret
 
 ; what was found, and the BLASTER to set
 report:
@@ -2458,6 +2828,17 @@ report:
         movzx   ax,byte [dma16]
         call    print_dec
         mov     dx,msg_through
+        movzx   ax,byte [dma2]
+        cmp     al,4
+        jae     .one
+        mov     dx,msg_audio2           ; on Audio 2's channel
+        call    print
+        call    print_dec
+        jmp     short .blaster
+.one:   call    print                   ; on Audio 1's, and why
+        cmp     byte [want2],4
+        je      .blaster
+        mov     dx,msg_no_audio2
         call    print
 .blaster:
         mov     dx,msg_blaster
@@ -3012,6 +3393,8 @@ dma_trapped:
         mov     al,[dma16]
         mov     [vchan+bx],al
         ret
+want2:          db 0xFF         ; /2's channel for Audio 2, 4 for /2-,
+                                ; FFh for the card's
 irq:            db 5            ; the card's IRQ, and its bit in mixer 80h
 irq_bit:        db 0xF0, 0xF0, 0xF1, 0xF0, 0xF0, 0xF2, 0xF0, 0xF4
                 db 0xF0, 0xF1, 0xF8, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0
@@ -3031,9 +3414,11 @@ emm_device2:    db "EMMQXXX0", 0
 blaster_name:   db "BLASTER=", 0
 
 banner:         db "esssb16 1.0: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
-usage:          db "usage: esssb16 [/A220] [/H5|/H6|/H7|/H0] [/S] [/F0|/F1] [/O0|/O1]", 13, 10
+usage:          db "usage: esssb16 [/A220] [/H5|/H6|/H7|/H0] [/20|/21|/23|/2-] [/S] [/F0|/F1]", 13, 10
+                db "       [/O0|/O1]", 13, 10
                 db "  /A  the card's base, else BLASTER's A (220)", 13, 10
                 db "  /H  the game's 16-bit DMA channel, else BLASTER's H (5); 0: none", 13, 10
+                db "  /2  Audio 2's DMA channel, for 16-bit sound, else the card's; -: none", 13, 10
                 db "  /S  single DMA transfers (ESS's Single Mode DMA)", 13, 10
                 db "  /F  the DACs' filters off (0) or on (1), else as they are", 13, 10
                 db "  /O  Audio 2's 4x oversampling off (0) or on (1), else as it is", 13, 10
@@ -3048,6 +3433,9 @@ msg_irq:        db "h, IRQ $"
 msg_dma:        db ", DMA $"
 msg_and:        db ", the game's DMA $"
 msg_through:    db " through it$"
+msg_audio2:     db " on Audio 2's DMA $"
+msg_no_audio2:  db 13, 10, "16-bit sound plays on Audio 1: Audio 2 has no 8-bit DMA channel of its own (/2)$"
+msg_unwired:    db "Audio 2 can't have that DMA channel: no DMA pin of the card is wired to it", 13, 10, "$"
 msg_blaster:    db 13, 10, "set BLASTER=A$"
 msg_i:          db " I$"
 msg_d:          db " D$"

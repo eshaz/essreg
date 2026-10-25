@@ -25,6 +25,7 @@ WINDOWS = test_vxddos.DosMixerTest.WINDOWS
 if HAVE_UNICORN:
     from vxdemu import (VM_SYS, VM_DOS, VM_DOS2, ADI_FM_OWNER,  # noqa: E402
                         ADI_DSP_OWNER, ADI_MPU_OWNER)
+    from sbfronts import VxDCard, play16  # noqa: E402
 
 VXD, DRV = "ES1869.VXD", "ES1869.DRV"
 KEYS = {                            # key: its bit in ESSREG_Opts
@@ -45,10 +46,12 @@ KEYS = {                            # key: its bit in ESSREG_Opts
     (VXD, "SoundBlaster16"): 0x4000,
 }
 DEFAULT, READ = 0x48FF, 0x8000
+# the keys without a bit: the Sound Blaster 16's channel and Audio 2
+OTHER = ((VXD, "SoundBlaster16DMA"), (VXD, "SoundBlaster16Audio2"))
 # every change off: ESS's driver
 ESS = {key: "0" for key in KEYS}
 ESS.update({(DRV, "Audio2Oversampling"): "1", (DRV, "Audio2Filter"): "1",
-            (DRV, "Audio1Filter"): "1"})
+            (DRV, "Audio1Filter"): "1", (VXD, "SoundBlaster16Audio2"): "0"})
 WIN_AUDIO = 0x220
 
 
@@ -129,7 +132,7 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         m = self.machine()
         m.start({(VXD, "VirtualFM"): "0"})
         calls = m.emu.services.count(0x000100B3)
-        self.assertEqual(calls, len(KEYS) + 1)  # and SoundBlaster16DMA
+        self.assertEqual(calls, len(KEYS) + len(OTHER))
         m.emu.ini = {}                          # changed while Windows runs
         opl3(m, VM_DOS)
         m.api(VM_SYS, 0x0400)
@@ -142,7 +145,7 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         m.start({})
         out, cf = m.api(VM_SYS, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0116)
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0117)
         # DrqLatch and the DirectSound lock are off
         self.assertEqual(out["EBX"] & 0xFFFF, 0x9FFF)
         self.assertEqual(out["ECX"] & 0xFFFF, DEFAULT | READ)
@@ -288,6 +291,33 @@ class EachSettingTest(VxDBuilds, unittest.TestCase):
                                  channel)
         m = self.machine_with({})
         self.assertEqual(m.emu.read32(m.syms["ESSREG_S16_Chan"]), 5)
+
+    def test_sound_blaster_16_audio2(self):
+        # on, the default: a game's 16-bit sound plays on Audio 2, on its
+        # 8-bit channel; 0: on Audio 1, one transfer at a time, as before
+        for value, on in (("1", True), ("2", True), ("0", False),
+                          ("", False), ("no", False)):
+            with self.subTest(value=value):
+                m = self.machine_with({(VXD, "SoundBlaster16Audio2"): value})
+                self.assertEqual(
+                    m.emu.read32(m.syms["ESSREG_S16_Audio2"]) != 0, on)
+        m = self.machine_with({})
+        self.assertEqual(m.emu.read32(m.syms["ESSREG_S16_Audio2"]), 1)
+        for ini, audio2 in (({}, True),
+                            ({(VXD, "SoundBlaster16Audio2"): "0"}, False)):
+            with self.subTest(ini=ini):
+                c = VxDCard(dma2=3, ini=ini)
+                self.assertTrue(sbgame.reset(c))
+                play16(c)
+                self.assertEqual(c.audio2, audio2)
+                self.assertEqual(c.chip.mixer[0x78] & 0x03,
+                                 0x03 if audio2 else 0x00)
+                self.assertEqual(c.chip.ctrl[0xB8] & 0x01,
+                                 0x00 if audio2 else 0x01)
+                ch = 3 if audio2 else 1
+                self.assertEqual(c.chip.dma[ch]["mask"], False)
+                self.assertEqual(c.chip.dma[ch]["addr"], 0x4680)
+                self.assertEqual(c.errors, [])
 
     def test_reset_dos_fm(self):
         m = self.machine_with({(VXD, "ResetDosFM"): "0"})

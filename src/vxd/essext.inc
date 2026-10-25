@@ -98,7 +98,15 @@ EX_S16_Ctrl             equ 0x1E8       ; 32 bytes: the chip's registers
                                         ; read them
 EX_S16_Known            equ 0x208       ; dword: bit n set while EX_S16_Ctrl+n
                                         ; holds the chip's A0h+n
-ESSREG_ADI_SIZE         equ 0x20C       ; ESS allocated E9h
+EX_S16_Flags2           equ 0x20C       ; byte: Audio 2's transfer, S16_RUN,
+                                        ; S16_AUTO, S16_LAST and S16_PAUSE
+EX_S16_A2               equ 0x20D       ; byte: Audio 2's channel while the
+                                        ; front plays 16-bit sound there, 4
+                                        ; for none
+EX_S16_To               equ 0x20E       ; byte: the channel the 16-bit
+                                        ; channel goes to, 0 Audio 1's, 1
+                                        ; Audio 2's
+ESSREG_ADI_SIZE         equ 0x210       ; ESS allocated E9h
 
 VSB_RESET               equ 0x01        ; the reset port is at 1
 VSB_SPEAKER             equ 0x02        ; the speaker is on (D1h)
@@ -116,7 +124,9 @@ VSB2_16                 equ 0x04        ; its transfer is 16-bit (mixer 82h)
 VSB2_STEREO             equ 0x08        ; and stereo (two samples a frame)
 
 ; the Sound Blaster 16 front (EX_S16_Flags), as esssb16.com's F_*; S16_AUTO
-; and S16_16 are the bits of ESSREG_S16_Xfer's BL
+; and S16_16 are the bits of ESSREG_S16_Xfer's BL. Audio 2's transfer has
+; S16_RUN, S16_AUTO, S16_LAST and S16_PAUSE in EX_S16_Flags2, and is always
+; 16-bit
 S16_ESS                 equ 0x01        ; the program knows the chip (C6h and a
                                         ; register): every access is the chip's
 S16_EXT                 equ 0x02        ; the chip is in Extended mode, its DAC on

@@ -37,7 +37,7 @@ IO_DIRECT, IO_HDPMI, IO_QPI, IO_CHAIN = 0, 1, 2, 3
 BASE = 0x220
 SB_PORTS = {BASE + o for o in (4, 5, 6, 0xA, 0xC, 0xE, 0xF)}
 DMA5_PORTS = {0xC4, 0xC6, 0x8B, 0xD4, 0xD6, 0xD8, 0xDA, 0xDC, 0xDE}
-OLD_PARAS = 248         # the resident part before the Sound Blaster 16 model
+MAX_PARAS = 280         # the resident part with the PSP, Audio 2's engine in
 # the 8237's mode register: demand or single transfers, auto-initialize,
 # from memory (playback) or into it (recording)
 DEMAND, SINGLE, AUTO, PLAY, RECORD = 0x00, 0x40, 0x10, 0x08, 0x04
@@ -81,6 +81,24 @@ def card(path="qpi", **kw):
     c.chip.commands, c.chip.log, c.chip.dma_log = [], [], []
     c.chip.resets = 0           # the installer's own reset of the chip
     return c
+
+
+def deep_calls(c):
+    """the front's deepest calls with Audio 2 playing: the chip's own reset
+    under a firmware command, with Audio 2's registers kept over it, and
+    each of Audio 2's commands and acknowledges"""
+    play16(c)
+    mixer(c, 0x00, 0x00)
+    program_dma(c, 1, 0x60000, 256, auto=False)
+    write(c, 0xC0, 0x00, 0xFF, 0x00)
+    c.wait(2000)
+    write(c, 0x10, 0x80)
+    write(c, 0xC6, 0x00, 0xFF, 0x03)
+    mixer(c, 0x82)
+    c.inp(BASE + 0x0F)
+    write(c, 0xD5, 0xD6, 0xD9)
+    write(c, 0xE3)
+    read_all(c)
 
 
 def poison_stack(m):
@@ -130,11 +148,11 @@ class BuildTest(unittest.TestCase):
                              "tools/build_esssb16.py")
 
     def test_small(self):
-        """the resident part, with the PSP, is no larger than before the
-        front answered as the Sound Blaster 16 model does"""
+        """the resident part, with the PSP, stays within its 280
+        paragraphs"""
         image, syms = build()
         self.assertLess(len(image), 8192)
-        self.assertLessEqual(paragraphs(syms), OLD_PARAS)
+        self.assertLessEqual(paragraphs(syms), MAX_PARAS)
         self.assertEqual(syms["RESIDENT_PARAS"], paragraphs(syms))
         self.assertLess(syms["resident_end"], syms["install"] + 1)
 
@@ -319,7 +337,7 @@ class InstallTest(unittest.TestCase):
 
     def test_usage(self):
         for tail in ("/X", "/?", "-h9", "/H4", "/A", "/F", "/F2", "/O",
-                     "/o5"):
+                     "/o5", "/2", "/22", "/24", "/2x"):
             m = machine()
             m.install(tail=tail, qpiemu=True)
             self.assertEqual(m.exit, ("exit", E_USAGE), tail)
@@ -394,6 +412,65 @@ class InstallTest(unittest.TestCase):
                       m.output)
         cfg = m.chip.cfg
         self.assertEqual([e for e in m.chip.log if e[1] in (cfg, cfg + 1)], [])
+
+    def audio2(self, dma2, tail="", irq2=0, pins=(0x10, 0x53)):
+        """the program installed on a card with Audio 2 on channel dma2,
+        its interrupt on irq2 and masked (Config_Base+7 bit 1 clear), its
+        DMA pins wired as card registers 23h and 24h say"""
+        chip = Chip()
+        chip.pnp.update({(1, 0x75): dma2, (1, 0x72): irq2,
+                         (None, 0x23): pins[0], (None, 0x24): pins[1]})
+        chip.cfg_ports[7] = 0xFD
+        chip.mixer[0x14] = 0x9A
+        m = machine(chip)
+        m.install(tail=tail, qpiemu=True)
+        self.assertEqual(m.exit[0], "tsr", m.output)
+        return m
+
+    def test_audio2(self):
+        """Audio 2 on an 8-bit channel plays the 16-bit sound: its
+        interrupt goes to the card's, unmasked, it runs at its own rate
+        (71h bit 1), stopped with its interrupt off, at the voice's
+        volume"""
+        m = self.audio2(3)
+        self.assertEqual(m.data8("dma2"), 3)
+        self.assertEqual(m.chip.pnp[(1, 0x72)], 5)
+        self.assertEqual(m.chip.cfg_ports[7], 0xFF)
+        mix = m.chip.mixer
+        self.assertEqual((mix[0x71] & 0x22, mix[0x78], mix[0x7A], mix[0x7C]),
+                         (0x02, 0x00, 0x00, 0x9A))
+        self.assertIn("ES1869 at 220h, IRQ 5, DMA 1, the game's DMA 5 on "
+                      "Audio 2's DMA 3\r\n", m.output)
+        self.assertIn("set BLASTER=A220 I5 D1 H5 P330 T6", m.output)
+
+    def test_audio2_not_its_own(self):
+        """Audio 2 on a 16-bit channel, on Audio 1's, or on none: the
+        16-bit sound plays on Audio 1, and the card is left as it is"""
+        for dma2 in (5, 1, 4):
+            m = self.audio2(dma2)
+            self.assertEqual(m.data8("dma2"), 4, dma2)
+            self.assertEqual(m.chip.pnp[(1, 0x72)], 0, dma2)
+            self.assertEqual(m.chip.cfg_ports[7], 0xFD, dma2)
+            self.assertEqual(m.chip.mixer[0x71], 0, dma2)
+            self.assertIn("the game's DMA 5 through it\r\n16-bit sound plays "
+                          "on Audio 1", m.output)
+
+    def test_audio2_moved(self):
+        """/23 puts Audio 2 on channel 3 when a DMA pin of the card is
+        wired to it, else says that it can't"""
+        m = self.audio2(5, "/23")
+        self.assertEqual((m.chip.pnp[(1, 0x75)], m.data8("dma2")), (3, 3))
+        m = self.audio2(5, "/20", pins=(0x11, 0x53))
+        self.assertEqual((m.chip.pnp[(1, 0x75)], m.data8("dma2")), (5, 4))
+        self.assertIn("Audio 2 can't have that DMA channel", m.output)
+
+    def test_audio2_none(self):
+        """/2-: no Audio 2, though it has a channel"""
+        m = self.audio2(3, "/2-")
+        self.assertEqual(m.data8("dma2"), 4)
+        self.assertEqual(m.chip.pnp[(1, 0x72)], 0)
+        self.assertEqual(m.chip.cfg_ports[7], 0xFD)
+        self.assertIn("the game's DMA 5 through it\r\nset BLASTER", m.output)
 
     def test_no_16bit_channel(self):
         """/H0, or BLASTER's H equal to its D: 16-bit sound on the 8-bit
@@ -622,6 +699,16 @@ class FrontTest(unittest.TestCase):
         self.assertGreater(depth, 0)
         self.assertLessEqual(depth, top - lo - 16)  # 16 bytes to spare
 
+    def test_stack_audio2(self):
+        """the same with Audio 2 playing the 16-bit sound"""
+        c = self.card(dma2=3)
+        m = c.m
+        lo, top = m.addr("stack"), m.addr("stack_top")
+        poison_stack(m)
+        deep_calls(c)
+        self.assertLessEqual(stack_depth(m), top - lo - 16)
+        self.assertEqual(c.chip.violations, [])
+
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
 class QPIFrontTest(FrontTest):
@@ -746,6 +833,16 @@ class HDPMITest(unittest.TestCase):
         depth = stack_depth(m)
         self.assertGreater(depth, 0)
         self.assertLessEqual(depth, top - lo - 16)
+
+    def test_stack_audio2(self):
+        """the deepest calls with Audio 2 playing, on HDPMI32i's frame"""
+        c = card("pm", dma2=3)
+        m = c.m
+        lo, top = m.addr("stack"), m.addr("stack_top")
+        poison_stack(m)
+        deep_calls(c)
+        self.assertLessEqual(stack_depth(m), top - lo - 16)
+        self.assertEqual(c.chip.violations, [])
 
 
 if __name__ == "__main__":

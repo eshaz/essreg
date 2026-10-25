@@ -83,15 +83,17 @@ The Python tests, in `tests/test_*.py`, cover the following:
   model of the chip's audio (`tests/esschip.py`): `esssb16.com` under
   QPIEMU, EMM386 and HDPMI32i, and the VxD in a DOS box, with a model of
   VDMAD (`tests/sbfronts.py`). What the game saw, the DSP's answers, the
-  mixer, the interrupts, the DMA counts, the frames the DAC played and what
-  its recordings put in memory, has to be the same, and the chip model must
-  see no use the data sheet leaves undefined. `test_esschip` checks the chip
-  model itself.
+  mixer, the interrupts, the DMA counts, the frames each engine played and
+  what its recordings put in memory, has to be the same, and the chip model
+  must see no use the data sheet leaves undefined. With Audio 2 on an 8-bit
+  channel the 16-bit sound plays on Audio 2, and the scenes of an 8-bit and
+  a 16-bit transfer at once run too; with Audio 2 on a 16-bit channel
+  everything plays on Audio 1. `test_esschip` checks the chip model itself.
 * `test_sb16front` checks what both fronts send the chip: the Extended mode
-  registers of each transfer with ES1869.DRV's rates, the registers a
-  transfer like the last leaves alone, the 16-bit channel carried over, the
-  chip's Compatibility mode for the firmware's commands, and the chip's
-  mixer behind the Sound Blaster 16's view.
+  registers of each transfer with ES1869.DRV's rates, on Audio 1 and on
+  Audio 2, the registers a transfer like the last leaves alone, the 16-bit
+  channel carried over, the chip's Compatibility mode for the firmware's
+  commands, and the chip's mixer behind the Sound Blaster 16's view.
 * Other tests run `esfmpat` on copies of `ESFM.DRV` and check that the
   generated documentation is current.
 
@@ -303,9 +305,10 @@ and stop at the first surprise. Each step says what you should see.
 1. Install `esssb16` as the [README](../README.md#installing-esssb16) says:
    in real DOS with `EMM386.EXE` loaded
    (`DEVICE=C:\WINDOWS\EMM386.EXE NOEMS` or `RAM` in `CONFIG.SYS`), run
-   `LH ESSSB16`. It prints the card's base, IRQ and channel, the `BLASTER`
+   `LH ESSSB16`. It prints the card's base, IRQ and channel, the game's
+   16-bit channel `on Audio 2's DMA` and Audio 2's channel, the `BLASTER`
    line to set, and `traps: EMM386 4.95 for real-mode games` (4.49 with
-   MS-DOS 6.22). `MEM /C` shows it in upper memory, 3.9 KB. Run it again:
+   MS-DOS 6.22). `MEM /C` shows it in upper memory, 4.4 KB. Run it again:
    "already loaded". In a Windows DOS box it refuses with "not for a Windows
    DOS box", and without a memory manager with "no EMM386: no EMMXXXX0 or
    EMMQXXX0 device" and "no port traps". When EMM386 is there and it still
@@ -324,7 +327,7 @@ and stop at the first surprise. Each step says what you should see.
    and try it once more with `/S`.
 4. With `LH HDPMI32I -r` before `esssb16` (`HDPMI32i.EXE` from
    `third_party\hdpmi32i`, HX's release), `esssb16` adds
-   `, HDPMI32i for protected-mode games`, and `MEM /C` shows it with 4.4 KB.
+   `, HDPMI32i for protected-mode games`, and `MEM /C` shows it with 4.9 KB.
    A DOS/4GW game set to the Sound Blaster 16 (Descent, Duke Nukem 3D,
    Quake) plays 16-bit sound. Without HDPMI32i the same game plays 8-bit
    sound, or finds no Sound Blaster 16, as before `esssb16`.
@@ -349,6 +352,12 @@ and stop at the first surprise. Each step says what you should see.
    and 2 clear with `/F1` and set with `/F0` once the game has started a
    transfer. `/O1` and `/O0` set and clear bit 4, Audio 2's 4x oversampling,
    the same way.
+9. 16-bit sound plays on Audio 2, and 8-bit sound on Audio 1, so a game that
+   plays 8-bit effects over 16-bit music plays both. Load `ESSSB16 /2-` and
+   play it again: the 16-bit sound plays the same on Audio 1, and the sound
+   that starts last ends the other. If the card gives Audio 2 no 8-bit
+   channel, `esssb16` says so as it loads; `/21` or `/23` then gives it one,
+   if a DMA pin of the card is wired to it.
 
 ### E0. Installing with essinst
 
@@ -377,7 +386,7 @@ driver in a folder of their own.
    restart Windows.
 2. Try Windows sounds, MIDI, a DirectSound game and a DOS game in a window.
    They all work as before.
-3. Start essctl. Its title bar says "VxD register API 1.16", and the owners
+3. Start essctl. Its title bar says "VxD register API 1.17", and the owners
    line at the bottom right shows who owns the DSP, FM and the MPU.
 4. While a DOS game plays, change *Audio 2 volume* or *Master volume* in
    essctl. The change applies at once, and the game keeps its sound. This is
@@ -456,6 +465,11 @@ Sound Blaster sound, and a second game that uses the Sound Blaster too.
    * A game or tool with an ESS AudioDrive setting that identifies the chip
      with E7h finds it only with `SoundBlaster16=0`; with 1 it finds a Sound
      Blaster 16, and the game's Sound Blaster 16 setting plays 16-bit sound.
+   * The 16-bit sound plays on Audio 2: in Expert mode essctl shows mixer
+     78h, *Audio 2 control 1*, at 93h (13h with *Single Mode DMA*) while it
+     plays, and 8-bit sound plays on Audio 1 at the same time. With
+     `SoundBlaster16Audio2=0` and Windows restarted, the same game plays its
+     16-bit sound on Audio 1, and 78h stays 00h.
 10. Note anything that differs, and in which game.
 
 ### E3. The Audio 2 DAC

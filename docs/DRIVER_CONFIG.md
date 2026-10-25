@@ -675,6 +675,7 @@ DosFMDelay=0
 DirectSoundLock=0
 DrqLatch=0
 SoundBlaster16=0
+SoundBlaster16Audio2=0
 
 [ES1869.DRV]
 Audio1Device=0
@@ -747,9 +748,10 @@ ESS's driver:
   0, the latch stays as the card's PnP data set it.
 * **SoundBlaster16** (default 1). A DOS program that takes the Sound Blaster
   finds a Sound Blaster 16 in front of the chip, DSP version 4.05 with the
-  CT1745 mixer ([SB16.md](SB16.md)). The VxD plays every transfer, 8-bit or
-  16-bit, in the chip's Extended mode on Audio 1, and turns the mixer
-  registers into the chip's volumes
+  CT1745 mixer ([SB16.md](SB16.md)). The VxD plays every transfer in the
+  chip's Extended mode, the 8-bit ones and the recordings on Audio 1 and the
+  16-bit playback on Audio 2, and turns the mixer registers into the chip's
+  volumes
   ([VXD_INTERNALS.md](VXD_INTERNALS.md#a-sound-blaster-16-for-dos-programs)).
   A program that uses Extended mode itself gets the chip as it is, and one
   that asks for the chip's identification (E7h) gets no answer, as from a
@@ -759,11 +761,18 @@ ESS's driver:
 * **SoundBlaster16DMA** (default 5). The Sound Blaster 16's 16-bit DMA
   channel, 5, 6 or 7, the `H5` of `BLASTER`. When it is Audio 2's channel,
   ESS's handler for that channel passes the program's programming on, else
-  the VxD takes the channel from VDMAD. Either way the transfer runs on
-  Audio 1's 8-bit channel, two bytes a sample. With 0, the front offers no
-  16-bit channel: a program that programs one plays nothing, and one that
-  plays 16-bit sound through the 8-bit channel, as the Sound Blaster 16
-  allows, plays.
+  the VxD takes the channel from VDMAD. Either way the transfer runs on an
+  8-bit channel, Audio 2's or Audio 1's, two bytes a sample. With 0, the
+  front offers no 16-bit channel: a program that programs one plays nothing,
+  and one that plays 16-bit sound through the 8-bit channel, as the Sound
+  Blaster 16 allows, plays on Audio 1.
+* **SoundBlaster16Audio2** (default 1). The front plays a program's 16-bit
+  sound on Audio 2, so that it plays while the 8-bit sound plays on Audio 1,
+  as on a Sound Blaster 16. This takes Audio 2 on an 8-bit DMA channel of
+  its own, 0, 1 or 3 and not Audio 1's, as the card's resources give it; on
+  a 16-bit channel, or none, the key changes nothing. With 0, the 16-bit
+  sound plays on Audio 1, and a transfer of one kind ends the other kind's,
+  one at a time, as with version 1.16. It needs `SoundBlaster16=1`.
 
 ### 6.2 [ES1869.DRV]
 

@@ -11,10 +11,15 @@ DSP's commands as the data sheet lists them (DS p.72-74) and these engines:
   A4h/A5h with its interrupt (DS p.48-50, p.68-70);
 * Audio 1 in the firmware's Compatibility mode: 14h, 1Ch, 48h, 90h, 91h,
   the ADC commands, ADPCM, silence, the direct DAC and MIDI;
-* Audio 2, through mixer registers 70h-7Ch (DS p.51-52, p.64-65).
+* Audio 2, through mixer registers 70h-7Ch (DS p.51-52, p.64-65), heard
+  while its volume (7Ch) isn't 0.
 Around them it models the interrupt bits of Audio_Base+Ch and
-Config_Base+6, the acknowledge at +Eh, the resets of +6, and time. A DMA
-engine moves a byte a DMA cycle on its 8-bit channel (dma8237).
+Config_Base+6, the acknowledge at +Eh, the resets of +6, which clear 7Ah
+and 7Ch (DS p.51, p.65), and time. A DMA engine moves a byte a DMA cycle
+on its 8-bit channel (dma8237); on a 16-bit channel the cycle moves a
+word, of which Audio 2 takes the low byte, as ESS's drivers have it
+(docs/VXD_INTERNALS.md). What both DACs play goes into `heard` as well,
+in order.
 
 What the data sheet leaves undefined is not guessed at: it goes into
 `violations`. That covers a Compatibility transfer or pause with the
@@ -128,6 +133,8 @@ class ES1869Audio:
         self.ctrl.update({0xA1: 0x4E, 0xA2: 0xF4, 0xA4: 0x00, 0xA5: 0xF8,
                           0xB1: 0x80 | irq_bits(irq),
                           0xB2: 0x80 | drq_bits(dma1)})
+        # Audio 1's volume after power-on (DS p.58); Audio 2's (7Ch) is 0
+        self.mixer[0x14] = 0x88
         self.a1 = Stream(FIFO1)
         self.fw = None              # the firmware's transfer
         self.fw_buf = Stream(FIFO_FW)
@@ -146,6 +153,8 @@ class ES1869Audio:
         self.played = []            # Audio 1's DAC: frames heard
         self.muted = []             # Audio 1 frames with D1h off
         self.played2 = []           # Audio 2's DAC
+        self.muted2 = []            # Audio 2 frames with 7Ch at 0
+        self.heard = []             # what both DACs played, in order
         self.loads = []             # holding-register loads (B7h bit 0)
         self.recorded = []
         self.source = None          # callable(n) -> n frames for the ADC
@@ -298,7 +307,18 @@ class ES1869Audio:
         self._heard(decode(data, bits, signed, stereo))
 
     def _heard(self, frame):
-        (self.played if self.dac_on else self.muted).append(frame)
+        if self.dac_on:
+            self.played.append(frame)
+            self.heard.append(frame)
+        else:
+            self.muted.append(frame)
+
+    def _heard2(self, frame):
+        if self.mixer[0x7C]:
+            self.played2.append(frame)
+            self.heard.append(frame)
+        else:
+            self.muted2.append(frame)
 
     def _b8_write(self, old, new):
         if new & 1 and not old & 1:
@@ -462,13 +482,15 @@ class ES1869Audio:
         s, r78 = self.a2, self.mixer[0x78]
         if r78 & 0x02:
             ch = self.a2_channel()
+            if r78 & 0x20:
+                self.violate("78h bit 5, which the data sheet reserves")
             for _ in range(DMA_PER_US):
-                if len(s.fifo) >= s.size or ch > 3:
+                if len(s.fifo) >= s.size or ch == 4 or ch > 7:
                     break
                 data = self.dmac.read(ch, 1)
                 if not data:
                     break
-                s.fifo += data
+                s.fifo += data[:1]          # a word's low byte
                 if self._a2_count():
                     break
         s.debt += self.a2_rate() / 1e6
@@ -483,7 +505,7 @@ class ES1869Audio:
             if len(s.fifo) >= size:
                 data = bytes(s.fifo[:size])
                 del s.fifo[:size]
-                self.played2.append(decode(data, bits, signed, stereo))
+                self._heard2(decode(data, bits, signed, stereo))
 
     def _mixer_written(self, reg, old, v):
         if reg == 0x78 and v & 0x02 and not old & 0x02:
@@ -563,7 +585,8 @@ class ES1869Audio:
     def _halt(self):
         """the software reset (DS p.43): Extended mode off, DMA stopped,
         interrupts cleared, the DAC off the mixer, the counters at 2048
-        bytes, the timer at 8 kHz, 7Ah cleared"""
+        bytes, the timer at 8 kHz, 7Ah cleared (p.65) and Audio 2's volume
+        7Ch with it (p.51); Audio 2's DMA goes on (78h)"""
         self.ext_mode = False
         self.cmd_cur, self.cmd_need, self.cmd_ops = None, 0, []
         self.pending, self.operands = [], []
@@ -583,6 +606,7 @@ class ES1869Audio:
         self.fw_rate = 8000.0
         self.midi = None
         self.mixer[0x7A] = 0
+        self.mixer[0x7C] = 0
         self._line()
 
     # --- the command port ----------------------------------------------------

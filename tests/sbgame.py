@@ -7,9 +7,11 @@ A card has the game's view of the machine: out() and inp() on its ports
 (each access takes a microsecond), the DMA controllers it programs through
 those ports, the memory its buffers are in, and wait(), in which time
 passes and the card's interrupt runs the game's handler (`isr`), once per
-rising edge as an edge-triggered PIC would. ModelCard is a real Sound
-Blaster 16 (sb16.SB16); the fronts' cards (test_sb16conf) put esssb16.com
-or ES1869.VXD and the chip model behind the same calls.
+rising edge as an edge-triggered PIC would. `played` is what the card
+played, and dac(8) and dac(16) what the 8-bit and the 16-bit transfers
+played, which can run together. ModelCard is a real Sound Blaster 16
+(sb16.SB16); the fronts' cards (test_sb16conf) put esssb16.com or
+ES1869.VXD and the chip model behind the same calls.
 
 The functions below are a game's sound driver: the reset handshake, DSP
 writes and reads that poll the status bits with a time-out, the mixer, the
@@ -53,6 +55,10 @@ class Card:
 
     def record_from(self, source):
         """what the card's ADC hears: source(n) gives n frames"""
+        raise NotImplementedError
+
+    def dac(self, kind):
+        """the frames the transfers of `kind` (8 or 16) played"""
         raise NotImplementedError
 
     def out(self, port, v):
@@ -120,6 +126,10 @@ class ModelCard(Card):
     @property
     def played(self):
         return self.sb.played
+
+    def dac(self, kind):
+        """each engine's output, heard or not: the DAC plays one of them"""
+        return self.sb.out[kind]
 
     @property
     def midi_out(self):
