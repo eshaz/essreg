@@ -5,8 +5,9 @@
 (sbgame.Card) and return what the game saw.
 
 Each scene returns a dict: the DSP's answers, the mixer's values, what the
-interrupt handler found in mixer 82h, the DMA counts it read, and the
-frames the DAC played, cut at the blocks the game counted. The conformance
+interrupt handler found in mixer 82h, the DMA counts it read, the frames
+the DAC played, cut at the blocks the game counted, and whether a
+recording holds what the ADC heard, none of it left out. The conformance
 tests (test_sb16conf.py) run a scene on the Sound Blaster 16 model and on
 a front with the chip model, and compare the two.
 """
@@ -16,6 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from sb16 import encode  # noqa: E402
 from sbgame import (BASE, reset, write, read, read_all, mixer,  # noqa: E402
                     program_dma, dma_count, samples16, words)
 
@@ -384,6 +386,76 @@ def eight_then_sixteen(card):
     out = _play16(card, 0xB6, 0x30, 1024, 3)
     out["first"] = first
     return out
+
+
+# --- recording -------------------------------------------------------------------
+
+RAMP = 4000                 # frames of the ADC's input to look for the data in
+
+
+def ramp():
+    """the ADC's input, a frame that differs from the last every time, the
+    same for every card"""
+    k = [0]
+
+    def source(n):
+        out = []
+        for _ in range(n):
+            v = (k[0] * 1031) % 0xF000 - 0x7800
+            out.append((v, 0x10 - v))
+            k[0] += 1
+        return out
+    return source
+
+
+def unbroken(data, bits, signed, stereo):
+    """True if data is the ADC's input from some frame on, none left out"""
+    frame = (bits // 8) * (2 if stereo else 1)
+    stream = encode(ramp()(RAMP), bits, signed, stereo)
+    at = stream.find(data)
+    while at >= 0 and at % frame:
+        at = stream.find(data, at + 1)
+    return at >= 0
+
+
+def _record(card, cmd, ops, ch, size, fmt, rate=None, tc=None):
+    """one single-cycle recording of size bytes into the buffer, in the
+    format fmt (bits, signed, stereo)"""
+    prepare(card)
+    reset(card)
+    card.poke(BUF, b"\x5A" * size)
+    card.record_from(ramp())
+    program_dma(card, ch, BUF, size, auto=False, record=True)
+    if rate is not None:
+        write(card, 0x42, rate >> 8, rate & 0xFF)
+    if tc is not None:
+        write(card, 0x40, tc)
+    write(card, cmd, *ops)
+    ok = wait_blocks(card, 1)
+    card.wait(2000)
+    return {"ok": ok, "seen": card.seen, "blocks": card.blocks,
+            "unbroken": unbroken(card.peek(BUF, size), *fmt)}
+
+
+@scene
+def rec16_stereo(card):
+    """BAh: 16-bit signed stereo, once, on the 16-bit channel"""
+    return _record(card, 0xBA, (0x30, 0xFF, 0x07), 5, 4096,
+                   (16, True, True), rate=22050)
+
+
+@scene
+def rec8_mono(card):
+    """CAh: 8-bit unsigned mono, once"""
+    return _record(card, 0xCA, (0x00, 0xCF, 0x07), 1, 2000,
+                   (8, False, False), rate=11025)
+
+
+@scene
+def rec8_legacy(card):
+    """an SB 2.0 driver's recording: the time constant, then 24h"""
+    return _record(card, 0x24, (0xDB, 0x05), 1, 1500, (8, False, False),
+                   tc=0xA5)
 
 
 # --- the mixer -------------------------------------------------------------------

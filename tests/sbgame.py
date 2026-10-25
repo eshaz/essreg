@@ -51,6 +51,10 @@ class Card:
         interrupt; (the time that passed, the rising edges so far)"""
         raise NotImplementedError
 
+    def record_from(self, source):
+        """what the card's ADC hears: source(n) gives n frames"""
+        raise NotImplementedError
+
     def out(self, port, v):
         self.port_out(port, v & 0xFF)
         self._time(1)
@@ -108,6 +112,9 @@ class ModelCard(Card):
 
     def tick(self, us):
         return self.sb.advance(us), len(self.sb.irq_edges)
+
+    def record_from(self, source):
+        self.sb.source = source
 
     # what the tests compare
     @property

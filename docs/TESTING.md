@@ -83,9 +83,10 @@ The Python tests, in `tests/test_*.py`, cover the following:
   model of the chip's audio (`tests/esschip.py`): `esssb16.com` under
   QPIEMU, EMM386 and HDPMI32i, and the VxD in a DOS box, with a model of
   VDMAD (`tests/sbfronts.py`). What the game saw, the DSP's answers, the
-  mixer, the interrupts, the DMA counts and the frames the DAC played, has
-  to be the same, and the chip model must see no use the data sheet leaves
-  undefined. `test_esschip` checks the chip model itself.
+  mixer, the interrupts, the DMA counts, the frames the DAC played and what
+  its recordings put in memory, has to be the same, and the chip model must
+  see no use the data sheet leaves undefined. `test_esschip` checks the chip
+  model itself.
 * `test_sb16front` checks what both fronts send the chip: the Extended mode
   registers of each transfer with ES1869.DRV's rates, the registers a
   transfer like the last leaves alone, the 16-bit channel carried over, the

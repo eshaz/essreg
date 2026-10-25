@@ -191,6 +191,9 @@ class TSRCard(Card):
     def tick(self, us):
         return self.chip.advance(us), len(self.chip.irq_edges)
 
+    def record_from(self, source):
+        self.chip.source = source
+
     @property
     def played(self):
         return self.chip.played
@@ -474,6 +477,9 @@ class VxDCard(Card):
         done = self.chip.advance(us)
         self.m.advance_to(self.chip.clock.us)   # the VxD's time-outs
         return done, len(self.chip.irq_edges)
+
+    def record_from(self, source):
+        self.chip.source = source
 
     # the game's handler runs when ESS's hardware interrupt procedure has
     # requested the VM's interrupt, and its EOI reaches the VxD
