@@ -56,16 +56,18 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   channel trapped (QPI, HDPMI32i) or read back from the controller (EMM386)
   instead of VDMAD. The chip takes a byte per DMA cycle on any channel, so
   no transfer may go to a 16-bit channel as words.
-* `tools/` holds the builders, the RE tools, `guard.py`, `wineshot.sh` and
-  `dualwav.py`, which makes 4-channel files for dual playback. `tests/`
-  holds the Python tests (`esfmemu.py`, `vxdemu.py` and `drvemu.py` run the
-  drivers in a CPU emulator, `tsremu.py` runs `esssb16.com` in one, with
-  DOS, the memory managers and the DPMI host in Python, and `dosrun.py` a
-  DOS program, `sb16test.exe`, in front of a card), and `tests/host/` the C
-  tests. `sb16.py` is the Sound Blaster 16 that the fronts are tested
-  against, `esschip.py` the chip's audio behind them, `dma8237.py` the DMA
-  controllers, `sbgame.py` and `sbscenes.py` what games do, and
-  `sbfronts.py` the fronts as cards, with a model of VDMAD for the VxD's.
+* `tools/` holds the builders, the RE tools, `guard.py`, `wineshot.sh`,
+  `dualwav.py`, which makes 4-channel files for dual playback, and
+  `sb16rec.py`, which analyzes a recording of `SB16TEST /R` against its
+  report. `tests/` holds the Python tests (`esfmemu.py`, `vxdemu.py` and
+  `drvemu.py` run the drivers in a CPU emulator, `tsremu.py` runs
+  `esssb16.com` in one, with DOS, the memory managers and the DPMI host in
+  Python, and `dosrun.py` a DOS program, `sb16test.exe`, in front of a
+  card), and `tests/host/` the C tests. `sb16.py` is the Sound Blaster 16
+  that the fronts are tested against, `esschip.py` the chip's audio behind
+  them, `dma8237.py` the DMA controllers, `sbgame.py` and `sbscenes.py` what
+  games do, and `sbfronts.py` the fronts as cards, with a model of VDMAD for
+  the VxD's.
 * `docs/` holds [TESTING.md](docs/TESTING.md),
   [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md),
   [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md),
@@ -82,7 +84,7 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
 
 On Claude Code on the web,
 [`.claude/hooks/session-start.sh`](.claude/hooks/session-start.sh) installs
-everything: nasm, unicorn, flake8, clang-format, Open Watcom v2 in
+everything: nasm, unicorn, numpy, flake8, clang-format, Open Watcom v2 in
 `/opt/open-watcom`, 32-bit Wine, Xvfb, xdotool and ImageMagick. It exports
 `OW2=/opt/open-watcom` and `ESSREG_WINE=1`, so every test runs, and it logs
 to `/tmp/essreg-setup.log`. Elsewhere, install the same by hand, following
@@ -114,6 +116,9 @@ python3 tools/ess3dico.py              # the tray icons, src/win/ess3d*.ico
 
 # a 4-channel file for dual playback
 python3 tools/dualwav.py same in.wav out.wav
+
+# a recorded sb16test run (SB16TEST /R) against its report
+python3 tools/sb16rec.py SB16TEST.TXT run.wav
 
 # style
 flake8                                 # Python lint, clean
@@ -190,7 +195,7 @@ tools/wineshot.sh run ess3d.exe /sim tray
   `EX_S16_A2` in the VxD), and everything else on Audio 1. Test it with a
   scene in `tests/sbscenes.py` (`@dual` for two transfers at once), which
   `tests/test_sb16conf.py` plays on the model and on both fronts, or a check
-  in `tests/test_sb16front.py`; the resident part stays within the 280
+  in `tests/test_sb16front.py`; the resident part stays within the 284
   paragraphs of `MAX_PARAS`, and `tests/test_esssb16.py` checks that
   `build/esssb16.com` is current.
 * **sb16test.** Its checks (`src/sb16t.c`) reach the card only through
@@ -201,7 +206,11 @@ tools/wineshot.sh run ess3d.exe /sim tray
   has no varargs and does no floating point. Every check passes on the
   model, and one is KNOWN on a front only for a difference that SB16.md
   lists (`KNOWN` in the test). The test runs `build/sb16test.exe` in the
-  emulator too, so copy it from `out/ow2/` after a change.
+  emulator too, so copy it from `out/ow2/` after a change. Every listening
+  tone is `HZ` (441 Hz) in a buffer of whole cycles. The recorded run's
+  lines (`record_one`) are what `tools/sb16rec.py` reads, so a change to
+  them goes into both, and `tests/test_sb16rec.py` analyzes recordings made
+  from the model's and a front's output.
 * **Committed binaries.** After changing their sources, rebuild
   `build/ESFM.DRV`, `build/ES1869.VXD`, `build/ES1869.DRV` or
   `build/esssb16.com`, and copy the changed programs from `out/ow2/` to

@@ -2,7 +2,8 @@
 # Sets up a Claude Code on the web session with the tools essreg's builds
 # and tests use:
 # - nasm (the drivers), gcc (the host C tests) and curl
-# - the unicorn Python module (the CPU emulator tests), flake8 and
+# - the unicorn Python module (the CPU emulator tests), numpy
+#   (tools/sb16rec.py, the analysis of a recorded sb16test run), flake8 and
 #   clang-format (the linters)
 # - Open Watcom v2 in /opt/open-watcom (the DOS and 16-bit Windows programs)
 # - 32-bit Wine, Xvfb, xdotool and ImageMagick (tests/test_wine.py and
@@ -27,6 +28,7 @@ fi
 OW2_DIR=${OW2_DIR:-/opt/open-watcom}
 OW2_URL=${OW2_URL:-https://github.com/open-watcom/open-watcom-v2/releases/download/Current-build/ow-snapshot.tar.xz}
 UNICORN=unicorn==2.1.4
+NUMPY=numpy==2.4.6
 LOG=${TMPDIR:-/tmp}/essreg-setup.log
 export DEBIAN_FRONTEND=noninteractive
 : > "$LOG"
@@ -84,6 +86,9 @@ fi
 if ! python3 -c 'import unicorn' 2> /dev/null; then
   pip_install "$UNICORN"
 fi
+if ! python3 -c 'import numpy' 2> /dev/null; then
+  pip_install "$NUMPY"
+fi
 if no_cmd flake8; then
   pip_install flake8
 fi
@@ -136,5 +141,6 @@ fi
 
 echo "essreg setup: $(nasm -v | cut -d' ' -f1-3)," \
   "unicorn $(python3 -c 'import unicorn; print(unicorn.__version__)')," \
+  "numpy $(python3 -c 'import numpy; print(numpy.__version__)')," \
   "Open Watcom: $([ "$ow2" = 1 ] && echo "$OW2_DIR" || echo none)," \
   "Wine: $([ "$wine" = 1 ] && wine --version 2> /dev/null || echo none)"

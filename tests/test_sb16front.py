@@ -168,6 +168,27 @@ class FrontChecks:
         self.assertEqual((chip.ctrl[0xA1], chip.ctrl[0xB7]), (0x6E, 0xF4))
         self.assertClean()
 
+    def test_a_transfer_of_another_kind(self):
+        """a 16-bit transfer that ends a running 8-bit one on Audio 1 starts
+        on an empty FIFO, however many 8-bit bytes it held (each 8-bit
+        sample changes their number's parity): none of them plays as a
+        16-bit sample, and the 16-bit samples play whole"""
+        for delay in range(1000, 1100, 9):
+            c = self.card()
+            chip = c.chip
+            c.poke(0x14000, b"\x55" * 4096)
+            c.poke(0x24680, b"\x34\x12" * 2048)
+            program_dma(c, 1, 0x14000, 4096)
+            write(c, 0x41, 0x56, 0x22, 0xC6, 0x00, 0xFF, 0x07)
+            c.wait(delay)
+            mark = len(chip.played)
+            play16(c, mode=0x10, samples=2048, rate=22050)
+            c.wait(20000)
+            after = chip.played[mark:]
+            self.assertEqual(after.count((0x5555,)), 0, delay)
+            self.assertEqual(set(after[-200:]), {(0x1234,)}, delay)
+            self.assertClean()
+
     def test_pause_continue_end(self):
         """D5h and D6h: Audio 1's DMA requests off and on (B2h bit 6); D9h:
         the block that plays is the last (B8h bit 2)"""

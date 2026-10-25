@@ -773,11 +773,11 @@ halt:
         jmp     short boot.clear
 
 ; Audio 1's transfer of the front's stops (B8h bit 0), at once, as a Sound
-; Blaster 16's: its FIFO empties (a1_flush), so that nothing of it plays
-; on while Audio 2 plays the next
+; Blaster 16's, and its FIFO empties (a1_flush), so that nothing of it
+; plays on while Audio 2 plays the next, or in the next one's format
 a1_stop:
         test    byte [V(flags)],F_RUN
-        jz      a2_stop.ret
+        jz      a1_flush
         and     byte [V(flags)],~(F_RUN | F_AUTO | F_LAST | F_PAUSE) & 0xFF
         mov     ax,0xB8FE
         call    reg_and
@@ -1342,10 +1342,12 @@ xfer:
         cmp     byte [V(dma2)],4
         jb      a2_xfer
 .not2:  call    a2_stop
-.a1:    test    byte [V(flags)],F_RUN   ; the first after a reset: the FIFO
-        jnz     .ext                    ; empties, so that nothing of
-        call    a1_flush                ; another stream plays in this
-.ext:   call    ensure_ext              ; one's format
+.a1:    mov     al,[V(flags)]           ; anew, Audio 1 stops and its FIFO
+        and     al,F_RUN | F_AUTO       ; empties (a1_stop), so that
+        cmp     al,F_RUN                ; nothing of another stream plays
+        je      .ext                    ; in this one's format; a
+        call    a1_stop                 ; single-cycle block goes on from
+.ext:   call    ensure_ext              ; the last (a1_format)
         mov     al,bl                   ; F_16 and F_AUTO from BL
         or      al,F_RUN
         and     al,F_16 | F_RUN | F_AUTO
@@ -1527,7 +1529,9 @@ a1_count:
         jmp     reg_set
 
 ; the format, B6h = DL and B7h = DH: B6h, then B7h twice (DS p.49, table
-; 16), first 51h or 71h, unless the chip has the format
+; 16), first 51h or 71h, unless the chip has the format. Another format
+; starts on an empty FIFO, the DMA stopped (B8h), so that the bytes of the
+; last block don't play in it
 a1_format:
         cmp     dx,[V(ctrl)+0x15]
         jne     .write
@@ -1535,7 +1539,10 @@ a1_format:
         not     al
         test    al,0x60
         jz      .out
-.write: mov     al,dl
+.write: push    dx
+        call    a1_flush
+        pop     dx
+        mov     al,dl
         mov     ah,0xB6
         call    reg_force
         mov     ax,0xB771
@@ -1611,11 +1618,18 @@ vtrapped:
 ; page, the word count as a byte count, demand transfers (single with /S),
 ; the direction of the transfer, auto-initialize as the game's channel has
 ; it. Without the traps, the channel's registers are read back (right
-; after the game programmed them they hold what it wrote) and
-; auto-initialize is the command's. The game's flip-flop is left cleared
+; after the game programmed them they hold what it wrote, and the channel
+; never moves), and the channel that plays auto-initializes, since the
+; chip asks for a block's bytes only. A single-cycle block whose channel
+; still holds what was carried over goes on where the last one ended: the
+; game programmed the buffer once, and the next block follows the last.
+; The game's flip-flop is left cleared
 mirror:
         call    vtrapped
         jnc     .have
+        push    word [V(vpage)]         ; the last read, the page in the
+        push    word [V(vcount)]        ; low byte
+        push    word [V(vaddr)]
         mov     dx,0xD8                 ; read back, the flip-flop cleared
         call    chip_out                ; before and after
         mov     dl,[V(vpagep)]
@@ -1628,10 +1642,21 @@ mirror:
         call    word_in
         mov     dl,0xD8
         call    chip_out
-        mov     al,[V(xbits)]
-        and     al,0x04
-        shl     al,2
-        mov     [V(vmode)],al
+        mov     byte [V(vmode)],0x10
+        pop     ax
+        pop     cx
+        pop     dx
+        test    bl,F_AUTO               ; a single-cycle block, the channel
+        jnz     .have                   ; as it was carried over: it goes on
+        test    byte [V(vbits)],V_LIVE
+        jz      .have
+        cmp     ax,[V(vaddr)]
+        jne     .have
+        cmp     cx,[V(vcount)]
+        jne     .have
+        cmp     dl,[V(vpage)]
+        jne     .have
+        ret
 .have:  mov     ah,[V(vmode)]
         and     ah,0x10                 ; auto-initialize
         or      ah,0x08                 ; from memory

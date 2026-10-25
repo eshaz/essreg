@@ -587,10 +587,12 @@ static void on_break(int sig) {
 }
 
 static void usage(void) {
-  puts("usage: sb16test [/A] [/L] [/Q] [/O:file]\n"
+  puts("usage: sb16test [/A] [/L] [/Q] [/R] [/O:file]\n"
        "  /A  the automatic checks only, no listening\n"
        "  /L  the listening checks only\n"
        "  /Q  quicker: fewer rates\n"
+       "  /R  a recorded run: a tone to set the recorder's level, then each\n"
+       "      sound after its DTMF marker, and no questions\n"
        "  /O  the report's file, else SB16TEST.TXT\n"
        "Set BLASTER first (A I D H P), as for a game. Esc stops.");
 }
@@ -614,6 +616,9 @@ int main(int argc, char **argv) {
       break;
     case 'Q':
       opts |= SBT_O_QUICK;
+      break;
+    case 'R':
+      opts |= SBT_O_RECORD;
       break;
     case 'T': // short blocks and sounds, for the host tests' emulator
       opts |= SBT_O_SHORT;
@@ -673,8 +678,13 @@ int main(int argc, char **argv) {
   hal.esc = dos_esc;
   hal.keep = dos_keep;
   hal.state = dos_state;
-  puts("The checks play quiet tones; the listening checks at the end ask "
-       "what you\nheard. Esc stops at any time.");
+  if (opts & SBT_O_RECORD)
+    puts("A recorded run: a tone to set the recorder's level by, then the "
+         "checks, and\neach sound after its DTMF marker. Esc stops at any "
+         "time.");
+  else
+    puts("The checks play quiet tones; the listening checks at the end ask "
+         "what you\nheard. Esc stops at any time.");
   pit_init();
   hook_irq();
   failed = sbt_run(&hal, &card, opts);

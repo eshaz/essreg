@@ -68,12 +68,16 @@ EXT_SAFE = {0xC6, 0xC7, 0xC0, 0xD1, 0xD3, 0xD8, 0xE1, 0xE7, 0xF2}
 
 
 def a1_hz(a1, new=False):
-    """Audio 1's rate for A1h; `new` is mixer 71h bit 5, A1h as 70h"""
+    """Audio 1's rate for A1h; `new` is mixer 71h bit 5, A1h as 70h. The
+    data sheet gives the clocks as 795.5 and 397.7 kHz (p.67), but on the
+    card of the first report every rate came out at 793.8 and 396.9 kHz to
+    the hertz, 44101 Hz for EEh and 22050 for 6Eh: the 44.1 kHz clock of
+    70h, and half of it"""
     if new:
         return a2_hz(a1)
     if a1 & 0x80:
-        return 795500 / (256 - a1)
-    return 397700 / (128 - a1)
+        return 793800 / (256 - a1)
+    return 396900 / (128 - a1)
 
 
 def a2_hz(r70):
@@ -256,24 +260,36 @@ class ES1869Audio:
         s.halted = True
         return True
 
+    # a DMA request moves 1 byte (single transfers) or 2 or 4 (demand
+    # transfers, B9h 10b and 11b, DS p.70), and the chip asks only with
+    # room for them in its FIFO, or with them there as it records; the DMA
+    # controller holds the bus for a whole burst
     def _a1_step(self):
         s, b8 = self.a1, self.ctrl[0xB8]
         adc = bool(b8 & 0x08)
         if b8 & 1 and not s.halted and self.ctrl[0xB2] & 0x40:
             ch = self.a1_channel()
-            for _ in range(DMA_PER_US):
-                if adc:
-                    if not s.fifo or not self.dmac.write(ch, s.fifo[:1]):
+            burst = (1, 1, 2, 4)[self.ctrl[0xB9] & 3]
+            s.credit = min(s.credit + DMA_PER_US, max(burst, DMA_PER_US))
+            while s.credit >= burst and not s.halted and \
+                    (len(s.fifo) >= burst if adc else
+                     len(s.fifo) + burst <= s.size):
+                s.credit -= burst
+                moved = 0
+                for _ in range(burst):
+                    if adc:
+                        if not self.dmac.write(ch, s.fifo[:1]):
+                            break
+                        del s.fifo[0]
+                    else:
+                        data = self.dmac.read(ch, 1)
+                        if not data:
+                            break
+                        s.fifo += data
+                    moved += 1
+                    if self._a1_count():
                         break
-                    del s.fifo[0]
-                else:
-                    if len(s.fifo) >= s.size:
-                        break
-                    data = self.dmac.read(ch, 1)
-                    if not data:
-                        break
-                    s.fifo += data
-                if self._a1_count():
+                if moved < burst:
                     break
         s.debt += self.a1_rate() / 1e6
         while s.debt >= 1:

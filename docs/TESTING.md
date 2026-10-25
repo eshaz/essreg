@@ -100,8 +100,14 @@ The Python tests, in `tests/test_*.py`, cover the following:
   check passes, but for the fronts' differences that SB16.md lists. It also
   runs `build/sb16test.exe` itself in a CPU emulator with DOS and the BIOS
   (`tests/dosrun.py`), on the model and on `esssb16.com`: its interrupt
-  handler, its clock, the report, the restore file, Esc, and a person who
-  answers the questions.
+  handler, its clock, the report, the restore file, Esc, a person who
+  answers the questions, and a recorded run. Each listening tone has to
+  measure 441 Hz.
+* `test_sb16rec` checks `tools/sb16rec.py`: the WAV formats, the DTMF
+  markers and the measures of a tone, then recorded runs on the model and on
+  `esssb16` under EMM386, whose recordings are made from what the DACs
+  played, each frame at its time, and then broken: a flat tone, a 16-bit
+  stream a byte out, a loop, a dead channel. Needs numpy.
 * Other tests run `esfmpat` on copies of `ESFM.DRV` and check that the
   generated documentation is current.
 
@@ -388,12 +394,14 @@ so set the speakers to a normal level first.
    one of the keys it shows; `d` says that the sound was distorted or looped
    rather than steady, `g` plays the sound again and `s` skips the question.
    Esc stops the program at any time.
-2. Nine of the tones, near the end, are of about 440 Hz. The first is 8-bit
-   mono at 22 kHz, and each of the others differs from it in one thing: odd
-   blocks, demand DMA, a 4 times longer buffer, 11 kHz, 44 kHz, 8-bit stereo
-   and 16-bit mono; the last is 16-bit stereo at 44 kHz. Answer `y` for a
-   steady tone and `d` for one that sounds distorted or looping: which tones
-   are steady shows what the fault depends on.
+2. Every tone has the same pitch, 441 Hz, so a tone that sounds flat or
+   sharp next to the others plays at the wrong rate. Nine of them, near the
+   end, come one after the other. The first is 8-bit mono at 22 kHz, and
+   each of the others differs from it in one thing: odd blocks, demand DMA,
+   a 4 times longer buffer, 11 kHz, 44 kHz, 8-bit stereo and 16-bit mono;
+   the last is 16-bit stereo at 44 kHz. Answer `y` for a steady tone and `d`
+   for one that sounds distorted or looping: which tones are steady shows
+   what the fault depends on.
 3. Send `SB16TEST.TXT` back, with a note of anything you heard that no
    question asked about. Each check has a line: PASS, FAIL, KNOWN (a
    difference of the ES1869 that [SB16.md](SB16.md) lists), INFO or SKIP,
@@ -407,15 +415,27 @@ so set the speakers to a normal level first.
    `one at a time on Audio 1`.
 4. If a tone sounded distorted or looping, restart, load `ESSSB16 /S` and
    run `SB16TEST /L /O:SB16S.TXT`, and send both reports.
-5. Run it in a Windows 98 DOS box with the extended driver too, with
+5. A recorded run measures what reaches the speakers, without a person.
+   Connect the card's line out to a recorder's line in, in stereo, and
+   record a WAV file at 44.1 or 48 kHz, 16 or 24-bit. Run `SB16TEST /R`: a
+   tone plays at full scale; set the recorder's level so that it peaks just
+   under clipping, start recording and press Enter. The run asks nothing: it
+   plays the start marker (four DTMF tones), the automatic checks, each
+   listening sound after its own marker, and the end marker, and writes the
+   report. Stop recording when it ends, and send the WAV file with
+   `SB16TEST.TXT`. `SB16TEST /R /L` records the sounds only. `python3
+   tools/sb16rec.py SB16TEST.TXT run.wav` gives each sound PASS or FAIL,
+   with its pitch in cents against 441 Hz, how much of it is the tone, its
+   side, the pause, the volume's steps, the balance and the blocks.
+6. Run it in a Windows 98 DOS box with the extended driver too, with
    `BLASTER` as in [E2](#e2-dos-boxes-with-the-extended-driver) step 9, and
    send that report as well. It has the VxD's version and settings.
-6. If a real Sound Blaster 16 is at hand, run it there too: that report
+7. If a real Sound Blaster 16 is at hand, run it there too: that report
    shows what the checks expect.
-7. `/A` runs only the automatic checks, `/L` only the listening ones, `/Q`
-   measures fewer rates and `/O:file` names the report. If the computer
-   stops during a run, the next run puts the mixer back from `SB16TEST.RST`
-   before it starts, and its report says so.
+8. `/A` runs only the automatic checks, `/L` only the listening ones, `/Q`
+   measures fewer rates, `/R` makes a recorded run and `/O:file` names the
+   report. If the computer stops during a run, the next run puts the mixer
+   back from `SB16TEST.RST` before it starts, and its report says so.
 
 ### E0. Installing with essinst
 

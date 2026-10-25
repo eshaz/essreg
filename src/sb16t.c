@@ -384,6 +384,11 @@ static void rate40(u8 tc) {
 
 // --- tones -------------------------------------------------------------------
 
+// the listening checks' pitch: a cycle is a whole number of frames at
+// 11025, 22050 and 44100 Hz (25, 50 and 100), so that every tone, whatever
+// its rate and its buffer, has this pitch and no other
+#define HZ 441.0
+
 static void tab_init(void) {
   int i;
 
@@ -491,7 +496,13 @@ static u16 block_frames(double rate, u8 fmt) {
 
 static u16 blocks(void) { return (O & SBT_O_SHORT) ? 4 : 8; }
 
-static u32 sound_us(void) { return (O & SBT_O_SHORT) ? 20000UL : 2000000UL; }
+// a listening sound's length; a short recorded run's are long enough for
+// tools/sb16rec.py's 20 ms windows
+static u32 sound_us(void) {
+  if (O & SBT_O_SHORT)
+    return (O & SBT_O_RECORD) ? 200000UL : 20000UL;
+  return 2000000UL;
+}
 
 // --- a transfer --------------------------------------------------------------
 
@@ -1889,35 +1900,45 @@ static void check_time(void) {
 // --- the listening checks ----------------------------------------------------
 
 static u32 sound_rate;
+static u32 part_t[4][2]; // the clock as each part of a sound began and ended
+static u8 nparts;
 
 static void sound_on(double rate) {
   sound_rate = (u32)(rate + 0.5);
+  if (nparts < 4)
+    part_t[nparts][0] = H->now();
   if (H->sound != NULL)
     H->sound(sound_rate);
 }
 
 static void sound_off(void) {
+  if (nparts < 4)
+    part_t[nparts++][1] = H->now();
   if (H->sound != NULL)
     H->sound(0);
 }
 
-// an even number of frames near most (or 256 short) that holds whole
-// cycles of hz at rate, exactly when rate is a multiple of hz
-static u16 whole_cycles(double hz, double rate, u16 most) {
+// frames near most, a multiple of unit (the blocks), that hold whole
+// cycles of hz at rate: exactly when rate is a multiple of hz
+static u16 whole_cycles(double hz, double rate, u16 most, u16 unit) {
   double len = rate / hz, cycles;
-  u16 f;
+  u16 step = 1, n = (u16)len;
 
-  if (O & SBT_O_SHORT)
-    most = 256;
-  cycles = floor(most / len);
-  if (cycles < 1)
-    cycles = 1;
-  f = (u16)floor(cycles * len + 0.5);
-  return (u16)(f & ~1U);
+  if (len == n) // the cycles that make whole blocks
+    while ((u32)step * n % unit)
+      step++;
+  cycles = floor(most / len / step) * step;
+  if (cycles < step)
+    cycles = step;
+  n = (u16)floor(cycles * len + 0.5);
+  return (u16)(n - n % unit);
 }
 
+// a listening sound's buffer, at most frames, or 256 in the short run
+static u16 at_most(u16 frames) { return (O & SBT_O_SHORT) ? 256 : frames; }
+
 // a sound of the format at rate for us: hz on the left (or mono), hz_r on
-// the right, through the command
+// the right, 0 for none, through the command
 static void play_tone(u8 c, u8 mode, u8 fmt, u16 rate_hz, double hz,
                       double hz_r, u32 us) {
   struct xfer x;
@@ -1929,10 +1950,11 @@ static void play_tone(u8 c, u8 mode, u8 fmt, u16 rate_hz, double hz,
   rate41(rate_hz);
   rate = sbt_v_hz(cur_v);
   x_init(&x, c, mode, fmt, rate);
-  frames = whole_cycles(hz, rate, (fmt & F16) && (fmt & FST) ? 2048 : 4096);
+  frames = whole_cycles(hz ? hz : hz_r, rate,
+                        at_most((fmt & F16) && (fmt & FST) ? 2048 : 4096), 2);
   x.frames = (u16)(frames / 2);
-  tone_set(&t, fit_hz(hz, frames, rate), hz_r ? fit_hz(hz_r, frames, rate) : 0,
-           rate, 12000);
+  tone_set(&t, hz ? fit_hz(hz, frames, rate) : 0,
+           hz_r ? fit_hz(hz_r, frames, rate) : 0, rate, 12000);
   fill(x.addr, frames, fmt, &t);
   sound_on(rate);
   x_start(&x);
@@ -1941,83 +1963,153 @@ static void play_tone(u8 c, u8 mode, u8 fmt, u16 rate_hz, double hz,
   quiet();
 }
 
-static void s_tone8(void) {
-  play_tone(0xC6, 0x00, 0, 22050, 440, 0, sound_us());
-}
+// --- the recorded run --------------------------------------------------------
 
-static void s_left16(void) {
-  play_tone(0xB6, 0x30, F16 | FST | FSG, 44100, 440, 0, sound_us());
-}
+// The recorded run (SBT_O_RECORD) asks nothing: it plays each listening
+// sound after its marker, DTMF symbols that a recording of the card's
+// output holds, and tools/sb16rec.py finds the markers in the recording and
+// measures the sounds. The report gives the markers' and the sounds' times
+// in us from the start marker's
 
-static void s_right16(void) {
+static const char dtmf_syms[] = "123A456B789C*0#D";
+static const u16 dtmf_lo[4] = {697, 770, 852, 941};
+static const u16 dtmf_hi[4] = {1209, 1336, 1477, 1633};
+
+static u32 rec_t0; // the clock as the start marker began
+
+static u32 rec_us(u32 t) { return us_of(t - rec_t0); }
+
+// a marker's symbols, each 60 ms of its two tones and 40 ms of silence (30
+// and 20 in the short run), 8-bit mono at 22050 Hz, played once; the clock
+// as it began
+static u32 marker(const char *syms) {
+  static u8 buf[128];
   struct xfer x;
   struct tone t;
   double rate;
-  u16 frames = (O & SBT_O_SHORT) ? 256 : 2048;
-
-  dsp_reset(NULL);
-  rate41(44100);
-  rate = sbt_v_hz(cur_v);
-  x_init(&x, 0xB6, 0x30, F16 | FST | FSG, rate);
-  x.frames = (u16)(frames / 2);
-  tone_set(&t, 0, fit_hz(440, frames, rate), rate, 12000);
-  fill(x.addr, frames, x.fmt, &t);
-  sound_on(rate);
-  x_start(&x);
-  pass_time(sound_us());
-  sound_off();
-  quiet();
-}
-
-static void s_left8(void) {
-  play_tone(0xC6, 0x20, FST, 22050, 440, 0, sound_us());
-}
-
-static void s_right8(void) {
-  struct xfer x;
-  struct tone t;
-  double rate;
-  u16 frames = (O & SBT_O_SHORT) ? 256 : 4096;
+  u16 on = (O & SBT_O_SHORT) ? 662 : 1323, sym = (u16)(on * 5U / 3U), n = 0;
+  u16 i, j, k;
+  const char *s, *p;
+  u32 t0;
 
   dsp_reset(NULL);
   rate41(22050);
   rate = sbt_v_hz(cur_v);
-  x_init(&x, 0xC6, 0x20, FST, rate);
-  x.frames = (u16)(frames / 2);
-  tone_set(&t, 0, fit_hz(440, frames, rate), rate, 12000);
-  fill(x.addr, frames, x.fmt, &t);
+  for (s = syms; *s; s++) {
+    p = strchr(dtmf_syms, *s);
+    k = p != NULL ? (u16)(p - dtmf_syms) : 0;
+    tone_set(&t, dtmf_lo[k / 4], dtmf_hi[k % 4], rate, 6000);
+    for (i = 0; i < sym; i = (u16)(i + j)) {
+      for (j = 0; j < sizeof(buf) && i + j < sym; j++)
+        buf[j] =
+            (u8)(i + j < on ? 128 + ((tone_next(&t, 0) + tone_next(&t, 1)) >> 8)
+                            : 128);
+      H->poke(BUF8 + n, buf, j);
+      n = (u16)(n + j);
+    }
+  }
+  x_init(&x, 0xC0, 0x00, 0, rate);
+  x.frames = n;
+  x.nb = 1;
+  counters();
   sound_on(rate);
+  t0 = H->now();
   x_start(&x);
-  pass_time(sound_us());
+  wait_n(&n8, 1, (u32)(n * 1e6 / rate) + 100000UL);
   sound_off();
   quiet();
+  return t0;
 }
 
-// 441 Hz: a whole number of frames a cycle at the three rates
+// the recorded run's start: a full-scale tone plays until the person, who
+// sets the recorder's level by it, presses Enter; then the start marker
+static void record_start(void) {
+  struct xfer x;
+  struct tone t;
+  double rate;
+  u16 frames;
+  int a;
+
+  section("record", "a recorded run: set the recorder's level");
+  dsp_reset(NULL);
+  rate41(22050);
+  rate = sbt_v_hz(cur_v);
+  frames = whole_cycles(HZ, rate, 4096, 2);
+  x_init(&x, 0xC6, 0x00, 0, rate);
+  x.frames = (u16)(frames / 2);
+  tone_set(&t, HZ, 0, rate, 32767);
+  fill(x.addr, frames, 0, &t);
+  x_start(&x);
+  a = H->ask("r.level",
+             "A full-scale tone plays: set the recorder's level\n just under "
+             "clipping, start recording, and press Enter",
+             "\r");
+  quiet();
+  if (a != '\r') {
+    stop_now = 1;
+    res("rec.level", R_SKIP, "stopped");
+    return;
+  }
+  rec_t0 = marker("ABCD");
+  res("rec.start", R_INFO,
+      "marker ABCD at 0 us; the level tone was %u Hz, 8-bit mono at "
+      "22050 Hz, full scale",
+      (unsigned)HZ);
+}
+
+static void record_end(void) {
+  u32 t = marker("DCBA");
+
+  res("rec.end", R_INFO, "marker DCBA at %lu us", (unsigned long)rec_us(t));
+}
+
+static void s_tone8(void) {
+  play_tone(0xC6, 0x00, 0, 22050, HZ, 0, sound_us());
+}
+
+static void s_left16(void) {
+  play_tone(0xB6, 0x30, F16 | FST | FSG, 44100, HZ, 0, sound_us());
+}
+
+static void s_right16(void) {
+  play_tone(0xB6, 0x30, F16 | FST | FSG, 44100, 0, HZ, sound_us());
+}
+
+static void s_left8(void) {
+  play_tone(0xC6, 0x20, FST, 22050, HZ, 0, sound_us());
+}
+
+static void s_right8(void) {
+  play_tone(0xC6, 0x20, FST, 22050, 0, HZ, sound_us());
+}
+
 static void s_pitch(void) {
-  play_tone(0xC6, 0x00, 0, 11025, 441, 0, sound_us() / 2);
+  play_tone(0xC6, 0x00, 0, 11025, HZ, 0, sound_us() / 2);
   pass_time(sound_us() / 8);
-  play_tone(0xC6, 0x00, 0, 22050, 441, 0, sound_us() / 2);
+  play_tone(0xC6, 0x00, 0, 22050, HZ, 0, sound_us() / 2);
   pass_time(sound_us() / 8);
-  play_tone(0xB6, 0x10, F16 | FSG, 44100, 441, 0, sound_us() / 2);
+  play_tone(0xB6, 0x10, F16 | FSG, 44100, HZ, 0, sound_us() / 2);
 }
 
+// a low tone, a twelfth below the high one: 294 and 882 Hz, cycles of 75
+// and 25 frames
 static void s_dual(void) {
   struct xfer a, b;
   struct tone t;
   double rate;
-  u16 frames = (O & SBT_O_SHORT) ? 256 : 4096;
+  u16 frames;
 
   dsp_reset(NULL);
   rate41(22050);
   rate = sbt_v_hz(cur_v);
+  frames = whole_cycles(HZ * 2 / 3, rate, at_most(4096), 2);
   x_init(&a, 0xC6, 0x00, 0, rate);
   a.frames = (u16)(frames / 2);
-  tone_set(&t, fit_hz(330, frames, rate), 0, rate, 12000);
+  tone_set(&t, fit_hz(HZ * 2 / 3, frames, rate), 0, rate, 12000);
   fill(a.addr, frames, a.fmt, &t);
   x_init(&b, 0xB6, 0x10, F16 | FSG, rate);
   b.frames = (u16)(frames / 2);
-  tone_set(&t, fit_hz(880, frames, rate), 0, rate, 12000);
+  tone_set(&t, fit_hz(HZ * 2, frames, rate), 0, rate, 12000);
   fill(b.addr, frames, b.fmt, &t);
   sound_on(rate);
   x_start(&a);
@@ -2027,20 +2119,21 @@ static void s_dual(void) {
   quiet();
 }
 
-// short, the pause still outlasts what Audio 1's FIFO holds (5.8 ms)
+// the pause, 20 ms at least, outlasts what Audio 1's FIFO holds (5.8 ms)
 static void s_pause(void) {
   struct xfer x;
   struct tone t;
   double rate;
-  u16 frames = (O & SBT_O_SHORT) ? 256 : 4096;
-  u32 part = (O & SBT_O_SHORT) ? 20000UL : sound_us() / 3;
+  u16 frames;
+  u32 part = sound_us() / 3 > 20000UL ? sound_us() / 3 : 20000UL;
 
   dsp_reset(NULL);
   rate41(22050);
   rate = sbt_v_hz(cur_v);
+  frames = whole_cycles(HZ, rate, at_most(4096), 2);
   x_init(&x, 0xB6, 0x10, F16 | FSG, rate);
   x.frames = (u16)(frames / 2);
-  tone_set(&t, fit_hz(440, frames, rate), 0, rate, 12000);
+  tone_set(&t, fit_hz(HZ, frames, rate), 0, rate, 12000);
   fill(x.addr, frames, x.fmt, &t);
   sound_on(rate);
   x_start(&x);
@@ -2058,14 +2151,15 @@ static void s_volume(void) {
   struct xfer x;
   struct tone t;
   double rate;
-  u16 frames = (O & SBT_O_SHORT) ? 256 : 4096, i;
+  u16 frames, i;
 
   dsp_reset(NULL);
   rate41(22050);
   rate = sbt_v_hz(cur_v);
+  frames = whole_cycles(HZ, rate, at_most(4096), 2);
   x_init(&x, 0xC6, 0x00, 0, rate);
   x.frames = (u16)(frames / 2);
-  tone_set(&t, fit_hz(440, frames, rate), 0, rate, 12000);
+  tone_set(&t, fit_hz(HZ, frames, rate), 0, rate, 12000);
   fill(x.addr, frames, x.fmt, &t);
   sound_on(rate);
   x_start(&x);
@@ -2084,14 +2178,15 @@ static void s_balance(void) {
   struct xfer x;
   struct tone t;
   double rate;
-  u16 frames = (O & SBT_O_SHORT) ? 256 : 4096;
+  u16 frames;
 
   dsp_reset(NULL);
   rate41(22050);
   rate = sbt_v_hz(cur_v);
+  frames = whole_cycles(HZ, rate, at_most(4096), 2);
   x_init(&x, 0xB6, 0x10, F16 | FSG, rate);
   x.frames = (u16)(frames / 2);
-  tone_set(&t, fit_hz(440, frames, rate), 0, rate, 12000);
+  tone_set(&t, fit_hz(HZ, frames, rate), 0, rate, 12000);
   fill(x.addr, frames, x.fmt, &t);
   sound_on(rate);
   mix_set(0x32, 0xF8);
@@ -2152,7 +2247,7 @@ static void s_adpcm(void) {
   static u8 buf[129];
   struct tone t;
   double rate;
-  u16 bytes = (O & SBT_O_SHORT) ? 128 : 8192, i, k, n;
+  u16 bytes = sound_us() < 200000UL ? 128 : 8192, i, k, n;
   int ref = 128;
   u8 step = 0, hi;
   u32 addr = BUF8;
@@ -2160,7 +2255,7 @@ static void s_adpcm(void) {
   dsp_reset(NULL);
   rate40(0xD3);
   rate = sbt_v_hz(cur_v);
-  tone_set(&t, fit_hz(440, (u16)(bytes * 2), rate), 0, rate, 12000);
+  tone_set(&t, HZ, 0, rate, 12000); // once: no loop to fit
   // the reference byte, then two codes a byte
   buf[0] = 128;
   H->poke(addr, buf, 1);
@@ -2205,7 +2300,7 @@ static void s_direct(void) {
 static void s_speaker(void) {
   dsp_reset(NULL);
   cmd(1, 0xD3);
-  play_tone(0xC6, 0x00, 0, 22050, 440, 0, sound_us());
+  play_tone(0xC6, 0x00, 0, 22050, HZ, 0, sound_us());
 }
 
 static void s_fm(void) {
@@ -2232,15 +2327,16 @@ static void s_blocks(void) {
   struct xfer x;
   struct tone t;
   double rate;
-  u16 frames = (O & SBT_O_SHORT) ? 256 : 4096;
+  u16 frames;
 
   dsp_reset(NULL);
   rate40(0xD3);
   rate = sbt_v_hz(cur_v);
+  frames = whole_cycles(HZ, rate, at_most(4096), 4);
   x_init(&x, 0x14, 0, 0, rate);
   x.frames = (u16)(frames / 4);
   x.nb = 4;
-  tone_set(&t, fit_hz(440, frames, rate), 0, rate, 12000);
+  tone_set(&t, fit_hz(HZ, frames, rate), 0, rate, 12000);
   fill(x.addr, frames, 0, &t);
   dma_set(x.ch, x.addr, frames, DMA_PLAY);
   blk_cmd[0] = 0x14;
@@ -2310,42 +2406,39 @@ struct clean {
   u8 dmode;          // the 8237's mode, else single transfers
 };
 
+// whole cycles of HZ in every buffer
 static const struct clean cleans[] = {
-    {0xC6, 0x00, 0, 22050, 4096, 2048, 0},
-    {0xC6, 0x00, 0, 22050, 4058, 2029, 0},
-    {0xC6, 0x00, 0, 22050, 4096, 2048, DMA_DEMAND},
-    {0xC6, 0x00, 0, 22050, 16384, 8192, 0},
-    {0xC6, 0x00, 0, 11025, 4096, 2048, 0},
-    {0xC6, 0x00, 0, 44100, 4096, 2048, 0},
-    {0xC6, 0x20, FST, 22050, 4096, 2048, 0},
-    {0xB6, 0x10, F16 | FSG, 22050, 4096, 2048, 0},
-    {0xB6, 0x30, F16 | FST | FSG, 44100, 2048, 1024, 0},
+    {0xC6, 0x00, 0, 22050, 4000, 2000, 0},
+    {0xC6, 0x00, 0, 22050, 4050, 2025, 0},
+    {0xC6, 0x00, 0, 22050, 4000, 2000, DMA_DEMAND},
+    {0xC6, 0x00, 0, 22050, 16000, 8000, 0},
+    {0xC6, 0x00, 0, 11025, 4000, 2000, 0},
+    {0xC6, 0x00, 0, 44100, 4000, 2000, 0},
+    {0xC6, 0x20, FST, 22050, 4000, 2000, 0},
+    {0xB6, 0x10, F16 | FSG, 22050, 4000, 2000, 0},
+    {0xB6, 0x30, F16 | FST | FSG, 44100, 2000, 1000, 0},
 };
 
 static u8 play_arg; // the clean tone that s_clean plays
 
-// short, a sixteenth of the buffer, and an odd block stays odd
+// short, about a sixteenth of the buffer, in whole cycles
 static void s_clean(void) {
   const struct clean *c = &cleans[play_arg];
   struct xfer x;
   struct tone t;
   double rate, hz;
-  u16 frames = c->frames, block = c->block;
+  u16 nb = (u16)(c->frames / c->block), frames;
 
-  if (O & SBT_O_SHORT) {
-    block = (u16)(block / 16);
-    if ((c->block & 1) && !(block & 1))
-      block++;
-    frames = (u16)(block * (c->frames / c->block));
-  }
   dsp_reset(NULL);
   rate41(c->rate);
   rate = sbt_v_hz(cur_v);
+  frames = whole_cycles(
+      HZ, rate, (O & SBT_O_SHORT) ? (u16)(c->frames / 16) : c->frames, nb);
   x_init(&x, c->cmd, c->mode, c->fmt, rate);
-  x.frames = block;
-  x.nb = (u8)(frames / block);
+  x.frames = (u16)(frames / nb);
+  x.nb = (u8)nb;
   x.dmode = c->dmode;
-  hz = fit_hz(440, frames, rate);
+  hz = fit_hz(HZ, frames, rate);
   tone_set(&t, hz, (c->fmt & FST) ? hz : 0, rate, 12000);
   fill(x.addr, frames, c->fmt, &t);
   sound_on(rate);
@@ -2461,6 +2554,33 @@ static const char *legend(const char *keys) {
   return s;
 }
 
+// a recorded sound: its marker, * and its number and #, then the sound; its
+// line gives when the marker and each part of the sound began, and when
+// each part ended
+static void record_one(u16 i, const struct listen *l, const char *want) {
+  static char syms[8], parts[96]; // four parts of 20 characters at most
+  char *p = parts;
+  u32 tm;
+  u8 k;
+
+  if (l->needs & 4) {
+    res(l->id, R_SKIP, "no one to speak in a recorded run");
+    return;
+  }
+  sprintf(syms, "*%02u#", i);
+  say(l->id);
+  tm = marker(syms);
+  nparts = 0;
+  play_arg = l->arg;
+  l->play();
+  parts[0] = 0;
+  for (k = 0; k < nparts; k++)
+    p += sprintf(p, " %lu-%lu", (unsigned long)rec_us(part_t[k][0]),
+                 (unsigned long)rec_us(part_t[k][1]));
+  res(l->id, R_INFO, "recorded: marker %s at %lu us, sound%s us, %s expected",
+      syms, (unsigned long)rec_us(tm), parts, want);
+}
+
 static void check_listen(void) {
   static char keys[16], question[200];
   const struct listen *l;
@@ -2468,7 +2588,9 @@ static void check_listen(void) {
   u16 i;
   int a;
 
-  section("listen", "the listening checks: turn the speakers up");
+  section("listen", (O & SBT_O_RECORD)
+                        ? "the recorded sounds"
+                        : "the listening checks: turn the speakers up");
   for (i = 0; i < ESS_ARRAY_SIZE(listens) && !stop_now; i++) {
     l = &listens[i];
     if (((l->needs & 1) && !C->dma16) || ((l->needs & 2) && !fm_port)) {
@@ -2478,6 +2600,10 @@ static void check_listen(void) {
     want = l->want;
     if (l->play == s_dual)
       want = front && audio2 ? "b" : "h"; // a Sound Blaster 16 has one DAC
+    if (O & SBT_O_RECORD) {
+      record_one(i, l, want);
+      continue;
+    }
     strcpy(keys, l->keys);
     strcat(keys, "gs");
     sprintf(question, "%s\n %s", l->question, legend(l->keys));
@@ -2579,7 +2705,9 @@ int sbt_run(const struct sbt_hal *hal, const struct sbt_card *card,
     chip_dump("before");
   }
   mix_save();
-  if (!(O & SBT_O_LISTEN)) {
+  if (O & SBT_O_RECORD)
+    record_start();
+  if (!stop_now && !(O & SBT_O_LISTEN)) {
     check_e2();
     check_mixer();
     check_irq();
@@ -2594,12 +2722,14 @@ int sbt_run(const struct sbt_hal *hal, const struct sbt_card *card,
     check_misc();
     check_fm_mpu();
     check_time();
-  } else {
+  } else if (!stop_now) {
     check_routing();
     check_fm_mpu();
   }
   if (!(O & SBT_O_AUTO) && !stop_now)
     check_listen();
+  if ((O & SBT_O_RECORD) && !stop_now)
+    record_end();
   if (front && !stop_now) {
     section("chip", "the ES1869 after the checks");
     chip_dump("after");

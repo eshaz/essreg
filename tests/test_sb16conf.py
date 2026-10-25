@@ -20,7 +20,8 @@ doesn't reach memory: the front has no way to write it through the DMA.
 Under EMM386 the TSR doesn't trap the DMA controller, so a game's 16-bit
 channel keeps the position it was programmed with, its programming has to
 come before the transfer's command, and each command carries it over anew,
-from the buffer's start.
+from the buffer's start, but for a single-cycle block of the buffer it
+carried over last, which goes on from the block before.
 
 The chip model also has to see no undefined use (esschip's violations),
 every DMA cycle has to move data (dma8237's bad), and the VxD has to ask
@@ -147,8 +148,7 @@ class EMM386Test(Conformance, unittest.TestCase):
     without the DMA controller's traps"""
 
     known = {**Conformance.known, "position16": {"moving"},
-             "play16_dma_after": {"data", "ok", "per_block", "seen"},
-             "play16_single_each_block": {"data"}}
+             "play16_dma_after": {"data", "ok", "per_block", "seen"}}
 
     def card(self):
         return TSRCard("emm", dma2=3)

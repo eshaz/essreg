@@ -30,6 +30,7 @@
 #define SBT_O_LISTEN 0x0002 // the listening checks only
 #define SBT_O_SHORT 0x0004  // short blocks and sounds (the host tests)
 #define SBT_O_QUICK 0x0008  // fewer rates
+#define SBT_O_RECORD 0x0010 // a recorded run: no questions, DTMF markers
 
 // sbt_card.flags: what the platform found
 #define SBT_F_WINDOWS 0x01 // a Windows DOS box

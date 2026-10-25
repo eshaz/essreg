@@ -109,8 +109,11 @@ def extended_play(chip, bits=16, stereo=True, signed=True, auto=True,
 
 class ExtendedTest(unittest.TestCase):
     def test_rates(self):
-        self.assertAlmostEqual(a1_hz(0xF0), 795500 / 16)
-        self.assertAlmostEqual(a1_hz(0x40), 397700 / 64)
+        """A1h's clocks as the card of the first report measured them, not
+        the data sheet's 795.5 and 397.7 kHz: 44101 Hz for EEh"""
+        self.assertAlmostEqual(a1_hz(0xF0), 793800 / 16)
+        self.assertAlmostEqual(a1_hz(0x40), 396900 / 64)
+        self.assertAlmostEqual(a1_hz(0xEE), 44100)
         self.assertAlmostEqual(a2_hz(0xF0), 768000 / 16)
         self.assertAlmostEqual(a2_hz(0x6E), 793800 / 18)
 

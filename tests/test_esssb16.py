@@ -37,7 +37,7 @@ IO_DIRECT, IO_HDPMI, IO_QPI, IO_CHAIN = 0, 1, 2, 3
 BASE = 0x220
 SB_PORTS = {BASE + o for o in (4, 5, 6, 0xA, 0xC, 0xE, 0xF)}
 DMA5_PORTS = {0xC4, 0xC6, 0x8B, 0xD4, 0xD6, 0xD8, 0xDA, 0xDC, 0xDE}
-MAX_PARAS = 280         # the resident part with the PSP, Audio 2's engine in
+MAX_PARAS = 284         # the resident part with the PSP: 4.4 KB in MEM /C
 # the 8237's mode register: demand or single transfers, auto-initialize,
 # from memory (playback) or into it (recording)
 DEMAND, SINGLE, AUTO, PLAY, RECORD = 0x00, 0x40, 0x10, 0x08, 0x04
@@ -659,13 +659,14 @@ class FrontTest(unittest.TestCase):
 
     def test_dma_select(self):
         """mixer 81h picks the 16-bit channel; one the front doesn't trap
-        is read back at the command"""
+        is read back at the command, and the channel that plays it
+        auto-initializes, also for a single-cycle block"""
         c, chip = self.c, self.chip
         mixer(c, 0x81, 0x42)                    # channel 6
         self.assertEqual(mixer(c, 0x81), 0x42)
         self.assertEqual(c.m.data8("dma16"), 6)
         play16(c, cmd=0xB2, ch=6, addr=0x51000, auto=False)
-        self.assertEqual(chip.dma[1], {"mask": False, "mode": 0x09,
+        self.assertEqual(chip.dma[1], {"mask": False, "mode": 0x19,
                                        "addr": 0x1000, "count": 0x1FFF,
                                        "page": 0x05})
         mixer(c, 0x81, 0x02)                    # none: on the 8-bit channel

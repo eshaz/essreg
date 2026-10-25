@@ -829,12 +829,12 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
 
 Checks the Sound Blaster 16 that DOS games find, whether `esssb16`, the VxD
 in a DOS box or a real card, and writes what it found to `SB16TEST.TXT`, to
-send back. About a hundred automatic checks come first: the DSP's commands,
-the mixer, the interrupts, every transfer and rate, two transfers at once,
-recording, FM and the MPU-401. Then it plays sounds and asks what you heard.
-`/A` runs only the automatic checks, `/L` only the listening ones, `/Q`
-fewer rates, and `/O:file` names the report. Esc stops it.
-[docs/TESTING.md](docs/TESTING.md#d3-sb16test) has the steps.
+send back. About a hundred automatic checks of the DSP, the mixer, every
+transfer and rate, FM and the MPU-401 come first, then sounds and what you
+heard. `/A` runs only the automatic checks, `/L` only the listening ones,
+`/Q` fewer rates, and `/O:file` names the report. `/R` asks nothing, for a
+recorder, and [`tools/sb16rec.py`](tools/sb16rec.py) analyzes the recording.
+Esc stops it. [docs/TESTING.md](docs/TESTING.md#d3-sb16test) has the steps.
 
 ## [`esfmpat.exe`](build)
 * Utility to write custom patch banks to the Windows ESFM VxD driver.

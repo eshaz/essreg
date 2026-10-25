@@ -45,7 +45,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src")
 EXE = os.path.join(ROOT, "build", "sb16test.exe")
 AREA = 0x40000              # the DMA area, free in tsremu's first megabyte
-O_AUTO, O_LISTEN, O_SHORT, O_QUICK = 0x01, 0x02, 0x04, 0x08
+O_AUTO, O_LISTEN, O_SHORT, O_QUICK, O_RECORD = 0x01, 0x02, 0x04, 0x08, 0x10
 IDLE_US = 25                # the time an idle() of the checks takes
 # what the fronts can't do as the card does (docs/SB16.md)
 KNOWN = {"dsp.ram", "dsp.e2", "dsp.reset_held", "ctl.unacknowledged"}
@@ -179,11 +179,15 @@ class Run:
     """the checks on one card: the hardware layer's calls, what the card
     played while each listening sound ran, and the report"""
 
-    def __init__(self, card, front, opts=O_SHORT, irq=5, dma8=1, dma16=5):
+    def __init__(self, card, front, opts=O_SHORT, irq=5, dma8=1, dma16=5,
+                 timeline=False):
         self.card, self.front = card, front
+        # (us, frames each DAC had played) as time passes, for a recording
+        self.timeline = [] if timeline else None
         self.lines, self.errors, self.asked = [], [], {}
         self.sections = []
         self.segments = []          # (rate, start, end) of each sound
+        self.sounds = {}            # each question's segments
         self.mix_log = []           # (us, register, value) written
         self.out_log = []           # (us, port, value) of the FM ports
         self.index = 0
@@ -239,6 +243,19 @@ class Run:
     @_guard
     def _idle(self):
         self.card.wait(IDLE_US)
+        if self.timeline is not None:
+            # the times where the DACs' counts change, and the last time
+            # each count held
+            now, heard = clock(self.card), self.heard_now()
+            if not self.timeline or heard != self.timeline[-1][1]:
+                if self.still and self.still != self.timeline[-1:][0:1]:
+                    self.timeline.append(self.still)
+                self.timeline.append((now, heard))
+                self.still = None
+            else:
+                self.still = (now, heard)
+
+    still = None
 
     @_guard
     def _poke(self, addr, src, n):
@@ -336,6 +353,8 @@ class Run:
         return crossings_hz([f[0] for f in frames], rate)
 
     def answer(self, id_, keys):
+        if id_ == "r.level":
+            return "\r"            # the recorder is set: the run begins
         segs = self.segments[self.asked_from:]
         seg = segs[-1] if segs else None
         if seg is None:
@@ -392,6 +411,8 @@ class Run:
         id_ = id_.decode()
         a = self.answer(id_, keys.decode())
         self.asked[id_] = a
+        self.sounds.setdefault(id_, []).extend(
+            self.segments[self.asked_from:])
         self.asked_from = len(self.segments)
         return ord(a)
 
@@ -471,6 +492,30 @@ class Checks:
         self.assertGreaterEqual(len(listen), 14)
         for k in listen:
             self.assertIn(res[k][0], ("PASS", "SKIP"), (k, res[k]))
+
+    def test_pitch(self):
+        """every listening tone at one pitch, 441 Hz, whatever its rate and
+        buffer, and the two tones at once at 294 and 882 Hz; measured on
+        each DAC and channel that sounds, past the first quarter of each
+        sound, where a transfer may end another, to 0.5 %: the short run's
+        sounds at 44.1 kHz hold three cycles"""
+        run, bad = self.run_, []
+        for id_, segs in run.sounds.items():
+            if id_ in ("l.direct", "l.fm", "l.record", "l.adpcm"):
+                continue
+            want = (294, 882) if id_ == "l.dual" else (441,)
+            for seg in segs:
+                for part in run.parts(seg):
+                    part = part[len(part) // 4:]
+                    for c in range(len(part[0]) if part else 0):
+                        xs = [f[c] for f in part]
+                        if rms(xs) < 300:
+                            continue
+                        hz = crossings_hz(xs, seg[0])
+                        if all(abs(hz - w) > w / 200 for w in want):
+                            bad.append((id_, c, round(hz, 1)))
+        self.assertGreater(len(run.sounds), 14)
+        self.assertEqual(bad, [], run.report())
 
     def test_mixer_back(self):
         """the restore file's pairs, and none at the end"""
@@ -569,7 +614,7 @@ class Person:
             return "\x1b"
         if not output.endswith("> "):
             return None
-        asked = re.findall(r"\n(l\.[\w.]+): ", output)
+        asked = re.findall(r"\n([lr]\.[\w.]+): ", output)
         return self.answers[asked[-1]][asked.count(asked[-1]) - 1]
 
 
@@ -729,6 +774,36 @@ class ExePersonTest(unittest.TestCase):
             self.assertEqual([(c[0], c[3]) for c in d.vxd_calls],
                              [(0x0001, 0xE9), (0x0400, None)])
             self.assertEqual(d.vxd_calls[1][2], 0x00012345)
+
+    def test_recorded_run(self):
+        """/R: the level tone until Enter, then each listening sound after
+        its marker, nothing asked, and the times in the report"""
+        d, code = exe_run(ModelCard(), "/R /L /T",
+                          keys=Person({"r.level": "\r"}))
+        self.assertEqual(code, 0)
+        self.assertEqual(d.output.count("\nr.level: "), 1)
+        self.assertNotRegex(d.output, r"\nl\.[\w.]+: ")    # no questions
+        self.assertIn("A recorded run", d.output)
+        lines = report(d)
+        res = results(lines)
+        self.assertTrue(res["rec.start"][1].startswith("marker ABCD at 0 us"))
+        self.assertTrue(res["rec.end"][1].startswith("marker DCBA at "))
+        recorded = [(k, v[1]) for k, v in res.items()
+                    if v[1].startswith("recorded: ")]
+        self.assertGreater(len(recorded), 20)
+        last = 0
+        for i, (k, det) in enumerate(recorded):
+            m = re.match(r"recorded: marker \*(\d\d)# at (\d+) us, "
+                         r"sound((?: \d+-\d+)+) us, (\w+) expected", det)
+            self.assertIsNotNone(m, det)
+            at = int(m.group(2))
+            self.assertGreater(at, last, k)
+            spans = [tuple(map(int, s.split("-")))
+                     for s in m.group(3).split()]
+            self.assertTrue(all(at < a < b for a, b in spans), det)
+            last = spans[-1][1]
+        self.assertEqual(res["l.record"],
+                         ("SKIP", "no one to speak in a recorded run"))
 
     def test_tsr_in_upper_memory(self):
         """esssb16 loaded high (LH): found with the UMBs linked into the

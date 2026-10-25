@@ -3720,11 +3720,12 @@ ESSREG_S16_Halt:
         jmp     ESSREG_S16_Boot.clear
 
 ; Audio 1's transfer of the front's stops (B8h bit 0), at once, as a Sound
-; Blaster 16's: its FIFO empties (ESSREG_S16_Flush), so that nothing of it
-; plays on while Audio 2 plays the next; EDI = ADI
+; Blaster 16's, and its FIFO empties (ESSREG_S16_Flush), so that nothing of
+; it plays on while Audio 2 plays the next, or in the next one's format;
+; EDI = ADI
 ESSREG_S16_A1_Stop:
         test    byte [edi+EX_S16_Flags],S16_RUN
-        jz      ESSREG_S16_Flush.out
+        jz      ESSREG_S16_Flush
         and     byte [edi+EX_S16_Flags],~(S16_RUN | S16_AUTO | S16_LAST | S16_PAUSE) & 0xFF
         mov     ax,0xB8FE
         call    ESSREG_S16_And
@@ -4554,10 +4555,12 @@ ESSREG_S16_Xfer:
 .eight: cmp     byte [edi+EX_S16_To],0  ; the program programs Audio 1's
         jne     .a1                     ; channel itself: what the front
         mov     byte [edi+EX_S16_DMA],0 ; carried over there is gone
-.a1:    test    byte [edi+EX_S16_Flags],S16_RUN ; the first after a reset: the
-        jnz     .ext                    ; FIFO empties, so that nothing of
-        call    ESSREG_S16_Flush        ; another stream plays in this one's
-.ext:   call    ESSREG_S16_Ext          ; format
+.a1:    mov     al,[edi+EX_S16_Flags]   ; anew, Audio 1 stops and its FIFO
+        and     al,S16_RUN | S16_AUTO   ; empties (ESSREG_S16_A1_Stop), so
+        cmp     al,S16_RUN              ; that nothing of another stream
+        je      .ext                    ; plays in this one's format; a
+        call    ESSREG_S16_A1_Stop      ; single-cycle block goes on from
+.ext:   call    ESSREG_S16_Ext          ; the last (ESSREG_S16_Format)
         mov     al,bl                   ; S16_16 and S16_AUTO from BL
         or      al,S16_RUN
         and     al,S16_16 | S16_RUN | S16_AUTO
@@ -4828,7 +4831,9 @@ ESSREG_S16_Count:
         jmp     ESSREG_S16_Set
 
 ; the format, B6h = DL and B7h = DH, EDI = ADI: B6h, then B7h twice (DS
-; p.49, table 16), first 51h or 71h, unless the chip has the format
+; p.49, table 16), first 51h or 71h, unless the chip has the format.
+; Another format starts on an empty FIFO, the DMA stopped (B8h), so that
+; the bytes of the last block don't play in it
 ESSREG_S16_Format:
         bt      dword [edi+EX_S16_Known],0xB6 - 0xA0
         jnc     .write
@@ -4836,7 +4841,8 @@ ESSREG_S16_Format:
         jnc     .write
         cmp     dx,[edi+EX_S16_Ctrl+0xB6-0xA0]
         je      .out
-.write: mov     al,dl
+.write: call    ESSREG_S16_Flush
+        mov     al,dl
         mov     ah,0xB6
         call    ESSREG_S16_Force
         mov     ax,0xB771
