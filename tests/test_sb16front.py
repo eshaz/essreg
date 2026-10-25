@@ -402,14 +402,21 @@ class FrontChecks:
         self.assertClean()
 
     def test_audio2_reset(self):
-        """the game's reset stops Audio 2 (78h bits 4 and 1) and turns its
-        interrupt off (7Ah)"""
+        """the game's reset stops Audio 2 (78h bits 4 and 1), turns its
+        interrupt off and clears its latch (7Ah bits 6 and 7); what its
+        FIFO holds plays out in the stream's format, whole frames, so that
+        nothing is left to put the next stream's channels off by a byte"""
         c = self.a2()
         chip = c.chip
         play16(c)
         c.wait(3000)
+        n = len(chip.played2)
         self.assertTrue(reset(c))
-        self.assertEqual((chip.mixer[0x78], chip.mixer[0x7A]), (0x81, 0x00))
+        self.assertEqual((chip.mixer[0x78], chip.mixer[0x7A]), (0x81, 0x07))
+        c.wait(3000)
+        self.assertEqual(len(chip.a2.fifo), 0)
+        self.assertGreater(len(chip.played2), n)
+        self.assertTrue(all(len(f) == 2 for f in chip.played2[n:]))
         self.assertClean()
 
     def test_audio2_one_16bit_transfer(self):

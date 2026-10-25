@@ -490,13 +490,15 @@ the FIFO to the DAC, auto-initialized as the command says, with demand
 transfers of 4 bytes, or single ones with "Single Mode DMA". D5h and D6h
 turn 78h bit 0 off and on, D9h ends the auto-initialize (78h bit 4), and a
 single-cycle 16-bit command while Audio 2 auto-initializes becomes its last
-block. A reset of the chip clears 7Ah and 7Ch (DS p.51), so the front's own
-resets, for the commands of Compatibility mode, put them back while Audio 2
-plays. Audio 2 needs an 8-bit channel of its own, 0, 1 or 3 and not Audio
-1's, because the chip takes one byte a DMA cycle on any channel, and
-`SoundBlaster16Audio2=1`, the default. Otherwise the 16-bit playback plays
-on Audio 1, as a 16-bit recording always does, and a transfer of one kind
-ends the other kind's.
+block. The program's reset stops Audio 2 and clears only the interrupt bits
+of 7Ah (7 and 6), so that what its FIFO still holds plays out in the
+stream's format, in whole frames. A reset of the chip clears 7Ah and 7Ch (DS
+p.51), so the front's own resets, for the commands of Compatibility mode,
+put them back while Audio 2 plays. Audio 2 needs an 8-bit channel of its
+own, 0, 1 or 3 and not Audio 1's, because the chip takes one byte a DMA
+cycle on any channel, and `SoundBlaster16Audio2=1`, the default. Otherwise
+the 16-bit playback plays on Audio 1, as a 16-bit recording always does, and
+a transfer of one kind ends the other kind's.
 
 The whole sequence is about 30 bytes, and four of its registers are read
 first for the bits the front keeps, each read waiting for the chip's answer

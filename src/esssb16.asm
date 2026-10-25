@@ -757,15 +757,15 @@ boot:
         ret
 
 ; the DSP held in reset: the front's transfers stop, the chip's interrupts
-; are acknowledged (Audio 2's off until its next transfer), and nothing
-; waits in the latches
+; are acknowledged (Audio 2's interrupt off and its latch clear until its
+; next transfer), and nothing waits in the latches
 halt:
         call    a1_stop
         call    a2_stop
         cmp     byte [V(dma2)],4
         jae     .idle
-        mov     ax,0x7A00
-        call    mix_write
+        mov     ax,0x7A07               ; its format kept for what the FIFO
+        call    mix_and                 ; still plays
 .idle:  mov     al,0x0E
         call    port_of
         call    chip_in

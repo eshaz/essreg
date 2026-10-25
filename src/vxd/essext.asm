@@ -3707,8 +3707,8 @@ ESSREG_S16_Cold:
         ret
 
 ; the DSP held in reset, EDI = ADI: the front's transfers stop, the chip's
-; interrupts are acknowledged (Audio 2's off until its next transfer), and
-; nothing waits in the latches
+; interrupts are acknowledged (Audio 2's interrupt off and its latch clear
+; until its next transfer), and nothing waits in the latches
 ESSREG_S16_Halt:
         call    ESSREG_S16_A1_Stop
         call    ESSREG_S16_A2_Stop
@@ -3753,14 +3753,14 @@ ESSREG_S16_A2_Stop:
         pop     eax
 .out:   ret
 
-; Audio 2's interrupt off and cleared (7Ah), while the front uses Audio 2;
-; EDI = ADI
+; Audio 2's interrupt off and its latch cleared (7Ah), while the front uses
+; Audio 2; its format stays for what its FIFO still plays; EDI = ADI
 ESSREG_S16_A2_Off:
         cmp     byte [edi+EX_S16_A2],4
         jae     .out
         push    eax
-        mov     ax,0x7A00
-        call    ESSREG_S16_Mix_Set
+        mov     ax,0x7A07
+        call    ESSREG_S16_Mix_And
         pop     eax
 .out:   ret
 
