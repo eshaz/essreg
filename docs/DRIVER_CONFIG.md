@@ -746,15 +746,16 @@ ESS's driver:
   mode on the *Plug and Play* page, whether the chip takes the write. With
   0, the latch stays as the card's PnP data set it.
 * **SoundBlaster16** (default 1). A DOS program that takes the Sound Blaster
-  finds a Sound Blaster 16 in front of the chip: DSP version 4.05, the
-  16-bit transfer commands, a 16-bit DMA channel and the Sound Blaster 16's
-  mixer registers, which the VxD turns into the chip's Extended mode
-  transfers on Audio 1 and into its volumes
+  finds a Sound Blaster 16 in front of the chip, DSP version 4.05 with the
+  CT1745 mixer ([SB16.md](SB16.md)). The VxD plays every transfer, 8-bit or
+  16-bit, in the chip's Extended mode on Audio 1, and turns the mixer
+  registers into the chip's volumes
   ([VXD_INTERNALS.md](VXD_INTERNALS.md#a-sound-blaster-16-for-dos-programs)).
-  A program that identifies the chip (E7h) or uses Extended mode itself gets
-  the chip as it is. With 0, the chip answers as a Sound Blaster Pro
-  (version 3.01) through untrapped ports, as with ESS's driver, and a Sound
-  Blaster 16 program plays 8-bit sound or none.
+  A program that uses Extended mode itself gets the chip as it is, and one
+  that asks for the chip's identification (E7h) gets no answer, as from a
+  Sound Blaster 16. With 0, the chip answers as a Sound Blaster Pro (version
+  3.01) through untrapped ports, as with ESS's driver, and a Sound Blaster
+  16 program plays 8-bit sound or none.
 * **SoundBlaster16DMA** (default 5). The Sound Blaster 16's 16-bit DMA
   channel, 5, 6 or 7, the `H5` of `BLASTER`. When it is Audio 2's channel,
   ESS's handler for that channel passes the program's programming on, else

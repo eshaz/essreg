@@ -444,108 +444,150 @@ in front of the chip (`ESSREG_S16_Start`, from ESS's `Acquire_Resources`).
 ESS's code untraps the audio ports for the owner, and the front traps seven
 of them again for its VM: the mixer index and data, the reset, the read
 data, the command, the status and the 16-bit acknowledge ports. Everything
-else, the FM ports included, stays as ESS has it. The front answers E1h with
-version 4.05 and E3h with the Sound Blaster 16's copyright string, and takes
-the Sound Blaster 16's own commands: the rate (41h, 42h), the transfers Bxh
-and Cxh with their mode and length, pause, continue and stop (D5h, D6h, D9h,
-and DAh while a transfer of the front's runs) and the 16-bit interrupt
-(F3h). Every other command goes to the chip as it comes, with its operands,
-so a Sound Blaster or Sound Blaster Pro program sees the chip as before, and
-the port accesses it makes reach the chip unchanged.
+else, the FM ports included, stays as ESS has it.
 
-A transfer command becomes the chip's Extended mode transfer
-(`ESSREG_S16_Transfer`), the sequence of the data sheet (p. 48) that
-ES1869.DRV's recording uses: C6h once after a reset, B8h for the direction
-and auto-initialize, B9h for demand transfers of 2 bytes, or single ones
-with ESS's "Single Mode DMA" setting, A8h for mono or stereo, A1h and A2h
-for the rate as ES1869.DRV computes them, from the rate of 41h/42h or the
-time constant of 40h, which gives the rate of each channel, A4h and A5h for
-the length in bytes, B6h and B7h for the format, B1h and B2h for the
-interrupt and the DMA request, then B8h bit 0 and D1h. Mixer 82h answers
-with the transfer that interrupts, 8-bit or 16-bit, and the MPU-401's bit,
-80h with the card's IRQ and 81h with its channels.
+The front answers as DSP 4.05 and the CT1745 mixer do, as the model of
+[SB16.md](SB16.md) has them. Every command takes the operands the DSP's
+firmware takes, and an answer goes out a byte at a time through the read
+latch, so E1h gives version 4.05, E3h the copyright, E0h the inverted byte
+and E4h/E8h the test register. The rate generator of 40h, 41h and 42h runs
+at v * 44100 / 248 Hz, with the firmware's table for the time constant, and
+a reset gives the cold boot's rate, block length and speaker, or the warm
+boot's after the high-speed and MIDI UART commands. The 8-bit and 16-bit
+transfers have their own interrupts in mixer 82h and their own acknowledges
+(+Eh and +Fh).
+
+Every PCM transfer, the Sound Blaster 16's Bxh and Cxh and the older 8-bit
+commands alike, plays or records on Audio 1 in the chip's Extended mode
+(`ESSREG_S16_Xfer`). It follows the sequence of the data sheet (p.48) that
+ES1869.DRV's recording uses: C6h and D1h once, B8h for the direction and
+auto-initialize, B9h for demand transfers of 2 bytes, or single ones with
+ESS's "Single Mode DMA" setting, A8h for mono or stereo, A1h and A2h for the
+rate as ES1869.DRV computes them from the rate generator's value, A4h and
+A5h for the length in bytes, B6h and B7h for the format, B1h and B2h for the
+interrupt and the DMA request, mixer 71h bit 5 off, so that A1h means what
+the front computes, then B8h bit 0. A DSP reset would take the chip out of
+Extended mode, so the front emulates the program's reset: the transfer
+stops, the chip's interrupt is acknowledged, AAh comes back, and the chip
+stays in Extended mode. The firmware's commands that Extended mode doesn't
+have, the direct DAC and ADC, ADPCM, silence and MIDI, go to the chip in its
+Compatibility mode, after a reset of its own, with the rate as a time
+constant.
+
+Pause and continue (D0h and D4h, D5h and D6h) turn Audio 1's DMA requests
+off and on (B2h bit 6), and D9h and DAh end the auto-initialize with the
+block that plays (B8h bit 2). A single-cycle transfer of the kind that runs
+auto-initialized becomes its last block, as the firmware queues it.
 
 The whole sequence is about 30 bytes, and four of its registers are read
 first for the bits the front keeps, each read waiting for the chip's answer
 with interrupts off. A game that plays block by block sends a transfer
 command for every block, so the front keeps the chip's registers A0h-BFh
 that it wrote or read since the chip's last reset (`EX_S16_Ctrl`,
-`EX_S16_Known`): a transfer writes only the registers that change, reads
-each of the others once, and a transfer like the last costs B8h twice and
-D1h. The registers become unknown again at a reset, at the front's start,
-and at any command of the chip's that may change them, which is every one
-but pause, continue, the speaker, the tests, the version, the identification
-and the interrupt request (`ESSREG_S16_Passed`). The work stays in the port
-trap, where the program waits for it: the chip takes each byte within
-microseconds, and a time-out would start the transfer later.
+`EX_S16_Known`): a transfer writes only the registers that change and reads
+each of the others once, and a transfer like the last costs B8h twice. The
+work stays in the port trap, where the program waits for it: the chip takes
+each byte within microseconds, and a time-out would start the transfer
+later.
 
-The DMA runs on Audio 1's 8-bit channel, where a 16-bit sample is two bytes.
-A program that uses the 16-bit channel (`SoundBlaster16DMA`, 5 by default,
-the `H5` of `BLASTER`) programs it as ever. When that channel is Audio 2's,
-ESS's handler for it gets the programming (`ESSREG_DMA2`); else the VxD
-takes the channel from VDMAD once (`VDMAD_Virtualize_Channel`), and its
-callback gets it. Either way the programming, region, length and mode, goes
-to Audio 1's channel (`VDMAD_Set_Virt_State`, with the length in bytes and
-the mode changed to demand transfers), and ESS's handler for Audio 1's
-channel programs the chip's channel from it, as if the program had
-(`ESSREG_S16_DMA_State`). Masking the 16-bit channel masks Audio 1's. VDMAD
-tells the front when the program reads the channel's count
-(`VDMAD_Set_Channel_Callbacks`), and the front answers with Audio 1's count
-(`VDMAD_Get_Phys_Count` and `VDMAD_Set_Virt_Count`, `ESSREG_S16_Position`),
-also at the end of each block and at each acknowledge, so a program that
-polls the position sees it move.
+The DMA runs on Audio 1's 8-bit channel, where a 16-bit sample is two bytes,
+because the chip takes a byte per DMA cycle whatever the channel. A program
+that uses the 16-bit channel (`SoundBlaster16DMA`, 5 by default, the `H5` of
+`BLASTER`) programs it as ever. When that channel is Audio 2's, ESS's
+handler for it gets the programming (`ESSREG_DMA2`); else the VxD takes the
+channel from VDMAD once (`VDMAD_Virtualize_Channel`), and its callback gets
+it. Either way the programming, region, length and mode, goes to Audio 1's
+channel (`VDMAD_Set_Virt_State`, with the length in bytes and the mode
+changed to demand transfers), and ESS's handler for Audio 1's channel
+programs the chip's channel from it, as if the program had
+(`ESSREG_S16_DMA_State`). A transfer command takes the channel's state from
+VDMAD as well, so a program that programmed the channel before the front had
+it plays too, and while the channel is masked, Audio 1's waits masked.
+Masking the 16-bit channel masks Audio 1's. VDMAD tells the front when the
+program reads the channel's count (`VDMAD_Set_Channel_Callbacks`), and the
+front answers with Audio 1's count in words (`VDMAD_Get_Phys_Count` and
+`VDMAD_Set_Virt_Count`, `ESSREG_S16_Position`), also at the end of each
+block, so a program that polls the position sees it move. Mixer 81h picks
+the 16-bit channel: the one `SoundBlaster16DMA` names, or none, when the
+program plays 16-bit sound through the 8-bit channel, which it programs
+itself. Another channel only reads back, because the VxD has just the one
+from VDMAD.
+
+ESS's hardware interrupt procedure requests the owner VM's interrupt without
+acknowledging the chip. The program's handler reads 82h, which the front
+answers from the chip's Audio_Base+Ch bits: the counter's interrupt is the
+transfer's kind, and the processor's (F2h, the firmware's transfers, MIDI
+input) is the 8-bit kind unless F3h asked for the 16-bit one. The
+acknowledge of the right kind reads the chip's +Eh (`ESSREG_S16_Ack`).
 
 The Sound Blaster 16's mixer registers 30h-47h are the program's view
-(`EX_S16_Mix`), and the chip gets the volumes they stand for, each register
-its own (`ESSREG_S16_Mix_Apply`): master in 60h/62h, voice in 14h, MIDI in
-36h, CD in 38h, line in 3Eh, the mic in 1Ah and the PC speaker in 3Ch, with
-CD, line and the mic through the output switches of 3Ch, and the record
-source of 1Ch from the input switches of 3Dh/3Eh. A program that starts sees
-the levels the chip has, which are Windows' (`ESSREG_S16_Mix_Chip`), so a
-program that reads its volumes and writes them back changes nothing. A mixer
-reset (00h) is the Sound Blaster 16's: the view gets the Sound Blaster 16's
-reset values and the chip their levels, and the chip's other registers stay
-as Windows and the VxD set them: the 3-D effect, the DACs' modes, the music
-DAC's source and Audio 2, which the chip's own reset would put back to their
+(`EX_S16_Mix`), in the bits the CT1745 keeps, and the chip gets the volumes
+they stand for, each register its own (`ESSREG_S16_Mix_Apply`): master in
+60h/62h, voice in 14h, MIDI in 36h, CD in 38h, line in 3Eh, the mic in 1Ah
+and the PC speaker in 3Ch, with CD, line and the mic through the output
+switches of 3Ch, and the record source of 1Ch from the input switches of
+3Dh/3Eh. A program that starts sees the levels the chip has, which are
+Windows' (`ESSREG_S16_Mix_Chip`), so a program that reads its volumes and
+writes them back changes nothing but the bits the CT1745 doesn't have: the
+lowest of the master's 6 and of the PC speaker's 3. A mixer reset (00h) is
+the Sound Blaster 16's: the view gets the Sound Blaster 16's reset values
+and the chip their levels, and the chip's other registers stay as Windows
+and the VxD set them: the 3-D effect, the DACs' modes, the music DAC's
+source and Audio 2, which the chip's own reset would put back to their
 power-on values.
 
-Every other mixer register reaches the chip as it comes. Some of them change
-a level of the view: the Sound Blaster Pro's 04h, 0Ah, 0Ch, 22h, 26h, 28h
-and 2Eh, which the chip translates into its own, and the chip's own volume
-registers. The front marks that level stale and reads it back from the chip
-the next time the program uses the Sound Blaster 16's registers
-(`ESSREG_S16_Mix_Stale`, `ESSREG_S16_Mix_Fresh`), so a Sound Blaster Pro
-program's port accesses stay the same as before. When a recording takes the
-DSP, the view keeps the program's levels, and they go back to the chip when
-the program gets the DSP again.
+The Sound Blaster Pro's registers 04h, 0Ah, 22h, 26h, 28h and 2Eh are views
+of the Sound Blaster 16's, as on the CT1745, and 0Ch and 0Eh aren't there,
+so a Sound Blaster Pro program's stereo bit has no effect, as on a Sound
+Blaster 16. 80h-82h answer with the card's IRQ, its channels and the
+interrupts that are pending, and writes to them don't reach the chip. Every
+other mixer register reaches the chip as it comes. The chip's own volume
+registers change a level of the view: the front marks that level stale and
+reads it back from the chip the next time the program uses the Sound Blaster
+16's registers (`ESSREG_S16_Mix_Stale`, `ESSREG_S16_Mix_Fresh`). When a
+recording takes the DSP, the view keeps the program's levels, and they go
+back to the chip when the program gets the DSP again.
 
-A program that identifies the chip with E7h, or that uses Extended mode
-itself, gets the chip throughout: its commands, Bxh and Cxh included, its
-registers and its mixer go to the chip as they come. C6h is both the Sound
-Blaster 16's 8-bit auto-initializing transfer and the chip's Extended mode,
-and the byte after it tells them apart: a transfer's mode byte has only bits
-4 and 5, and a command has more. The front's settings stay with the VM while
-a recording has the DSP, and go when the program or the VM ends.
+A program that uses Extended mode itself gets the chip throughout: its
+commands, Bxh and Cxh included, its registers and its mixer go to the chip
+as they come, until its next reset, whose AAh the front takes from the chip
+and answers itself. C6h is both the Sound Blaster 16's 8-bit
+auto-initializing transfer and the chip's Extended mode, and the byte after
+it tells them apart: a transfer's mode byte has only bits 4 and 5, and a
+command has more. E7h, the chip's identification, isn't the Sound Blaster
+16's, so a program that asks for it gets no answer, as from a Sound Blaster
+16, and goes on as a Sound Blaster 16 program. The front's settings stay
+with the VM while a recording has the DSP, and go when the program or the VM
+ends.
 
-Two limits remain. A buffer that crosses a 64 KB physical page is copied
+Some limits remain. A buffer that crosses a 64 KB physical page is copied
 through VDMAD's buffer, as every DOS program's is on Audio 1's channel, and
-an auto-initializing transfer in such a buffer plays stale data. And the
-whole 16-bit sound goes through one 8-bit channel, two bytes a sample, with
-demand transfers of 2 bytes, so the bus is arbitrated as often as for a
-Sound Blaster 16's words.
+an auto-initializing transfer in such a buffer plays stale data. The whole
+16-bit sound goes through one 8-bit channel, two bytes a sample, with demand
+transfers of 2 bytes, so the bus is arbitrated as often as for a Sound
+Blaster 16's words. And E2h, the DSP's DMA identification, writes no byte
+through the DMA, because the front has no way to.
 
 In DOS itself, `esssb16.com` (`src/esssb16.asm`) is the same front as a
 resident program. There no driver sees a port access, so it traps the Sound
 Blaster ports through the memory manager: EMM386's port trap interface,
 QEMM's QPI, which JEMM gets from QPIEMU, and for protected-mode games
 HDPMI32i, with which it registers as a 32-bit client. Without VDMAD, it
-reads the game's programming of its 16-bit channel back from the DMA
-controller at the transfer command and puts it on Audio 1's channel in
-bytes, as VDMAD's callbacks do here. Its view of the mixer starts from the
-chip's levels when it loads. Nothing tells it when a game starts, so a DSP
-reset makes the front a Sound Blaster 16 again for the next game, even after
-a game that identified the chip, and the levels that another program set
-through the chip's own registers reach the view when the next game reads it.
+traps the ports of the game's 16-bit channel itself where the memory manager
+lets it (QPI and HDPMI32i), follows its programming and answers its count
+from Audio 1's channel, as VDMAD's callbacks let the VxD do. EMM386 has no
+traps for the DMA controllers, so there the front reads the programming back
+from the controller at each 16-bit command, and the count the game reads
+stands still. Its view of the mixer starts from the chip's levels when it
+loads and then stays the game's: the chip's own registers that a program
+writes don't change it. Nothing tells it when a game starts, so a DSP reset
+makes the front a Sound Blaster 16 again for the next game, even after a
+program that used the chip's Extended mode.
+
+`tests/test_sb16conf.py` plays the games' scenes of `tests/sbscenes.py` on
+the model and on both fronts, in front of a model of the chip, and compares
+what the game saw; `tests/test_sb16front.py` checks what both fronts send
+the chip ([TESTING.md](TESTING.md)).
 
 ## Hardware volume
 

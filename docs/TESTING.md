@@ -52,12 +52,11 @@ The Python tests, in `tests/test_*.py`, cover the following:
   with VMs, per-VM port trapping and a model of the FM chip that follows
   ESFMu. It covers FM detection no matter who has FM, the virtual FM chip
   and its hand-over, the music DAC, Windows' mixer around a DOS game, the
-  reset when Windows uses the card again, and the Sound Blaster 16 in front
-  of the chip, with VDMAD's channel services modeled: the bytes each
-  transfer sends, which shrink to what changes, the mixer a program finds,
-  its mixer reset, and the Sound Blaster Pro's and the chip's own volumes
-  under the Sound Blaster 16's view. Where ESS's driver behaves differently,
-  the test runs the same steps on it too.
+  reset when Windows uses the card again, and what only the VxD's Sound
+  Blaster 16 does: its front for a DOS VM alone, the 16-bit channel through
+  VDMAD, the card's registers as the ADI has them, the mixer a program finds
+  and its levels while a recording has the DSP. Where ESS's driver behaves
+  differently, the test runs the same steps on it too.
 * The `SYSTEM.INI` settings of all three drivers are read with emulated
   profile calls. The tests check each key and its default, that each key is
   read once, and that each change, when it is turned off, does what ESS's
@@ -75,13 +74,23 @@ The Python tests, in `tests/test_*.py`, cover the following:
   the program gave, found in the program's own dispatch table, and
   HDPMI32i's handler at ring 3. DOS has reused the memory the TSR gave back
   by then, and HDPMI its data, so code or data left there fails. It checks
-  the Sound Blaster 16 they answer: the DSP's answers, 16-bit and 8-bit
-  transfers on Audio 1 with the rates ES1869.DRV would pick, the registers a
-  transfer like the last leaves alone, the game's 16-bit channel carried
-  over to the card's, the mixer's view, which starts from the chip's levels
-  and follows the Sound Blaster Pro's and the chip's own registers, the
-  mixer reset, the interrupts, resets, and the chip's own commands going
-  through unchanged.
+  what only this front does: its traps of the game's 16-bit channel on each
+  path, its options, the ports it passes on, and its stack.
+* `test_sb16conf` checks both Sound Blaster 16 fronts against the model of a
+  Sound Blaster 16 in `tests/sb16.py` ([SB16.md](SB16.md)). Every scene of
+  `tests/sbscenes.py`, what a game does through its sound driver
+  (`tests/sbgame.py`), runs on the model and on each front in front of the
+  model of the chip's audio (`tests/esschip.py`): `esssb16.com` under
+  QPIEMU, EMM386 and HDPMI32i, and the VxD in a DOS box, with a model of
+  VDMAD (`tests/sbfronts.py`). What the game saw, the DSP's answers, the
+  mixer, the interrupts, the DMA counts and the frames the DAC played, has
+  to be the same, and the chip model must see no use the data sheet leaves
+  undefined. `test_esschip` checks the chip model itself.
+* `test_sb16front` checks what both fronts send the chip: the Extended mode
+  registers of each transfer with ES1869.DRV's rates, the registers a
+  transfer like the last leaves alone, the 16-bit channel carried over, the
+  chip's Compatibility mode for the firmware's commands, and the chip's
+  mixer behind the Sound Blaster 16's view.
 * Other tests run `esfmpat` on copies of `ESFM.DRV` and check that the
   generated documentation is current.
 
@@ -307,25 +316,38 @@ and stop at the first surprise. Each step says what you should see.
    offers 16-bit stereo. The game plays, with 16-bit sound at the game's
    rate (its setup may say 22, 44 or 48 kHz), and without the 8-bit hiss.
    Its digital sound and its FM music both play.
-3. With `LH HDPMI32I -r` before `esssb16` (`HDPMI32i.EXE` from
+3. Play the games whose 16-bit sound played wrong or not at all with the
+   `esssb16` before this one. Each should play 16-bit sound now. For one
+   that doesn't, note the game, the memory manager, whether it runs in real
+   or protected mode, and what it sets up (rate, mono or stereo, channel),
+   and try it once more with `/S`.
+4. With `LH HDPMI32I -r` before `esssb16` (`HDPMI32i.EXE` from
    `third_party\hdpmi32i`, HX's release), `esssb16` adds
    `, HDPMI32i for protected-mode games`, and `MEM /C` shows it with 4.4 KB.
    A DOS/4GW game set to the Sound Blaster 16 (Descent, Duke Nukem 3D,
    Quake) plays 16-bit sound. Without HDPMI32i the same game plays 8-bit
    sound, or finds no Sound Blaster 16, as before `esssb16`.
-4. With QEMM, or with JEMMEX and `JLOAD QPIEMU.DLL`, step 2 again: the
+5. With QEMM, or with JEMMEX and `JLOAD QPIEMU.DLL`, step 2 again: the
    banner says `traps: QPI for real-mode games`.
-5. A program that knows the chip works as before: ESS's own DOS mixer, or
-   `essreg a`, which reads the chip's registers through E7h and the Extended
-   mode. Set the volumes and the 3-D effect with ESS's mixer, then start the
+6. A program that uses the chip's Extended mode works as before, such as
+   `essreg a`, which reads the chip's registers with C6h and C0h. Set the
+   volumes and the 3-D effect with `essreg` or ESS's mixer, then start the
    game of step 2: its sound setup, where it shows the volumes, shows those
    levels, and the 3-D effect stays on while it plays. Run
    `essreg r=before.txt` before the game and `essreg r=after.txt` after it:
-   of the mixer registers, only the volumes the game set differ.
-6. If sound breaks up, `ESSSB16 /S` (single DMA transfers); with `/H0`, or
+   of the mixer registers, only the volumes the game set differ. A program
+   that identifies the chip with E7h finds a Sound Blaster 16 instead, as on
+   a real one; note any that then fails.
+7. If sound breaks up, `ESSSB16 /S` (single DMA transfers); with `/H0`, or
    with `BLASTER` without an `H`, the game programs the 8-bit channel for
    its 16-bit sound itself, which rules out the carrying over of the 16-bit
    channel's programming.
+8. Load `ESSSB16 /F1` and then `ESSSB16 /F0` (restart in between) and play
+   the same 16-bit sound: with `/F1` the DACs' filters are on and the sound
+   is duller, with `/F0` they are bypassed. `essreg` shows mixer 71h bits 3
+   and 2 clear with `/F1` and set with `/F0` once the game has started a
+   transfer. `/O1` and `/O0` set and clear bit 4, Audio 2's 4x oversampling,
+   the same way.
 
 ### E0. Installing with essinst
 
@@ -430,8 +452,9 @@ Sound Blaster sound, and a second game that uses the Sound Blaster too.
      without gaps between the blocks.
    * With `SoundBlaster16=0` in `[ES1869.VXD]` and Windows restarted, the
      setup finds a Sound Blaster Pro, version 3.01, as with ESS's driver.
-   * A game or tool with an ESS AudioDrive setting, which asks the chip for
-     its identification, works the same with either setting.
+   * A game or tool with an ESS AudioDrive setting that identifies the chip
+     with E7h finds it only with `SoundBlaster16=0`; with 1 it finds a Sound
+     Blaster 16, and the game's Sound Blaster 16 setting plays 16-bit sound.
 10. Note anything that differs, and in which game.
 
 ### E3. The Audio 2 DAC

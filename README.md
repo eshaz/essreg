@@ -462,20 +462,25 @@ DOS game expects it
   the chip. It is off unless you set it
   ([docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md#what-software-can-do-about-it)).
 * A DOS game written for the Sound Blaster 16 gets one. The chip answers as
-  a Sound Blaster Pro and plays 16-bit sound only through ESS's own
-  commands, so such a game played 8-bit sound at best. The extended driver
-  answers the game as a Sound Blaster 16, version 4.05, and turns its 16-bit
-  stereo transfers, its 16-bit DMA channel and its mixer settings into the
-  chip's own, on Audio 1. Set `BLASTER=A220 I5 D1 H5 P330 T6` with the
-  card's address, IRQ and 8-bit channel, and `H5` for the 16-bit channel
+  a Sound Blaster Pro and plays 16-bit sound only in ESS's own Extended
+  mode, so such a game played 8-bit sound at best. The extended driver
+  answers the game as a Sound Blaster 16 does, DSP version 4.05 with the
+  CT1745 mixer, command for command ([docs/SB16.md](docs/SB16.md)), and
+  plays every transfer, 8-bit or 16-bit, mono or stereo, in the chip's
+  Extended mode on Audio 1, at the rate the game asked for. Set
+  `BLASTER=A220 I5 D1 H5 P330 T6` with the card's address, IRQ and 8-bit
+  channel, and `H5` for the 16-bit channel
   ([docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#a-sound-blaster-16-for-dos-programs)).
-  The game finds Windows' volumes in the Sound Blaster 16's mixer, and its
-  mixer reset sets the Sound Blaster 16's levels without undoing the chip's
-  other settings, such as the 3-D effect and the DACs' modes. A transfer
-  writes only the chip's registers that change, so a game that starts one
-  for every block spends little time on it. A game or tool that knows the
-  ESS chip, which it asks with E7h, gets the chip as before. In DOS itself,
-  [`esssb16.com`](#esssb16com) does the same.
+  The game's 16-bit channel is carried over to Audio 1's 8-bit channel, and
+  the count the game reads from it moves with the sound. The game finds
+  Windows' volumes in the Sound Blaster 16's mixer, and its mixer reset sets
+  the Sound Blaster 16's levels without undoing the chip's other settings,
+  such as the 3-D effect and the DACs' modes. A transfer writes only the
+  chip's registers that change, so a game that starts one for every block
+  spends little time on it. A program that uses the chip's Extended mode,
+  such as `essreg`, gets the chip as before, and one that asks E7h finds a
+  Sound Blaster 16. In DOS itself, [`esssb16.com`](#esssb16com) does the
+  same.
 
 The Sound Blaster part and the MPU-401 still belong to one program at a
 time, as with ESS's driver. A DOS game that starts while Windows plays a
@@ -680,31 +685,40 @@ c:\>1869opl3.com "c:\path\to\game.exe"
 
 A Sound Blaster 16 in front of the ES1869 for DOS games, in DOS itself. The
 chip answers a DOS program as a Sound Blaster Pro, version 3.01, and plays
-16-bit sound only through ESS's own commands, so a game written for the
+16-bit sound only in ESS's own Extended mode, so a game written for the
 Sound Blaster 16 plays 8-bit sound on it at best. `esssb16` stays resident,
-in upper memory with `LH`, answers the game as a Sound Blaster 16, version
-4.05, and turns the game's commands into the chip's own, as the Windows
-driver's Sound Blaster 16 does:
-* Every transfer plays or records on Audio 1 in ESS's Extended mode, at the
-  rate the game asked for, up to 48 kHz, 16-bit ones two bytes a sample on
-  the card's 8-bit DMA channel. The chip takes one byte per DMA cycle
-  whatever the channel (its audio channels map to channels 0, 1 and 3, DS
-  p.14), so a 16-bit channel can't carry a game's words: when the game
-  programs its 16-bit channel, the `H` of `BLASTER`, `esssb16` reads that
-  programming back at the transfer command and puts it on the 8-bit channel,
-  in bytes, with the same direction and auto-initialize. A game that picks
-  the 8-bit channel for 16-bit sound through mixer 81h, as a Sound Blaster
-  16 allows, programs that channel itself.
+in upper memory with `LH`, and answers the game as a Sound Blaster 16 does,
+DSP version 4.05 with the CT1745 mixer, command for command
+([docs/SB16.md](docs/SB16.md)). It works like the Windows driver's Sound
+Blaster 16:
+* Every transfer, the Sound Blaster 16's own and the older 8-bit ones, plays
+  or records on Audio 1 in ESS's Extended mode, at the rate the game asked
+  for, up to 48 kHz. The game's DSP reset never reaches the chip, which it
+  would take out of Extended mode: `esssb16` answers it itself.
+* 16-bit sound takes two bytes a sample on the card's 8-bit DMA channel. The
+  chip takes one byte per DMA cycle whatever the channel (its audio channels
+  map to channels 0, 1 and 3, DS p.14), so a 16-bit channel can't carry a
+  game's words. When the game programs its 16-bit channel, the `H` of
+  `BLASTER`, `esssb16` carries the programming over to the 8-bit channel, in
+  bytes, with the same direction and auto-initialize, and the count that the
+  game reads from its channel moves with the sound. A game that picks the
+  8-bit channel for 16-bit sound through mixer 81h, as a Sound Blaster 16
+  allows, programs that channel itself.
+* The direct DAC and ADC, ADPCM, silence and MIDI, which Extended mode
+  lacks, go to the chip in its Compatibility mode.
 * The Sound Blaster 16's mixer registers, 30h to 47h, show the levels the
-  chip has, also those a mixer program set, and set the chip's levels and
-  record source. A mixer reset sets the Sound Blaster 16's levels and leaves
-  the chip's other settings, such as the 3-D effect. Registers 80h to 82h
-  give the card's IRQ, its channels and which transfer's interrupt is
-  pending.
+  chip has when `esssb16` loads, also those a mixer program set, and set the
+  chip's levels and record source. The Sound Blaster Pro's registers are
+  views of them, as on the CT1745, which has no 0Ch or 0Eh. A mixer reset
+  sets the Sound Blaster 16's levels and leaves the chip's other settings,
+  such as the 3-D effect. Registers 80h to 82h give the card's IRQ, its
+  channels and which transfer's interrupt is pending.
 * A transfer writes only the chip's registers that change, so a game that
   starts one for every block spends little time on it.
-* A game or tool that knows the chip, which it asks with E7h, gets the chip
-  as it is, with ESS's own commands and mixer.
+* A program that uses the chip's Extended mode itself, such as `essreg`,
+  gets the chip as it is, with ESS's own commands and mixer, until its next
+  reset. One that asks for the chip's identification with E7h finds a Sound
+  Blaster 16, which has no E7h.
 
 In a Windows DOS box the rebuilt
 [`ES1869.VXD`](#es1869vxd-with-a-register-interface-and-better-dos-boxes)
@@ -741,21 +755,26 @@ EMM386 device, one older than 4.46, or one that refused the traps.
   8-bit channel, as a Sound Blaster 16 does without an `H`.
 * `/S`: single DMA transfers instead of demand transfers of two bytes, ESS's
   own *Single Mode DMA* setting, if sound breaks up.
+* `/F0` or `/F1`: the DACs' filters off or on (mixer 71h bits 2 and 3) at
+  each transfer. Without it they stay as they are.
+* `/O0` or `/O1`: Audio 2's 4x oversampling off or on (mixer 71h bit 4) at
+  each transfer. Without it, it stays as it is.
 
 The resident part takes 3.9 KB with its PSP, 4.4 KB with HDPMI32i, whose
 data for it stay too, and makes no DOS call once it is in. The exit codes
 are 1 for a bad option, 2 when no ES1869 answers at the base, 3 without port
 traps, 4 in a Windows DOS box and 5 when it is loaded already. The limits:
-the game must program its 16-bit channel before the transfer command, as
-Creative's guide says, and a game that reads that channel's count for its
-position sees it stand still, because the sound flows through the 8-bit
-channel; a 16-bit buffer that crosses a 64 KB boundary, which the 16-bit
-channel allows and the 8-bit one doesn't, plays wrong; and the FM ports
-aren't trapped, so a game plays FM as before. The program was tested in a
-CPU emulator against models of the chip, the DMA controllers, DOS, the
-memory managers and HDPMI32i
-([docs/TESTING.md](docs/TESTING.md#d2-esssb16-dos) has the steps for real
-hardware).
+EMM386 doesn't trap the DMA controllers, so under it the game must program
+its 16-bit channel before the transfer command, as Creative's guide says,
+and its count stands still for a game that reads it; with QEMM, JEMM and
+HDPMI32i neither applies. A 16-bit buffer that crosses a 64 KB boundary
+plays wrong, E2h writes no byte through the DMA, and the FM ports aren't
+trapped, so a game plays FM as before.
+
+The program was tested in a CPU emulator against a model of the Sound
+Blaster 16 and models of the chip, the DMA controllers, DOS, the memory
+managers and HDPMI32i ([docs/TESTING.md](docs/TESTING.md#d2-esssb16-dos) has
+the steps for real hardware).
 
 ### Installing esssb16
 
@@ -808,7 +827,7 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
 6. As it loads, `esssb16` prints the card, the `BLASTER` line and `traps:
    EMM386 4.95 for real-mode games, HDPMI32i for protected-mode games`; the
    HDPMI32i part is there only when HDPMI32i was resident first. `MEM /C`
-   lists `ESSSB16` in upper memory, 3.3 KB, or 3.8 KB with HDPMI32i. A
+   lists `ESSSB16` in upper memory, 3.9 KB, or 4.4 KB with HDPMI32i. A
    game's setup program then detects a Sound Blaster 16, DSP version 4.05,
    and offers 16-bit sound. To take `esssb16` out again, restart without its
    line.
@@ -1025,6 +1044,8 @@ copy C:\WINDOWS\SYSTEM\ESFM.ORG C:\WINDOWS\SYSTEM\ESFM.DRV
   the card.
 * [docs/AUDIO1.md](docs/AUDIO1.md): the chip's Audio 1 channel, telegaming,
   and the second wave device of `ES1869.DRV`.
+* [docs/SB16.md](docs/SB16.md): the Sound Blaster 16 that the DOS fronts
+  answer as, the model they are tested against, and its sources.
 * [docs/RE_NOTES.md](docs/RE_NOTES.md): how the drivers were
   reverse-engineered.
 * [docs/TESTING.md](docs/TESTING.md): the automated tests, and a checklist

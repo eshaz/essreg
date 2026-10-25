@@ -52,15 +52,18 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   of EMM386, QPI (QEMM, JEMM with QPIEMU) and HDPMI32i. It is the VxD's
   front (`ESSREG_S16_*` in `essext.asm`) in DOS: the same commands, operand
   table, transfer sequences and mixer mapping, with the game's 16-bit DMA
-  channel read back from the controller instead of VDMAD. The chip takes a
-  byte per DMA cycle on any channel, so no transfer may go to a 16-bit
-  channel as words.
+  channel trapped (QPI, HDPMI32i) or read back from the controller (EMM386)
+  instead of VDMAD. The chip takes a byte per DMA cycle on any channel, so
+  no transfer may go to a 16-bit channel as words.
 * `tools/` holds the builders, the RE tools, `guard.py`, `wineshot.sh` and
   `dualwav.py`, which makes 4-channel files for dual playback. `tests/`
   holds the Python tests (`esfmemu.py`, `vxdemu.py` and `drvemu.py` run the
   drivers in a CPU emulator, `tsremu.py` runs `esssb16.com` in one, with
   DOS, the memory managers and the DPMI host in Python), and `tests/host/`
-  the C tests.
+  the C tests. `sb16.py` is the Sound Blaster 16 that the fronts are tested
+  against, `esschip.py` the chip's audio behind them, `dma8237.py` the DMA
+  controllers, `sbgame.py` and `sbscenes.py` what games do, and
+  `sbfronts.py` the fronts as cards, with a model of VDMAD for the VxD's.
 * `docs/` holds [TESTING.md](docs/TESTING.md),
   [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md),
   [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md),
@@ -68,9 +71,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   [SPATIALIZER.md](docs/SPATIALIZER.md),
   [DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md),
   [AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md), [AUDIO1.md](docs/AUDIO1.md),
-  [RE_NOTES.md](docs/RE_NOTES.md) and [STYLE.md](docs/STYLE.md).
-  `REGISTERS.md` and the `REG_*.md` pages are generated, and
-  `docs/datasheet/` has the ES1869, ES938 and ES1868 data sheets.
+  [SB16.md](docs/SB16.md), [RE_NOTES.md](docs/RE_NOTES.md) and
+  [STYLE.md](docs/STYLE.md). `REGISTERS.md` and the `REG_*.md` pages are
+  generated, and `docs/datasheet/` has the ES1869, ES938 and ES1868 data
+  sheets.
 
 ## Environment
 
@@ -178,9 +182,12 @@ tools/wineshot.sh run ess3d.exe /sim tray
   passes, and HDPMI's data take the paragraphs after the resident part, over
   the routines between `host_area` and `host_code_end`, which run only
   before the switch. A change to the Sound Blaster 16's translation goes
-  into the VxD's front and the TSR alike, with a test in
-  `tests/test_esssb16.py`, which also checks that `build/esssb16.com` is
-  current.
+  into the VxD's front and the TSR alike, and both answer as the model in
+  `tests/sb16.py` does ([SB16.md](docs/SB16.md)). Test it with a scene in
+  `tests/sbscenes.py`, which `tests/test_sb16conf.py` plays on the model and
+  on both fronts, or a check in `tests/test_sb16front.py`; the resident part
+  stays within the 248 paragraphs of `OLD_PARAS`, and
+  `tests/test_esssb16.py` checks that `build/esssb16.com` is current.
 * **Committed binaries.** After changing their sources, rebuild
   `build/ESFM.DRV`, `build/ES1869.VXD`, `build/ES1869.DRV` or
   `build/esssb16.com`, and copy the changed programs from `out/ow2/` to
