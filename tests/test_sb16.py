@@ -24,7 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sbgame  # noqa: E402
 from sbgame import (BASE, ModelCard, reset, write, read, read_all,  # noqa
                     mixer, program_dma, dma_count, sb16_isr, words)
-from sb16 import (COPYRIGHT, tc_to_v, rate_to_v, v_hz, SB16)  # noqa: E402
+from sb16 import (ADPCM, COPYRIGHT, adpcm_codes, tc_to_v,  # noqa: E402
+                  rate_to_v, v_hz, SB16)
 
 BUF = 0x20000               # the game's DMA buffer
 
@@ -34,6 +35,20 @@ def card(**kw):
     c.wait(100)
     assert reset(c)
     return c
+
+
+def adpcm_decode(data, bits):
+    """Creative ADPCM with a reference byte, as one decoder plays it"""
+    scale, adjust, top = ADPCM[bits]
+    ref, step = data[0], 0
+    out = [(ref - 128) << 8]
+    for b in data[1:]:
+        for code in adpcm_codes(b, bits):
+            s = max(0, min(top, code + step))
+            ref = max(0, min(255, ref + scale[s]))
+            step = (step + adjust[s]) & 0xFF
+            out.append((ref - 128) << 8)
+    return out
 
 
 class ResetTest(unittest.TestCase):
@@ -411,6 +426,22 @@ class TransferTest(unittest.TestCase):
         c = card()
         write(c, 0x10, 0x80, 0x10, 0xFF)
         self.assertEqual(c.played, [(0,), (0x7F00,)])
+
+    def test_adpcm_goes_on_from_the_last_block(self):
+        """a block without a reference byte decodes on from the last one's
+        reference and step: two blocks play as one stream"""
+        for first, then, bits in ((0x75, 0x74, 4), (0x77, 0x76, 3),
+                                  (0x17, 0x16, 2)):
+            c = card()
+            data = bytes((0x80,)) + bytes((0x3B, 0xC4, 0x0F) * 133)
+            c.poke(BUF, data)
+            program_dma(c, 1, BUF, len(data), auto=False)
+            write(c, 0x40, 0xD3, first, 199, 0)
+            c.wait(60000)
+            write(c, then, 199, 0)
+            c.wait(60000)
+            self.assertEqual([f[0] for f in c.played],
+                             adpcm_decode(data, bits), hex(first))
 
     def test_dma_count_moves(self):
         c = card()

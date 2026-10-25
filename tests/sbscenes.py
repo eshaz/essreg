@@ -388,6 +388,139 @@ def eight_then_sixteen(card):
     return out
 
 
+@scene
+def play8_stereo(card):
+    """C6h: 8-bit unsigned stereo, auto-initialized"""
+    prepare(card)
+    reset(card)
+    block = 1024                    # samples, both channels counted
+    card.poke(BUF, _bytes(2 * block, 0x21))
+    program_dma(card, 1, BUF, 2 * block)
+    write(card, 0x41, 0x56, 0x22, 0xC6, 0x20, (block - 1) & 0xFF,
+          (block - 1) >> 8)
+    ok = wait_blocks(card, 3)
+    got = played(card)
+    return {"ok": ok, "seen": card.seen[:3],
+            "width": all(len(f) == 2 for f in got),
+            "data": [s for f in got for s in f][:2 * block]}
+
+
+@scene
+def pause_continue8(card):
+    prepare(card)
+    reset(card)
+    block = 2048
+    card.poke(BUF, _bytes(2 * block, 0x44))
+    program_dma(card, 1, BUF, 2 * block)
+    write(card, 0x41, 0x2B, 0x11, 0xC6, 0x00, (block - 1) & 0xFF,
+          (block - 1) >> 8)
+    card.wait(5000)
+    write(card, 0xD0)
+    n = len(card.played)
+    card.wait(20000)
+    held = len(card.played) - n
+    write(card, 0xD4)
+    ok = wait_blocks(card, 2)
+    return {"held8": held, "ok": ok, "data": played(card)[:2 * block]}
+
+
+@scene
+def exit_auto8(card):
+    prepare(card)
+    reset(card)
+    block = 512
+    card.poke(BUF, _bytes(2 * block, 0x66))
+    program_dma(card, 1, BUF, 2 * block)
+    write(card, 0x41, 0xAC, 0x44, 0xC6, 0x00, (block - 1) & 0xFF,
+          (block - 1) >> 8)
+    card.wait(2000)
+    write(card, 0xDA)
+    card.wait(40000)
+    return {"blocks": card.blocks, "frames": len(card.played),
+            "seen": card.seen}
+
+
+@scene
+def last_block16(card):
+    """a single-cycle B2h while B6h runs auto-initialized: the block that
+    plays ends, and the single one after it is the last"""
+    prepare(card)
+    reset(card)
+    block = 512
+    data = words(samples16(4 * block, start=0x0999))
+    card.poke(BUF, data)
+    program_dma(card, 5, BUF, len(data))
+    write(card, 0x41, 0xAC, 0x44, 0xB6, 0x10, (block - 1) & 0xFF,
+          (block - 1) >> 8)
+    wait_blocks(card, 1)
+    write(card, 0xB2, 0x10, (block - 1) & 0xFF, (block - 1) >> 8)
+    card.wait(60000)
+    return {"blocks": card.blocks, "frames": len(card.played),
+            "seen": card.seen}
+
+
+def _adpcm(card, first, then, n, fill):
+    """two single-cycle ADPCM blocks of n bytes from one buffer: `first`
+    with its reference byte, then `then`"""
+    prepare(card)
+    reset(card)
+    card.poke(BUF, bytes((0x80,)) + _bytes(2 * n - 1, fill))
+    program_dma(card, 1, BUF, 2 * n, auto=False)
+    write(card, 0x40, 0xD3, first, (n - 1) & 0xFF, (n - 1) >> 8)
+    ok = wait_blocks(card, 1)
+    write(card, then, (n - 1) & 0xFF, (n - 1) >> 8)
+    ok = wait_blocks(card, 2) and ok
+    return {"ok": ok, "seen": card.seen[:2], "data": played(card)}
+
+
+@scene
+def adpcm4(card):
+    """75h: 4-bit ADPCM with its reference byte, then 74h"""
+    return _adpcm(card, 0x75, 0x74, 600, 0x13)
+
+
+@scene
+def adpcm2(card):
+    """17h: 2-bit ADPCM with its reference byte, then 16h"""
+    return _adpcm(card, 0x17, 0x16, 400, 0x5B)
+
+
+@scene
+def silence(card):
+    """80h: silence for a length of sample periods, then the 8-bit
+    interrupt"""
+    prepare(card)
+    reset(card)
+    write(card, 0x40, 0xD3, 0x80, 0xFF, 0x03)
+    ok = wait_blocks(card, 1)
+    return {"ok": ok, "seen": card.seen[:1], "blocks": card.blocks}
+
+
+@scene
+def direct_dac(card):
+    """10h, a sample at a time, as a game without DMA plays"""
+    prepare(card)
+    reset(card)
+    for i in range(64):
+        write(card, 0x10, (0x40 + 3 * i) & 0xFF)
+        card.wait(45)
+    return {"data": [tuple(f) for f in card.played]}
+
+
+@scene
+def midi_out(card):
+    """38h a byte at a time, then the MIDI UART mode until a reset"""
+    prepare(card)
+    reset(card)
+    write(card, 0x38, 0x90, 0x38, 0x3C, 0x38, 0x7F)
+    write(card, 0x35)
+    write(card, 0x80, 0x3C, 0x00)
+    out = {"midi": list(card.midi_out), "reset": reset(card)}
+    write(card, 0xE1)
+    out["version"] = (read(card), read(card))
+    return out
+
+
 # --- recording -------------------------------------------------------------------
 
 RAMP = 4000                 # frames of the ADC's input to look for the data in

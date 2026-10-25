@@ -550,7 +550,11 @@ class SB16:
         self._full_start(e, rec, auto, length, coding, ref)
 
     def _full_start(self, e, rec, auto, length, coding, ref):
+        # ADPCM goes on from the last block: only a reference byte sets the
+        # reference and step anew
+        keep = e.reference, e.step, e.codes if e.coding == coding else []
         e.clear()
+        e.reference, e.step, e.codes = keep
         e.rec, e.auto = rec, auto
         e.latch = length
         e.count = length + 1
@@ -796,7 +800,7 @@ class SB16:
                 e.debt = 0          # no DMA: the engine waits for it
                 return
             e.debt -= 1
-            if e.count == 0:
+            if e.count == 0 and not e.codes:    # an ADPCM byte plays out
                 if self.ex1:
                     self._block_end(e)
                 else:

@@ -111,8 +111,6 @@ class FwTransfer:
         self.bits, self.stereo = bits, stereo
         self.paused = False
         self.done = False           # the DMA side ended (single-cycle)
-        self.codes = []
-        self.reference, self.step = 0x80, 0
         self.right = None           # a stereo frame's first byte
 
 
@@ -133,6 +131,8 @@ class ES1869Audio:
         self.a1 = Stream(FIFO1)
         self.fw = None              # the firmware's transfer
         self.fw_buf = Stream(FIFO_FW)
+        self.fw_rec = False         # the last of them recorded
+        self._adpcm_reset()
         self.a2 = Stream(FIFO2)
         self.a1_flags = 0           # I_* of Audio_Base+Ch
         self.a1_load = False        # B7h bit 0: the holding register next
@@ -336,9 +336,21 @@ class ES1869Audio:
         else:
             self.violate("ESPCM transfer %02Xh" % c)
             return
+        # the next block of a stream goes on from the last: what the buffer
+        # holds plays, and ADPCM keeps its reference and step (DS p.44); a
+        # recording's bytes are no sound to play
+        if t.rec or self.fw_rec:
+            self.fw_buf.fifo = bytearray()
+        self.fw_rec = t.rec
+        if t.coding != self.adpcm_bits:
+            self.adpcm_codes = []
+            self.adpcm_bits = t.coding
         self.fw = t
-        self.fw_buf.fifo = bytearray()
-        self.fw_buf.debt = 0.0
+
+    def _adpcm_reset(self):
+        self.adpcm_codes = []       # the codes of a byte still to play
+        self.adpcm_ref, self.adpcm_step = 0x80, 0
+        self.adpcm_bits = None
 
     def _fw_step(self):
         t = self.fw
@@ -395,8 +407,9 @@ class ES1869Audio:
             self.recorded.append(frame)
             return
         if t.coding != "pcm":
-            self._fw_adpcm(t)
-        elif t.bits == 16:
+            self._fw_adpcm(t)           # it ends the transfer itself
+            return
+        if t.bits == 16:
             if len(buf.fifo) >= 2:
                 self._heard(decode(bytes(buf.fifo[:2]), 16, False, False))
                 del buf.fifo[:2]
@@ -414,7 +427,7 @@ class ES1869Audio:
 
     def _fw_adpcm(self, t):
         buf = self.fw_buf
-        if not t.codes:
+        if not self.adpcm_codes:
             if not buf.fifo:
                 if t.done:
                     self.fw = None
@@ -422,15 +435,15 @@ class ES1869Audio:
             b = buf.fifo.pop(0)
             if t.ref:
                 t.ref = False
-                t.reference, t.step = b, 0
-                self._heard(((t.reference - 128) << 8,))
+                self.adpcm_ref, self.adpcm_step = b, 0
+                self._heard(((b - 128) << 8,))
                 return
-            t.codes = adpcm_codes(b, t.coding)
+            self.adpcm_codes = adpcm_codes(b, t.coding)
         scale, adjust, top = ADPCM[t.coding]
-        s = max(0, min(top, t.codes.pop(0) + t.step))
-        t.reference = max(0, min(255, t.reference + scale[s]))
-        t.step = (t.step + adjust[s]) & 0xFF
-        self._heard(((t.reference - 128) << 8,))
+        s = max(0, min(top, self.adpcm_codes.pop(0) + self.adpcm_step))
+        self.adpcm_ref = max(0, min(255, self.adpcm_ref + scale[s]))
+        self.adpcm_step = (self.adpcm_step + adjust[s]) & 0xFF
+        self._heard(((self.adpcm_ref - 128) << 8,))
 
     # --- Audio 2 -------------------------------------------------------------
     def _a2_count(self):
@@ -558,6 +571,8 @@ class ES1869Audio:
         self.resets += 1
         self.fw = None
         self.fw_buf.fifo = bytearray()
+        self.fw_rec = False
+        self._adpcm_reset()
         self.a1.fifo = bytearray()
         self.a1.halted = False
         self.ctrl[0xB8] = 0

@@ -121,6 +121,10 @@ class ModelCard(Card):
     def played(self):
         return self.sb.played
 
+    @property
+    def midi_out(self):
+        return self.sb.midi_out
+
     def poke(self, addr, data):
         self.memory.write(addr, data)
 

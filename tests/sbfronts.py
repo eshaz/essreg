@@ -198,6 +198,10 @@ class TSRCard(Card):
     def played(self):
         return self.chip.played
 
+    @property
+    def midi_out(self):
+        return self.chip.midi_out
+
     def poke(self, addr, data):
         self.m.put(addr, data)
 
@@ -507,6 +511,10 @@ class VxDCard(Card):
     @property
     def played(self):
         return self.chip.played
+
+    @property
+    def midi_out(self):
+        return self.chip.midi_out
 
     def poke(self, addr, data):
         self.chip.dmac.memory.write(addr, data)

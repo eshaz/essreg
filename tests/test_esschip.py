@@ -14,6 +14,7 @@ from dma8237 import DMA8237  # noqa: E402
 from esschip import ES1869Audio, a1_hz, a2_hz  # noqa: E402
 from vxdemu import FakeES1869  # noqa: E402
 from sbgame import program_dma, words, samples16  # noqa: E402
+from test_sb16 import adpcm_decode  # noqa: E402
 
 BASE = 0x220
 BUF = 0x20000
@@ -217,6 +218,24 @@ class CompatibilityTest(unittest.TestCase):
         self.assertEqual([f[0] for f in chip.played][:4],
                          [-0x8000, -0x7F00, -0x7E00, -0x7D00])
         self.assertEqual(chip.violations, [])
+
+    def test_adpcm_blocks_go_on(self):
+        """the block after the one with the reference byte goes on from its
+        reference and step (DS p.44), and what the firmware's buffer held
+        still plays"""
+        for first, then, bits in ((0x75, 0x74, 4), (0x77, 0x76, 3),
+                                  (0x7B, 0x7A, 2)):
+            chip = Chip()
+            data = bytes((0x80,)) + bytes((0x3B, 0xC4, 0x0F) * 133)
+            chip.dmac.memory.write(BUF, data)
+            program_dma(Card(chip), 1, BUF, len(data), auto=False)
+            reset(chip)
+            dsp(chip, 0xD1, 0x40, 0xD3, first, 199, 0)
+            run(chip, 60000)
+            dsp(chip, then, 199, 0)
+            run(chip, 60000)
+            self.assertEqual([f[0] for f in chip.played],
+                             adpcm_decode(data, bits), hex(first))
 
     def test_stereo_starts_with_the_right_channel(self):
         chip = Chip()

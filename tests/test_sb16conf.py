@@ -60,6 +60,8 @@ def differences(want, got):
             ok = g == w[:len(g)] and len(g) >= len(w) - 2 * FIFO
         elif key == "held":
             ok = g <= FIFO // 4         # 16-bit stereo: 4 bytes a frame
+        elif key == "held8":
+            ok = g <= FIFO              # 8-bit mono: a byte a frame
         elif key == "first":
             ok = w - FIFO <= g <= w
         else:
