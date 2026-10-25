@@ -266,6 +266,7 @@ class Machine(Cpu):
         self.qpi_fail = set()           # QPI functions that fail
         self.qpi_fail_after = {}        # function: the calls that succeed
         self.qpi_calls = []             # (function, dx, es:di)
+        self.qpi_counts = {}            # function: its calls
         self.qpi_trapped = set()        # ports trapped through 1A09h
         self.qpi_callback = (0, 0)      # the I/O callback: seg, off
         self.qpi_accesses = []          # 1A00h/1A01h: ("in", port, v) ...
@@ -513,7 +514,7 @@ class Machine(Cpu):
         ax, dx = self.r16("eax"), self.r16("edx")
         fn = 0x0300 if ax >> 8 == 3 else ax
         self.qpi_calls.append((fn, dx, (self.r16("es"), self.r16("edi"))))
-        calls = sum(1 for c in self.qpi_calls if c[0] == fn)
+        calls = self.qpi_counts[fn] = self.qpi_counts.get(fn, 0) + 1
         if fn in self.qpi_fail or calls > self.qpi_fail_after.get(fn, calls):
             self.carry(True)
             return

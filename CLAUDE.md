@@ -5,16 +5,17 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
 
 ## Layout
 
-* `src/*.c` holds the DOS programs (`essreg`, `1869opl3` and `esfmpat`) and
-  the shared code: `esshw` (the port protocols), `esscat` (the register
-  catalog, from `esscat.tbl`), `profile`, `vxdapi`, `simhw` (a simulated
-  ES1869 for the tests), `ess3d` (the commands of `ess3d.exe`), `fmrec`
-  (esfmrec's WAV header, file names and levels), `s3dmeas` (ess3d's
+* `src/*.c` holds the DOS programs (`essreg`, `1869opl3`, `esfmpat` and
+  `sb16test`) and the shared code: `esshw` (the port protocols), `esscat`
+  (the register catalog, from `esscat.tbl`), `profile`, `vxdapi`, `simhw` (a
+  simulated ES1869 for the tests), `ess3d` (the commands of `ess3d.exe`),
+  `fmrec` (esfmrec's WAV header, file names and levels), `s3dmeas` (ess3d's
   measurement of the 3-D effect, with an effect in `s3dsim` that follows one
   card's measurement, for the tests, /sim and the tray panel's graph),
   `wavestat` (what ES1869.DRV is doing, read from its data segment for
-  essctl) and `drvinst` (essinst's checks of the drivers, and its staging
-  through WININIT.INI).
+  essctl), `drvinst` (essinst's checks of the drivers, and its staging
+  through WININIT.INI) and `sb16t` (sb16test's checks of a Sound Blaster 16,
+  which the tests also run on the host).
 * `src/win/` holds `essctl.exe`, the 16-bit Windows control panel, and
   `ess3dw.c`, the Windows side of `ess3d.exe`, which sets the 3-D effect
   from the command line for keys. `ess3dtr.c` is ess3d's tray icon and
@@ -59,8 +60,9 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   `dualwav.py`, which makes 4-channel files for dual playback. `tests/`
   holds the Python tests (`esfmemu.py`, `vxdemu.py` and `drvemu.py` run the
   drivers in a CPU emulator, `tsremu.py` runs `esssb16.com` in one, with
-  DOS, the memory managers and the DPMI host in Python), and `tests/host/`
-  the C tests. `sb16.py` is the Sound Blaster 16 that the fronts are tested
+  DOS, the memory managers and the DPMI host in Python, and `dosrun.py` a
+  DOS program, `sb16test.exe`, in front of a card), and `tests/host/` the C
+  tests. `sb16.py` is the Sound Blaster 16 that the fronts are tested
   against, `esschip.py` the chip's audio behind them, `dma8237.py` the DMA
   controllers, `sbgame.py` and `sbscenes.py` what games do, and
   `sbfronts.py` the fronts as cards, with a model of VDMAD for the VxD's.
@@ -89,7 +91,7 @@ the hook.
 ## Commands
 
 ```
-# every test (about 30 s), or one class
+# every test (about 6 minutes), or one class
 python3 tests/run_tests.py
 python3 -m unittest tests.test_esfmdrv.SustainTest
 
@@ -191,6 +193,15 @@ tools/wineshot.sh run ess3d.exe /sim tray
   in `tests/test_sb16front.py`; the resident part stays within the 280
   paragraphs of `MAX_PARAS`, and `tests/test_esssb16.py` checks that
   `build/esssb16.com` is current.
+* **sb16test.** Its checks (`src/sb16t.c`) reach the card only through
+  `struct sbt_hal`: `src/sb16test.c` on the machine, and
+  `tests/test_sb16test.py` on the model and on both fronts. The handler's
+  path (`sbt_irq` and the hooks) may run on another program's stack and in
+  the middle of the checks' arithmetic, so it takes no address of a local,
+  has no varargs and does no floating point. Every check passes on the
+  model, and one is KNOWN on a front only for a difference that SB16.md
+  lists (`KNOWN` in the test). The test runs `build/sb16test.exe` in the
+  emulator too, so copy it from `out/ow2/` after a change.
 * **Committed binaries.** After changing their sources, rebuild
   `build/ESFM.DRV`, `build/ES1869.VXD`, `build/ES1869.DRV` or
   `build/esssb16.com`, and copy the changed programs from `out/ow2/` to

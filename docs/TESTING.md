@@ -94,6 +94,14 @@ The Python tests, in `tests/test_*.py`, cover the following:
   Audio 2, the registers a transfer like the last leaves alone, the 16-bit
   channel carried over, the chip's Compatibility mode for the firmware's
   commands, and the chip's mixer behind the Sound Blaster 16's view.
+* `test_sb16test` builds the checks of `sb16test.exe` (`src/sb16t.c`) for
+  the host and runs them on the model and on both fronts, with a listener
+  that answers each listening question from what the card played. Every
+  check passes, but for the fronts' differences that SB16.md lists. It also
+  runs `build/sb16test.exe` itself in a CPU emulator with DOS and the BIOS
+  (`tests/dosrun.py`), on the model and on `esssb16.com`: its interrupt
+  handler, its clock, the report, the restore file, Esc, and a person who
+  answers the questions.
 * Other tests run `esfmpat` on copies of `ESFM.DRV` and check that the
   generated documentation is current.
 
@@ -359,6 +367,35 @@ and stop at the first surprise. Each step says what you should see.
    channel, `esssb16` says so as it loads; `/21` or `/23` then gives it one,
    if a DMA pin of the card is wired to it.
 
+### D3. sb16test
+
+`sb16test.exe` checks the Sound Blaster 16 that DOS games find and writes
+what it found to `SB16TEST.TXT`, which you send back. It plays quiet tones,
+so set the speakers to a normal level first.
+
+1. In real DOS, with `esssb16` loaded and `BLASTER` set as in D2, run
+   `SB16TEST`. The automatic checks come first, for about half a minute: the
+   DSP's commands, the mixer, the interrupts, playback in every format, the
+   rates, pause and continue, an 8-bit and a 16-bit transfer at once,
+   recording, ADPCM and the direct DAC, FM, the MPU-401 and timing. Then
+   each listening check plays a sound and asks what you heard. Answer with
+   one of the keys it shows; `g` plays the sound again and `s` skips the
+   question. Esc stops the program at any time.
+2. Send `SB16TEST.TXT` back, with a note of anything you heard that no
+   question asked about. Each check has a line: PASS, FAIL, KNOWN (a
+   difference of the ES1869 that [SB16.md](SB16.md) lists), INFO or SKIP,
+   and what it measured. The report also has the chip's registers before and
+   after the checks, and `esssb16`'s variables after each section.
+3. Run it in a Windows 98 DOS box with the extended driver too, with
+   `BLASTER` as in [E2](#e2-dos-boxes-with-the-extended-driver) step 9, and
+   send that report as well. It has the VxD's version and settings.
+4. If a real Sound Blaster 16 is at hand, run it there too: that report
+   shows what the checks expect.
+5. `/A` runs only the automatic checks, `/L` only the listening ones, `/Q`
+   measures fewer rates and `/O:file` names the report. If the computer
+   stops during a run, the next run puts the mixer back from `SB16TEST.RST`
+   before it starts, and its report says so.
+
 ### E0. Installing with essinst
 
 See the [README](../README.md#essinstexe). Start with ESS's drivers.
@@ -470,6 +507,8 @@ Sound Blaster sound, and a second game that uses the Sound Blaster too.
      plays, and 8-bit sound plays on Audio 1 at the same time. With
      `SoundBlaster16Audio2=0` and Windows restarted, the same game plays its
      16-bit sound on Audio 1, and 78h stays 00h.
+   * Run `sb16test` in the DOS box as in [D3](#d3-sb16test) and send its
+     report.
 10. Note anything that differs, and in which game.
 
 ### E3. The Audio 2 DAC

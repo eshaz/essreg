@@ -72,7 +72,8 @@ class OW2BuildTest(unittest.TestCase):
 
     def test_all_programs(self):
         for name in ("essreg.exe", "esfmpat.exe", "1869opl3.com",
-                     "essctl.exe", "ess3d.exe", "esfmrec.exe", "nestamp.exe"):
+                     "essctl.exe", "ess3d.exe", "esfmrec.exe", "nestamp.exe",
+                     "sb16test.exe"):
             self.assertTrue(os.path.exists(os.path.join(self.out, name)), name)
 
     def test_windows_program(self):

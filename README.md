@@ -465,23 +465,16 @@ DOS game expects it
   a Sound Blaster Pro and plays 16-bit sound only in ESS's own Extended
   mode, so such a game played 8-bit sound at best. The extended driver
   answers the game as a Sound Blaster 16 does, DSP version 4.05 with the
-  CT1745 mixer, command for command ([docs/SB16.md](docs/SB16.md)), and
-  plays every transfer in the chip's Extended mode at the rate the game
-  asked for: 8-bit sound and recordings on Audio 1, and 16-bit sound on
-  Audio 2, so both play at once, as on the card. Set
-  `BLASTER=A220 I5 D1 H5 P330 T6` with the card's address, IRQ and 8-bit
-  channel, and `H5` for the 16-bit channel
+  CT1745 mixer, command for command ([docs/SB16.md](docs/SB16.md)), as
+  [`esssb16.com`](#esssb16com) does in DOS: 8-bit sound and recordings on
+  Audio 1 and 16-bit sound on Audio 2, both at once, at the rate the game
+  asked for. Set `BLASTER=A220 I5 D1 H5 P330 T6` with the card's address,
+  IRQ and 8-bit channel, and `H5` for the 16-bit channel
   ([docs/VXD_INTERNALS.md](docs/VXD_INTERNALS.md#a-sound-blaster-16-for-dos-programs)).
-  The game's 16-bit channel is carried over to Audio 2's 8-bit channel, or
-  to Audio 1's where Audio 2 has none, and the count the game reads from it
-  moves with the sound. The game finds Windows' volumes in the Sound Blaster
-  16's mixer, and its mixer reset sets the Sound Blaster 16's levels without
-  undoing the chip's other settings, such as the 3-D effect and the DACs'
-  modes. A transfer writes only the chip's registers that change, so a game
-  that starts one for every block spends little time on it. A program that
-  uses the chip's Extended mode, such as `essreg`, gets the chip as before,
-  and one that asks E7h finds a Sound Blaster 16. In DOS itself,
-  [`esssb16.com`](#esssb16com) does the same.
+  The game finds Windows' volumes in the Sound Blaster 16's mixer, and its
+  mixer reset leaves the chip's other settings, such as the 3-D effect and
+  the DACs' modes. A transfer writes only the chip's registers that change,
+  so a game that starts one for every block spends little time on it.
 
 The Sound Blaster part and the MPU-401 still belong to one program at a
 time, as with ESS's driver. A DOS game that starts while Windows plays a
@@ -761,21 +754,20 @@ has the steps. The options:
 * `/O0` or `/O1`: Audio 2's 4x oversampling off or on (mixer 71h bit 4) at
   each transfer. Without it, it stays as it is.
 
-The resident part takes 4.4 KB with its PSP, 4.9 KB with HDPMI32i, whose
-data for it stay too, and makes no DOS call once it is in. The exit codes
-are 1 for a bad option, 2 when no ES1869 answers at the base, 3 without port
-traps, 4 in a Windows DOS box and 5 when it is loaded already. The limits:
-EMM386 doesn't trap the DMA controllers, so under it the game must program
-its 16-bit channel before the transfer command, as Creative's guide says,
-and its count stands still for a game that reads it; with QEMM, JEMM and
+The resident part makes no DOS call once it is in. The exit codes are 1 for
+a bad option, 2 when no ES1869 answers at the base, 3 without port traps, 4
+in a Windows DOS box and 5 when it is loaded already. The limits: EMM386
+doesn't trap the DMA controllers, so under it the game must program its
+16-bit channel before the transfer command, as Creative's guide says, and
+its count stands still for a game that reads it; with QEMM, JEMM and
 HDPMI32i neither applies. A 16-bit buffer that crosses a 64 KB boundary
 plays wrong, E2h writes no byte through the DMA, and the FM ports aren't
 trapped, so a game plays FM as before.
 
 It was tested in a CPU emulator against models of the Sound Blaster 16, the
-chip, the DMA controllers, DOS, the memory managers and HDPMI32i
-([docs/TESTING.md](docs/TESTING.md#d2-esssb16-dos) has the steps for real
-hardware).
+chip, the DMA controllers, DOS, the memory managers and HDPMI32i.
+[docs/TESTING.md](docs/TESTING.md#d2-esssb16-dos) has the steps for real
+hardware, and [`sb16test`](#sb16testexe) checks it there.
 
 ### Installing esssb16
 
@@ -807,24 +799,23 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
    LH C:\ESS\HDPMI32I.EXE -r -x
    LH C:\ESS\ESSSB16.COM
    ```
-   `-r` keeps HDPMI32i resident, which it has to be for `esssb16` to find it
-   when it loads, and `-x` makes it report 256 MB of memory at most, which
-   some games need. Leave its line out without the file. If the card's base,
-   IRQ or 8-bit channel differ from this `BLASTER` line, `esssb16` prints
-   the line to set.
+   `-r` keeps HDPMI32i resident, for `esssb16` to find, and `-x` makes it
+   report 256 MB of memory at most, which some games need. Leave its line
+   out without the file. If the card's base, IRQ or 8-bit channel differ
+   from this `BLASTER` line, `esssb16` prints the line to set.
 5. Start DOS with these files. On Windows 98, hold Ctrl as the machine
    starts, or press F8 at *Starting Windows 98*, and choose *Command prompt
-   only*: `CONFIG.SYS` and `AUTOEXEC.BAT` run, and Windows doesn't. Since
-   the same `AUTOEXEC.BAT` runs before a normal start of Windows, where
-   `esssb16` has no work (the VxD traps the ports of a DOS box), the batch
-   file keeps it to DOS sessions. The other way is an MS-DOS mode shortcut
-   with its own files: right-click the game, or `C:\COMMAND.COM` for a
-   prompt, choose *Properties* > *Program* > *Advanced*, tick *MS-DOS mode*
-   and *Specify a new MS-DOS configuration*, and put the lines of steps 3
-   and 4 into its `CONFIG.SYS` and `AUTOEXEC.BAT` boxes. Windows restarts
-   into DOS with them when the shortcut runs, and comes back when the
-   program ends. *Restart in MS-DOS mode* in the Shut Down box runs such a
-   shortcut, `Exit To Dos.pif` in `C:\WINDOWS`, with the same settings.
+   only*: `CONFIG.SYS` and `AUTOEXEC.BAT` run, and Windows doesn't. The
+   batch file keeps `esssb16` to DOS sessions, since `AUTOEXEC.BAT` also
+   runs before Windows, where the VxD traps the ports itself. The other way
+   is an MS-DOS mode shortcut with its own files: right-click the game, or
+   `C:\COMMAND.COM` for a prompt, choose *Properties* > *Program* >
+   *Advanced*, tick *MS-DOS mode* and *Specify a new MS-DOS configuration*,
+   and put the lines of steps 3 and 4 into its `CONFIG.SYS` and
+   `AUTOEXEC.BAT` boxes. Windows restarts into DOS with them when the
+   shortcut runs, and comes back when the program ends. *Restart in MS-DOS
+   mode* in the Shut Down box runs such a shortcut, `Exit To Dos.pif` in
+   `C:\WINDOWS`, with the same settings.
 6. As it loads, `esssb16` prints the card, the `BLASTER` line and `traps:
    EMM386 4.95 for real-mode games, HDPMI32i for protected-mode games`; the
    HDPMI32i part is there only when HDPMI32i was resident first. `MEM /C`
@@ -832,6 +823,17 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
    game's setup program then detects a Sound Blaster 16, DSP version 4.05,
    and offers 16-bit sound. To take `esssb16` out again, restart without its
    line.
+
+## [`sb16test.exe`](build)
+
+Checks the Sound Blaster 16 that DOS games find, whether `esssb16`, the VxD
+in a DOS box or a real card, and writes what it found to `SB16TEST.TXT`, to
+send back. About a hundred automatic checks come first: the DSP's commands,
+the mixer, the interrupts, every transfer and rate, two transfers at once,
+recording, FM and the MPU-401. Then it plays sounds and asks what you heard.
+`/A` runs only the automatic checks, `/L` only the listening ones, `/Q`
+fewer rates, and `/O:file` names the report. Esc stops it.
+[docs/TESTING.md](docs/TESTING.md#d3-sb16test) has the steps.
 
 ## [`esfmpat.exe`](build)
 * Utility to write custom patch banks to the Windows ESFM VxD driver.
@@ -1067,8 +1069,8 @@ copy C:\WINDOWS\SYSTEM\ESFM.ORG C:\WINDOWS\SYSTEM\ESFM.DRV
 ### Building
 * Clone this repo and copy it your build environment.
 * Run [`build.bat`](build.bat) to build the executables: `essreg.exe`,
-  `1869opl3.com`, `esfmpat.exe`, `essctl.exe`, `ess3d.exe`, `esfmrec.exe`
-  and `essinst.exe`.
+  `1869opl3.com`, `esfmpat.exe`, `essctl.exe`, `ess3d.exe`, `esfmrec.exe`,
+  `essinst.exe` and `sb16test.exe`.
 * Run `python3 tools/build_vxd.py` to build `build/ES1869.VXD`,
   `python3 tools/build_esfm.py` to build `build/ESFM.DRV`,
   `python3 tools/build_es1869drv.py` to build `build/ES1869.DRV`, and
@@ -1081,8 +1083,7 @@ copy C:\WINDOWS\SYSTEM\ESFM.ORG C:\WINDOWS\SYSTEM\ESFM.DRV
 ### Testing
 * This code has been tested using a real ES1869 soundcard on I/O port 0x220.
   It probably won't work with any other ESS sound chips.
-* For essctl, ess3d, esfmrec, essinst and the rebuilt drivers,
-  [docs/TESTING.md](docs/TESTING.md) has a checklist for real hardware.
+* [docs/TESTING.md](docs/TESTING.md) has a checklist for real hardware.
 * `python3 tests/run_tests.py` runs the automated tests against a simulated
   ES1869.
 

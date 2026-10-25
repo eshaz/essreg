@@ -1,0 +1,655 @@
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""sb16test's checks on the Sound Blaster 16 model and on both fronts.
+
+src/sb16t.c, the checks that sb16test.exe runs on the machine, is built
+for the host and called through ctypes, with its hardware layer on an
+sbgame card: the model of a Sound Blaster 16 (sbgame.ModelCard), and
+esssb16.com and ES1869.VXD's front in front of the chip model
+(sbfronts). A listener answers the listening checks from what the card
+played while each sound ran, so a sound that doesn't do what its question
+says fails here. On the model every automatic check has to pass; on the
+fronts too, but for the differences SB16.md lists (KNOWN). The ES1869's
+record source 7 is the frames Audio 2 played, so the fronts' loopback
+checks run.
+
+build/sb16test.exe itself runs in a CPU emulator with DOS and the BIOS
+(tests/dosrun.py), on the model and on esssb16.com: its interrupt
+handler, clock, DMA area, report, restore file and keyboard, with a
+person who answers the questions.
+
+usage: python3 -m unittest tests.test_sb16test   (needs gcc, nasm and
+unicorn for the fronts and the program)
+"""
+
+import ctypes
+import math
+import os
+import re
+import struct
+import subprocess
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from test_vxdext import HAVE_UNICORN, have_nasm  # noqa: E402
+from sbgame import ModelCard  # noqa: E402
+
+if HAVE_UNICORN:
+    from sbfronts import TSRCard, VxDCard  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(ROOT, "src")
+EXE = os.path.join(ROOT, "build", "sb16test.exe")
+AREA = 0x40000              # the DMA area, free in tsremu's first megabyte
+O_AUTO, O_LISTEN, O_SHORT, O_QUICK = 0x01, 0x02, 0x04, 0x08
+IDLE_US = 25                # the time an idle() of the checks takes
+# what the fronts can't do as the card does (docs/SB16.md)
+KNOWN = {"dsp.ram", "dsp.e2", "dsp.reset_held", "ctl.unacknowledged"}
+
+u8, u16, ul = ctypes.c_uint8, ctypes.c_uint16, ctypes.c_ulong
+INB = ctypes.CFUNCTYPE(u8, u16)
+OUTB = ctypes.CFUNCTYPE(None, u16, u8)
+NOW = ctypes.CFUNCTYPE(ul)
+VOID = ctypes.CFUNCTYPE(None)
+MEM = ctypes.CFUNCTYPE(None, ul, ctypes.POINTER(u8), u16)
+MASK = ctypes.CFUNCTYPE(None, ctypes.c_int)
+ASK = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_char_p, ctypes.c_char_p,
+                       ctypes.c_char_p)
+SOUND = ctypes.CFUNCTYPE(None, ul)
+TEXT = ctypes.CFUNCTYPE(None, ctypes.c_char_p)
+ESC = ctypes.CFUNCTYPE(ctypes.c_int)
+KEEP = ctypes.CFUNCTYPE(None, ctypes.POINTER(u8), u16)
+
+
+class HAL(ctypes.Structure):
+    _fields_ = [("inb", INB), ("outb", OUTB), ("now", NOW), ("idle", VOID),
+                ("poke", MEM), ("peek", MEM), ("lock", VOID),
+                ("unlock", VOID), ("irq_mask", MASK), ("ask", ASK),
+                ("sound", SOUND), ("line", TEXT), ("say", TEXT),
+                ("esc", ESC), ("keep", KEEP), ("state", TEXT)]
+
+
+class CARD(ctypes.Structure):
+    _fields_ = [("base", u16), ("irq", u8), ("dma8", u8), ("dma16", u8),
+                ("mpu", u16), ("hz", ul), ("area", ul), ("flags", u8),
+                ("env", ctypes.POINTER(ctypes.c_char_p))]
+
+
+_LIB = {}
+
+
+def library():
+    """src/sb16t.c built as a shared library, once"""
+    if "lib" not in _LIB:
+        tmp = _LIB["tmp"] = tempfile.TemporaryDirectory()
+        out = os.path.join(tmp.name, "libsb16t.so")
+        subprocess.run(["gcc", "-std=gnu99", "-Wall", "-Wextra", "-Werror",
+                        "-DESS_HOST", "-O1", "-fPIC", "-shared", "-I" + SRC,
+                        "-o", out, os.path.join(SRC, "sb16t.c"), "-lm"],
+                       check=True, capture_output=True)
+        lib = ctypes.CDLL(out)
+        lib.sbt_run.argtypes = [ctypes.POINTER(HAL), ctypes.POINTER(CARD),
+                                ctypes.c_uint]
+        lib.sbt_run.restype = ctypes.c_int
+        lib.sbt_tc_to_v.argtypes = [u8]
+        lib.sbt_tc_to_v.restype = u8
+        lib.sbt_rate_to_v.argtypes = [u16]
+        lib.sbt_rate_to_v.restype = u8
+        _LIB["lib"] = lib
+    return _LIB["lib"]
+
+
+def clock(card):
+    """the card's time in microseconds"""
+    if isinstance(card, ModelCard):
+        return card.clock.us
+    return card.chip.clock.us
+
+
+def rms(samples):
+    return math.sqrt(sum(s * s for s in samples) / len(samples)) \
+        if samples else 0
+
+
+def crossings_hz(samples, rate):
+    """a tone's frequency from its rising zero crossings, placed between
+    the samples"""
+    pairs = zip(samples, samples[1:])
+    at = [i + a / (a - b) for i, (a, b) in enumerate(pairs) if a < 0 <= b]
+    if len(at) < 2:
+        return 0
+    return (len(at) - 1) * rate / (at[-1] - at[0])
+
+
+class Input:
+    """what the card's ADC hears: on the ES1869 with record source 7, the
+    frames Audio 2 played, else a 300 Hz tone"""
+
+    def __init__(self, card):
+        self.card, self.at = card, 0
+
+    def __call__(self, n):
+        chip = getattr(self.card, "chip", None)
+        if chip is not None and (chip.mixer[0x1C] & 7) == 7:
+            # the frame Audio 2's DAC plays now, a little behind the FIFO
+            f = chip.played2[-32] if len(chip.played2) >= 32 else (0, 0)
+            return [f if len(f) == 2 else f * 2] * n
+        out = []
+        for _ in range(n):
+            self.at += 1
+            s = int(12000 * math.sin(2 * math.pi * 300 * self.at / 22050))
+            out.append((s, s))
+        return out
+
+
+def results(lines):
+    """{check: (result, details)} of a report's check lines"""
+    out = {}
+    for line in lines:
+        parts = line.split(None, 2)
+        if len(parts) >= 2 and parts[1] in ("PASS", "FAIL", "KNOWN", "INFO",
+                                            "SKIP"):
+            out[parts[0]] = (parts[1], parts[2] if len(parts) > 2 else "")
+    return out
+
+
+class Run:
+    """the checks on one card: the hardware layer's calls, what the card
+    played while each listening sound ran, and the report"""
+
+    def __init__(self, card, front, opts=O_SHORT, irq=5, dma8=1, dma16=5):
+        self.card, self.front = card, front
+        self.lines, self.errors, self.asked = [], [], {}
+        self.sections = []
+        self.segments = []          # (rate, start, end) of each sound
+        self.mix_log = []           # (us, register, value) written
+        self.out_log = []           # (us, port, value) of the FM ports
+        self.index = 0
+        self.locks = 0
+        self.kept = []
+        self.sound_start = None
+        lib = library()
+        card.isr = self._isr
+        card.record_from(Input(card))
+        self.hal = HAL(INB(self._inb), OUTB(self._outb), NOW(self._now),
+                       VOID(self._idle), MEM(self._poke), MEM(self._peek),
+                       VOID(self._lock), VOID(self._unlock),
+                       MASK(self._mask), ASK(self._ask), SOUND(self._sound),
+                       TEXT(self._line), TEXT(lambda s: None),
+                       ESC(lambda: 0), KEEP(self._keep),
+                       TEXT(self._state))
+        env = (ctypes.c_char_p * 2)(b"machine: the host tests", None)
+        self.cardinfo = CARD(0x220, irq, dma8, dma16, 0, 1000000, AREA, 0,
+                             env)
+        self.failed = lib.sbt_run(ctypes.byref(self.hal),
+                                  ctypes.byref(self.cardinfo), opts)
+
+    # --- the hardware layer --------------------------------------------------
+    def _guard(fn):
+        def call(self, *a):
+            try:
+                return fn(self, *a)
+            except Exception as e:      # ctypes would swallow it
+                import traceback
+                self.errors.append("%s: %r\n%s" % (fn.__name__, e,
+                                                   traceback.format_exc()))
+                return 0
+        return call
+
+    @_guard
+    def _inb(self, port):
+        return self.card.inp(port) & 0xFF
+
+    @_guard
+    def _outb(self, port, v):
+        if port == 0x224:
+            self.index = v
+        elif port == 0x225:
+            self.mix_log.append((clock(self.card), self.index, v))
+        elif port in (0x388, 0x389, 0x220, 0x221, 0x228, 0x229):
+            self.out_log.append((clock(self.card), port, v))
+        self.card.out(port, v)
+
+    @_guard
+    def _now(self):
+        return clock(self.card)
+
+    @_guard
+    def _idle(self):
+        self.card.wait(IDLE_US)
+
+    @_guard
+    def _poke(self, addr, src, n):
+        self.card.poke(addr, bytes(src[:n]))
+
+    @_guard
+    def _peek(self, addr, dst, n):
+        data = self.card.peek(addr, n)
+        for i, b in enumerate(data):
+            dst[i] = b
+
+    # the handler runs only between the checks' locked port accesses
+    def _lock(self):
+        if self.locks == 0:
+            self.was_in_isr = self.card.in_isr
+            self.card.in_isr = True
+        self.locks += 1
+
+    def _unlock(self):
+        self.locks -= 1
+        if self.locks == 0:
+            self.card.in_isr = self.was_in_isr
+
+    def _mask(self, masked):
+        self.card.isr = None if masked else self._isr
+
+    def _isr(self, card):
+        library().sbt_irq()
+
+    @_guard
+    def _line(self, text):
+        self.lines.append(text.decode())
+
+    @_guard
+    def _state(self, section):
+        self.sections.append(section.decode())
+
+    @_guard
+    def _keep(self, pairs, n):
+        self.kept.append(bytes(pairs[:n]))
+
+    @_guard
+    def _sound(self, rate):
+        if rate:
+            self.sound_start = (rate, clock(self.card), self.heard_now())
+        elif self.sound_start is not None:
+            rate, t0, start = self.sound_start
+            self.segments.append((rate, t0, clock(self.card), start,
+                                  self.heard_now()))
+            self.sound_start = None
+
+    # --- the listener --------------------------------------------------------
+    def heard_now(self):
+        """where each audible output is: the model's one DAC, the chip's
+        two"""
+        if self.front:
+            return (len(self.card.chip.played), len(self.card.chip.played2))
+        return (len(self.card.played),)
+
+    def parts(self, seg):
+        """the frames each DAC played during a sound"""
+        rate, t0, t1, start, end = seg
+        lists = ([self.card.chip.played, self.card.chip.played2]
+                 if self.front else [self.card.played])
+        return [lst[a:b] for lst, a, b in zip(lists, start, end)]
+
+    def frames(self, seg):
+        return [f for part in self.parts(seg) for f in part]
+
+    def side(self, seg):
+        fr = self.frames(seg)
+        left = rms([f[0] for f in fr])
+        right = rms([f[-1] for f in fr])
+        if max(left, right) < 300:
+            return "n"
+        if left > 4 * right:
+            return "l"
+        if right > 4 * left:
+            return "r"
+        return "b"
+
+    def present(self, seg):
+        return rms([s for f in self.frames(seg) for s in f]) > 300
+
+    def tone_hz(self, frames, rate):
+        return crossings_hz([f[0] for f in frames], rate)
+
+    def answer(self, id_, keys):
+        segs = self.segments[self.asked_from:]
+        seg = segs[-1] if segs else None
+        if seg is None:
+            return "n"
+        if id_ in ("l.left16", "l.right16", "l.left8", "l.right8"):
+            return self.side(seg)
+        if id_ == "l.pitch":
+            hz = [self.tone_hz(self.frames(s), s[0]) for s in segs[-3:]]
+            return "y" if len(hz) == 3 and max(hz) < min(hz) * 1.05 and \
+                min(hz) > 300 else "n"
+        if id_ == "l.dual":
+            parts = [p for p in self.parts(seg) if rms([f[0] for f in p])
+                     > 300]
+            if len(parts) == 2:
+                return "b"
+            if not parts:
+                return "n"
+            hz = self.tone_hz(parts[0], seg[0])
+            return "h" if hz > 600 else "l"
+        if id_ == "l.pause":
+            rate, t0, t1 = seg[:3]
+            got = max(len(p) for p in self.parts(seg))
+            return "y" if got < 0.85 * (t1 - t0) * rate / 1e6 else "n"
+        if id_ == "l.blocks":
+            rate, t0, t1 = seg[:3]
+            got = max(len(p) for p in self.parts(seg))
+            return "y" if got > 0.85 * (t1 - t0) * rate / 1e6 else "n"
+        if id_ in ("l.volume", "l.balance"):
+            writes = [(r, v) for us, r, v in self.mix_log
+                      if seg[1] <= us <= seg[2]]
+            if id_ == "l.volume":
+                levels = [v for r, v in writes if r == 0x30]
+                return "y" if len(levels) >= 3 and levels == sorted(
+                    levels, reverse=True) and self.present(seg) else "n"
+            first = [v for r, v in writes if r == 0x33][:1]
+            last = [v for r, v in writes if r == 0x33][-1:]
+            return "y" if first == [0] and last == [0xF8] else "n"
+        if id_ == "l.fm":
+            keyon = [v for us, p, v in self.out_log
+                     if seg[1] <= us <= seg[2] and v & 0x20 and p & 1]
+            return "y" if keyon else "n"
+        if id_ == "l.record":
+            fr = self.frames(seg)
+            hz = self.tone_hz(fr, seg[0]) if fr else 0
+            return "y" if self.present(seg) and hz > 0 else "n"
+        return "y" if self.present(seg) else "n"
+
+    @_guard
+    def _ask(self, id_, question, keys):
+        id_ = id_.decode()
+        a = self.answer(id_, keys.decode())
+        self.asked[id_] = a
+        self.asked_from = len(self.segments)
+        return ord(a)
+
+    asked_from = 0
+
+    # --- the report ----------------------------------------------------------
+    def results(self):
+        return results(self.lines)
+
+    def report(self):
+        return "\n".join(self.lines)
+
+
+class RateTest(unittest.TestCase):
+    """the rates DSP 4.05 computes, as the model has them"""
+
+    def test_rates(self):
+        import sb16
+        lib = library()
+        for tc in range(256):
+            self.assertEqual(lib.sbt_tc_to_v(tc), sb16.tc_to_v(tc), hex(tc))
+        for rate in list(range(4000, 50000, 37)) + [5000, 22050, 23000,
+                                                    44100, 48000, 65535]:
+            self.assertEqual(lib.sbt_rate_to_v(rate), sb16.rate_to_v(rate),
+                             rate)
+
+
+class Checks:
+    """the checks on one kind of card; known: the checks that may be KNOWN"""
+
+    known = set()
+    front = True
+
+    def card(self):
+        raise NotImplementedError
+
+    @classmethod
+    def setUpClass(cls):
+        cls.run_ = Run(cls.card(cls), cls.front)
+
+    def test_no_errors(self):
+        self.assertEqual(self.run_.errors, [], self.run_.report())
+
+    def test_every_check_passes(self):
+        bad = {k: v for k, v in self.run_.results().items()
+               if v[0] == "FAIL" or (v[0] == "KNOWN" and k not in self.known)}
+        self.assertEqual(bad, {}, self.run_.report())
+
+    def test_summary(self):
+        lines = self.run_.lines
+        self.assertTrue(lines[0].startswith("sb16test "))
+        self.assertIn("[summary]", lines)
+        self.assertTrue(any(line.startswith("pass=") for line in lines))
+        self.assertEqual(self.run_.failed, 0)
+
+    def test_listening(self):
+        """every listening check asked, and its sound was what it asks"""
+        res = self.run_.results()
+        listen = [k for k in res if k.startswith("l.")]
+        self.assertGreaterEqual(len(listen), 14)
+        for k in listen:
+            self.assertIn(res[k][0], ("PASS", "SKIP"), (k, res[k]))
+
+    def test_mixer_back(self):
+        """the restore file's pairs, and none at the end"""
+        kept = self.run_.kept
+        self.assertGreaterEqual(len(kept), 2)
+        self.assertGreater(len(kept[0]), 0)
+        self.assertEqual(kept[-1], b"")
+
+
+class ModelTest(Checks, unittest.TestCase):
+    """the model of a Sound Blaster 16: what the checks expect"""
+
+    front = False
+
+    def card(self):
+        return ModelCard()
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class TSRTest(Checks, unittest.TestCase):
+    """esssb16.com with Audio 2 on channel 3"""
+
+    known = KNOWN
+
+    def card(self):
+        return TSRCard("qpi", dma2=3)
+
+    def test_audio2(self):
+        res = self.run_.results()
+        self.assertIn("Audio 2", res["route.audio2"][1])
+        self.assertEqual(res["loop.left"][0], "PASS")
+        self.assertEqual(res["loop.right"][0], "PASS")
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class VxDTest(Checks, unittest.TestCase):
+    """ES1869.VXD's front in a DOS box, Audio 2 on channel 3"""
+
+    known = KNOWN
+
+    def card(self):
+        return VxDCard(dma2=3)
+
+
+# --- the program --------------------------------------------------------------
+
+def exe_run(card, tail, keys="", files=None, vxd=None):
+    """build/sb16test.exe on card until it exits, with files on the disk
+    (and in a DOS box with vxd, as dosrun has it): the runner and the exit
+    code"""
+    from dosrun import Dos
+    with open(EXE, "rb") as f:
+        exe = f.read()
+    card.record_from(Input(card))
+    d = Dos(exe, card, keys=keys, vxd=vxd)
+    for name, data in (files or {}).items():
+        d.files[name] = bytearray(data)
+    return d, d.run(tail)
+
+
+def report(d):
+    return d.files["SB16TEST.TXT"].decode("latin-1").splitlines()
+
+
+class Person:
+    """at the keyboard: each question's answers in turn (g: again), and Esc
+    once `esc_after` is on the screen"""
+
+    def __init__(self, answers, esc_after=None):
+        self.answers, self.esc_after = answers, esc_after
+        self.escaped = False
+
+    def __call__(self, output):
+        if self.esc_after and self.esc_after in output and not self.escaped:
+            self.escaped = True
+            return "\x1b"
+        if not output.endswith("> "):
+            return None
+        asked = re.findall(r"\n(l\.\w+): ", output)
+        return self.answers[asked[-1]][asked.count(asked[-1]) - 1]
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class ExeModelTest(unittest.TestCase):
+    """build/sb16test.exe on the model of a Sound Blaster 16"""
+
+    SECTIONS = ["[env]", "[dsp]", "[mixer]", "[irq]", "[play]", "[rate]",
+                "[control]", "[dual]", "[record]", "[misc]", "[fm]",
+                "[time]", "[summary]"]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.card = ModelCard()
+        cls.d, cls.code = exe_run(cls.card, "/A /T")
+        cls.lines = report(cls.d)
+        cls.res = results(cls.lines)
+
+    def test_every_check_passes(self):
+        bad = {k: v for k, v in self.res.items() if v[0] in ("FAIL", "KNOWN")}
+        self.assertEqual(bad, {}, "\n".join(self.lines))
+        self.assertEqual(self.code, 0)
+        self.assertIn("0 checks failed.", self.d.output)
+
+    def test_sections(self):
+        self.assertEqual([s for s in self.lines if s.startswith("[")],
+                         self.SECTIONS)
+        self.assertGreater(len(self.res), 90)
+
+    def test_machine(self):
+        """what the report says of the machine"""
+        for line in ("dos: 7.10", "windows: not running",
+                     "esssb16: not resident",
+                     "blaster: A220 I5 D1 H5 P330 T6"):
+            self.assertIn(line, self.lines)
+
+    def test_left_as_it_was(self):
+        """the PIT in the BIOS's mode again, the IRQ masked and its vector
+        back, the channels masked, the report the only file"""
+        d = self.d
+        self.assertEqual(d.pit_mode, 3)
+        self.assertTrue(d.pic_mask[0] & 0x20)
+        self.assertEqual(d.mem(0x0D * 4, 4), bytes(4))
+        self.assertTrue(self.card.dma.ch[1].masked)
+        self.assertTrue(self.card.dma.ch[5].masked)
+        self.assertEqual(set(d.files), {"SB16TEST.TXT"})
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class ExeTSRTest(unittest.TestCase):
+    """build/sb16test.exe on esssb16.com, which it finds resident"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.d, cls.code = exe_run(TSRCard("qpi", dma2=3), "/A /T /Q")
+        cls.lines = report(cls.d)
+        cls.res = results(cls.lines)
+
+    def test_every_check_passes(self):
+        bad = {k: v for k, v in self.res.items()
+               if v[0] == "FAIL" or (v[0] == "KNOWN" and k not in KNOWN)}
+        self.assertEqual(bad, {}, "\n".join(self.lines))
+        self.assertEqual(self.code, 0)
+
+    def test_front(self):
+        self.assertTrue(any(line.startswith("esssb16: resident at 1000h")
+                            for line in self.lines))
+        self.assertIn("behind a front", self.res["card.es1869"][1])
+        self.assertIn("Audio 2", self.res["route.audio2"][1])
+        self.assertEqual(self.res["loop.left"][0], "PASS")
+
+    def test_state(self):
+        """esssb16's variables after each section, from its signature on"""
+        state = [line for line in self.lines if line.startswith("esssb16 ")
+                 and ":" in line]
+        sections = {line.split()[1] for line in state}
+        self.assertLessEqual({"env", "dsp", "play", "dual", "record"},
+                             sections)
+        for line in state:
+            part = line.split()[2]              # 0:<96 bytes>, 1:<96 bytes>
+            self.assertEqual(len(part), 2 + 2 * 96, line)
+            if part.startswith("0:"):
+                self.assertTrue(part[2:].startswith(b"ESSSB16".hex().upper()),
+                                line)
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class ExePersonTest(unittest.TestCase):
+    """build/sb16test.exe with a person: the listening checks' questions
+    and answers, Esc, and the restore file of a run that didn't finish"""
+
+    ANSWERS = {"l.tone8": "gy", "l.left16": "l", "l.right16": "r",
+               "l.left8": "l", "l.right8": "r", "l.pitch": "y",
+               "l.dual": "h", "l.pause": "y", "l.volume": "y",
+               "l.balance": "y", "l.adpcm": "y", "l.direct": "y",
+               "l.speaker": "y", "l.blocks": "y", "l.fm": "y",
+               "l.record": "s"}
+
+    def test_listening(self):
+        d, code = exe_run(ModelCard(), "/L /T", keys=Person(self.ANSWERS))
+        res = results(report(d))
+        listen = {k: v[0] for k, v in res.items() if k.startswith("l.")}
+        self.assertEqual(set(listen), set(self.ANSWERS))
+        self.assertEqual(listen.pop("l.record"), "SKIP")
+        self.assertEqual(res["l.fm"], ("SKIP", "not on this card"))
+        del listen["l.fm"]
+        self.assertEqual(set(listen.values()), {"PASS"})
+        self.assertEqual(d.output.count("\nl.tone8: "), 2)     # again
+        self.assertIn("answer y (y expected)", res["l.tone8"][1])
+        self.assertEqual(code, 0)
+
+    def test_escape_and_restore(self):
+        """SB16TEST.RST puts the mixer back before the checks; Esc stops
+        them, and the mixer goes back to what it was when they began"""
+        card = ModelCard()
+        rst = b"SBTRST1\0" + struct.pack("<HH", 0x220, 4) + \
+            bytes((0x30, 0x80, 0x31, 0x90))
+        d, _ = exe_run(card, "/A /T", keys=Person({}, "the interrupts"),
+                       files={"SB16TEST.RST": rst})
+        lines = report(d)
+        self.assertIn("restored the mixer from SB16TEST.RST: the last run "
+                      "didn't finish", lines)
+        self.assertTrue(any(line.startswith("pass=") and
+                            line.endswith("(stopped)") for line in lines))
+        self.assertNotIn("SB16TEST.RST", d.files)
+        self.assertEqual(card.sb.mix,
+                         {**card.sb.DEFAULTS, 0x30: 0x80, 0x31: 0x90})
+
+    def test_dos_box(self):
+        """in a Windows DOS box: ES1869.VXD's version and settings, which
+        its API gives, or none, with ESS's driver"""
+        adi = bytearray(0xE9)
+        struct.pack_into("<I", adi, 0x55, 0x00012345)     # the devnode
+        for info, line in (((0x0117, 0xFFFF, 0x4321),
+                            "es1869.vxd: register API 1.17, features FFFF, "
+                            "settings 4321"),
+                           (None, "es1869.vxd: no register API (ESS's "
+                            "driver, or none)")):
+            d, _ = exe_run(ModelCard(), "/A /T",
+                           keys=Person({}, "the DSP's commands"),
+                           vxd={"adi": bytes(adi), "info": info})
+            lines = report(d)
+            self.assertIn("windows: 4.10, a DOS box", lines)
+            self.assertIn(line, lines)
+            self.assertEqual([(c[0], c[3]) for c in d.vxd_calls],
+                             [(0x0001, 0xE9), (0x0400, None)])
+            self.assertEqual(d.vxd_calls[1][2], 0x00012345)
+
+
+if __name__ == "__main__":
+    unittest.main()
