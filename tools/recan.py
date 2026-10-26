@@ -26,7 +26,10 @@ DTMF_HI = (1209, 1336, 1477, 1633)
 CENTS = 10                  # a pitch's tolerance
 CLEAN_DB = 25               # a steady tone's least median of tone to rest
 WORST_DB = 15               # and its least in any 20 ms
-SIDE_DB = 15                # the side a tone came from, louder by this
+# the side a tone came from, louder by this: a recorder's crosstalk left
+# the other side only 8 dB under it in one run, and a stream two bytes
+# off puts the tone on the other side
+SIDE_DB = 3
 OFF_S = 0.010               # a marker farther off the clock is left out
 
 # --- the recording ------------------------------------------------------------

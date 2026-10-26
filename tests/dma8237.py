@@ -71,6 +71,9 @@ class DMA8237:
     def __init__(self, memory=None):
         self.memory = memory if memory is not None else Memory()
         self.ch = [Channel(i) for i in range(8)]
+        # channel 4 cascades the first controller, unmasked, as the BIOS
+        # leaves it (env.dma: DEh reads 0Eh)
+        self.ch[4].mode, self.ch[4].masked = MODE_CASCADE, False
         self.ff = [0, 0]                # the byte pointer flip-flops
         self.command = [0, 0]
         self.temp = [0, 0]

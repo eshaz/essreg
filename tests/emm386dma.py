@@ -1,19 +1,19 @@
 # (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 #
 # Licensed under GPL Version 3.0
-"""EMM386's DMA translation between a V86 program and the 8237s, as the
-research on it says (docs/SB16.md): EMM386 traps the DMA controllers'
-ports, keeps what a program writes of a channel (its address, page, count
-and mode) and programs the 8237 with it when the program unmasks the
-channel; reads of the address, count and status are the 8237's. The
-research has EMM386 copy a buffer that crosses a page through one of its
-own, which isn't modelled: essprobe's h1.cross cases tell.
+"""EMM386's DMA translation between a V86 program and the 8237s, as
+essprobe measured MS EMM386 4.95 (docs/ESS_EXTENDED.md, h1.*): EMM386
+traps the DMA controllers' ports, keeps what a program writes of a channel
+(its address, page, count and mode) and programs the 8237 with it when the
+program unmasks the channel; reads of the address, count and status are
+the 8237's; the program's writes move a byte flip-flop of EMM386's own (a
+clear goes to both, a read toggles the 8237's). A single-cycle buffer
+across a page goes through a buffer of EMM386's at 120000h (h1.cross1),
+which isn't modelled.
 
 `at_unmask` False passes every write on at once instead, as when the
 memory manager's translation is off or the program runs in real mode.
-`virtual_ff` True keeps the byte flip-flop of the program's writes in
-EMM386 (a clear goes to both, a read toggles the 8237's); False uses the
-8237's for both. essprobe's h1 cases tell which of these the hardware does.
+`virtual_ff` False uses the 8237's flip-flop for the writes too.
 
 The program's accesses go through outb() and inb(); a ring 0 handler, or
 the window, reaches the 8237 itself.
@@ -43,7 +43,7 @@ def channel_regs(port):
 
 
 class EMM386DMA:
-    def __init__(self, dmac, at_unmask=True, virtual_ff=False):
+    def __init__(self, dmac, at_unmask=True, virtual_ff=True):
         self.dmac = dmac
         self.at_unmask = at_unmask
         self.virtual_ff = virtual_ff

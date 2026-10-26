@@ -106,7 +106,7 @@ void winio_path_text(char *buf, unsigned size) {
 
   switch (winio_path) {
   case WIO_VXDEXT:
-    sprintf(tmp, "VxD register API %u.%02u, Audio_Base %03Xh",
+    sprintf(tmp, "VxD register API %X.%02X, Audio_Base %03Xh",
             vxd.ext_version >> 8, vxd.ext_version & 0xFF, esshw.audio_base);
     break;
   case WIO_DIRECT_VXD:

@@ -55,6 +55,13 @@ of the chip and the DMA controllers:
   is M(7Ah) with bit 7 clear.
 * **DMA(ch, ...)**: a DMA channel programmed: its mode, address, count and
   page, as the chip's first cycle on it finds them.
+* **HOLD** and **SETTLE**, around Audio 1's start: HOLD masks the channel
+  that plays, and SETTLE polls +Ch 64 + 22528 / v times, v the rate
+  generator's value, then unmasks what HOLD masked. The game's own channel
+  is held only where its mask reads back unmasked at 0Fh, and the chipset
+  gives the mask back, with DEh bit 0, the cascade, clear. The VxD holds
+  through VDMAD (VDMAD_Mask_Channel and VDMAD_UnMask_Channel), for the
+  program's channel while its virtual state is unmasked.
 
 ## The state
 
@@ -155,8 +162,8 @@ and a length. Each becomes a transfer of its kind (`xfer`,
    the rate, and B6h and B7h for the format. A changed format starts with
    FIFO, then R(B6h), R(B7h) 51h (71h for B6h 00h), and R(B7h) with the
    format. Then R(B1h) and R(B2h) with bits 6 and 4 set, mixer 71h for the
-   DACs' mode, the DMA, and R(B8h) with bit 0 set. Of the registers, only
-   those that change are written. Audio 1 is RUN.
+   DACs' mode, the DMA with HOLD, R(B8h) with bit 0 set, and SETTLE. Of the
+   registers, only those that change are written. Audio 1 is RUN.
 4. **Audio 2.** M(78h, 0), M(74h) and M(76h) with minus the bytes, M(70h)
    and M(72h) for the rate, M(7Ch) for the voice level, M(7Ah) for the
    interrupt and the format, mixer 71h for the DACs' mode and Audio 2's own
@@ -169,6 +176,15 @@ itself, and the engine is IDLE again only with the next transfer that stops
 it or the game's reset. A single-cycle block that follows one in the same
 format on Audio 1 goes on from it without FIFO, because the FIFO still holds
 the last block's end, and 82h names the ended block's interrupt by its kind.
+
+HOLD and SETTLE keep the DMA's bytes away from Audio 1 while its start
+settles. A byte that comes within a few microseconds of B8h bit 0 rising is
+lost but counted, and the stream plays a byte off from there: noise in
+16-bit sound, the sides swapped in 8-bit stereo (`fix.base1`, `fix.late0`,
+[ESS_EXTENDED.md](ESS_EXTENDED.md#a-16-bit-stream-a-byte-off)). With the
+channel unmasked 20 us or more after the start, every rate measured stayed
+in step. The game's own channel that the game unmasks after the command gets
+SETTLE's time too, since the trap returns only after it.
 
 A 16-bit block of more than 32768 samples starts in halves (`half_count`):
 the counter gets half the block's bytes, the chip auto-initializes also for
@@ -183,11 +199,14 @@ and DAh end its auto-initialize with the block that plays. The 16-bit kind
 is Audio 2's while Audio 2 runs. A command for a kind that doesn't run does
 nothing:
 * **Audio 1**: the pause clears B2h bit 6, so that the chip asks for no more
-  DMA and the FIFO plays out, and the continue sets the rate again, then B2h
-  bit 6. The end of auto-initialize clears B8h bit 2.
-* **Audio 2**: the pause clears 78h bit 0, so that the DMA fills the FIFO
-  and waits, and the continue sets the rate again, then 78h bit 0. The end
-  of auto-initialize clears 78h bit 4.
+  DMA and the FIFO plays out, and the continue sets the rate again, then
+  HOLD, B2h bit 6 and SETTLE, because a byte right after B2h bit 6 rises can
+  be lost as at the start (`fix.pb2late` without a memory manager). The end
+  of auto-initialize clears B8h bit 2.
+* **Audio 2**: the pause clears 78h bit 0, which silences the DAC, though
+  the card's DMA runs on meanwhile and the stream skips what it moved
+  (`a2.pause_f`), and the continue sets the rate again, then 78h bit 0. The
+  end of auto-initialize clears 78h bit 4.
 
 In the first half of a block in halves, the end of auto-initialize sets ONCE
 instead (`half_last`), so that the block plays to its end.
@@ -271,7 +290,10 @@ The machine keeps these:
 * Every DMA cycle moves data in the direction of its transfer
   (`tests/dma8237.py`).
 * B8h bit 0 is the last write of Audio 1's start, and 78h the last of Audio
-  2's.
+  2's. No DMA byte reaches Audio 1 within SETTLE's polls of B8h bit 0 or B2h
+  bit 6 rising (`tests/esschip.py`'s RACE_US). Audio 2 starts with one write
+  of 78h, its DMA and its FIFO at once, which stayed in step on the card
+  where two steps did not (`a2.start2`).
 * The front sends DSP commands only while the game waits for the port access
   that caused them: in the trap's handler, never from an interrupt of its
   own.
@@ -312,16 +334,22 @@ A difference shows the first operation where the two part, with the ones
 before it. A change to the machine goes into the reference and both fronts
 alike.
 
-## What the probe decides
+## What the probe decided
 
-Some transitions wait for the card's answers ([ESSPROBE.md](ESSPROBE.md)):
-* `a2.wide_packed`: whether Audio 2 plays a game's own 16-bit buffer on the
-  game's 16-bit channel with 78h bit 5. If it does, a 16-bit playback can go
-  straight to Audio 2 on that channel, with no programming carried over and
-  a count that moves, also under EMM386.
-* `h1.reach5` and `h1.stale`: when EMM386 gives the 8237 a channel's
-  programming, and so whether READBACK can follow a game that unmasks its
-  channel after the command, as Pinball Fantasies' driver does.
-* `a1.pause_b2` and `a1.pause_b8`: which pause keeps Audio 1's place.
-* `a1.b9_0` to `a1.b9_3` and `both.*`: the transfer types, and both engines
-  at once.
+These transitions follow the card's answers ([ESSPROBE.md](ESSPROBE.md),
+[ESS_EXTENDED.md](ESS_EXTENDED.md)):
+* `a2.wide_packed`: Audio 2 doesn't play a game's own 16-bit buffer on the
+  game's 16-bit channel with 78h bit 5, so a 16-bit playback goes to Audio 2
+  only where Audio 2 has an 8-bit channel of its own.
+* `h1.reach5` and `h1.stale`: EMM386 gives the 8237 a channel's programming
+  at the program's unmask, so READBACK carries over what the channel had
+  before when a game unmasks its channel after the command, as Pinball
+  Fantasies' driver does.
+* `fix.late20` and the others: HOLD and SETTLE around Audio 1's start.
+* `a1.pause_b2`: B2h bit 6 stops Audio 1's DMA within a few bytes, so it is
+  the pause. Whether HOLD keeps the continue in step is for `fix.pb2hold1`
+  to `fix.pb2hold3`, and whether Audio 2's 78h bit 0, whose DMA runs on in
+  the pause, or bit 1 serves its pause better, for `fix.a2pdhold1` and the
+  others.
+* `a1.b9_0` to `a1.b9_3`: B9h 00, 01 and 10 run at the rate and 11 runs
+  ahead of it, so the fronts write 10, or 00 with `/S`.

@@ -85,7 +85,7 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0119
+ESSREG_VERSION          equ 0x0120
 ESSREG_FEATURES         equ 0xFFFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
@@ -4110,8 +4110,12 @@ ESSREG_S16_GD:
         jz      ESSREG_S16_None
         and     byte [edi+EX_S16_Flags],~S16_PAUSE & 0xFF
         call    ESSREG_S16_Clocks               ; the rate as it is now
+        call    ESSREG_S16_Hold                 ; the DMA requests on with
+        push    eax                             ; the channel masked
         mov     ax,0xB240
-        jmp     ESSREG_S16_Or
+        call    ESSREG_S16_Or
+        pop     eax
+        jmp     ESSREG_S16_Settle
 .a2:    shl     ah,2                    ; Audio 2: the same with 78h
         jc      .pause2
         js      .cont2
@@ -4125,8 +4129,8 @@ ESSREG_S16_GD:
         jmp     ESSREG_S16_Mix_And
 .pause2:
         or      byte [edi+EX_S16_Flags2],S16_PAUSE      ; the FIFO off the
-        mov     ax,0x78FE                               ; DAC (bit 0): the
-        jmp     ESSREG_S16_Mix_And                      ; DMA fills it, waits
+        mov     ax,0x78FE                               ; DAC (bit 0), whose
+        jmp     ESSREG_S16_Mix_And                      ; DMA runs on
 .cont2: test    byte [edi+EX_S16_Flags2],S16_PAUSE
         jz      ESSREG_S16_None
         and     byte [edi+EX_S16_Flags2],~S16_PAUSE & 0xFF
@@ -4543,7 +4547,8 @@ ESSREG_S16_Filter_Rec:
 ; auto-initialize, B9h for demand transfers of 2 bytes, A8h for mono or
 ; stereo, A1h and A2h for the rate, A4h and A5h for minus the bytes, B6h
 ; and B7h for the format, B1h and B2h for the interrupt and the DMA
-; request, mixer 71h bit 5 off, then B8h bit 0. Only the registers that
+; request, mixer 71h bit 5 off, then B8h bit 0, with the channel masked
+; until the start settled (ESSREG_S16_Settle). Only the registers that
 ; change are written. The DMA is the program's, through VDMAD: Audio 1's
 ; channel as the program programs it, or its 16-bit channel carried over
 ; (ESSREG_S16_Carry). There is one transfer of each kind, so a 16-bit one
@@ -4644,8 +4649,69 @@ ESSREG_S16_Xfer:
         test    bl,0x10                 ; a 16-bit transfer on the 16-bit
         jz      .go                     ; channel: Audio 1's takes its
         call    ESSREG_S16_Carry        ; programming
-.go:    mov     ax,0xB801
-        jmp     ESSREG_S16_Or
+.go:    call    ESSREG_S16_Hold
+        push    eax
+        mov     ax,0xB801
+        call    ESSREG_S16_Or
+        pop     eax
+        jmp     ESSREG_S16_Settle
+
+; the channel that plays Audio 1's transfer, EDI = ADI, masked over its
+; DMA's (re)start while it runs: the program's own channel while unmasked,
+; or its 16-bit one carried over (EX_S16_DMA). EAX = its VDMAD handle, to
+; unmask once the start settled (ESSREG_S16_Settle), or 0
+ESSREG_S16_Hold:
+        mov     eax,[edi+ADI_DMA1Handle]
+        or      eax,eax
+        jz      .out
+        test    byte [edi+EX_S16_Flags],S16_16
+        jz      .own
+        cmp     byte [edi+EX_S16_Chan],0
+        je      .own
+        cmp     byte [edi+EX_S16_DMA],0
+        jne     .mask
+        jmp     short .none
+.own:   push    ebx
+        push    ecx
+        push    edx
+        push    esi
+        mov     ebx,[edi+EX_S16_VM]
+        VxDCall VDMAD_Get_Virt_State    ; DL = the mode
+        test    dl,DMA_MASKED
+        pop     esi
+        pop     edx
+        pop     ecx
+        pop     ebx
+        jnz     .none
+.mask:  VxDCall VDMAD_Mask_Channel
+.out:   ret
+.none:  xor     eax,eax
+        ret
+
+; Audio 1's DMA (re)started, EDI = ADI: Audio_Base+Ch polled 64 + 22528 /
+; v times, at least 32 us and two of its sample periods at an ISA read's
+; half a microsecond, before a byte may come (fix.late20, a byte off
+; sooner); then the channel that the start held masked, EAX = its VDMAD
+; handle (0: none), unmasked
+ESSREG_S16_Settle:
+        pushad
+        mov     esi,eax
+        movzx   ecx,byte [edi+EX_S16_RateV]
+        mov     eax,22528
+        xor     edx,edx
+        div     ecx
+        lea     ecx,[eax+64]
+        movzx   edx,word [edi+ADI_AudioBase]
+        add     edx,byte 0x0C
+.poll:  in      al,dx
+        loop    .poll
+        or      esi,esi
+        jz      .out
+        mov     eax,esi
+        mov     ebx,[edi+EX_S16_VM]
+        VxDCall VDMAD_UnMask_Channel
+.out:   popad
+        ret
 
 ; a 16-bit transfer on the program's 16-bit channel, EDI = ADI: the channel
 ; it goes to (EX_S16_To) takes its programming as VDMAD has it, or waits

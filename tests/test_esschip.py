@@ -11,7 +11,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dma8237 import DMA8237  # noqa: E402
-from esschip import ES1869Audio, a1_hz, a2_hz  # noqa: E402
+from esschip import ES1869Audio, a1_hz, a2_hz, decode  # noqa: E402
 from vxdemu import FakeES1869  # noqa: E402
 from sbgame import program_dma, words, samples16  # noqa: E402
 from test_sb16 import adpcm_decode  # noqa: E402
@@ -83,8 +83,10 @@ def reset(chip, fifo=True):
 
 
 def extended_play(chip, bits=16, stereo=True, signed=True, auto=True,
-                  nbytes=1024, rate_a1=0xF0):
-    """the data sheet's sequence (DS p.48-49, table 16)"""
+                  nbytes=1024, rate_a1=0xF0, late=50):
+    """the data sheet's sequence (DS p.48-49, table 16), with channel 1
+    masked over B8h bit 0 and unmasked late us after it (fix.late50); None
+    leaves the channel as it is"""
     reset(chip)
     dsp(chip, 0xC6)
     reg(chip, 0xB8, 0x04 if auto else 0x00)
@@ -103,8 +105,24 @@ def extended_play(chip, bits=16, stereo=True, signed=True, auto=True,
     reg(chip, 0xB7, fmt)
     for r in (0xB1, 0xB2):
         reg(chip, r, reg_read(chip, r) | 0x50)
-    reg(chip, 0xB8, reg_read(chip, 0xB8) | 0x01)
+    masked(chip, lambda: reg(chip, 0xB8, reg_read(chip, 0xB8) | 0x01), late)
     dsp(chip, 0xD1)
+
+
+def masked(chip, fn, late):
+    """fn with channel 1 masked, unmasked late us after; at once if None"""
+    if late is not None:
+        chip.outb(0x0A, 0x05)
+    fn()
+    if late is not None:
+        run(chip, late)
+        chip.outb(0x0A, 0x01)
+
+
+def stream(data, skip=0):
+    """the 16-bit stereo frames of data from byte skip on"""
+    return [tuple(decode(data[i:i + 4], 16, True, True))
+            for i in range(skip, len(data) - 3, 4)]
 
 
 class ExtendedTest(unittest.TestCase):
@@ -180,6 +198,47 @@ class ExtendedTest(unittest.TestCase):
         reg(chip, 0xB2, reg_read(chip, 0xB2) | 0x40)
         run(chip, 2000)
         self.assertLess(chip.dmac.left(1), left)
+
+    def test_a_live_channel_at_the_start_plays_a_byte_off(self):
+        """the channel unmasked over B8h bit 0: its first byte is lost but
+        counted, and 16-bit stereo plays a byte off, its interrupts in
+        time (fix.base1, fix.late0 without a memory manager); unmasked 20
+        us after, in step (fix.late20)"""
+        for late, skip in ((None, 1), (0, 1), (20, 0)):
+            chip = Chip()
+            data = words(samples16(2048, start=0x1111))
+            chip.dmac.memory.write(BUF, data)
+            program_dma(Card(chip), 1, BUF, len(data))
+            extended_play(chip, nbytes=1024, late=late)
+            run(chip, 5200)
+            self.assertEqual(len(chip.irq_edges), 1, late)
+            got = chip.played
+            self.assertGreater(len(got), 100)
+            self.assertEqual(got, stream(data, skip)[:len(got)], late)
+
+    def test_a_live_channel_at_a_resume_plays_a_byte_off(self):
+        """B2h bit 6 back on with the channel unmasked: a byte off from
+        there (fix.pb2late without a memory manager); masked over it, in
+        step"""
+        for late, skip in ((None, 1), (50, 0)):
+            chip = Chip()
+            data = words(samples16(4096, start=0x2222))
+            chip.dmac.memory.write(BUF, data)
+            program_dma(Card(chip), 1, BUF, len(data))
+            extended_play(chip, nbytes=4096)
+            run(chip, 3000)
+            reg(chip, 0xB2, reg_read(chip, 0xB2) & ~0x40)
+            run(chip, 10000)
+            before = len(chip.played)
+            moved = len(data) - chip.dmac.left(1)
+            masked(chip, lambda: reg(chip, 0xB2, reg_read(chip, 0xB2) | 0x40),
+                   late)
+            run(chip, 3000)
+            got = chip.played
+            self.assertEqual(got[:before], stream(data)[:before])
+            want = stream(data[:moved]) + stream(data[moved + skip:])
+            self.assertGreater(len(got), before + 100)
+            self.assertEqual(got, want[:len(got)], late)
 
     def test_reset_stops_and_leaves_extended_mode(self):
         chip = Chip()

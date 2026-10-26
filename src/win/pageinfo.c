@@ -126,7 +126,7 @@ void info_text(char *buf, unsigned size) {
             vxd.version >> 8, vxd.version & 0xFF);
     if (vxd.ext_version)
       sprintf(ADD,
-              "Register API:\tversion %u.%02u, %u functions, "
+              "Register API:\tversion %X.%02X, %u functions, "
               "features %04Xh\r\n",
               vxd.ext_version >> 8, vxd.ext_version & 0xFF, vxd.ext_count,
               vxd.ext_features);

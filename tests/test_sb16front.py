@@ -255,6 +255,24 @@ class FrontChecks:
             self.assertEqual(set(after[-200:]), {(0x1234,)}, delay)
             self.assertClean()
 
+    def stereo8(self, c):
+        """an 8-bit stereo transfer on the game's own channel, unmasked
+        before the command, left 10h and right F0h: the frames played"""
+        c.poke(0x14000, b"\x10\xF0" * 2048)
+        program_dma(c, 1, 0x14000, 4096)
+        write(c, 0x41, 0x56, 0x22, 0xC6, 0x20, 0xFF, 0x07)
+        c.wait(20000)
+        return self.chip.played
+
+    def test_start_holds_the_channel(self):
+        """the channel masked over B8h bit 0 and unmasked once the start
+        settled: no byte is lost, and the sides stay as written
+        (fix.s8late against fix.s8base)"""
+        played = self.stereo8(self.c)
+        self.assertGreater(len(played), 100)
+        self.assertEqual(set(played), {(-0x7000, 0x7000)})
+        self.assertClean()
+
     def test_pause_continue_end(self):
         """D5h and D6h: Audio 1's DMA requests off and on (B2h bit 6); D9h:
         the block that plays is the last (B8h bit 2)"""
@@ -690,6 +708,28 @@ class TSRFrontTest(FrontChecks, unittest.TestCase):
 
     def card(self, **kw):
         return fresh(TSRCard("qpi", **kw))
+
+    def test_mask_readback(self):
+        """the game's own channel masked and unmasked by the front only
+        where the chipset gives the mask back: without it (0Fh and DEh read
+        FFh) the channel is left alone, and 8-bit stereo plays a byte off,
+        its sides swapped, as on such a machine (fix.s8base)"""
+        for readback, writes, frame in ((True, [0x05, 0x01], (-0x7000, 0x7000)),
+                                        (False, [], (0x7000, -0x7000))):
+            c = self.card()
+            dmac = c.chip.dmac
+            if not readback:
+                inb = dmac.inb
+                dmac.inb = lambda port: 0xFF if port in (0x0F, 0xDE) \
+                    else inb(port)
+            c.poke(0x14000, b"\x10\xF0" * 2048)
+            program_dma(c, 1, 0x14000, 4096)
+            mark = len(dmac.log)
+            write(c, 0x41, 0x56, 0x22, 0xC6, 0x20, 0xFF, 0x07)
+            c.wait(20000)
+            self.assertEqual([v for p, v in dmac.log[mark:] if p == 0x0A],
+                             writes, readback)
+            self.assertEqual(set(c.chip.played), {frame}, readback)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")

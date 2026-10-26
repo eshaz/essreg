@@ -483,7 +483,7 @@ driver in a folder of their own.
    restart Windows.
 2. Try Windows sounds, MIDI, a DirectSound game and a DOS game in a window.
    They all work as before.
-3. Start essctl. Its title bar says "VxD register API 1.19", and the owners
+3. Start essctl. Its title bar says "VxD register API 1.20", and the owners
    line at the bottom right shows who owns the DSP, FM and the MPU.
 4. While a DOS game plays, change *Audio 2 volume* or *Master volume* in
    essctl. The change applies at once, and the game keeps its sound. This is

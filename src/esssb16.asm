@@ -117,6 +117,8 @@ V_MASK          equ 0x01        ; masked
 V_FF            equ 0x02        ; its controller's flip-flop
 V_NEW           equ 0x04        ; programmed since it was carried over
 V_LIVE          equ 0x08        ; Audio 1's channel carries its programming
+V_HOLD          equ 0x10        ; carried over for Audio 1's start, which
+                                ; unmasks the channel (settle)
 
 ; their bit numbers, for bt, bts and btr
 F_EXT_BIT       equ 1
@@ -1154,8 +1156,12 @@ gd:     cmp     al,8
 .cont:  btr     word [V(flags)],F_PAUSE_BIT
         jnc     none
         call    a1_clocks               ; the rate as it is now
+        call    a1_hold                 ; the DMA requests on with the
+        push    ax                      ; channel masked
         mov     ax,0xB240
-        jmp     reg_or
+        call    reg_or
+        pop     ax
+        jmp     settle
 .a2:    shl     ah,2                    ; Audio 2: the same with 78h
         jc      .pause2
         js      .cont2
@@ -1168,8 +1174,8 @@ gd:     cmp     al,8
         mov     ax,0x78EF               ; bit 4: auto-initialize
         jmp     mix_and
 .pause2:
-        or      byte [V(flags2)],F_PAUSE ; the FIFO off the DAC (bit 0): the
-        mov     ax,0x78FE               ; DMA fills it and waits
+        or      byte [V(flags2)],F_PAUSE ; the FIFO off the DAC (bit 0),
+        mov     ax,0x78FE               ; whose DMA runs on (a2.pause_f)
         jmp     mix_and
 .cont2: btr     word [V(flags2)],F_PAUSE_BIT
         jnc     none
@@ -1353,7 +1359,8 @@ filter_rec:     db 3, 5, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 10, 10
 ; transfers of 2 bytes, A8h for mono or stereo, A1h and A2h for the rate,
 ; A4h and A5h for minus the bytes, B6h and B7h for the format, B1h and B2h
 ; for the interrupt and the DMA request, mixer 71h, the DMA, then B8h bit
-; 0. Only the registers that change are written. There is one transfer of
+; 0, with the channel that plays masked until the start settled (settle).
+; Only the registers that change are written. There is one transfer of
 ; each kind, so a 16-bit one ends the other engine's
 xfer:
         mov     si,ax
@@ -1440,10 +1447,15 @@ xfer:
         mov     ax,0xB250               ; kept, as ES1869.DRV keeps them
         call    reg_or
         call    dac_options
+        or      byte [V(vbits)],V_HOLD
         mov     al,[V(dma8)]
         call    xfer_dma
+        and     byte [V(vbits)],~V_HOLD & 0xFF
+        push    ax
         mov     ax,0xB801               ; go
-        jmp     reg_or
+        call    reg_or
+        pop     ax
+        jmp     settle
 
 ; a 16-bit playback on Audio 2: SI = the samples, CL = the mode. As
 ; ES1869.DRV starts Audio 2 (6:2C1A, docs/DRIVER_CONFIG.md): stopped (78h),
@@ -1683,7 +1695,9 @@ dac_options:
 ; the game programmed it; a 16-bit one has the game's 16-bit channel
 ; carried over to AL's, Audio 1's or Audio 2's. Where the front traps that
 ; channel, it is carried over when the game programmed it anew or it goes
-; to the other channel, and AL's waits while the game's is masked
+; to the other channel, and AL's waits while the game's is masked. Audio
+; 1's start (V_HOLD) holds the channel that plays masked: AL = the channel
+; to unmask once the start settled (settle), FFh for none
 xfer_dma:
         test    bl,0x10
         jz      .own
@@ -1694,19 +1708,105 @@ xfer_dma:
         mov     [V(mchan)],al
         and     byte [V(vbits)],~V_LIVE & 0xFF
 .same:  call    vtrapped
-        jc      mirror
+        jc      .mirror
         test    byte [V(vbits)],V_MASK
-        jnz     ch8_mask
+        jnz     .masked
         mov     al,[V(vbits)]
         and     al,V_NEW | V_LIVE
         cmp     al,V_LIVE
-        jne     mirror
+        jne     .mirror
+        test    byte [V(vbits)],V_HOLD  ; carried over already: masked for
+        jz      .none                   ; the start
+        call    ch8_mask
+        jmp     short .held
+.mirror:
+        call    mirror
+        test    byte [V(vbits)],V_HOLD
+        jz      .none
+.held:  mov     al,[V(mchan)]
+        ret
+.masked:
+        call    ch8_mask
+.none:  mov     al,0xFF
         ret
 .own:   mov     al,[V(dma8)]            ; the game programs Audio 1's channel
         cmp     al,[V(mchan)]           ; itself: what it carried is gone,
-        jne     .ret                    ; but on Audio 2's
+        jne     .hold                   ; but on Audio 2's
         and     byte [V(vbits)],~V_LIVE & 0xFF
+.hold:  test    byte [V(vbits)],V_HOLD
+        jz      .none
+
+; the game's own channel AL masked over Audio 1's start, if the chipset
+; gives the mask back (DEh bit 0, the cascade, clear) and it reads
+; unmasked (0Fh); AL = the channel to unmask after, or FFh
+hold:
+        push    cx
+        push    dx
+        mov     cl,al
+        mov     dx,0xDE
+        call    chip_in
+        test    al,0x01
+        jnz     .none
+        mov     dl,0x0F
+        call    chip_in
+        shr     al,cl
+        test    al,0x01
+        jnz     .none
+        mov     al,0x04
+        or      al,cl
+        mov     dl,0x0A
+        call    chip_out
+        mov     al,cl
+        jmp     short .out
+.none:  mov     al,0xFF
+.out:   pop     dx
+        pop     cx
+        ret
+
+; the channel that plays Audio 1's transfer masked over its DMA's restart:
+; the game's own, or the one that carries its 16-bit channel unless the
+; game masked that; AL = the channel to unmask after, or FFh
+a1_hold:
+        mov     al,[V(dma8)]
+        test    byte [V(flags)],F_16
+        jz      hold
+        cmp     byte [V(dma16)],0
+        je      hold
+        call    vtrapped
+        jc      .held
+        test    byte [V(vbits)],V_MASK
+        mov     al,0xFF
+        jnz     .ret
+.held:  call    ch8_mask
+        mov     al,[V(mchan)]
 .ret:   ret
+
+; Audio 1's DMA (re)started: +Ch polled 64 + 22528 / v times, at least 32
+; us and two of its sample periods at an ISA read's half a microsecond,
+; before a byte may come (fix.late20, a byte off sooner); then AL, the
+; channel that the start held masked, unmasked (FFh: none)
+settle:
+        push    cx
+        push    dx
+        push    ax
+        movzx   cx,byte [V(rate_v)]
+        mov     ax,22528
+        xor     dx,dx
+        div     cx
+        add     ax,64
+        mov     cx,ax
+        mov     al,0x0C
+        call    port_of
+.poll:  call    chip_in
+        loop    .poll
+        pop     ax
+        cmp     al,0xFF
+        je      .out
+        mov     dx,0x0A
+        call    chip_out
+.out:   pop     dx
+        pop     cx
+        ret
 
 ; CF clear if this trap path traps the game's 16-bit channel (the one the
 ; TSR was installed for, which mixer 81h may have changed)
@@ -1730,7 +1830,8 @@ vtrapped:
 ; chip asks for a block's bytes only. A single-cycle block whose channel
 ; still holds what was carried over goes on where the last one ended: the
 ; game programmed the buffer once, and the next block follows the last.
-; The game's flip-flop is left cleared
+; The game's flip-flop is left cleared, and the channel that plays masked
+; for Audio 1's start (V_HOLD)
 mirror:
         call    vtrapped
         jnc     .have
@@ -1763,7 +1864,9 @@ mirror:
         jne     .have
         cmp     dl,[V(vpage)]
         jne     .have
-        ret
+        test    byte [V(vbits)],V_HOLD
+        jnz     ch8_mask
+.ret:   ret
 .have:  mov     ah,[V(vmode)]
         and     ah,0x10                 ; auto-initialize
         or      ah,0x08                 ; from memory
@@ -1803,6 +1906,8 @@ mirror:
         call    chip_out
         and     byte [V(vbits)],~V_NEW & 0xFF
         or      byte [V(vbits)],V_LIVE
+        test    byte [V(vbits)],V_HOLD
+        jnz     .ret
         call    vtrapped
         jc      ch8_unmask
         test    byte [V(vbits)],V_MASK

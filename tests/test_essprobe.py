@@ -475,7 +475,14 @@ def synthesize(run, rate=48000):
 # the recorded cases: one of each kind the recording should hold
 RECORDED = ("a1.base,a1.left,a1.right,a1.pause_b2,a1.muted,a2.base,"
             "a2.slaved,both.base,both.muted2,stream.a1,stream.mirror,"
-            "a2.wide_packed,fix.late100a,fix.a2pfd1")
+            "a2.wide_packed,fix.late100a,fix.a2pfd1,fix.pb2late,"
+            "fix.pb2hold1")
+# those whose Audio 1 stream plays a byte off, its DMA running at its
+# start or resume, as on the card (docs/ESS_EXTENDED.md); the names are
+# prefixes, so fix.pb2late runs fix.pb2late2 and 3 too
+BYTE_OFF = {"a1.base", "a1.left", "a1.right", "a1.pause_b2", "both.base",
+            "both.muted2", "stream.a1", "fix.pb2late", "fix.pb2late2",
+            "fix.pb2late3"}
 
 
 @unittest.skipUnless(HAVE_UNICORN and np is not None,
@@ -537,9 +544,10 @@ class RecordedTest(unittest.TestCase):
         self.assertEqual(self.probe.errors, [])
         for case in RECORDED.split(","):
             self.assertIn(case, v, v["_text"])
-        bad = {c: r for c, r in v.items() if c != "_text" and
-               r[0] == "FAIL"}
-        self.assertEqual(bad, {}, v["_text"])
+        bad = {c for c, r in v.items() if c != "_text" and r[0] == "FAIL"}
+        self.assertEqual(bad, BYTE_OFF, v["_text"])
+        self.assertRegex(v["fix.pb2late"][1], r"before: .*clean [3-9]\d dB.*"
+                         r"after: .*clean -?\d dB")
         self.assertEqual(v["a2.wide_packed"][0], "INFO")
         self.assertIn("plays at 220", v["a2.slaved"][1])
         self.assertIn("by spec key", v["_text"])
@@ -553,16 +561,16 @@ class RecordedTest(unittest.TestCase):
     def test_a_flat_tone(self):
         def flat(x, a, b):
             x[a:b] = 0.2
-        self.assertEqual(self.broken("a1.base", flat)[0], "FAIL")
+        self.assertEqual(self.broken("a2.base", flat)[0], "FAIL")
 
     def test_another_rate(self):
         """the tone an octave up: the rate it played at is twice"""
         def octave(x, a, b):
             t = np.arange(b - a) / self.RATE
             x[a:b, 0] = x[a:b, 1] = 0.3 * np.sin(2 * np.pi * 882 * t)
-        res, text = self.broken("a1.base", octave)
+        res, text = self.broken("a2.base", octave)
         self.assertEqual(res, "FAIL")
-        self.assertIn("plays at 882", text)
+        self.assertRegex(text, r"plays at 88[12]\d\d Hz")
 
     def test_a_loop(self):
         """the glide's first 40 ms over and over"""
@@ -570,7 +578,8 @@ class RecordedTest(unittest.TestCase):
             lap = int(0.040 * self.RATE)
             for i in range(a + lap, b, lap):
                 x[i:min(i + lap, b)] = x[a:a + min(lap, b - i)]
-        res, text = self.broken("stream.a1", loop)
+        self.assertEqual(self.verdicts["stream.a1_8"][0], "PASS")
+        res, text = self.broken("stream.a1_8", loop)
         self.assertEqual(res, "FAIL", text)
 
     def test_the_loop_found(self):
@@ -581,7 +590,7 @@ class RecordedTest(unittest.TestCase):
     def test_a_dead_side(self):
         def dead(x, a, b):
             x[a:b, 0] = 0
-        self.assertEqual(self.broken("a1.left", dead)[0], "FAIL")
+        self.assertEqual(self.broken("fix.late100a", dead)[0], "FAIL")
 
     def test_a_sound_where_none(self):
         def tone(x, a, b):
@@ -593,7 +602,7 @@ class RecordedTest(unittest.TestCase):
         def fill(x, a, b):
             t = np.arange(b - a) / self.RATE
             x[a:b, 0] = x[a:b, 1] = 0.3 * np.sin(2 * np.pi * 441 * t)
-        self.assertEqual(self.broken("a1.pause_b2", fill)[0], "FAIL")
+        self.assertEqual(self.broken("fix.pb2hold1", fill)[0], "FAIL")
 
     def test_sides_swapped_after_a_pause(self):
         """a stream two bytes off after the pause: the tone on the right"""

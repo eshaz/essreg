@@ -539,7 +539,9 @@ class Front:
             if self.flags & F_PAUSE:
                 self.flags &= ~F_PAUSE & 0xFF
                 self.a1_clocks()
+                held = self.a1_hold()
                 self.reg_or(0xB2, 0x40)
+                self.settle(held)
         elif self.flags & F_AUTO:
             self.flags &= ~(F_AUTO | F_LAST) & 0xFF
             if not self.half_last(0):
@@ -547,7 +549,8 @@ class Front:
 
     def a2_dx(self, op):
         if op & 0x40:
-            self.flags2 |= F_PAUSE          # the FIFO off the DAC
+            # the FIFO off the DAC, whose DMA runs on (a2.pause_f)
+            self.flags2 |= F_PAUSE
             self.mix_and(0x78, 0xFE)
         elif op & 0x20:
             if self.flags2 & F_PAUSE:
@@ -635,8 +638,40 @@ class Front:
         self.reg_or(0xB1, 0x50)
         self.reg_or(0xB2, 0x50)
         self.dac_options()
-        self.xfer_dma(self.dma8, bl)
+        held = self.xfer_dma(self.dma8, bl)
         self.reg_or(0xB8, 0x01)
+        self.settle(held)
+
+    def settle(self, ch):
+        """Audio 1's DMA (re)started: polls for at least 32 us and two of
+        its sample periods, before a byte may come (fix.late20), then the
+        channel ch that the start held masked unmasked"""
+        port = self.port_of(0x0C)
+        for _ in range(64 + 22528 // self.rate_v):
+            self.chip_in(port)
+        if ch is not None:
+            self.chip_out(0x0A, ch)
+
+    def hold(self, ch):
+        """the game's own channel ch masked over the start, if the chipset
+        gives the mask back (DEh bit 0, the cascade, clear) and it reads
+        unmasked (0Fh); the channel to unmask after, or None"""
+        if self.chip_in(0xDE) & 0x01 or self.chip_in(0x0F) >> ch & 1:
+            return None
+        self.chip_out(0x0A, 0x04 | ch)
+        return ch
+
+    def a1_hold(self):
+        """the channel that plays Audio 1's transfer masked over its DMA's
+        restart: the game's own, or the one that carries its 16-bit
+        channel unless the game masked that; the channel to unmask after,
+        or None"""
+        if not self.flags & F_16 or not self.dma16:
+            return self.hold(self.dma8)
+        if self.vtrapped() and self.vbits & V_MASK:
+            return None
+        self.ch8_set(4)
+        return self.mchan
 
     def a2_xfer(self, si, bl, mode):
         """a 16-bit playback on Audio 2, as ES1869.DRV starts Audio 2"""
@@ -654,7 +689,7 @@ class Front:
             r7a |= 0x02
         self.mix_write(0x7A, r7a)
         self.dac_options()
-        self.xfer_dma(self.dma2, bl)
+        self.xfer_dma(self.dma2, bl, go=True)
         r78 = 0x03
         if bl & F_AUTO or self.halves & (H_ON << H_A2):
             r78 |= 0x10
@@ -756,29 +791,32 @@ class Front:
     def vtrapped(self):
         return self.vchan[self.how_io] == self.dma16
 
-    def xfer_dma(self, ch, bl):
+    def xfer_dma(self, ch, bl, go=False):
         """the channel ch plays the transfer: the game's own (8-bit), or
-        the game's 16-bit one carried over to it"""
+        the game's 16-bit one carried over to it. Audio 1's is held masked
+        for its start: the channel to unmask after it, or None; Audio 2's
+        (go) is unmasked at once"""
         if not bl & 0x10 or not self.dma16:
             if self.dma8 == self.mchan:
                 self.vbits &= ~V_LIVE & 0xFF
-            return
+            return None if go else self.hold(self.dma8)
         if ch != self.mchan:
             self.mchan = ch
             self.vbits &= ~V_LIVE & 0xFF
-        if not self.vtrapped():
-            self.mirror(bl)
-            return
-        if self.vbits & V_MASK:
+        if self.vtrapped() and self.vbits & V_MASK:
             self.ch8_set(4)
-            return
-        if self.vbits & (V_NEW | V_LIVE) != V_LIVE:
-            self.mirror(bl)
+            return None
+        if not self.vtrapped() or self.vbits & (V_NEW | V_LIVE) != V_LIVE:
+            self.mirror(bl, go)
+        elif not go:
+            self.ch8_set(4)
+        return None if go else ch
 
-    def mirror(self, bl):
+    def mirror(self, bl, go=True):
         """the game's 16-bit channel carried over to mchan: read back
         without the traps, where a single-cycle block of the buffer
-        carried over last goes on from it"""
+        carried over last goes on from it; unmasked unless the game masked
+        its channel, or masked for Audio 1's start (go False)"""
         if not self.vtrapped():
             last = (self.vpage, self.vcount, self.vaddr)
             self.chip_out(0xD8, 0)
@@ -789,6 +827,8 @@ class Front:
             self.vmode = 0x10
             if not bl & F_AUTO and self.vbits & V_LIVE and \
                     last == (self.vpage, self.vcount, self.vaddr):
+                if not go:
+                    self.ch8_set(4)
                 return
         ah = (self.vmode & 0x10) | 0x08
         if self.xbits & 0x08:
@@ -806,6 +846,8 @@ class Front:
         self.word_out((ch << 1) + 1, ((self.vcount << 1) | 1) & 0xFFFF)
         self.chip_out(PAGE8[ch], page)
         self.vbits = (self.vbits & ~V_NEW & 0xFF) | V_LIVE
+        if not go:
+            return
         if self.vtrapped() and self.vbits & V_MASK:
             self.ch8_set(4)
         else:

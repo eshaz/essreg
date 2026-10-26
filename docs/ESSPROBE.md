@@ -75,7 +75,13 @@ such as `t2=0` for Audio 2's single transfers.
   without bit 0 (`b7=nl`), at other rates and in 8-bit stereo, where a byte
   off swaps the sides; and Audio 2's pauses through 78h bit 0, bit 1 and
   both (`pause=fd`). Each start is a race, so the cases come two or three
-  times.
+  times. The first fix runs kept every stream in step with the DMA unmasked
+  20 us or more after the start, which the fronts now do
+  ([ESS_EXTENDED.md](ESS_EXTENDED.md#a-16-bit-stream-a-byte-off)). Version
+  1.2 adds the pause's end with the channels masked over it and unmasked 100
+  us after (`hold`), as the fronts' continue does, and a start with Audio
+  1's DMA requests (B2h bit 6) on only 100 or 300 us after B8h bit 0, the
+  channel unmasked (`b2late=N`).
 
 Every case uses the DMA channels that the card is configured for, Audio 1's
 (PnP 74h) and Audio 2's (75h), since other devices may own the others. An h1
@@ -110,7 +116,7 @@ first. `/N` runs without the window.
    `esssb16`. Set `BLASTER` with the card's base, such as
    `SET BLASTER=A220 I5 D1 H5 P330 T6`.
 2. Run `ESSPROBE /S` for the short run, about a minute, then `ESSPROBE` for
-   all 139 cases, about four minutes. Each writes `ESSPROBE.TXT`; `/O:file`
+   all 153 cases, about five minutes. Each writes `ESSPROBE.TXT`; `/O:file`
    names another, such as `/O:FULL.TXT`. Esc stops at any time. The report
    is on the disk after every line, so a run that stops the machine keeps
    what it measured until then.

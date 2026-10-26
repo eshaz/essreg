@@ -44,6 +44,10 @@ FIFO_FW = 64                # the firmware's buffer in Compatibility mode
 FIFO2 = 64                  # Audio 2's FIFO: 32 words
 RESET_US = 25               # AAh this long after the reset's end (assumed)
 DMA_PER_US = 2              # bytes a DMA engine moves in a microsecond
+# Audio 1's playback loses the first byte the DMA brings within this long
+# of its start (B8h bit 0) or of its DMA request's (B2h bit 6), and counts
+# it: the stream plays a byte off (fix.late0 to fix.late20, pb2late)
+RACE_US = 10
 
 # Audio_Base+Ch's interrupt bits
 I_OVF, I_HE, I_PROC = 0x01, 0x02, 0x04
@@ -114,6 +118,7 @@ class Stream:
         self.counter = 0
         self.halted = False
         self.credit = 0             # the bus time for DMA cycles, in bytes
+        self.race = None            # until when a DMA byte is lost (us)
 
 
 class FwTransfer:
@@ -298,7 +303,9 @@ class ES1869Audio:
                         data = self.dmac.read(ch, 1)
                         if not data:
                             break
-                        s.fifo += data
+                        if s.race is None or self.a_us > s.race:
+                            s.fifo += data
+                        s.race = None
                     moved += 1
                     if self._a1_count():
                         break
@@ -354,6 +361,7 @@ class ES1869Audio:
         if new & 1 and not old & 1:
             self.a1.counter = self.ctrl[0xA4] | (self.ctrl[0xA5] << 8)
             self.a1.halted = False
+            self._a1_race()
             if self.fw is not None:
                 self.violate("Extended DMA while the firmware transfers")
             if bool(new & 0x08) != bool(new & 0x02):
@@ -364,6 +372,12 @@ class ES1869Audio:
                 self.violate("A8h and B7h disagree on stereo")
             if bool(self.ctrl[0xB7] & 0x40) == stereo:
                 self.violate("B7h bit 6 is not the opposite of bit 3")
+
+    def _a1_race(self):
+        """Audio 1's DMA (re)starts as it plays: the first byte that comes
+        within RACE_US is lost"""
+        if not self.ctrl[0xB8] & 0x08:
+            self.a1.race = self.clock.us + RACE_US
 
     # --- the firmware's transfers (Compatibility mode) -----------------------
     def _fw_start(self, c, ops):
@@ -709,6 +723,9 @@ class ES1869Audio:
                              "rate (a1.b9_3)")
             if c == 0xB8:
                 self._b8_write(old, ops[0])
+            elif c == 0xB2 and self.ctrl[c] & ~old & 0x40 and \
+                    self.ctrl[0xB8] & 1:
+                self._a1_race()
             elif c == 0xB7 and ops[0] & 1:
                 self.a1_load = True
             if self.fw is not None:

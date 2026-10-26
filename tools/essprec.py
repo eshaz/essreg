@@ -17,7 +17,8 @@ This finds the markers, fits the report's clock to the recording's, and
 measures each sound by what it should hold:
 * tone: 441 Hz within 10 cents, clean (the tone 25 dB over the rest, 15
   in the worst 20 ms), and the rate it played at from its pitch;
-* left, right: the same on that side, 15 dB over the other;
+* left, right: the same on that side, louder than the other by 3 dB,
+  since a recorder's crosstalk can leave the other side 8 dB under it;
 * dual: 294 Hz and 882 Hz both; low: 294 Hz without 882 Hz;
 * none: 30 dB under a tone's level;
 * pause: the tone in both parts and quiet between them; lpause: the same

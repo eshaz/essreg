@@ -756,6 +756,8 @@ struct pc {
   u8 noack;         // never acknowledged
   u8 after;         // the DMA unmasked after the start
   u16 late;         // and this many us after it
+  u8 hold;          // the pause's end with the DMA masked, unmasked after
+  u16 b2late;       // Audio 1's DMA requests on this many us after B8h
   u8 order;         // Audio 1's registers in the Windows player's order
   u8 b7;            // B7h's first write: 0 as Table 16, 1 none, 2 bit 0 clear
   u8 start2;        // Audio 2 started in two steps: 78h bit 1, then bit 0
@@ -917,7 +919,18 @@ static const struct ecase cases[] = {
     {"fix.s8base", "f=8s", "left"},
     {"fix.s8late", "f=8s late=100", "left"},
     {"fix.pb2late", "late=100 pause=b2 ms=1500", "lpause"},
+    {"fix.pb2late2", "late=100 pause=b2 ms=1500", "lpause"},
+    {"fix.pb2late3", "late=100 pause=b2 ms=1500", "lpause"},
     {"fix.pb8late", "late=100 pause=b8 ms=1500", "lpause"},
+    {"fix.pb2hold1", "late=100 pause=b2 hold S ms=1500", "lpause"},
+    {"fix.pb2hold2", "late=100 pause=b2 hold ms=1500", "lpause"},
+    {"fix.pb2hold3", "late=100 pause=b2 hold ms=1500", "lpause"},
+    {"fix.pb8hold1", "late=100 pause=b8 hold ms=1500", "lpause"},
+    {"fix.pb8hold2", "late=100 pause=b8 hold ms=1500", "lpause"},
+    {"fix.b2late1", "b2late=100 S", "left"},
+    {"fix.b2late2", "b2late=100", "left"},
+    {"fix.b2late3", "b2late=100", "left"},
+    {"fix.r11b2late", "r=11025 b2late=300", "left"},
     {"fix.a2base1", "e=2 S", "left"},
     {"fix.a2base2", "e=2", "left"},
     {"fix.a2pf1", "e=2 pause=f ms=1500", "lpause"},
@@ -928,6 +941,9 @@ static const struct ecase cases[] = {
     {"fix.a2pfd1", "e=2 pause=fd S ms=1500", "lpause"},
     {"fix.a2pfd2", "e=2 pause=fd ms=1500", "lpause"},
     {"fix.a2pfd3", "e=2 pause=fd ms=1500", "lpause"},
+    {"fix.a2pdhold1", "e=2 pause=d hold S ms=1500", "lpause"},
+    {"fix.a2pdhold2", "e=2 pause=d hold ms=1500", "lpause"},
+    {"fix.a2pfdhold", "e=2 pause=fd hold ms=1500", "lpause"},
 };
 
 u16 esp_cases(void) { return (u16)ESS_ARRAY_SIZE(cases); }
@@ -1075,7 +1091,11 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
   else if (IS("late")) {
     p->after = 1;
     p->late = (u16)n;
-  } else if (IS("order") && v != NULL && !strcmp(v, "win"))
+  } else if (IS("hold"))
+    p->hold = 1;
+  else if (IS("b2late"))
+    p->b2late = (u16)n;
+  else if (IS("order") && v != NULL && !strcmp(v, "win"))
     p->order = 1;
   else if (IS("b7") && v != NULL && (!strcmp(v, "once") || !strcmp(v, "nl")))
     p->b7 = (u8)(!strcmp(v, "once") ? 1 : 2);
@@ -1351,9 +1371,29 @@ static void a2_program(const struct pc *p, struct eng *e) {
       (u8)((p->t2 << 6) | (p->wide ? 0x20 : 0) | (p->once ? 0 : 0x10) | 0x03);
 }
 
+// Audio 1's DMA requests on or off (B2h bit 6); 0 if B2h doesn't read
+static int b2_dma(int on) {
+  int r = reg_r(0xB2);
+
+  if (r < 0)
+    return 0;
+  reg_w(0xB2, (u8)(on ? r | 0x40 : r & ~0x40));
+  return 1;
+}
+
+// the engines' channels masked or unmasked
+static void eng_masks(int masked) {
+  int i;
+
+  for (i = 0; i < 2; i++)
+    if (en[i].on)
+      dma_mask(en[i].ch, masked);
+}
+
 // the engines start: Audio 2's DMA first, its FIFO off the DAC, then
 // Audio 1 and the FIFO onto the DAC with interrupts off, as ES1869.DRV's
-// dual playback starts them
+// dual playback starts them. With b2late, Audio 1 starts without its DMA
+// requests, which come that much later
 static void eng_start(const struct pc *p) {
   if (en[1].on && en[0].on) {
     mix_w(0x78, (u8)(r78_run & ~0x01));
@@ -1368,15 +1408,19 @@ static void eng_start(const struct pc *p) {
       pass_time(10);
     }
     mix_w(0x78, r78_run);
-  } else if (en[0].on)
+  } else if (en[0].on) {
+    if (p->b2late)
+      b2_dma(0);
     reg_w(0xB8, (u8)(b8_run | 1));
+    if (p->b2late) {
+      pass_time(p->b2late);
+      b2_dma(1);
+    }
+  }
   if (p->after) {
     if (p->late)
       pass_time(p->late);
-    if (en[0].on)
-      dma_mask(en[0].ch, 0);
-    if (en[1].on)
-      dma_mask(en[1].ch, 0);
+    eng_masks(0);
   }
   if (p->fifo == 2 && en[0].on) {
     pass_time(20000);
@@ -1563,32 +1607,41 @@ static void sound_line(const char *id, const char *syms, u32 tm,
 
 // --- playing -----------------------------------------------------------------
 
+// the pause (on) or its end; with hold, the end comes with the engines'
+// channels masked, unmasked late us after it (100 without late); 0 if the
+// pause can't be made
 static int pause_on(const struct pc *p, int on) {
-  int r;
+  int ok = 1;
 
+  if (!on && p->hold)
+    eng_masks(1);
   switch (p->pause) {
   case P_B2:
-    r = reg_r(0xB2);
-    if (r < 0)
-      return 0;
-    reg_w(0xB2, (u8)(on ? r & ~0x40 : r | 0x40));
-    return 1;
+    ok = b2_dma(!on);
+    break;
   case P_B8:
     reg_w(0xB8, (u8)(on ? b8_run : b8_run | 1));
-    return 1;
+    break;
   case P_78F:
     mix_w(0x78, (u8)(on ? r78_run & ~0x01 : r78_run));
-    return 1;
+    break;
   case P_78D:
     mix_w(0x78, (u8)(on ? r78_run & ~0x02 : r78_run));
-    return 1;
+    break;
   case P_78FD:
     mix_w(0x78, (u8)(on ? r78_run & ~0x03 : r78_run));
-    return 1;
+    break;
   case P_D0:
-    return dsp_out((u8)(on ? 0xD0 : 0xD4)) == 0;
+    ok = dsp_out((u8)(on ? 0xD0 : 0xD4)) == 0;
+    break;
+  default:
+    ok = 0;
   }
-  return 0;
+  if (!on && p->hold) {
+    pass_time(p->late ? p->late : 100);
+    eng_masks(0);
+  }
+  return ok;
 }
 
 // the engines run for the case's time, sampled; with a pause in the
