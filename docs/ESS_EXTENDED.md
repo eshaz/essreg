@@ -461,10 +461,10 @@ A program in V86 mode reaches the 8237 through its memory manager:
 * **EMM386** traps the DMA controllers' ports for itself, and its int 2Fh
   function 4A15h lets another program trap only ports 0100h to FFFFh, so a
   TSR can't see a game's DMA programming ([ESSSB16.md](ESSSB16.md)). By the
-  research, EMM386 keeps what a program writes and programs the 8237 when
-  the program unmasks the channel, through a buffer of its own where the
-  program's crosses a 64 KB page, while the program's reads come from the
-  8237 itself (`tests/emm386dma.py`).
+  research, EMM386 keeps what a program writes of a channel and programs the
+  8237 with it when the program unmasks the channel, copying a buffer that
+  crosses a 64 KB page through one of its own, and the program's reads come
+  from the 8237 itself. `tests/emm386dma.py` models all of it but the copy.
 * **HDPMI32i and QPI** let a TSR trap the DMA ports, so the front sees the
   programming as it happens ([ESSSB16.md](ESSSB16.md)).
 

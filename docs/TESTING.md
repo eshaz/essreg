@@ -82,13 +82,15 @@ The Python tests, in `tests/test_*.py`, cover the following:
   (`tests/sbgame.py`), runs on the model and on each front in front of the
   model of the chip's audio (`tests/esschip.py`): `esssb16.com` under
   QPIEMU, EMM386 and HDPMI32i, and the VxD in a DOS box, with a model of
-  VDMAD (`tests/sbfronts.py`). What the game saw, the DSP's answers, the
-  mixer, the interrupts, the DMA counts, the frames each engine played and
-  what its recordings put in memory, has to be the same, and the chip model
-  must see no use the data sheet leaves undefined. With Audio 2 on an 8-bit
-  channel the 16-bit sound plays on Audio 2, and the scenes of an 8-bit and
-  a 16-bit transfer at once run too; with Audio 2 on a 16-bit channel
-  everything plays on Audio 1. `test_esschip` checks the chip model itself.
+  VDMAD (`tests/sbfronts.py`); under EMM386 the game's DMA programming goes
+  through EMM386's translation (`tests/emm386dma.py`). What the game saw,
+  the DSP's answers, the mixer, the interrupts, the DMA counts, the frames
+  each engine played and what its recordings put in memory, has to be the
+  same, and the chip model must see no use the data sheet leaves undefined.
+  With Audio 2 on an 8-bit channel the 16-bit sound plays on Audio 2, and
+  the scenes of an 8-bit and a 16-bit transfer at once run too; with Audio 2
+  on a 16-bit channel everything plays on Audio 1. `test_esschip` checks the
+  chip model itself.
 * `test_sb16front` checks what both fronts send the chip: the Extended mode
   registers of each transfer with ES1869.DRV's rates, on Audio 1 and on
   Audio 2, the registers a transfer like the last leaves alone, the 16-bit
@@ -110,7 +112,8 @@ The Python tests, in `tests/test_*.py`, cover the following:
   stream a byte out, a loop, a dead channel. Needs numpy.
 * `test_essprobe` runs essprobe's cases (`src/essp.c`) on the chip model,
   also behind `tests/emm386dma.py`'s EMM386, its window in EMM386's call of
-  a trap handler, `build/essprobe.exe` itself, and `tools/essprec.py` on a
+  a trap handler, `build/essprobe.exe` itself, in real mode and under
+  EMM386, where its window traps a port, and `tools/essprec.py` on a
   recording of the model's run and broken ones ([ESSPROBE.md](ESSPROBE.md)).
 * Other tests run `esfmpat` on copies of `ESFM.DRV` and check that the
   generated documentation is current.

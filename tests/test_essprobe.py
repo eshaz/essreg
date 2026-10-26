@@ -727,6 +727,65 @@ class ExeTest(unittest.TestCase):
         self.assertNotIn("ESSPROBE.RST", d.files)
         self.assertIn("Restart before you load esssb16", d.output)
 
+    def test_under_emm386(self):
+        """/A /T under EMM386: V86 mode, EMMQXXX0's version, the window on
+        Audio_Base+Dh, the 8237 seen past EMM386's translation, which
+        programs it at the unmask, and the trap removed at the end"""
+        card = ChipCard(emm386={})
+        before = snapshot(card)
+        d, code = self.dos(card, "/A /T /C:env.machine,h1", emm386=(4, 95),
+                           noems=True)
+        self.assertEqual(code, 0, d.output)
+        res = results(self.report(d))
+        machine = "\n".join(t for _r, t in res["env.machine"])
+        self.assertIn("V86 mode", machine)
+        self.assertIn("EMMXXXX0 4.95", machine)
+        self.assertIn("window: Audio_Base+Dh trapped", machine)
+        for ch in (1, 5):
+            reach = res["h1.reach%d" % ch][0][1]
+            self.assertIn("it gets it at the unmask", reach)
+        self.assertEqual([b for b, _si in d.emm_calls], [0, 1])
+        self.assertEqual(d.emm_traps, [])
+        self.assertEqual(snapshot(card), before)
+
+    def test_window_refused(self):
+        """EMM386 refuses the trap: the 8237 as a program sees it"""
+        from dosrun import Dos
+        card = ChipCard(emm386={})
+        d = Dos(self.exe(), card, emm386=(4, 95))
+        d.emm_fail.add(0)
+        code = d.run("/A /T /C:env.machine,h1.reach5")
+        self.assertEqual(code, 0, d.output)
+        res = results(self.report(d))
+        self.assertIn("window: refused",
+                      "\n".join(t for _r, t in res["env.machine"]))
+        self.assertEqual(res["h1.reach5"][0][0], "SKIP")
+
+    def test_window_left(self):
+        """a run that didn't end left its window, DOS's block with its trap
+        still in: the next start removes that trap and frees the block
+        before it puts its own in"""
+        import build_essp0
+        from dosrun import Dos
+        data, syms = build_essp0.build()
+        d = Dos(self.exe(), ChipCard(emm386={}), emm386=(4, 95))
+        old, paras = 0x3800, (len(data) + 15) >> 4
+        # in the free block after the program's: DOS's, and a free rest
+        d.mcb(old - 1, b"M", 0x0008, paras)
+        d.mcb(old + paras, b"M", 0, 0x3FFF - (old + paras) - 1)
+        image = bytearray(data)
+        struct.pack_into("<H", image, syms["handle"], 7)
+        image[syms["armed"]] = syms["ESSP0_ARMED"]
+        d.put(old * 16, bytes(image))
+        d.emm_traps.append({"first": 0x22D, "last": 0x22D, "count": 1,
+                            "ds": old, "si": syms["table"],
+                            "size": len(data), "handle": 7})
+        code = d.run("/A /T /C:env.machine")
+        self.assertEqual(code, 0, d.output)
+        self.assertEqual(d.emm_calls[:2], [(1, 7), (0, syms["table"])])
+        self.assertEqual(d.emm_traps, [])
+        self.assertEqual(d.mem(old * 16 + syms["armed"], 1), b"\0")
+
     def test_no_chip(self):
         d, code = self.dos(ChipCard(), "/A /T", env="BLASTER=A240 I5 D1")
         self.assertEqual(code, 2)

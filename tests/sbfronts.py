@@ -7,10 +7,13 @@ the CPU emulator in front of the ES1869 model (esschip).
 TSRCard installs the TSR under QPIEMU, EMM386 or HDPMI32i, and sends the
 game's accesses of the ports the memory manager traps through the front;
 the others reach the chip and the DMA controllers directly, as on the
-machine. Time passes on the chip, which stops at a rising edge of the
-game's interrupt so that the game's handler runs then. What the game
-hears is what both DACs played; where Audio 2 has an 8-bit channel, the
-16-bit transfers play there and the 8-bit ones on Audio 1.
+machine, but under EMM386, whose own traps of the DMA controllers keep
+what the game programs until it unmasks the channel (emm386dma), while
+the TSR's accesses at ring 0 reach the 8237 itself. Time passes on the
+chip, which stops at a rising edge of the game's interrupt so that the
+game's handler runs then. What the game hears is what both DACs played;
+where Audio 2 has an 8-bit channel, the 16-bit transfers play there and
+the 8-bit ones on Audio 1.
 
 VxDCard puts the game in a DOS box of Windows with the extended
 ES1869.VXD (vxdemu). Its accesses of the chip's ports go to the VxD's trap
@@ -127,15 +130,37 @@ class TSRChip(ES1869Audio, Chip):
         super().outb(port, v)
 
 
+class _GameDMA:
+    """the DMA controllers as EMM386 programs them for the game: through
+    the chip, so that each access takes its time"""
+
+    def __init__(self, chip):
+        self.chip = chip
+
+    def handles(self, port):
+        return self.chip.dmac.handles(port)
+
+    @property
+    def ff(self):
+        return self.chip.dmac.ff
+
+    def outb(self, port, v):
+        self.chip.outb(port, v)
+
+    def inb(self, port):
+        return self.chip.inb(port)
+
+
 class TSRCard(Card):
     """the game on esssb16.com: path "qpi" (QPIEMU), "emm" (EMM386 at ring
     0) or "pm" (a protected-mode game under HDPMI32i); `old_callback`: a
     QPI callback was there before the program's; the chip's mixer as
-    `mixer` has it before the program is installed"""
+    `mixer` has it before the program is installed; `emm386` the keywords
+    of EMM386's DMA translation (emm386dma)"""
 
     def __init__(self, path="qpi", env="BLASTER=A220 I5 D1 H5 P330 T6",
                  tail="", irq=5, dma8=1, dma2=None, old_callback=True,
-                 mixer=None):
+                 mixer=None, emm386=None):
         super().__init__()
         self.chip = TSRChip(irq, dma8, dma2)
         for reg, v in (mixer or {}).items():
@@ -144,9 +169,11 @@ class TSRCard(Card):
         self.m = Machine(image, syms, self.chip, env)
         self.path = path
         self.pm = None
+        self.emm = None
         if path == "emm":
             self.m.install(tail=tail, emm386=(4, 95), noems=True)
             self.m.path = "emm"
+            self.emm = EMM386DMA(_GameDMA(self.chip), **(emm386 or {}))
         elif path == "pm":
             self.m.install(tail=tail, qpiemu=True, dpmi=True,
                            old_callback=old_callback)
@@ -179,6 +206,8 @@ class TSRCard(Card):
 
     def port_in(self, port):
         if not self.trapped(port):
+            if self.emm is not None and self.emm.handles(port):
+                return self.emm.inb(port)
             return self.chip.inb(port)
         if self.pm is not None:
             return self.pm.hdpmi_io(port)
@@ -186,7 +215,10 @@ class TSRCard(Card):
 
     def port_out(self, port, v):
         if not self.trapped(port):
-            self.chip.outb(port, v)
+            if self.emm is not None and self.emm.handles(port):
+                self.emm.outb(port, v)
+            else:
+                self.chip.outb(port, v)
         elif self.pm is not None:
             self.pm.hdpmi_io(port, v)
         else:

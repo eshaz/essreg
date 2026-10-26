@@ -20,11 +20,14 @@ a pause and at the end of a scene can be that many fewer. E2h's byte
 doesn't reach memory: the front has no way to write it through the DMA.
 Under EMM386 the TSR doesn't trap the DMA controller, so a game's 16-bit
 channel keeps the position it was programmed with, its programming has to
-come before the transfer's command, and each command carries it over anew,
-from the buffer's start, but for a single-cycle block of the buffer it
-carried over last, which goes on from the block before. A game that mixes
-up to that channel's count (mix16, resiplay) plays its first fill over and
-over there.
+reach the 8237 before the transfer's command, and each command carries it
+over anew, from the buffer's start, but for a single-cycle block of the
+buffer it carried over last, which goes on from the block before. A game
+that mixes up to that channel's count (mix16) plays its first fill over
+and over there. EMM386 gives the 8237 the game's programming when the game
+unmasks the channel (emm386dma), so one that unmasks it after the command
+(resiplay, Pinball Fantasies' driver) plays what the channel held before;
+EMM386PinballTest shows both.
 
 The chip model also has to see no undefined use (esschip's violations),
 every DMA cycle has to move data (dma8237's bad), and the VxD has to ask
@@ -153,7 +156,7 @@ class EMM386Test(Conformance, unittest.TestCase):
 
     known = {**Conformance.known, "position16": {"moving"},
              "mix16": {"back", "mixed"}, "mix16_again": {"back", "mixed"},
-             "resiplay": {"back", "mixed"},
+             "resiplay": {"back", "mixed", "start"},
              "play16_dma_after": {"data", "ok", "per_block", "seen"}}
 
     def card(self):
@@ -183,6 +186,31 @@ class EMM386H0Test(Conformance, unittest.TestCase):
 
     def card(self):
         return TSRCard("emm", dma2=5, tail="/H0")
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class EMM386PinballTest(unittest.TestCase):
+    """Pinball Fantasies' Sound Blaster 16 driver under EMM386 (resiplay):
+    it unmasks its channel after B6h, and the TSR reads the channel back at
+    B6h"""
+
+    def test_at_the_unmask(self):
+        """EMM386 gives the 8237 the game's programming at the unmask, so
+        the TSR carries over what the channel held before, here its state
+        after the reset, and the game's count never moves"""
+        got = SCENES["resiplay"](TSRCard("emm", dma2=3))
+        self.assertEqual(set(got["start"]), {0})
+        self.assertFalse(got["mixed"])
+
+    def test_at_once(self):
+        """were each write to reach the 8237 at once, the TSR would carry
+        the game's channel over, and its count, which stands still, would
+        have the game mix its first fill only: the loop"""
+        got = SCENES["resiplay"](TSRCard("emm", dma2=3,
+                                         emm386={"at_unmask": False}))
+        self.assertEqual(got["start"], list(range(32)))
+        self.assertGreater(got["back"], 0)
+        self.assertFalse(got["mixed"])
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")

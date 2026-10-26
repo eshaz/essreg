@@ -5,8 +5,9 @@
 research on it says (docs/SB16.md): EMM386 traps the DMA controllers'
 ports, keeps what a program writes of a channel (its address, page, count
 and mode) and programs the 8237 with it when the program unmasks the
-channel, through a buffer of its own where the program's crosses a page;
-reads of the address, count and status are the 8237's.
+channel; reads of the address, count and status are the 8237's. The
+research has EMM386 copy a buffer that crosses a page through one of its
+own, which isn't modelled: essprobe's h1.cross cases tell.
 
 `at_unmask` False passes every write on at once instead, as when the
 memory manager's translation is off or the program runs in real mode.
