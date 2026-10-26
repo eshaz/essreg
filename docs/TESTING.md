@@ -96,6 +96,10 @@ The Python tests, in `tests/test_*.py`, cover the following:
   Audio 2, the registers a transfer like the last leaves alone, the 16-bit
   channel carried over, the chip's Compatibility mode for the firmware's
   commands, and the chip's mixer behind the Sound Blaster 16's view.
+* `test_sbfsm` runs the scenes on the front as a state machine in Python
+  (`tests/sbfsm.py`, [SB16_FRONT.md](SB16_FRONT.md)), which has to reach the
+  chip as `esssb16.com` does, access for access, while the VxD's front has
+  to send the chip the same operations for its transfers (`tests/sbops.py`).
 * `test_sb16test` builds the checks of `sb16test.exe` (`src/sb16t.c`) for
   the host and runs them on the model and on both fronts, with a listener
   that answers each listening question from what the card played. Every

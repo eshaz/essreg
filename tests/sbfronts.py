@@ -561,6 +561,43 @@ class VDMAD:
         return True
 
 
+class _VxDPorts:
+    """the chip as the VxD's code reaches it: the accesses of ESS's own
+    code (its interrupt and EOI procedures, its DMA handlers, its taking of
+    the DSP for a VM) go into no trace of the chip's operations (sbops),
+    which has the front's"""
+
+    def __init__(self, chip, uc, front):
+        self.chip, self.uc, self.front = chip, uc, front
+
+    def __getattr__(self, name):
+        return getattr(self.chip, name)
+
+    def _ess(self):
+        from unicorn.x86_const import UC_X86_REG_EIP
+        lo, hi = self.front
+        return not lo <= self.uc.reg_read(UC_X86_REG_EIP) < hi
+
+    def inb(self, port):
+        if self.chip.trace is None or not self._ess():
+            return self.chip.inb(port)
+        trace, self.chip.trace = self.chip.trace, None
+        try:
+            return self.chip.inb(port)
+        finally:
+            self.chip.trace = trace
+
+    def outb(self, port, v):
+        if self.chip.trace is None or not self._ess():
+            self.chip.outb(port, v)
+            return
+        trace, self.chip.trace = self.chip.trace, None
+        try:
+            self.chip.outb(port, v)
+        finally:
+            self.chip.trace = trace
+
+
 class VxDCard(Card):
     """the game in a DOS box on ES1869.VXD's front: the card at IRQ irq,
     Audio 1 on channel dma8 and Audio 2 on dma2 (None: none, which ESS's
@@ -579,6 +616,10 @@ class VxDCard(Card):
         for reg, v in (mixer or {}).items():
             self.chip.mixer[reg] = v
         e = m.emu
+        # the extension's code follows ESS's in the first object
+        lo = min(a for n, a in m.syms.items() if n.startswith("ESSREG_")
+                 and isinstance(a, int) and a >> 20 == 0x101)
+        e.hw = _VxDPorts(self.chip, e.uc, (lo, 0x10200000))
         m.start(ini or {})
         e.uc.mem_write(vxdemu.ADI + vxdemu.ADI_IRQ, bytes((irq, dma8)))
         e.uc.mem_write(vxdemu.ADI + vxdemu.ADI_DMA2_CHANNEL,

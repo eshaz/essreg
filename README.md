@@ -928,6 +928,8 @@ copy C:\WINDOWS\SYSTEM\ESFM.ORG C:\WINDOWS\SYSTEM\ESFM.DRV
   to record a run.
 * [docs/ESS_EXTENDED.md](docs/ESS_EXTENDED.md): the chip's Extended mode,
   each fact with its source, and what the probe measures of it.
+* [docs/SB16_FRONT.md](docs/SB16_FRONT.md): the fronts' translation as a
+  state machine, and how the tests hold both fronts to it.
 * [docs/RE_NOTES.md](docs/RE_NOTES.md): how the drivers were
   reverse-engineered.
 * [docs/TESTING.md](docs/TESTING.md): the automated tests, and a checklist

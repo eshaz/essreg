@@ -74,7 +74,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   audio behind them, `dma8237.py` the DMA controllers, `sbgame.py` and
   `sbscenes.py` what games do, and `sbfronts.py` the fronts as cards, with a
   model of VDMAD for the VxD's, and the bare chip with a VGA (`ChipCard`);
-  `emm386dma.py` is EMM386's DMA translation.
+  `emm386dma.py` is EMM386's DMA translation. `sbfsm.py` is the front as a
+  state machine in Python, the reference of
+  [SB16_FRONT.md](docs/SB16_FRONT.md), and `sbops.py` the operations that
+  the chip's model records.
 * `docs/` holds [TESTING.md](docs/TESTING.md),
   [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md),
   [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md),
@@ -84,9 +87,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   [AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md), [AUDIO1.md](docs/AUDIO1.md),
   [SB16.md](docs/SB16.md), [ESSSB16.md](docs/ESSSB16.md),
   [ESSPROBE.md](docs/ESSPROBE.md), [ESS_EXTENDED.md](docs/ESS_EXTENDED.md),
-  [RE_NOTES.md](docs/RE_NOTES.md) and [STYLE.md](docs/STYLE.md).
-  `REGISTERS.md` and the `REG_*.md` pages are generated, and
-  `docs/datasheet/` has the ES1869, ES938 and ES1868 data sheets.
+  [SB16_FRONT.md](docs/SB16_FRONT.md), [RE_NOTES.md](docs/RE_NOTES.md) and
+  [STYLE.md](docs/STYLE.md). `REGISTERS.md` and the `REG_*.md` pages are
+  generated, and `docs/datasheet/` has the ES1869, ES938 and ES1868 data
+  sheets.
 
 ## Environment
 
@@ -201,11 +205,15 @@ tools/wineshot.sh run ess3d.exe /sim tray
   passes, and HDPMI's data take the paragraphs after the resident part, over
   the routines between `host_area` and `host_code_end`, which run only
   before the switch. A change to the Sound Blaster 16's translation goes
-  into the VxD's front and the TSR alike, and both answer as the model in
-  `tests/sb16.py` does ([SB16.md](docs/SB16.md)). A 16-bit playback plays on
-  Audio 2 where it has an 8-bit channel of its own (`dma2` in the TSR,
-  `EX_S16_A2` in the VxD), and everything else on Audio 1. Test it with a
-  scene in `tests/sbscenes.py` (`@dual` for two transfers at once), which
+  into the VxD's front, the TSR and the reference (`tests/sbfsm.py`,
+  [SB16_FRONT.md](docs/SB16_FRONT.md)) alike, and all three answer as the
+  model in `tests/sb16.py` does ([SB16.md](docs/SB16.md)). The reference
+  reaches the chip as the TSR does, access for access, and the VxD's front
+  sends the chip the reference's operations (`tests/test_sbfsm.py`), with
+  the chip's registers written only where they change. A 16-bit playback
+  plays on Audio 2 where it has an 8-bit channel of its own (`dma2` in the
+  TSR, `EX_S16_A2` in the VxD), and everything else on Audio 1. Test it with
+  a scene in `tests/sbscenes.py` (`@dual` for two transfers at once), which
   `tests/test_sb16conf.py` plays on the model and on both fronts, or a check
   in `tests/test_sb16front.py`. The resident part has no fixed limit, and
   `tools/build_esssb16.py` reports its size; the file stays within the 9 KB

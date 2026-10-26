@@ -969,9 +969,12 @@ ESSREG_DMA2:
         call    ESSREG_DMA_DOS
         jc      .done
         movzx   edx,word [edi+ADI_AudioBase]
-        mov     ah,0x71
+        mov     ah,0x71                 ; written when the modes change it
         call    ESSREG_Mix_Read
+        mov     cl,al
         call    ESSREG_A2_Bits
+        cmp     al,cl
+        je      .done
         call    ESSREG_Mix_Write
 .done:  popad
 .default:
@@ -4721,11 +4724,15 @@ ESSREG_S16_A2_Xfer:
 .mono:  mov     ah,0x7A
         call    ESSREG_Mix_Write
         mov     ah,0x71                 ; its own rate; and A1h as the
-        call    ESSREG_Mix_Read         ; front computes it
+        call    ESSREG_Mix_Read         ; front computes it; written when
+        push    eax                     ; that changes 71h
         and     al,~0x20 & 0xFF
         or      al,0x02
+        cmp     al,[esp]
+        lea     esp,[esp+4]
+        je      .same
         call    ESSREG_Mix_Write
-        pop     edx
+.same:  pop     edx
         mov     al,0x03                 ; 78h: the DMA, and the FIFO to the
         test    bl,S16_AUTO             ; DAC
         jnz     .auto

@@ -34,7 +34,9 @@ EMM386PinballTest shows both.
 
 The chip model also has to see no undefined use (esschip's violations),
 every DMA cycle has to move data (dma8237's bad), and the VxD has to ask
-VDMAD nothing it wouldn't do (sbfronts.VDMAD's errors).
+VDMAD nothing it wouldn't do (sbfronts.VDMAD's errors). Each run keeps the
+chip's port accesses and operations in sbops.RUNS, which
+tests/test_sbfsm.py compares with the reference's.
 
 usage: python3 -m unittest tests.test_sb16conf   (needs nasm and unicorn)
 """
@@ -46,6 +48,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_vxdext import HAVE_UNICORN, have_nasm  # noqa: E402
+import sbops  # noqa: E402
 from sbgame import ModelCard  # noqa: E402
 from sbscenes import DUAL, SCENES  # noqa: E402
 
@@ -61,6 +64,17 @@ def model(name, dma16=5):
     if (name, dma16) not in _MODEL:
         _MODEL[name, dma16] = SCENES[name](ModelCard(dma16=dma16))
     return _MODEL[name, dma16]
+
+
+def run(conf, name):
+    """the scene on the card of the Conformance class conf: (the card, what
+    the game saw), with the chip's port accesses and operations into
+    sbops.RUNS"""
+    card = conf.card(conf)
+    trace = sbops.record(card)
+    got = SCENES[name](card)
+    sbops.RUNS[conf.__name__, name] = (sbops.ports(card.chip.log), trace)
+    return card, got
 
 
 def differences(want, got):
@@ -104,8 +118,7 @@ class Conformance:
         if name in DUAL and not self.audio2:
             self.skipTest("one transfer at a time on Audio 1")
         want = model(name, self.dma16)
-        card = self.card()
-        got = SCENES[name](card)
+        card, got = run(type(self), name)
         self.assertEqual(card.audio2, self.audio2)
         diffs = [d for d in differences(want, got)
                  if d[0] not in self.known.get(name, ())]

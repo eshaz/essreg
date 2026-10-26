@@ -288,9 +288,10 @@ gets the mode of both DACs, and with `Audio1Filter=0` the Audio 1 DAC's
 filter is bypassed as well, for Windows and for DOS programs. The DMA
 handlers then follow a DOS program's transfers, which VDMAD reports to them
 without any extra port trapping (`VDMAD_Get_Virt_State`), and write the mode
-again in case the program reset the mixer: on Audio 1's channel the Audio 1
-filter's bypass, in either direction, and on Audio 2's channel the Audio 2
-mode ([AUDIO1.md](AUDIO1.md#the-filter-of-the-audio-1-codec)).
+again where the program changed it, as a reset of the mixer does: on Audio
+1's channel the Audio 1 filter's bypass, in either direction, and on Audio
+2's channel the Audio 2 mode
+([AUDIO1.md](AUDIO1.md#the-filter-of-the-audio-1-codec)).
 
 ### A recording takes the DSP
 

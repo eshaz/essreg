@@ -77,6 +77,8 @@ class DMA8237:
         self.log = []                   # (port, value) of every write
         self.reads = []                 # (port, value) of every read
         self.bad = []                   # (channel, mode): no data moved
+        self.trace = None               # sbops: each channel's programming
+        self.served = {}                # as its cycles first move data
 
     @staticmethod
     def register(port):
@@ -174,6 +176,12 @@ class DMA8237:
         c = self.ch[n]
         return not c.masked and (c.mode & 0xC0) != MODE_CASCADE
 
+    def _serve(self, c):
+        key = (c.mode, c.base_addr, c.base_count, c.page)
+        if self.served.get(c.n) != key:
+            self.served[c.n] = key
+            self.trace.append(("DMA", c.n) + key)
+
     def _step(self, c):
         """one cycle done: the address and count move on, and terminal count
         reloads or masks the channel; True at terminal count"""
@@ -201,6 +209,8 @@ class DMA8237:
         for _ in range(units):
             if not self.ready(n):
                 break
+            if self.trace is not None:
+                self._serve(c)
             if c.mode & 0x0C == MODE_READ:
                 out += self.memory.read(c.phys(), size)
             else:
@@ -220,6 +230,8 @@ class DMA8237:
         while done + size <= len(data):
             if not self.ready(n):
                 break
+            if self.trace is not None:
+                self._serve(c)
             if c.mode & 0x0C == MODE_WRITE:
                 self.memory.write(c.phys(), data[done:done + size])
             else:

@@ -173,10 +173,15 @@ class ES1869Audio:
         self.cmd_ops = []
         self.resets = 0             # software resets of the chip
         self.a_us = self.clock.us   # the engines' time
+        self.trace = None           # the operations, when a list (sbops)
 
     # --- what the tests see ------------------------------------------------
     def violate(self, what):
         self.violations.append((self.clock.us, what))
+
+    def _op(self, *op):
+        if self.trace is not None:
+            self.trace.append(op)
 
     def a1_channel(self):
         return self.pnp.get((1, 0x74), 1)
@@ -563,6 +568,8 @@ class ES1869Audio:
                     (0x08 if n <= FIFO1 // 2 else 0)
             return v | self.a1_flags
         if off == 0x0E:
+            if self.a1_flags:
+                self._op("ACK")
             self.a1_flags = 0       # any read acknowledges Audio 1
             self._line()
             return 0x80 if self.out else 0x00
@@ -593,6 +600,7 @@ class ES1869Audio:
         if off == 5:
             reg = self.index
             old = self.mixer[reg]
+            self._op("M", reg, v)
             super().outb(port, v)
             self._mixer_written(reg, old, v)
             return
@@ -600,9 +608,11 @@ class ES1869Audio:
 
     def _reset_port(self, v):
         if v & 0x02:
+            self._op("FIFO")
             self.a1.fifo = bytearray()
         if v & 0x01:
             if not self.reset_high:
+                self._op("RESET")
                 self.reset_high = True
                 self._halt()
         elif self.reset_high:
@@ -685,6 +695,7 @@ class ES1869Audio:
                 self.ctrl[c] = (ops[0] & 0xF0) | low
             else:
                 self.ctrl[c] = ops[0]
+            self._op("R", c, self.ctrl[c])
             if c == 0xB8:
                 self._b8_write(old, ops[0])
             elif c == 0xB7 and ops[0] & 1:
@@ -696,6 +707,7 @@ class ES1869Audio:
             if 0xA0 <= ops[0] <= 0xBF:
                 self.out.append(self.ctrl[ops[0]])
             return
+        self._op("D", c, *ops)
         if self.ext_mode and c not in EXT_SAFE:
             self.violate("Compatibility command %02Xh in Extended mode" % c)
         if c in FW_XFER:
