@@ -312,14 +312,28 @@ class Audio2Test(unittest.TestCase):
         self.assertEqual([f[0] for f in chip.played2][:3],
                          [-0x8000, -0x7E00, -0x7C00])
 
-    def test_reset_clears_7a_and_7c(self):
+    def test_reset_keeps_the_mixer(self):
+        """a reset keeps 7Ah and 7Ch, against the data sheet, as the first
+        card measured it (rst.ext), and Audio 2's DMA goes on"""
         chip = Chip()
         for r, v in ((0x7A, 0x47), (0x7C, 0x88), (0x78, 0x93)):
             chip.outb(BASE + 4, r)
             chip.outb(BASE + 5, v)
         reset(chip)
-        self.assertEqual((chip.mixer[0x7A], chip.mixer[0x7C]), (0, 0))
+        self.assertEqual((chip.mixer[0x7A], chip.mixer[0x7C]), (0x47, 0x88))
         self.assertEqual(chip.mixer[0x78], 0x93)
+
+    def test_mixer_reset(self):
+        """a write to mixer 00h sets the levels it measured and keeps 70h
+        to 7Ch (rst.mixer)"""
+        chip = Chip()
+        for r, v in ((0x7A, 0x47), (0x14, 0x99), (0x38, 0x66)):
+            chip.outb(BASE + 4, r)
+            chip.outb(BASE + 5, v)
+        chip.outb(BASE + 4, 0x00)
+        chip.outb(BASE + 5, 0x00)
+        self.assertEqual((chip.mixer[0x7A], chip.mixer[0x14],
+                          chip.mixer[0x38]), (0x47, 0x88, 0x00))
 
 
 if __name__ == "__main__":

@@ -12,6 +12,13 @@ names the essprobe cases that measure it, such as `a2.wide`, and once a
 report of the probe has come back, what the card did follows as "Measured".
 Nothing on this page is copied from the sources' code.
 
+The measurements so far come from one card, an ES1869 at 220h with
+Config_Base 250h in a laptop with Intel's PIIX4, as ESS's PnP setup left it:
+three recorded runs of essprobe 1.0 in DOS 7.10, a short and a full one
+under MS EMM386 4.95 and a full one without a memory manager. The full run
+under EMM386 stopped in the h1 group ([The DMA controllers and the memory
+managers](#the-dma-controllers-and-the-memory-managers)).
+
 ## Sources
 
 * **The data sheet**, SAM0023-122898, in `docs/datasheet/`, cited as DS
@@ -112,6 +119,8 @@ notes give as a real ES1688's. es18xx gives only the ES1869 and the ES1879,
 of the 186x and 187x chips, the new rates and the second channel. Probe:
 `env.card`.
 
+Measured: E7h answers 68h and 8Bh, and E1h 3 and 1 (`env.card`).
+
 ## DMA channels and interrupts
 
 The chip has four DRQ and DACK pin pairs. Card registers 23h (pins B and A)
@@ -121,6 +130,10 @@ p.30). The audio device's PnP registers 74h and 75h select Audio 1's and
 Audio 2's channels, and a pin drives its DRQ only while a device's DMA
 register names the pin's channel and the device is active, PnP 30h bit 0 (DS
 p.13, p.31-32). essprobe's `env.card` reads all of them.
+
+Measured: card registers 23h = 10h and 24h = 25h wire the pins to channels
+0, 1, 5 and 2, PnP 74h and 75h give Audio 1 channel 1 and Audio 2 channel 5,
+and card register 25h is 80h, with the DRQ latch on (`env.card`).
 
 The data sheet maps Audio 2 to the 8-bit channels 0, 1 and 3 only, and wants
 at least two pins on 8-bit channels, with the 16-bit channels 5, 6 and 7 for
@@ -145,6 +158,16 @@ say that ESS's chips use the 8-bit channel even for 16-bit sound. Probe:
 `a2.base` on a card with Audio 2 on a 16-bit channel (the spread buffer),
 `a2.packed` (a game's 16-bit buffer as it is), `a2.wide` and
 `a2.wide_packed` (78h bit 5 set).
+
+Measured: ESS's way plays cleanly on channel 5, each byte in the low byte of
+a word (`a2.base` and the other a2 cases). A game's own 16-bit buffer
+without bit 5 plays its low bytes only, as noise an octave up (`a2.packed`).
+With bit 5 the chip interrupts half as often for the same count, as if it
+counted words, but neither buffer plays: the spread one comes out 45 dB
+under a tone's level at half the pitch (`a2.wide`), and a game's buffer as
+noise 50 dB under it (`a2.wide_packed`, `stream.a2w`). So bit 5 doesn't make
+a game's 16-bit buffer playable on Audio 2, and a front has to carry the
+game's channel over to an 8-bit one.
 
 Card register 25h bit 7 turns on the DRQ latch, which holds each audio DRQ
 high until a DACK pulse comes while the chip's own request is low, a
@@ -231,6 +254,13 @@ the data sheet does, but 86Box keeps it until C7h. Probe: `rst.ext` (3),
 `rst.compat` (1), `rst.fifo` (2) and `rst.mixer` (mixer 00h) set known
 values in 70h to 7Ch, the levels and A1h to B9h, then reset, and report what
 changed.
+
+Measured: both software resets keep the whole mixer, 70h to 7Ch included, as
+OSS's notes say and against the register pages. They set A1h to DCh, A2h to
+E7h, A4h and A5h to 00h and F8h, A8h to 02h, B7h to 44h and B9h to 00h, and
+clear bit 6 of B1h and B2h (`rst.ext`, `rst.compat`). The FIFO's reset
+changes no register (`rst.fifo`). A write to mixer 00h sets 14h and 36h to
+88h and 38h, 3Ah and 3Eh to 00h, and keeps 3Ch and 70h to 7Ch (`rst.mixer`).
 
 ## Audio 1
 
@@ -324,7 +354,9 @@ bit 0 first.
   Hz, with its write of 71h bit 5 left out ("For ES1869 only???"), Allegro
   the old ones switching at 22094 Hz, and Impulse Tracker only the high one.
   Probe: `a1.r8000` to `a1.r48000`, `a1.lo44100` and `a1.hi22050` (the other
-  clock), `a1.new48000` (71h bit 5).
+  clock), `a1.new48000` (71h bit 5). Measured: every rate came out as the
+  clocks of 396.9 and 793.8 kHz give it, 7938 Hz for 8000 on the low clock
+  and 46694 Hz for 48000 on the old clocks, and 48012 Hz in the new mode.
 * **A2h, the filter** (DS p.68, p.72). The filter's clock is 7.16 MHz over
   256 minus the value, and its roll-off is the clock over 82, best at 80 to
   90 percent of half the rate. For the high clock's divisors 18 to 35,
@@ -348,7 +380,9 @@ bit 0 first.
 * **B1h, the interrupt** (DS p.68). Bit 6 enables the counter's interrupt
   and bit 5 the FIFO half-empty interrupt of programmed I/O; bit 4 does
   nothing, and bit 7 belongs to Compatibility mode. ES1869.DRV reads it and
-  ORs 50h in (6:2934). Probe: `a1.irq_off` (bit 6 clear).
+  ORs 50h in (6:2934). Probe: `a1.irq_off` (bit 6 clear). Measured: with bit
+  6 clear no interrupt comes, and an interrupt never acknowledged is the
+  last (`a1.noack`).
 * **B2h, the DMA request** (DS p.69). Bit 6 enables the DRQ for Extended
   mode DMA, and with it clear the FIFO takes programmed I/O through +Fh. Bit
   5 belongs to Compatibility mode, and bit 4 does nothing. ES1869.DRV ORs
@@ -377,7 +411,9 @@ bit 0 first.
   page says 01 for single transfers, 10 and 11 for demand transfers of 2 and
   4 bytes, and 00 is reserved (DS p.70). ES1869.DRV writes 02h, unless
   "Single Mode DMA" is set (6:28BF). Probe: the base case (02h), `a1.b9_0`,
-  `a1.b9_1` and `a1.b9_3`.
+  `a1.b9_1` and `a1.b9_3`. Measured: 00, 01 and 10 run at the rate, and with
+  11 the DMA runs at nearly twice it (`a1.b9_3`), so 11 is the reserved
+  value.
 
 ### The FIFO and the interrupt
 
@@ -408,6 +444,35 @@ starts it anew to continue (`ess_audio_trigger`). The others never pause. A
 front can pause through B2h bit 6, which keeps the chip's state, through B8h
 bit 0, the DMA's reset, or perhaps through D0h. Probe: `a1.pause_b2`,
 `a1.pause_b8`, `a1.pause_d0`.
+
+Measured: clearing B2h bit 6 or B8h bit 0 stops the DMA within a few bytes,
+and the transfer goes on at its rate when the bit is set again
+(`a1.pause_b2`, `a1.pause_b8`). D0h doesn't pause an Extended mode transfer,
+whose DMA runs on (`a1.pause_d0`).
+
+### A 16-bit stream a byte off
+
+Measured: every 16-bit stream on Audio 1 played one byte off, so that each
+sample took its high byte from the next byte, and noise came out 12 dB
+louder than the tone. That held in real mode and under EMM386, at every
+rate, in every transfer type and with the FIFO kept or filled first
+(`a1.base` to `a1.noack`, `stream.a1`). A tone on one side came out on the
+other, loud and noisy, as a stream one byte ahead plays it (`a1.left`,
+`a1.right`). 8-bit streams played cleanly, since a byte only delays a mono
+stream by a sample. Only `a1.after` under EMM386 played in step, in both
+runs: its DMA was unmasked after the start, and EMM386 took tens of
+microseconds to pass the unmask on to the 8237. In real mode, where the
+unmask reaches the 8237 at once, the same case played a byte off. In the
+cases of both engines, Audio 1's stream was in step in some runs and off in
+others (`both.f16_8`, `both.pace`).
+
+So the start is a race between the DMA's first bytes and the DAC's first
+sample. Audio 2 has the same race, which a single write of 78h wins ([Audio
+2](#audio-2)). es18xx's note of Audio 1 garbled at 16-bit stereo may be the
+same fault. The fix group (`fix.*`) looks for a start that keeps the stream
+in step: Audio 1's DMA unmasked later after the start, the FIFO emptied
+after the format as `build/ES1869.DRV`'s player does it, and B7h written
+without its first write's load bit.
 
 ### Commands while the DMA runs
 
@@ -541,6 +606,20 @@ set or bits 1:0 are clear; 7Ah bits 7:6 both set give a test interrupt, and
 an ES1869 with 71h bit 1 clear plays Audio 2 at Audio 1's rate. Probe:
 `a2.start2` and `a2.left2` (78h's bit 1 before bit 0, as es1938 starts it).
 
+Measured: a start in one write of 78h, bits 1:0 together, played in step
+every time, in every format, rate and transfer type (`a2.base` and the
+others). A start in two steps, the DMA 10 us before the FIFO's way to the
+DAC as es1938 starts the Solo-1, played one, two or three bytes off in three
+of four runs (`a2.start2`, `a2.left2`): on the ES1869 the one write is the
+safe start. Clearing 78h bit 0 silences the DAC, but the DMA goes on at
+about twice the stream's rate while the FIFO drops its bytes, so the stream
+skips what moved meanwhile; it resumes in step (`a2.pause_f`). Clearing bit
+1 stops the DMA within a few bytes, but the stream resumed a byte off in one
+of two runs (`a2.pause_d`). With 71h bit 1 clear, Audio 2 plays at Audio 1's
+rate (`a2.slaved`). On channel 0, which a pin of the card reaches, it played
+as on channel 5 (`a2.ch0`, since taken out, because the probe keeps to the
+channels the card is configured for).
+
 Probe: `a2.f8m` to `a2.u16` (the formats), `a2.r8000` to `a2.r48000`,
 `a2.t2_0`, `a2.t2_1` and `a2.t2_3` (78h bits 7:6, the base case being 10),
 `a2.dmd` (the 8237 in demand mode as well, ESS's own setup), `a2.slaved`
@@ -576,6 +655,16 @@ has an 8-bit channel of its own. Probe: `both.base` (each on its own clock),
 (both channels in the 8237's demand mode), `both.muted2` and `both.pace`
 (Audio 2 muted, as `esssb16`'s withdrawn pace ran it).
 
+Measured: under EMM386 both engines kept their rates at 16-bit stereo and
+44.1 kHz. In real mode, with the 8237 in single mode, Audio 2's DMA fell
+about 12 percent short while the probe read the 8237's counts (`both.base`,
+`both.single`), and with the 8237 in demand mode both kept their rates
+(`both.dmd`). Mixed formats and rates kept them too (`both.f8_16`,
+`both.f16_8`, `both.r22_44`). Muted, slaved, in 8-bit stereo and without its
+interrupt, Audio 2 moved its channel's count at Audio 1's rate
+(`both.pace`). The recordings of the dual cases depend on Audio 1's stream
+being in step ([A 16-bit stream a byte off](#a-16-bit-stream-a-byte-off)).
+
 ## The DMA controllers and the memory managers
 
 The chip asks for a byte at a time, or 2, 4 or 8 in demand transfers, and
@@ -607,6 +696,18 @@ and writes move), `h1.cross1` and `h1.cross5` (a buffer across a page),
 `h1.stale` and `h1.fresh` (a channel carried over before its unmask, as
 Pinball Fantasies' driver has it, and the same after the unmask).
 
+Measured under MS EMM386 4.95: a channel's programming reaches the 8237 at
+the program's unmask, on channels 1 and 5 alike, and until then the program
+reads back what it wrote (`h1.reach1`, `h1.reach5`). So a channel read back
+before the unmask carries over what the 8237 had before (`h1.stale`), which
+played another buffer. In real mode the 8237 gets each write at once. The
+8237's mask register reads back, 0Fh where the channels 0 to 3 are masked
+(`env.dma`). The first full run stopped in the h1 group with EMM386's "DMA
+mode not supported", most likely at `h1.cross1`, an auto-initialized
+transfer across a 64 KB page, which EMM386 would have to buffer; the probe
+now makes that transfer single-cycle under a memory manager, and commits its
+report after every line.
+
 ## What the engines do to the machine
 
 A DMA cycle takes the ISA bus, and a channel programmed the wrong way round
@@ -619,13 +720,22 @@ DAC entries, and guard bytes around the buffers, with each engine and the
 pace's settings), `h4.wrong1` and `h4.wrong2` (a channel that writes into a
 scratch area).
 
+Measured in real mode: a busy loop keeps 90 percent of its speed with Audio
+1 in demand transfers, 84 percent in single transfers, 86 percent with Audio
+2, 81 percent with the pace's settings and 76 percent with both engines, and
+the VGA's retrace stays every 16564 us within 5 us. No VGA DAC entry and no
+guard byte around the buffers changed in any case (`h4.*`), so the engines
+and the pace leave the palette and memory alone. A channel programmed the
+wrong way round writes FFh, the floating bus, into memory, and halves the
+loop's speed (`h4.wrong1`, `h4.wrong2`).
+
 ## Where the sources disagree
 
 The data sheet contradicts itself, or ESS's drivers, in these places:
 * Table 16's signed and unsigned columns (DS p.49) are the wrong way round
   (AUDIO1.md).
 * B9h's encoding differs between the steps (DS p.48) and the register's page
-  (DS p.70).
+  (DS p.70). Measured: 00, 01 and 10 run at the rate, and 11 doesn't.
 * A1h's clocks are 397.7 and 795.5 kHz on the register's page (DS p.67) and
   measured 396.9 and 793.8 kHz.
 * Audio 2 maps to channels 0, 1 and 3 (DS p.13), and ESS's drivers play it
@@ -639,23 +749,26 @@ The data sheet contradicts itself, or ESS's drivers, in these places:
   which is Compatibility mode's, and 256 bytes in Extended mode (DS p.43).
 * 7Ch is zeroed "on reset" in the steps (DS p.51), and by a hardware reset
   on the register's page (DS p.65). Probe: `rst.ext` and `rst.compat`.
+  Measured: a software reset keeps it.
 * The steps turn Audio 2's volume up 100 ms after the start (DS p.52), and
   ES1869.DRV writes it before the start (6:2D6D).
 * ES1869.VXD sends C3h, which returns a status byte, and C2h 01h, neither in
   the data sheet, before it restores a DOS box's mixer (VXD_INTERNALS.md).
 * D0h and D4h pause and continue an Extended mode transfer by the steps (DS
   p.48) and OSS, but aren't safe with one by the comparison of the modes (DS
-  p.44). Probe: `a1.pause_d0`.
+  p.44). Probe: `a1.pause_d0`. Measured: D0h doesn't pause one.
 * 78h bit 5 is reserved (DS p.65), and es18xx, NetBSD and OSS set it on a
   16-bit channel, where NetBSD counts words and es18xx and OSS bytes. Probe:
-  `a2.wide`, `a2.wide_packed`.
+  `a2.wide`, `a2.wide_packed`. Measured: with it the chip interrupts as if
+  it counted words, but a game's 16-bit buffer doesn't play.
 * A reset clears 7Ah (DS p.65), and OSS's notes say it doesn't. Probe:
-  `rst.ext`, `rst.compat`.
+  `rst.ext`, `rst.compat`. Measured: it doesn't.
 * A reset ends Extended mode (DS p.43), as DOSBox-X has it, and 86Box keeps
   it until C7h.
 * The data sheet writes 78h's bits 1:0 at once (DS p.52), and es1938 one
   after the other, because the stereo channels can swap otherwise. Probe:
-  `a2.start2`, `a2.left2`.
+  `a2.start2`, `a2.left2`. Measured: on the ES1869 the one write keeps the
+  stream in step, and the two steps lose it.
 * The second B7h write's value is the FIFO's format for every driver, but
   es1938 writes the first one's 51h or 71h to B6h, and NetBSD writes no
   first one at all.

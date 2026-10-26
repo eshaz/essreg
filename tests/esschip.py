@@ -14,12 +14,13 @@ DSP's commands as the data sheet lists them (DS p.72-74) and these engines:
 * Audio 2, through mixer registers 70h-7Ch (DS p.51-52, p.64-65), heard
   while its volume (7Ch) isn't 0.
 Around them it models the interrupt bits of Audio_Base+Ch and
-Config_Base+6, the acknowledge at +Eh, the resets of +6, which clear 7Ah
-and 7Ch (DS p.51, p.65), and time. A DMA engine moves a byte a DMA cycle
-on its 8-bit channel (dma8237); on a 16-bit channel the cycle moves a
-word, of which Audio 2 takes the low byte, as ESS's drivers have it
-(docs/VXD_INTERNALS.md). What both DACs play goes into `heard` as well,
-in order.
+Config_Base+6, the acknowledge at +Eh, the resets of +6, which keep the
+mixer, against the data sheet's 7Ah and 7Ch (DS p.51, p.65), as the first
+card measured it (docs/ESS_EXTENDED.md, rst.ext), and time. A DMA engine
+moves a byte a DMA cycle on its 8-bit channel (dma8237); on a 16-bit
+channel the cycle moves a word, of which Audio 2 takes the low byte, as
+ESS's drivers have it (docs/VXD_INTERNALS.md). What both DACs play goes
+into `heard` as well, in order.
 
 What the data sheet leaves undefined is not guessed at: it goes into
 `violations`. That covers a Compatibility transfer or pause with the
@@ -65,6 +66,13 @@ FW_OTHER = {0x10: 1, 0x11: 2, 0x20: 0, 0x21: 0, 0x30: 0, 0x31: 0, 0x34: 0,
 # the ones that are safe with the Extended commands on (DS p.44): the DAC
 # input, its status, the versions, the interrupt test, the mode itself
 EXT_SAFE = {0xC6, 0xC7, 0xC0, 0xD1, 0xD3, 0xD8, 0xE1, 0xE7, 0xF2}
+# the controller registers a reset sets, as the first card read them back
+# after one (env.regs, rst.ext); B1h and B2h lose bit 6
+RESET_REGS = {0xA1: 0xDC, 0xA2: 0xE7, 0xA4: 0x00, 0xA5: 0xF8, 0xA8: 0x02,
+              0xB6: 0x80, 0xB7: 0x44, 0xB8: 0x00, 0xB9: 0x00}
+# what a write to mixer 00h sets (rst.mixer); 70h to 7Ch it keeps
+MIXER_RESET = {0x14: 0x88, 0x36: 0x88, 0x38: 0x00, 0x3A: 0x00, 0x3E: 0x00,
+               0x0E: 0x00}
 
 
 def a1_hz(a1, new=False):
@@ -135,9 +143,9 @@ class ES1869Audio:
         self.pnp[(1, 0x72)] = irq if irq2 is None else irq2
         self.pnp[(1, 0x75)] = 4 if dma2 is None else dma2
         self.game_irq = irq
-        self.ctrl.update({0xA1: 0x4E, 0xA2: 0xF4, 0xA4: 0x00, 0xA5: 0xF8,
-                          0xB1: 0x80 | irq_bits(irq),
-                          0xB2: 0x80 | drq_bits(dma1)})
+        self.ctrl.update(RESET_REGS)
+        self.ctrl.update({0xB1: 0x10 | irq_bits(irq),
+                          0xB2: 0x10 | drq_bits(dma1)})
         # Audio 1's volume after power-on (DS p.58); Audio 2's (7Ch) is 0
         self.mixer[0x14] = 0x88
         self.a1 = Stream(FIFO1)
@@ -547,9 +555,8 @@ class ES1869Audio:
             # the latch: a 0 clears it, a 1 sets it
             self.mixer[0x7A] = v
         elif reg == 0x00:
-            for r in range(0x70, 0x7D):
-                self.mixer[r] = 0
-            self.mixer[0x0E] = 0
+            for r, v in MIXER_RESET.items():
+                self.mixer[r] = v
         self._line()
 
     # --- ports ---------------------------------------------------------------
@@ -623,8 +630,9 @@ class ES1869Audio:
     def _halt(self):
         """the software reset (DS p.43): Extended mode off, DMA stopped,
         interrupts cleared, the DAC off the mixer, the counters at 2048
-        bytes, the timer at 8 kHz, 7Ah cleared (p.65) and Audio 2's volume
-        7Ch with it (p.51); Audio 2's DMA goes on (78h)"""
+        bytes, the timer at 8 kHz, the registers as the first card had them
+        after it (RESET_REGS); the mixer kept, 7Ah and 7Ch too (rst.ext),
+        and Audio 2's DMA goes on (78h)"""
         self.ext_mode = False
         self.cmd_cur, self.cmd_need, self.cmd_ops = None, 0, []
         self.pending, self.operands = [], []
@@ -637,14 +645,14 @@ class ES1869Audio:
         self.a1.fifo = bytearray()
         self.a1.halted = False
         self.ctrl[0xB8] = 0
-        self.ctrl.update({0xA1: 0x4E, 0xA2: 0xF4, 0xA4: 0x00, 0xA5: 0xF8})
+        self.ctrl.update(RESET_REGS)
+        self.ctrl[0xB1] &= ~0x40
+        self.ctrl[0xB2] &= ~0x40
         self.a1_flags = 0
         self.a1_load = False
         self.dac_on = False
         self.fw_rate = 8000.0
         self.midi = None
-        self.mixer[0x7A] = 0
-        self.mixer[0x7C] = 0
         self._line()
 
     # --- the command port ----------------------------------------------------
@@ -696,6 +704,9 @@ class ES1869Audio:
             else:
                 self.ctrl[c] = ops[0]
             self._op("R", c, self.ctrl[c])
+            if c == 0xB9 and ops[0] & 3 == 3:
+                self.violate("B9h 11b, at which the DMA runs ahead of the "
+                             "rate (a1.b9_3)")
             if c == 0xB8:
                 self._b8_write(old, ops[0])
             elif c == 0xB7 and ops[0] & 1:

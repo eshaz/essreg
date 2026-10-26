@@ -236,12 +236,14 @@ tools/wineshot.sh run ess3d.exe /sim tray
   `struct esp_hal`, with the same rules for the handler's path as
   sb16test's. Each case starts and ends with the chip's reset, and whatever
   else it changes (the mixer, PnP, Config_Base+7, the VGA DAC) goes to the
-  restore list before the change. It refuses in a Windows DOS box and with
-  esssb16 resident. The window (`src/essp0.asm`) passes every access unless
-  armed, belongs to DOS while its trap is in, and is removed at the end;
-  rebuild `src/essp0.h` after changing it. A new case goes in the table with
-  its spec and what the recording should hold, which `tools/essprec.py`
-  measures, and runs in `tests/test_essprobe.py`.
+  restore list before the change. It uses only the DMA channels the card is
+  configured for (PnP 74h and 75h), never another device's: the machine has
+  other devices on the rest, so no case moves a channel. It refuses in a
+  Windows DOS box and with esssb16 resident. The window (`src/essp0.asm`)
+  passes every access unless armed, belongs to DOS while its trap is in, and
+  is removed at the end; rebuild `src/essp0.h` after changing it. A new case
+  goes in the table with its spec and what the recording should hold, which
+  `tools/essprec.py` measures, and runs in `tests/test_essprobe.py`.
 * **Committed binaries.** After changing their sources, rebuild
   `build/ESFM.DRV`, `build/ES1869.VXD`, `build/ES1869.DRV` or
   `build/esssb16.com`, and copy the changed programs from `out/ow2/` to

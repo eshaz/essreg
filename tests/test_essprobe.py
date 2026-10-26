@@ -322,13 +322,15 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(skips, [])
 
     def test_undefined_uses(self):
-        """the chip sees only 78h bit 5 and D0h and D4h in Extended mode,
-        which a1.pause_d0 looks for, and the DMA runs the wrong way round
-        only where h4.wrong asks for it"""
+        """the chip sees only 78h bit 5, D0h and D4h in Extended mode and
+        B9h 11b, which the cases look for, and the DMA runs the wrong way
+        round only where h4.wrong asks for it"""
         self.assertEqual({w for _t, w in self.card.chip.violations},
                          {"78h bit 5, which the data sheet reserves",
                           "Compatibility command D0h in Extended mode",
-                          "Compatibility command D4h in Extended mode"})
+                          "Compatibility command D4h in Extended mode",
+                          "B9h 11b, at which the DMA runs ahead of the rate "
+                          "(a1.b9_3)"})
         self.assertEqual({(ch, mode & 0x0C) for ch, mode in
                           self.card.chip.dmac.bad}, {(1, 0x04), (5, 0x04)})
 
@@ -340,7 +342,10 @@ class ModelTest(unittest.TestCase):
         self.assertGreater(max(len(k) for k in self.probe.kept), 100)
 
     def test_resets(self):
-        self.assertIn("mixer 7A:47>00 7C:A5>00", self.probe.text("rst.ext"))
+        self.assertIn("Compatibility mode; mixer kept; regs A1:6E>DC",
+                      self.probe.text("rst.ext"))
+        self.assertIn("mixer 14:99>88 36:77>88 38:66>00 3A:55>00 3E:33>00",
+                      self.probe.text("rst.mixer"))
         self.assertIn("mixer kept; regs kept", self.probe.text("rst.fifo"))
 
     def test_real_mode_dma(self):

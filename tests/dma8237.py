@@ -160,8 +160,8 @@ class DMA8237:
                         c.tc = False
             elif reg == 13:
                 v = self.temp[hi]
-            elif reg == 15:             # the mask bits, as AT chipsets give
-                v = 0xF0
+            elif reg == 15:             # the mask bits, as the PIIX4 gives
+                v = 0x00                # them (env.dma)
                 for i, c in enumerate(self.ch[first:first + 4]):
                     if c.masked:
                         v |= 1 << i
