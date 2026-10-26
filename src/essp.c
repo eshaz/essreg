@@ -594,15 +594,15 @@ static u16 guards_check(u32 *first) {
 
 static double rnd(double x) { return floor(x + 0.5); }
 
-// ES1869.DRV's filter dividers for the 793.8 kHz clock's divisors 18-35
-static const u8 filter_stereo[18] = {3, 5, 5, 5, 6, 6, 6, 7, 7,
-                                     7, 7, 8, 8, 8, 8, 9, 9, 9};
-static const u8 filter_mono[18] = {3, 5, 5, 6, 6, 7, 7, 7,  7,
-                                   8, 8, 8, 8, 9, 9, 9, 10, 10};
+// ES1869.DRV's filter dividers for playback (DGROUP 4Eh, which 6:2308
+// takes unless its flag says recording) for the 793.8 kHz clock's
+// divisors 18-35
+static const u8 filter_play[18] = {3, 5, 5, 5, 6, 6, 6, 7, 7,
+                                   7, 7, 8, 8, 8, 8, 9, 9, 9};
 
 // A1h and A2h for rate: clk 1 the low clock, 2 the high one, 0 as the
 // rate needs (the high one above 22050 Hz); the rate they give
-static double a1_regs(double rate, u8 clk, int stereo, u8 *a1, u8 *a2) {
+static double a1_regs(double rate, u8 clk, u8 *a1, u8 *a2) {
   double d, got, f;
 
   if (clk == 1 || (clk == 0 && rate <= 22050)) {
@@ -623,7 +623,7 @@ static double a1_regs(double rate, u8 clk, int stereo, u8 *a1, u8 *a2) {
     got = A1_HI / d;
   }
   if (*a1 & 0x80 && d >= 18 && d <= 35)
-    f = stereo ? filter_stereo[(int)d - 18] : filter_mono[(int)d - 18];
+    f = filter_play[(int)d - 18];
   else
     f = rnd(199606.6 / got);
   *a2 = (u8)(256 - f);
@@ -742,7 +742,7 @@ struct pc {
   u8 newa1;         // 71h bit 5: A1h as 70h
   u8 once;          // normal mode: one block
   u8 b9;            // B9h
-  u8 dmd;           // Audio 1's channel in demand mode
+  u8 dmd;           // the channels in demand mode: 1 Audio 1's, 2 Audio 2's
   u8 t2;            // 78h bits 7:6
   u8 wide;          // 78h bit 5
   u8 ch2;           // Audio 2's channel (PnP 75h), 0xFF the card's
@@ -826,6 +826,7 @@ static const struct ecase cases[] = {
     {"a2.t2_0", "t2=0 S", "tone"},
     {"a2.t2_1", "t2=1", "tone"},
     {"a2.t2_3", "t2=3", "tone"},
+    {"a2.dmd", "dmd=2 S", "tone"},
     {"a2.slaved", "slaved r1=22050 S", "tone"},
     {"a2.x4", "x4", "tone"},
     {"a2.fb", "fb=2", "tone"},
@@ -853,6 +854,7 @@ static const struct ecase cases[] = {
     {"both.r22_44", "r1=22050", "dual"},
     {"both.t2_0", "t2=0 S", "dual"},
     {"both.single", "b9=0 t2=0", "dual"},
+    {"both.dmd", "dmd=3", "dual"},
     {"both.muted2", "v2=0 t2=0", "low"},
     {"both.pace", "v2=0 t2=0 slaved f2=8s irq2=0 S", "low"},
     // the DMA controllers behind the memory manager
@@ -978,7 +980,7 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
   else if (IS("b9"))
     p->b9 = (u8)(n & 3);
   else if (IS("dmd"))
-    p->dmd = 1;
+    p->dmd = (u8)(n & 3);
   else if (IS("t2"))
     p->t2 = (u8)(n & 3);
   else if (IS("wide"))
@@ -1133,7 +1135,7 @@ static void plan(const struct pc *p) {
     a->rate = a2_regs(p->rate1, &a->r1, &x72);
     a->r2 = x72;
   } else
-    a->rate = a1_regs(p->rate1, p->clk, (a->fmt & FST) != 0, &a->r1, &a->r2);
+    a->rate = a1_regs(p->rate1, p->clk, &a->r1, &a->r2);
   b->ch = p->ch2 != 0xFF ? p->ch2 : dma2;
   b->fmt = p->fmt2;
   b->spread = (u8)(b->ch >= 4 && !p->packed);
@@ -1167,7 +1169,8 @@ static void fill_tone(struct eng *e, u16 hz, u8 side, long amp) {
 // the channel of an engine: auto-initialized, from memory, or into the
 // scratch area the wrong way round
 static void eng_dma(const struct pc *p, struct eng *e, int unmask) {
-  u8 mode = (u8)((p->dmd && e == &en[0] ? DMA_DEMAND : DMA_SINGLE) | DMA_AUTO);
+  u8 mode = (u8)((p->dmd & (e == &en[0] ? 1 : 2) ? DMA_DEMAND : DMA_SINGLE) |
+                 DMA_AUTO);
   u32 bytes = e->ch >= 4 ? (u32)e->units * 2 : e->units;
 
   if (p->wrong) {
@@ -1356,7 +1359,7 @@ static u32 marker(const char *syms) {
   pass_time((O & ESP_O_TINY) ? 50000UL : 200000UL);
   chip_reset(3);
   ext_on();
-  rate = a1_regs(22050, 1, 0, &a1, &a2);
+  rate = a1_regs(22050, 1, &a1, &a2);
   n = snd_dtmf(mem_poke, C->area + BUF1, syms, rate,
                (O & ESP_O_TINY) ? 662 : 1323);
   dma_set(dma1, C->area + BUF1, n, DMA_SINGLE | DMA_READ, 1);
