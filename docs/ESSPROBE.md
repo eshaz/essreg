@@ -83,7 +83,10 @@ such as `t2=0` for Audio 2's single transfers.
   on only 100 or 300 us after B8h bit 0, the channel unmasked (`b2late=N`):
   neither kept the step. Version 1.3 pauses through B7h bit 7, the FIFO's
   way to the DAC, so that the FIFO fills and the DMA stops after whole
-  frames (`pause=b7`, `fix.pb7a` to `fix.pb7r22`).
+  frames (`pause=b7`, `fix.pb7a` to `fix.pb7r22`), which kept it every time.
+  Version 1.4 pauses as the fronts now do, B7h bit 7 and then B2h bit 6 off,
+  and back on the other way round (`pause=b72`, `fix.pb72a` to
+  `fix.pb72r22`).
 
 Every case uses the DMA channels that the card is configured for, Audio 1's
 (PnP 74h) and Audio 2's (75h), since other devices may own the others. An h1
@@ -154,7 +157,8 @@ report's file, and 6 when cases failed.
 
 For the fix group alone, record `ESSPROBE /R /C:fix /O:FIX.TXT` the same
 way, with EMM386 as usual, and once more without it as `/O:FIXREAL.TXT`.
-`/C:fix.pb7` runs only the pauses through B7h bit 7, about 15 seconds.
+`/C:fix.pb72` runs only the fronts' pause, about 15 seconds, and
+`/C:fix.pb7` both kinds through B7h bit 7.
 
 `python3 tools/essprec.py ESSPROBE.TXT run.wav` analyzes a recording: it
 finds the markers, fits the report's clock to the recording's, and measures

@@ -145,7 +145,7 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         m.start({})
         out, cf = m.api(VM_SYS, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0121)
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0122)
         # DrqLatch and the DirectSound lock are off
         self.assertEqual(out["EBX"] & 0xFFFF, 0x9FFF)
         self.assertEqual(out["ECX"] & 0xFFFF, DEFAULT | READ)

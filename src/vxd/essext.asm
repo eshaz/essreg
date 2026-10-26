@@ -85,7 +85,7 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0121
+ESSREG_VERSION          equ 0x0122
 ESSREG_FEATURES         equ 0xFFFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
@@ -4103,14 +4103,18 @@ ESSREG_S16_GD:
         jc      ESSREG_S16_None
         mov     ax,0xB8FB
         jmp     ESSREG_S16_And
-.pause: or      byte [edi+EX_S16_Flags],S16_PAUSE       ; Audio 1's DMA
-        mov     ax,0xB2BF                               ; requests off (B2h
-        jmp     ESSREG_S16_And                          ; bit 6)
+.pause: or      byte [edi+EX_S16_Flags],S16_PAUSE       ; the FIFO off the
+        mov     ax,0xB77F                               ; DAC (B7h bit 7), so
+        call    ESSREG_S16_And                          ; that it keeps whole
+        mov     ax,0xB2BF                               ; frames, then the DMA
+        jmp     ESSREG_S16_And                          ; requests off
 .cont:  test    byte [edi+EX_S16_Flags],S16_PAUSE
         jz      ESSREG_S16_None
         and     byte [edi+EX_S16_Flags],~S16_PAUSE & 0xFF
-        call    ESSREG_S16_Clocks               ; the rate as it is now
-        mov     ax,0xB240
+        call    ESSREG_S16_Clocks               ; the rate as it is now, the
+        mov     ax,0xB240                       ; DMA requests, then the
+        call    ESSREG_S16_Or                   ; FIFO to the DAC
+        mov     ax,0xB780
         jmp     ESSREG_S16_Or
 .a2:    shl     ah,2                    ; Audio 2: the same with 78h
         jc      .pause2

@@ -533,13 +533,17 @@ class Front:
         if (self.flags ^ op) & (F_RUN | F_16):
             return
         if op & 0x40:
-            self.flags |= F_PAUSE           # Audio 1's DMA requests off
+            # the FIFO off the DAC (B7h bit 7), so that it keeps whole
+            # frames (fix.pb7a), then the DMA requests off (B2h bit 6)
+            self.flags |= F_PAUSE
+            self.reg_and(0xB7, 0x7F)
             self.reg_and(0xB2, 0xBF)
         elif op & 0x20:
             if self.flags & F_PAUSE:
                 self.flags &= ~F_PAUSE & 0xFF
                 self.a1_clocks()
                 self.reg_or(0xB2, 0x40)
+                self.reg_or(0xB7, 0x80)
         elif self.flags & F_AUTO:
             self.flags &= ~(F_AUTO | F_LAST) & 0xFF
             if not self.half_last(0):

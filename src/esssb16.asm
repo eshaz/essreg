@@ -1150,13 +1150,17 @@ gd:     cmp     al,8
         jc      none
         mov     ax,0xB8FB
         jmp     reg_and
-.pause: or      byte [V(flags)],F_PAUSE ; Audio 1's DMA requests off (B2h
-        mov     ax,0xB2BF               ; bit 6)
+.pause: or      byte [V(flags)],F_PAUSE ; the FIFO off the DAC (B7h bit 7),
+        mov     ax,0xB77F               ; so that it keeps whole frames
+        call    reg_and                 ; (fix.pb7a), then the DMA requests
+        mov     ax,0xB2BF               ; off (B2h bit 6)
         jmp     reg_and
 .cont:  btr     word [V(flags)],F_PAUSE_BIT
         jnc     none
-        call    a1_clocks               ; the rate as it is now
-        mov     ax,0xB240
+        call    a1_clocks               ; the rate as it is now, the DMA
+        mov     ax,0xB240               ; requests, then the FIFO to the DAC
+        call    reg_or
+        mov     ax,0xB780
         jmp     reg_or
 .a2:    shl     ah,2                    ; Audio 2: the same with 78h
         jc      .pause2

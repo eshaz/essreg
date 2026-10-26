@@ -476,7 +476,7 @@ def synthesize(run, rate=48000):
 RECORDED = ("a1.base,a1.left,a1.right,a1.pause_b2,a1.muted,a2.base,"
             "a2.slaved,both.base,both.muted2,stream.a1,stream.mirror,"
             "a2.wide_packed,fix.late100a,fix.a2pfd1,fix.pb2late,"
-            "fix.b2late1,fix.pb7a")
+            "fix.b2late1,fix.pb7a,fix.pb72a")
 # those whose Audio 1 stream plays a byte off, its DMA running when its
 # start's first request came, as on the card (docs/ESS_EXTENDED.md); the
 # names are prefixes, so fix.pb2late runs fix.pb2late2 and 3 too

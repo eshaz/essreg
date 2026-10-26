@@ -199,11 +199,13 @@ D0h and D5h pause the engine of their kind, D4h and D6h continue it, and D9h
 and DAh end its auto-initialize with the block that plays. The 16-bit kind
 is Audio 2's while Audio 2 runs. A command for a kind that doesn't run does
 nothing:
-* **Audio 1**: the pause clears B2h bit 6, so that the chip asks for no more
-  DMA and the FIFO plays out, and the continue sets the rate again, then B2h
-  bit 6. The end of auto-initialize clears B8h bit 2. On the card a resume
-  came back in step about half the time, held or not (`fix.pb2late`,
-  `fix.pb2hold1`): the pause stops the DMA inside a frame.
+* **Audio 1**: the pause clears B7h bit 7, so that the FIFO stops feeding
+  the DAC and keeps whole frames, then B2h bit 6, so that the chip asks for
+  no more DMA. The continue sets the rate again, then B2h bit 6 and B7h bit
+  7. The end of auto-initialize clears B8h bit 2. A pause through B2h bit 6
+     alone came back in step only about half the time, since the DAC played
+     on and ran the FIFO down into a half-done frame (`fix.pb2late`), and
+     one through B7h bit 7 every time (`fix.pb7a`).
 * **Audio 2**: the pause clears 78h bit 0, which silences the DAC, though
   the card's DMA runs on meanwhile and the stream skips what it moved
   (`a2.pause_f`), and the continue sets the rate again, then 78h bit 0. The
@@ -347,10 +349,11 @@ These transitions follow the card's answers ([ESSPROBE.md](ESSPROBE.md),
   before when a game unmasks its channel after the command, as Pinball
   Fantasies' driver does.
 * `fix.late20` and the others: HOLD and SETTLE around Audio 1's start.
-* `a1.pause_b2`: B2h bit 6 stops Audio 1's DMA within a few bytes, so it is
-  the pause, though a resume comes back in step only about half the time, as
-  after every pause measured, and HOLD doesn't help it (`fix.pb2hold1` to
-  `fix.pb2hold3`). `fix.pb7a` and the others try a pause through B7h bit 7,
-  whose DMA would stop after whole frames.
+* `a1.pause_b2` and `fix.pb7a`: B2h bit 6 stops Audio 1's DMA within a few
+  bytes, but the stream came back in step only about half the time, held or
+  not (`fix.pb2hold1`); with B7h bit 7, which takes the FIFO off the DAC, it
+  came back in step every time, though the DMA fills the FIFO first. So the
+  pause takes the FIFO off the DAC and then stops the DMA, which `fix.pb72a`
+  to `fix.pb72r22` measure.
 * `a1.b9_0` to `a1.b9_3`: B9h 00, 01 and 10 run at the rate and 11 runs
   ahead of it, so the fronts write 10, or 00 with `/S`.

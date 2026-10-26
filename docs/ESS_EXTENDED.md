@@ -512,12 +512,20 @@ masked over the resume in 2 of 3 in real mode (`fix.a2pdhold1`). Under
 EMM386 the probe's unmask of a held channel went through EMM386, which
 started the channel over at the buffer's start ([The DMA controllers and the
 memory managers](#the-dma-controllers-and-the-memory-managers)), so those
-runs don't count. The offsets were one, two and three bytes. So a resume has
-no race of its own: the step goes where a pause stops the DMA inside a
-frame, which a demand transfer of 2 bytes does, half the time, in 16-bit
-stereo. `fix.pb7a` to `fix.pb7r22` pause through B7h bit 7, which takes the
-FIFO off the DAC: the FIFO fills, and the DMA stops when it is full, after
-whole frames.
+runs don't count. The offsets were one, two and three bytes.
+
+Paused through B7h bit 7, which takes the FIFO off the DAC, the stream
+resumed in step in all 12 runs, in both modes, in 16-bit stereo and mono, in
+8-bit stereo and at 22.05 kHz (`fix.pb7a` to `fix.pb7r22`). The DAC takes
+nothing from the FIFO in such a pause, and the DMA moved only 4 to 12 bytes
+more, as the FIFO filled. So a resume has no race of its own: the step goes
+while the DAC plays on in the pause and runs the FIFO down into a frame that
+the DMA left half done. The DMA goes on until the FIFO is full, though,
+which right after a start can be most of its 256 bytes, and a program that
+pauses and programs its channel anew would lose the next transfer's first
+bytes to it. The fronts therefore pause through B7h bit 7 and then B2h bit
+6, and continue through B2h bit 6 and then B7h bit 7, which `fix.pb72a` to
+`fix.pb72r22` measure.
 
 ### Commands while the DMA runs
 

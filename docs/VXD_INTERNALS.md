@@ -481,10 +481,14 @@ that Extended mode doesn't have, the direct DAC and ADC, ADPCM, silence and
 MIDI, go to the chip in its Compatibility mode, after a reset of its own,
 with the rate as a time constant.
 
-Pause and continue (D0h and D4h, D5h and D6h) turn Audio 1's DMA requests
-off and on (B2h bit 6), and D9h and DAh end the auto-initialize with the
-block that plays (B8h bit 2). A single-cycle transfer of the kind that runs
-auto-initialized becomes its last block, as the firmware queues it.
+Pause (D0h, D5h) takes Audio 1's FIFO off the DAC (B7h bit 7), so that it
+keeps whole frames, and then turns its DMA requests off (B2h bit 6), and
+continue (D4h, D6h) turns them back on the other way round, which keeps the
+stream in step
+([ESS_EXTENDED.md](ESS_EXTENDED.md#a-16-bit-stream-a-byte-off)). D9h and DAh
+end the auto-initialize with the block that plays (B8h bit 2). A
+single-cycle transfer of the kind that runs auto-initialized becomes its
+last block, as the firmware queues it.
 
 On Audio 2 (`ESSREG_S16_A2_Xfer`) the front starts the 16-bit playback as
 ES1869.DRV starts its wave output (6:2C1A): 78h at 0, so that the transfer
@@ -784,7 +788,7 @@ it by hand:
    `ES1869VX.ORG` in the same directory, the name essinst uses too.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
 3. Restart Windows. essctl's *Device information* page now shows "Register
-   API: version 1.21".
+   API: version 1.22".
 
 If sound stops working, run `essinst /restore`. If Windows doesn't start,
 restart, press F8 at "Starting Windows 95", choose *Command prompt only*,

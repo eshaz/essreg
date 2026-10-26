@@ -274,17 +274,22 @@ class FrontChecks:
         self.assertClean()
 
     def test_pause_continue_end(self):
-        """D5h and D6h: Audio 1's DMA requests off and on (B2h bit 6); D9h:
-        the block that plays is the last (B8h bit 2)"""
+        """D5h: Audio 1's FIFO off the DAC (B7h bit 7), so that it keeps
+        whole frames (fix.pb7a), then its DMA requests off (B2h bit 6);
+        D6h: both back the other way round; D9h: the block that plays is
+        the last (B8h bit 2)"""
         c, chip = self.c, self.chip
         play16(c)
         chip.commands = []
         write(c, 0xD5)
+        self.assertEqual(chip.ctrl[0xB7] & 0x80, 0)
         self.assertEqual(chip.ctrl[0xB2] & 0x40, 0)
         write(c, 0xD0)                      # the 8-bit kind: nothing
         write(c, 0xD6)
+        self.assertEqual(chip.ctrl[0xB7] & 0x80, 0x80)
         self.assertEqual(chip.ctrl[0xB2] & 0x40, 0x40)
-        self.assertEqual([x[0] for x in chip.commands], [0xB2, 0xB2])
+        self.assertEqual([x[0] for x in chip.commands],
+                         [0xB7, 0xB2, 0xB2, 0xB7])
         write(c, 0xD9)
         self.assertEqual(chip.ctrl[0xB8], 0x01)
         self.assertEqual(c.flags() & F_AUTO, 0)

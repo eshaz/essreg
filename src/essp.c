@@ -731,7 +731,7 @@ enum {
 #define E2 0x02 // Audio 2
 
 // the pauses
-enum { P_NONE, P_B2, P_B8, P_B7, P_78F, P_78D, P_78FD, P_D0 };
+enum { P_NONE, P_B2, P_B8, P_B7, P_B72, P_78F, P_78D, P_78FD, P_D0 };
 
 // a case's spec, parsed
 struct pc {
@@ -937,6 +937,12 @@ static const struct ecase cases[] = {
     {"fix.pb7m", "f=16m late=100 pause=b7 ms=1500", "pause"},
     {"fix.pb7s8", "f=8s late=100 pause=b7 ms=1500", "lpause"},
     {"fix.pb7r22", "r=22050 late=200 pause=b7 ms=1500", "lpause"},
+    {"fix.pb72a", "late=100 pause=b72 S ms=1500", "lpause"},
+    {"fix.pb72b", "late=100 pause=b72 ms=1500", "lpause"},
+    {"fix.pb72c", "late=100 pause=b72 ms=1500", "lpause"},
+    {"fix.pb72m", "f=16m late=100 pause=b72 ms=1500", "pause"},
+    {"fix.pb72s8", "f=8s late=100 pause=b72 ms=1500", "lpause"},
+    {"fix.pb72r22", "r=22050 late=200 pause=b72 ms=1500", "lpause"},
     {"fix.a2base1", "e=2 S", "left"},
     {"fix.a2base2", "e=2", "left"},
     {"fix.a2pf1", "e=2 pause=f ms=1500", "lpause"},
@@ -1076,6 +1082,8 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
       p->pause = P_B8;
     else if (!strcmp(v, "b7"))
       p->pause = P_B7;
+    else if (!strcmp(v, "b72"))
+      p->pause = P_B72;
     else if (!strcmp(v, "f"))
       p->pause = P_78F;
     else if (!strcmp(v, "d"))
@@ -1618,7 +1626,9 @@ static void sound_line(const char *id, const char *syms, u32 tm,
 // the pause (on) or its end; with hold, the end comes with the engines'
 // channels masked, unmasked late us after it (100 without late); 0 if the
 // pause can't be made. B7h bit 7 takes the FIFO off the DAC, so that it
-// fills and the DMA stops when it is full
+// fills and the DMA stops when it is full; b72 then turns the DMA requests
+// off too (B2h bit 6), and on again before the FIFO goes back to the DAC,
+// as the fronts pause
 static int pause_on(const struct pc *p, int on) {
   int ok = 1, r;
 
@@ -1632,11 +1642,16 @@ static int pause_on(const struct pc *p, int on) {
     reg_w(0xB8, (u8)(on ? b8_run : b8_run | 1));
     break;
   case P_B7:
+  case P_B72:
+    if (!on && p->pause == P_B72)
+      ok = b2_dma(1);
     r = reg_r(0xB7);
     if (r < 0)
       ok = 0;
     else
       reg_w(0xB7, (u8)(on ? r & ~0x80 : r | 0x80));
+    if (on && p->pause == P_B72)
+      ok = b2_dma(0) && ok;
     break;
   case P_78F:
     mix_w(0x78, (u8)(on ? r78_run & ~0x01 : r78_run));

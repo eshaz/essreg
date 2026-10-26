@@ -34,8 +34,8 @@ DSP version 4.05 with the CT1745 mixer, command for command
   game's own channel is masked only where the chipset reads its mask back,
   as Intel's PIIX4 does, and the channel is unmasked. On the card,
   `sb16test`'s recorded run then played every 16-bit sound clean. A pause
-  and continue (D5h and D6h, D0h and D4h) can still bring 16-bit or 8-bit
-  stereo sound back a byte off, about half the time.
+  (D0h, D5h) takes the FIFO off the DAC before it stops the DMA, so that the
+  sound goes on in step after the continue (D4h, D6h).
 * The direct DAC and ADC, ADPCM, silence and MIDI, which Extended mode
   lacks, go to the chip in its Compatibility mode.
 * The Sound Blaster 16's mixer registers, 30h to 47h, show the levels the
