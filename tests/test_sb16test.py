@@ -97,7 +97,8 @@ def library():
         out = os.path.join(tmp.name, "libsb16t.so")
         subprocess.run(["gcc", "-std=gnu99", "-Wall", "-Wextra", "-Werror",
                         "-DESS_HOST", "-O1", "-fPIC", "-shared", "-I" + SRC,
-                        "-o", out, os.path.join(SRC, "sb16t.c"), "-lm"],
+                        "-o", out, os.path.join(SRC, "sb16t.c"),
+                        os.path.join(SRC, "sbtsound.c"), "-lm"],
                        check=True, capture_output=True)
         lib = ctypes.CDLL(out)
         lib.sbt_run.argtypes = [ctypes.POINTER(HAL), ctypes.POINTER(CARD),

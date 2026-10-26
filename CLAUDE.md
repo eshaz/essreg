@@ -14,8 +14,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   card's measurement, for the tests, /sim and the tray panel's graph),
   `wavestat` (what ES1869.DRV is doing, read from its data segment for
   essctl), `drvinst` (essinst's checks of the drivers, and its staging
-  through WININIT.INI) and `sb16t` (sb16test's checks of a Sound Blaster 16,
-  which the tests also run on the host).
+  through WININIT.INI), `sb16t` (sb16test's checks of a Sound Blaster 16,
+  which the tests also run on the host), `sbtsound` (the tones and DTMF
+  markers of the recorded runs) and `dosplat` (the DOS programs' clock,
+  interrupt, report and crash-safe files).
 * `src/win/` holds `essctl.exe`, the 16-bit Windows control panel, and
   `ess3dw.c`, the Windows side of `ess3d.exe`, which sets the 3-D effect
   from the command line for keys. `ess3dtr.c` is ess3d's tray icon and

@@ -15,10 +15,16 @@ SB16T_FLAGS=-5 -osbhl+kp -fpi87 -s
 sb16t.obj : src\sb16t.c .AUTODEPEND
  *wcc src\sb16t.c -i="$(%watcom)/h" $(SB16T_FLAGS) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
 
+sbtsound.obj : src\sbtsound.c .AUTODEPEND
+ *wcc src\sbtsound.c -i="$(%watcom)/h" $(SB16T_FLAGS) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+
+dosplat.obj : src\dosplat.c .AUTODEPEND
+ *wcc src\dosplat.c -i="$(%watcom)/h" $(SB16T_FLAGS) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+
 sb16test.obj : src\sb16test.c .AUTODEPEND
  *wcc src\sb16test.c -i="$(%watcom)/h" $(SB16T_FLAGS) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
 
-sb16test.exe : sb16t.obj sb16test.obj .AUTODEPEND
- @%write sb16test.lk1 FIL sb16test.obj,sb16t.obj
+sb16test.exe : sb16t.obj sbtsound.obj dosplat.obj sb16test.obj .AUTODEPEND
+ @%write sb16test.lk1 FIL sb16test.obj,sb16t.obj,sbtsound.obj,dosplat.obj
  @%append sb16test.lk1
  *wlink name sb16test sys dos op m libf cstart_t op maxe=10 op q op DOSSEG op STACK=4096 op el sort @sb16test.lk1
