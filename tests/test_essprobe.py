@@ -59,11 +59,11 @@ SRC = os.path.join(ROOT, "src")
 EXE = os.path.join(ROOT, "build", "essprobe.exe")
 AREA = 0x40000              # the DMA area, 64 KB in one page
 O_RECORD, O_SHORT, O_SILENT, O_TINY = 0x01, 0x02, 0x04, 0x08
-G_ALL = 0xFF
+G_ALL = 0x1FF
 IDLE_US = 25                # the time an idle() of the cases takes
-GROUPS = ("env", "rst", "a1", "a2", "both", "h1", "h4", "stream")
-EXPECTS = {"tone", "left", "right", "dual", "low", "none", "pause", "glide",
-           "loop", "any", "-"}
+GROUPS = ("env", "rst", "a1", "a2", "both", "h1", "h4", "stream", "fix")
+EXPECTS = {"tone", "left", "right", "dual", "low", "none", "pause", "lpause",
+           "glide", "loop", "any", "-"}
 # the cases that look for what the data sheet doesn't define
 WIDE = {"a2.wide", "a2.wide_packed", "stream.a2w"}
 WRONG = {"h4.wrong1", "h4.wrong2"}
@@ -276,7 +276,7 @@ class CasesTest(unittest.TestCase):
         for cid, spec, _e in cases():
             self.assertEqual(lib.esp_parse_check(spec.encode()), 0, cid)
         for bad in ("f=9x", "clk=mid", "fifo=more", "side=c", "zz",
-                    "run=nothing", "pause=x"):
+                    "run=nothing", "pause=x", "order=dos", "b7=twice"):
             self.assertGreater(lib.esp_parse_check(bad.encode()), 0, bad)
 
     def test_ids(self):
@@ -319,8 +319,7 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(self.probe.failed, 0)
         skips = sorted(c for c, rs in self.probe.results.items()
                        if any(r[0] == "SKIP" for r in rs))
-        # no pin of the card to 0 or 3; channel 1 is Audio 1's
-        self.assertEqual(skips, ["a2.ch0", "a2.ch1", "a2.ch3"])
+        self.assertEqual(skips, [])
 
     def test_undefined_uses(self):
         """the chip sees only 78h bit 5 and D0h and D4h in Extended mode,
@@ -471,7 +470,7 @@ def synthesize(run, rate=48000):
 # the recorded cases: one of each kind the recording should hold
 RECORDED = ("a1.base,a1.left,a1.right,a1.pause_b2,a1.muted,a2.base,"
             "a2.slaved,both.base,both.muted2,stream.a1,stream.mirror,"
-            "a2.wide_packed")
+            "a2.wide_packed,fix.late100a,fix.a2pfd1")
 
 
 @unittest.skipUnless(HAVE_UNICORN and np is not None,
@@ -590,6 +589,21 @@ class RecordedTest(unittest.TestCase):
             t = np.arange(b - a) / self.RATE
             x[a:b, 0] = x[a:b, 1] = 0.3 * np.sin(2 * np.pi * 441 * t)
         self.assertEqual(self.broken("a1.pause_b2", fill)[0], "FAIL")
+
+    def test_sides_swapped_after_a_pause(self):
+        """a stream two bytes off after the pause: the tone on the right"""
+        _c, sounds, _m = essprec.read_report(self.report)
+        a, b = self.window("fix.a2pfd1")
+        resume = sounds["fix.a2pfd1"][2][1][0]
+        first = sounds["fix.a2pfd1"][2][0][0]
+        cut = a + int((resume - first) * self.RATE / 1e6)
+
+        def swap(x, a, b):
+            x[cut:b] = x[cut:b, ::-1].copy()
+        res, text = self.broken("fix.a2pfd1", swap)
+        self.assertEqual(res, "FAIL", text)
+        self.assertEqual(self.verdicts["fix.a2pfd1"][0], "PASS")
+        self.assertIn("left", self.verdicts["fix.late100a"][1])
 
 
 class _Machine:

@@ -42,8 +42,7 @@ such as `t2=0` for Audio 2's single transfers.
   sound goes into the low byte of a word, as ESS's drivers do; `a2.packed`
   gives it a game's own 16-bit buffer, and `a2.wide` and `a2.wide_packed`
   set 78h bit 5, which the data sheet reserves and Linux calls 16-bit DMA.
-  The `a2.chN` cases move Audio 2 to another channel where one of the card's
-  DMA pins is wired to it.
+  These three run only where the card has Audio 2 on a 16-bit channel.
 * **both**: Audio 1 at 294 Hz and Audio 2 at 882 Hz at once, on their own
   clocks or slaved, in mixed formats and transfer types, and with Audio 2
   muted, as `esssb16`'s withdrawn pace ran it.
@@ -52,7 +51,9 @@ such as `t2=0` for Audio 2's single transfers.
   reads of a channel that moves, whose flip-flop a program's reads and
   writes toggle, whether a buffer across a page goes through EMM386's own
   buffer, and the case of Pinball Fantasies' driver: a channel carried over
-  before its unmask.
+  before its unmask. Under EMM386 the buffer across a page is single-cycle,
+  because EMM386 stops the machine ("DMA mode not supported") at an
+  auto-initialized transfer that it would have to buffer.
 * **h4**: what the engines do to the machine. A busy loop's speed, the VGA's
   vertical retrace, the VGA DAC's entries, guard bytes around the DMA
   buffers, and a channel programmed the wrong way round, writing into memory
@@ -62,6 +63,24 @@ such as `t2=0` for Audio 2's single transfers.
   the position the count gives, on Audio 1's own channel, on Audio 2's, and
   through a channel carried over as `esssb16` does under EMM386
   (`stream.mirror`), whose count stands still, so that it loops.
+* **fix**: which start keeps a 16-bit stream in step. In the first runs,
+  Audio 1 played every 16-bit stream a byte off, as noise, but when its DMA
+  began well after its start (`a1.after` under EMM386), and Audio 2 lost its
+  step when its DMA began before its FIFO's way to the DAC or resumed after
+  a pause. Each case here plays the tone on the left alone, so that a stream
+  a byte off is noise and two bytes off plays on the right: Audio 1's DMA
+  unmasked 0 to 2000 us after the start (`late=N`), its registers in the
+  order of `build/ES1869.DRV`'s player, which empties the FIFO after the
+  format (`order=win`), B7h written once (`b7=once`) or its first write
+  without bit 0 (`b7=nl`), at other rates and in 8-bit stereo, where a byte
+  off swaps the sides; and Audio 2's pauses through 78h bit 0, bit 1 and
+  both (`pause=fd`). Each start is a race, so the cases come two or three
+  times.
+
+Every case uses the DMA channels that the card is configured for, Audio 1's
+(PnP 74h) and Audio 2's (75h), since other devices may own the others. An h1
+case of channel 5, and the cases that stand for a game's 16-bit channel, use
+the card's 16-bit channel, and are skipped where it has none.
 
 Under EMM386 the probe sees the 8237 past EMM386's translation through a
 window: a port trap of Audio_Base+Dh, which the chip doesn't decode, through
@@ -91,8 +110,10 @@ first. `/N` runs without the window.
    `esssb16`. Set `BLASTER` with the card's base, such as
    `SET BLASTER=A220 I5 D1 H5 P330 T6`.
 2. Run `ESSPROBE /S` for the short run, about a minute, then `ESSPROBE` for
-   all 105 cases, about three minutes. Each writes `ESSPROBE.TXT`; `/O:file`
-   names another, such as `/O:FULL.TXT`. Esc stops at any time.
+   all 139 cases, about four minutes. Each writes `ESSPROBE.TXT`; `/O:file`
+   names another, such as `/O:FULL.TXT`. Esc stops at any time. The report
+   is on the disk after every line, so a run that stops the machine keeps
+   what it measured until then.
 3. Run the full probe once more without EMM386, with its `DEVICE=` line
    taken out of `CONFIG.SYS`, as `ESSPROBE /O:REAL.TXT`. Without a memory
    manager the 8237 gets every access at once, which shows what EMM386
@@ -122,6 +143,9 @@ report's file, and 6 when cases failed.
    it.
 3. Run `ESSPROBE /R /O:FULLREC.TXT` the same way, into a second file.
 4. Send each report with its recording.
+
+For the fix group alone, record `ESSPROBE /R /C:fix /O:FIX.TXT` the same
+way, with EMM386 as usual, and once more without it as `/O:FIXREAL.TXT`.
 
 `python3 tools/essprec.py ESSPROBE.TXT run.wav` analyzes a recording: it
 finds the markers, fits the report's clock to the recording's, and measures

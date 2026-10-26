@@ -20,7 +20,9 @@ measures each sound by what it should hold:
 * left, right: the same on that side, 15 dB over the other;
 * dual: 294 Hz and 882 Hz both; low: 294 Hz without 882 Hz;
 * none: 30 dB under a tone's level;
-* pause: the tone in both parts and quiet between them;
+* pause: the tone in both parts and quiet between them; lpause: the same
+  with the tone on the left alone, which a stream a byte or two off after
+  the pause loses;
 * glide: a rise of 400 Hz a second that never steps back, which a loop
   or stale data does, and never stands, which a stall does;
 * loop: steps back, as the glide does when the game's count stands still;
@@ -135,18 +137,30 @@ def check_none(rec, spans):
     return lv < rec.ref - 30, "%.1f dBFS, a tone's %.1f" % (lv, rec.ref)
 
 
-def check_pause(rec, spans, case, rates):
+def check_pause(rec, spans, case, rates, side=None):
+    """the tone before and after the pause, and quiet between; with side,
+    on that side alone"""
     if len(spans) < 2:
         return False, "no pause in the report"
     (a, b), (c, d) = spans[0], spans[1]
-    ok1, t1 = tone_measure(rec.part(a, b), rate_of(case, rates))
-    ok2, t2 = tone_measure(rec.part(c, d), rate_of(case, rates))
+    oks, texts = [], []
+    for on, off in ((a, b), (c, d)):
+        ok, text = tone_measure(rec.part(on, off, side or "mono"),
+                                rate_of(case, rates))
+        text = ",".join(text.split(",")[:2])
+        if side and rec.stereo:
+            lv = level_db(rec.part(on, off, "left"))
+            rv = level_db(rec.part(on, off, "right"))
+            ok = ok and (lv - rv if side == "left" else rv - lv) >= SIDE_DB
+            text += ", left %.1f, right %.1f dBFS" % (lv, rv)
+        oks.append(ok)
+        texts.append(text)
     gap = rec.part(b, c)
     env = envelope(gap) if len(gap) else []
     quiet = sum(1 for e in env if e < rec.ref - 30)
-    return ok1 and ok2 and quiet >= len(env) // 2, \
+    return all(oks) and quiet >= len(env) // 2, \
         "before: %s; after: %s; %d of %d 10 ms of the pause quiet" % (
-            t1.split(",")[0], t2.split(",")[0], quiet, len(env))
+            texts[0], texts[1], quiet, len(env))
 
 
 def glide_track(x, win=0.020, hop=0.010, rate=RATE):
@@ -207,6 +221,8 @@ def judge(rec, case, sound, rates):
         ok, text = check_none(rec, spans)
     elif want == "pause":
         ok, text = check_pause(rec, spans, case, rates)
+    elif want == "lpause":
+        ok, text = check_pause(rec, spans, case, rates, "left")
     elif want in ("glide", "loop"):
         ok, text = check_glide(rec, spans, want)
     else:

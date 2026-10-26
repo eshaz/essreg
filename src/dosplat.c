@@ -175,8 +175,7 @@ void plat_line(const char *text) {
     report_bad = 1;
     printf("can't write %.60s: is the disk full?\n", report_name);
   }
-  if (text[0] == '[')
-    _commit(report_fd);
+  _commit(report_fd); // every line, for a machine that stops in a case
 }
 
 void plat_report_close(void) {

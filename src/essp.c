@@ -731,7 +731,7 @@ enum {
 #define E2 0x02 // Audio 2
 
 // the pauses
-enum { P_NONE, P_B2, P_B8, P_78F, P_78D, P_D0 };
+enum { P_NONE, P_B2, P_B8, P_78F, P_78D, P_78FD, P_D0 };
 
 // a case's spec, parsed
 struct pc {
@@ -745,7 +745,6 @@ struct pc {
   u8 dmd;           // the channels in demand mode: 1 Audio 1's, 2 Audio 2's
   u8 t2;            // 78h bits 7:6
   u8 wide;          // 78h bit 5
-  u8 ch2;           // Audio 2's channel (PnP 75h), 0xFF the card's
   u8 packed;        // a 16-bit channel's buffer as a game's words
   u8 slaved;        // 71h bit 1 clear: Audio 2 on Audio 1's clock
   u8 x4;            // 71h bit 4
@@ -756,6 +755,9 @@ struct pc {
   u8 irq1, irq2;    // the engines' interrupts on
   u8 noack;         // never acknowledged
   u8 after;         // the DMA unmasked after the start
+  u16 late;         // and this many us after it
+  u8 order;         // Audio 1's registers in the Windows player's order
+  u8 b7;            // B7h's first write: 0 as Table 16, 1 none, 2 bit 0 clear
   u8 start2;        // Audio 2 started in two steps: 78h bit 1, then bit 0
   u16 ms;           // how long it plays
   u8 side;          // 0, 'l' or 'r'
@@ -843,13 +845,9 @@ static const struct ecase cases[] = {
     {"a2.irq_off", "irq=0", "tone"},
     {"a2.noack", "noack", "tone"},
     {"a2.muted", "v2=0", "none"},
-    {"a2.ch0", "ch2=0", "tone"},
-    {"a2.ch1", "ch2=1", "tone"},
-    {"a2.ch3", "ch2=3 S", "tone"},
-    {"a2.ch5", "ch2=5 S", "tone"},
-    {"a2.packed", "ch2=5 packed", "any"},
-    {"a2.wide", "ch2=5 wide", "any"},
-    {"a2.wide_packed", "ch2=5 wide packed S", "any"},
+    {"a2.packed", "packed", "any"},
+    {"a2.wide", "wide", "any"},
+    {"a2.wide_packed", "wide packed S", "any"},
     // both: Audio 1 at 294 Hz and Audio 2 at 882 Hz
     {"both.base", "S", "dual"},
     {"both.slaved", "slaved S", "dual"},
@@ -888,6 +886,48 @@ static const struct ecase cases[] = {
     {"stream.mirror", "run=mirror S", "loop"},
     {"stream.a2", "run=stream e=2 S", "glide"},
     {"stream.a2w", "run=stream e=2 wide packed", "any"},
+    // which start keeps a 16-bit stream in step: the tone on the left
+    // alone, so that a stream a byte off is noise and two bytes off is on
+    // the right; Audio 1 by default, and the cases repeated, since a start
+    // is a race
+    {"fix.base1", "S", "left"},
+    {"fix.base2", "", "left"},
+    {"fix.late0", "late=0", "left"},
+    {"fix.late20", "late=20", "left"},
+    {"fix.late50", "late=50", "left"},
+    {"fix.late100a", "late=100 S", "left"},
+    {"fix.late100b", "late=100", "left"},
+    {"fix.late100c", "late=100", "left"},
+    {"fix.late300", "late=300", "left"},
+    {"fix.late2000", "late=2000", "left"},
+    {"fix.win1", "order=win S", "left"},
+    {"fix.win2", "order=win", "left"},
+    {"fix.win3", "order=win", "left"},
+    {"fix.once7a", "b7=once S", "left"},
+    {"fix.once7b", "b7=once", "left"},
+    {"fix.noload1", "b7=nl", "left"},
+    {"fix.noload2", "b7=nl", "left"},
+    {"fix.winlate1", "order=win late=100 S", "left"},
+    {"fix.winlate2", "order=win late=100", "left"},
+    {"fix.r22late", "r=22050 late=200", "left"},
+    {"fix.r11late", "r=11025 late=300", "left"},
+    {"fix.r8late", "r=8000 late=400", "left"},
+    {"fix.r22win", "r=22050 order=win", "left"},
+    {"fix.r11win", "r=11025 order=win", "left"},
+    {"fix.s8base", "f=8s", "left"},
+    {"fix.s8late", "f=8s late=100", "left"},
+    {"fix.pb2late", "late=100 pause=b2 ms=1500", "lpause"},
+    {"fix.pb8late", "late=100 pause=b8 ms=1500", "lpause"},
+    {"fix.a2base1", "e=2 S", "left"},
+    {"fix.a2base2", "e=2", "left"},
+    {"fix.a2pf1", "e=2 pause=f ms=1500", "lpause"},
+    {"fix.a2pf2", "e=2 pause=f ms=1500", "lpause"},
+    {"fix.a2pd1", "e=2 pause=d S ms=1500", "lpause"},
+    {"fix.a2pd2", "e=2 pause=d ms=1500", "lpause"},
+    {"fix.a2pd3", "e=2 pause=d ms=1500", "lpause"},
+    {"fix.a2pfd1", "e=2 pause=fd S ms=1500", "lpause"},
+    {"fix.a2pfd2", "e=2 pause=fd ms=1500", "lpause"},
+    {"fix.a2pfd3", "e=2 pause=fd ms=1500", "lpause"},
 };
 
 u16 esp_cases(void) { return (u16)ESS_ARRAY_SIZE(cases); }
@@ -916,7 +956,6 @@ static void spec_base(struct pc *p, const char *id) {
   p->rate1 = p->rate2 = 44100;
   p->b9 = 2;
   p->t2 = 2;
-  p->ch2 = 0xFF;
   p->fb = 0xFF;
   p->vol1 = p->vol2 = 0xCC;
   p->irq1 = p->irq2 = 1;
@@ -931,6 +970,10 @@ static void spec_base(struct pc *p, const char *id) {
     p->ms = 2000;
     p->hz1 = 294;
     p->hz2 = 882;
+  } else if (!strncmp(id, "fix.", 4)) {
+    p->eng = E1;
+    p->ms = 800;
+    p->side = 'l';
   }
 }
 
@@ -989,8 +1032,6 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
     p->t2 = (u8)(n & 3);
   else if (IS("wide"))
     p->wide = 1;
-  else if (IS("ch2"))
-    p->ch2 = (u8)n;
   else if (IS("packed"))
     p->packed = 1;
   else if (IS("slaved"))
@@ -1015,6 +1056,8 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
       p->pause = P_78F;
     else if (!strcmp(v, "d"))
       p->pause = P_78D;
+    else if (!strcmp(v, "fd"))
+      p->pause = P_78FD;
     else if (!strcmp(v, "d0"))
       p->pause = P_D0;
     else
@@ -1029,6 +1072,13 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
     p->noack = 1;
   else if (IS("after"))
     p->after = 1;
+  else if (IS("late")) {
+    p->after = 1;
+    p->late = (u16)n;
+  } else if (IS("order") && v != NULL && !strcmp(v, "win"))
+    p->order = 1;
+  else if (IS("b7") && v != NULL && (!strcmp(v, "once") || !strcmp(v, "nl")))
+    p->b7 = (u8)(!strcmp(v, "once") ? 1 : 2);
   else if (IS("start2"))
     p->start2 = 1;
   else if (IS("ms"))
@@ -1144,7 +1194,7 @@ static void plan(const struct pc *p) {
     a->r2 = x72;
   } else
     a->rate = a1_regs(p->rate1, p->clk, &a->r1, &a->r2);
-  b->ch = p->ch2 != 0xFF ? p->ch2 : dma2;
+  b->ch = dma2;
   b->fmt = p->fmt2;
   b->spread = (u8)(b->ch >= 4 && !p->packed);
   b->per_unit = (u8)(b->ch >= 4 && p->wide ? 2 : 1);
@@ -1206,27 +1256,23 @@ static void set_71(const struct pc *p) {
   mix_w(0x71, r);
 }
 
-// Audio 1 as the native drivers start it, stopped: B8h, B9h, A8h, A1h,
-// A2h, A4h and A5h, the FIFO emptied, B6h, B7h twice, B1h, B2h, D1h
-static void a1_program(const struct pc *p, struct eng *e) {
+// Audio 1's count, A4h and A5h: minus a block's bytes
+static void a1_count(const struct pc *p, const struct eng *e) {
   u16 block = (u16)(p->once ? e->sbytes : e->sbytes / 2), cnt;
-  u8 b7, v;
-  int r;
 
-  b8_run = (u8)(p->once ? 0x00 : 0x04);
-  reg_w(0xB8, b8_run);
-  reg_w(0xB9, p->b9);
-  r = reg_r(0xA8);
-  reg_w(0xA8, (u8)(((r < 0 ? 0 : r) & 0xFC) | ((e->fmt & FST) ? 1 : 2)));
-  reg_w(0xA1, e->r1);
-  reg_w(0xA2, e->r2);
   cnt = (u16)(0 - block);
   reg_w(0xA4, (u8)cnt);
   reg_w(0xA5, (u8)(cnt >> 8));
-  if (p->fifo == 0)
-    fifo_reset();
+}
+
+// Audio 1's format: B6h, B7h's first write (51h or 71h, with its bit 0,
+// as Table 16 has it, or without, or none), then B7h's format
+static void a1_format(const struct pc *p, const struct eng *e) {
+  u8 b7;
+
   reg_w(0xB6, (u8)((e->fmt & FSG) ? 0x00 : 0x80));
-  reg_w(0xB7, (u8)((e->fmt & FSG) ? 0x71 : 0x51));
+  if (p->b7 != 1)
+    reg_w(0xB7, (u8)(((e->fmt & FSG) ? 0x71 : 0x51) & (p->b7 ? 0xFE : 0xFF)));
   b7 = 0xD0;
   if (e->fmt & FSG)
     b7 ^= 0x20;
@@ -1235,6 +1281,13 @@ static void a1_program(const struct pc *p, struct eng *e) {
   if (e->fmt & FST)
     b7 ^= 0x48;
   reg_w(0xB7, (u8)(p->fifo == 2 ? b7 & 0x7F : b7));
+}
+
+// B1h and B2h with their bits 6 and 4, the volume and the DAC's way in
+static void a1_on(const struct pc *p) {
+  u8 v;
+  int r;
+
   r = reg_r(0xB1);
   v = (u8)((r < 0 ? 0 : r) | 0x10);
   reg_w(0xB1, (u8)(p->irq1 ? v | 0x40 : v & ~0x40));
@@ -1242,6 +1295,42 @@ static void a1_program(const struct pc *p, struct eng *e) {
   reg_w(0xB2, (u8)((r < 0 ? 0 : r) | 0x50));
   mix_w(0x14, p->vol1);
   dsp_out(0xD1);
+}
+
+// Audio 1 as the native drivers start it, stopped: B8h, B9h, A8h, A1h,
+// A2h, A4h and A5h, the FIFO emptied, B6h, B7h twice, B1h, B2h, D1h; or in
+// the order of build/ES1869.DRV's player, which writes the format when a
+// device opens, and B8h, the FIFO and the count at each start: A1h, A2h,
+// A8h, B9h, the format, B1h, B2h, D1h, then B8h, the FIFO, A4h and A5h
+static void a1_program(const struct pc *p, struct eng *e) {
+  int r;
+
+  b8_run = (u8)(p->once ? 0x00 : 0x04);
+  if (p->order) {
+    reg_w(0xA1, e->r1);
+    reg_w(0xA2, e->r2);
+    r = reg_r(0xA8);
+    reg_w(0xA8, (u8)(((r < 0 ? 0 : r) & 0xFC) | ((e->fmt & FST) ? 1 : 2)));
+    reg_w(0xB9, p->b9);
+    a1_format(p, e);
+    a1_on(p);
+    reg_w(0xB8, b8_run);
+    if (p->fifo == 0)
+      fifo_reset();
+    a1_count(p, e);
+    return;
+  }
+  reg_w(0xB8, b8_run);
+  reg_w(0xB9, p->b9);
+  r = reg_r(0xA8);
+  reg_w(0xA8, (u8)(((r < 0 ? 0 : r) & 0xFC) | ((e->fmt & FST) ? 1 : 2)));
+  reg_w(0xA1, e->r1);
+  reg_w(0xA2, e->r2);
+  a1_count(p, e);
+  if (p->fifo == 0)
+    fifo_reset();
+  a1_format(p, e);
+  a1_on(p);
 }
 
 // Audio 2 as ES1869.DRV starts it, stopped: 78h, 70h and 72h, 74h and
@@ -1282,6 +1371,8 @@ static void eng_start(const struct pc *p) {
   } else if (en[0].on)
     reg_w(0xB8, (u8)(b8_run | 1));
   if (p->after) {
+    if (p->late)
+      pass_time(p->late);
     if (en[0].on)
       dma_mask(en[0].ch, 0);
     if (en[1].on)
@@ -1491,6 +1582,9 @@ static int pause_on(const struct pc *p, int on) {
   case P_78D:
     mix_w(0x78, (u8)(on ? r78_run & ~0x02 : r78_run));
     return 1;
+  case P_78FD:
+    mix_w(0x78, (u8)(on ? r78_run & ~0x03 : r78_run));
+    return 1;
   case P_D0:
     return dsp_out((u8)(on ? 0xD0 : 0xD4)) == 0;
   }
@@ -1570,29 +1664,20 @@ static void run_play(const struct ecase *c, const struct pc *spec) {
   double t;
 
   if (p->eng & E2) {
-    u8 ch = p->ch2 != 0xFF ? p->ch2 : dma2;
-    if (ch >= 8 || ch == 4 || ch == 2) {
-      res(c->id, R_SKIP, "Audio 2 has no channel (PnP 75h %u)", ch);
+    if (dma2 >= 8 || dma2 == 4 || dma2 == 2) {
+      res(c->id, R_SKIP, "Audio 2 has no channel (PnP 75h %u)", dma2);
       return;
     }
-    if (p->ch2 != 0xFF && p->ch2 != dma2) {
-      if (p->ch2 == dma1) {
-        res(c->id, R_SKIP, "channel %u is Audio 1's", p->ch2);
-        return;
-      }
-      if (pins[0] != p->ch2 && pins[1] != p->ch2 && pins[2] != p->ch2 &&
-          pins[3] != p->ch2) {
-        res(c->id, R_SKIP, "no DMA pin of the card is wired to channel %u",
-            p->ch2);
-        return;
-      }
+    if ((p->packed || p->wide) && dma2 < 4) {
+      res(c->id, R_SKIP,
+          "Audio 2 is on the 8-bit channel %u, as the card is configured",
+          dma2);
+      return;
     }
   }
   tm = sound_marker(syms);
   chip_reset(3);
   ext_on();
-  if (p->ch2 != 0xFF && p->ch2 != dma2)
-    pnp_w(0x75, p->ch2);
   plan(p);
   if (en[0].on)
     fill_tone(&en[0], p->hz1, p->side, 12000);
@@ -1623,8 +1708,6 @@ static void run_play(const struct ecase *c, const struct pc *spec) {
   }
   np = eng_run(p, parts);
   eng_stop();
-  if (p->ch2 != 0xFF && p->ch2 != dma2)
-    pnp_w(0x75, dma2);
   line[0] = 0;
   if (en[0].on)
     ok &= eng_text(line, "a1", &en[0], n1, t1a, t1b, p);
@@ -1852,6 +1935,23 @@ static void run_rst(const struct ecase *c, const struct pc *p) {
 
 // --- the DMA controllers behind the memory manager ---------------------------
 
+// the card's channel for a case's: Audio 1's for an 8-bit one, Audio 2's
+// for a 16-bit one where it is one; 0xFF without. The cases use the
+// channels the card is configured for (PnP 74h and 75h), never another
+// device's
+static u8 card_ch(u8 ch) {
+  if (ch < 4)
+    return dma1;
+  return (u8)(dma2 >= 5 && dma2 <= 7 ? dma2 : 0xFF);
+}
+
+static int no_ch(const struct ecase *c, u8 ch) {
+  if (ch != 0xFF)
+    return 0;
+  res(c->id, R_SKIP, "the card has no 16-bit channel (PnP 75h %u)", dma2);
+  return 1;
+}
+
 static const char *reach_word(int at_write, int at_unmask) {
   return at_write ? "at once" : at_unmask ? "at the unmask" : "not at all";
 }
@@ -1859,11 +1959,13 @@ static const char *reach_word(int at_write, int at_unmask) {
 // a program programs the channel while it is masked, then unmasks it:
 // when the 8237 gets it, and what the program reads back meanwhile
 static void run_reach(const struct ecase *c, const struct pc *p) {
-  u8 ch = p->ch, page, page2;
+  u8 ch = card_ch(p->ch), page, page2;
   u32 addr = C->area + BUF2;
   u16 want_a, want_c, a0, c0, a1, c1, a2, c2, va, vc;
   int w, u;
 
+  if (no_ch(c, ch))
+    return;
   if (!window) {
     dma_mask(ch, 1);
     dma_set(ch, addr, 0x200, DMA_SINGLE | DMA_AUTO | DMA_READ, 0);
@@ -1896,11 +1998,10 @@ static void run_read(const struct ecase *c, const struct pc *p) {
   u16 vc = 0, va = 0, pc, pa;
   int i, same = 0, n = 0;
 
-  if (p->ch != dma1 && p->ch != dma2) {
-    res(c->id, R_SKIP, "channel %u belongs to neither engine", p->ch);
+  q.ch = card_ch(p->ch);
+  if (no_ch(c, q.ch))
     return;
-  }
-  q.eng = (u8)(p->ch == dma1 ? E1 : E2);
+  q.eng = (u8)(q.ch == dma1 ? E1 : E2);
   q.ms = 300;
   chip_reset(3);
   ext_on();
@@ -1919,8 +2020,8 @@ static void run_read(const struct ecase *c, const struct pc *p) {
   eng_start(&q);
   pass_time(30000);
   for (i = 0; i < 16; i++) {
-    dma_read(p->ch, &vc, &va);
-    if (!dma_phys(p->ch, &pc, &pa, NULL))
+    dma_read(q.ch, &vc, &va);
+    if (!dma_phys(q.ch, &pc, &pa, NULL))
       break;
     n++;
     if ((u16)(pc - vc) <= 0x20 || (u16)(vc - pc) <= 0x20)
@@ -1969,8 +2070,10 @@ static const char *ff_word(u8 v) {
 }
 
 static void run_ff(const struct ecase *c, const struct pc *p) {
-  u8 ch = p->ch, r, w;
+  u8 ch = card_ch(p->ch), r, w;
 
+  if (no_ch(c, ch))
+    return;
   if (!window) {
     res(c->id, R_SKIP, "no window on the 8237");
     return;
@@ -1984,18 +2087,25 @@ static void run_ff(const struct ecase *c, const struct pc *p) {
       r, w, r == 0x12 ? "the 8237's" : ff_word(r), ff_word(w));
 }
 
-// a buffer across a page: the memory manager puts its own buffer there
+// a buffer across a page: the memory manager puts its own buffer there;
+// under one, the channel isn't auto-initialized, because EMM386 stops the
+// machine at an auto-initialized transfer that it would have to buffer
+// ("DMA mode not supported")
 static void run_cross(const struct ecase *c, const struct pc *p) {
-  u8 ch = p->ch, page;
+  u8 ch = card_ch(p->ch), page;
+  u8 mode = (u8)(C->flags & ESP_F_EMM386 ? DMA_SINGLE | DMA_READ
+                                         : DMA_SINGLE | DMA_AUTO | DMA_READ);
   u32 addr = C->area + 0xFF80UL;
   u16 pc, pa;
 
+  if (no_ch(c, ch))
+    return;
   // the 16-bit channel's pages are 128 KB: the area's end, or its start
   if (ch >= 4)
     addr = (C->area + 0x10000UL) & 0x1FFFFUL ? C->area - 0x100UL
                                              : C->area + 0xFF00UL;
 
-  dma_set(ch, addr, 0x200, DMA_SINGLE | DMA_AUTO | DMA_READ, 0);
+  dma_set(ch, addr, 0x200, mode, 0);
   dma_mask(ch, 0);
   if (!dma_phys(ch, &pc, &pa, &page)) {
     dma_mask(ch, 1);
@@ -2004,9 +2114,10 @@ static void run_cross(const struct ecase *c, const struct pc *p) {
   }
   dma_mask(ch, 1);
   res(c->id, R_INFO,
-      "512 bytes at %05lXh, across %s: the 8237 got %04X page %02X, count "
-      "%04X (%s)",
-      (unsigned long)addr, ch >= 4 ? "a 128 KB page" : "a 64 KB page", pa, page,
+      "512 bytes at %05lXh, across %s, %s: the 8237 got %04X page %02X, "
+      "count %04X (%s)",
+      (unsigned long)addr, ch >= 4 ? "a 128 KB page" : "a 64 KB page",
+      C->flags & ESP_F_EMM386 ? "single-cycle" : "auto-initialized", pa, page,
       pc,
       (ch >= 4 ? (u32)page << 16 | (u32)pa << 1 : (u32)page << 16 | pa) == addr
           ? "the program's buffer"
@@ -2022,9 +2133,11 @@ static void run_stale(const struct ecase *c, const struct pc *p) {
   struct pc q = *p;
   u32 parts[6], tm;
   u16 cnt, addr, np;
-  u8 page, gch = 5;
+  u8 page, gch = card_ch(5);
   u32 from;
 
+  if (no_ch(c, gch))
+    return;
   spec_base(&q, "a1.");
   q.after = 0;
   tm = sound_marker(syms);
@@ -2053,7 +2166,8 @@ static void run_stale(const struct ecase *c, const struct pc *p) {
       "%lu bytes (%s)",
       (unsigned long)en[0].addr, p->after ? "after" : "before",
       (unsigned long)from, (unsigned long)(cnt + 1) * 2,
-      from == en[0].addr ? "the game's" : "stale");
+      from == en[0].addr && (u32)(cnt + 1) * 2 == en[0].sbytes ? "the game's"
+                                                               : "stale");
   put("%-20s spec  %s", c->id, c->spec);
   sound_line(c->id, syms, tm, parts, np, c->expect);
 }
@@ -2285,6 +2399,14 @@ static void run_stream(const struct ecase *c, const struct pc *p) {
   if (mirror)
     q.eng = E1;
   e = &en[(q.eng & E2) ? 1 : 0];
+  gch = mirror ? card_ch(5) : 0;
+  if (mirror && no_ch(c, gch))
+    return;
+  if ((q.wide || q.packed) && dma2 < 4) {
+    res(c->id, R_SKIP,
+        "Audio 2 is on the 8-bit channel %u, as the card is configured", dma2);
+    return;
+  }
   tm = sound_marker(syms);
   chip_reset(3);
   ext_on();
@@ -2295,7 +2417,8 @@ static void run_stream(const struct ecase *c, const struct pc *p) {
   e->sbytes = (u16)(e->frames * frame_bytes(e->fmt));
   e->units =
       e->ch >= 4 ? (u16)(e->spread ? e->sbytes : e->sbytes / 2) : e->sbytes;
-  gch = mirror ? 5 : e->ch;
+  if (!mirror)
+    gch = e->ch;
   if (mirror)
     e->addr = C->area + BUF2;
   glide_init(&g, e->rate);
@@ -2357,8 +2480,8 @@ static void run_stream(const struct ecase *c, const struct pc *p) {
 // --- the run -----------------------------------------------------------------
 
 static unsigned group_of(const char *id) {
-  static const char *const names[] = {"env",  "rst", "a1", "a2",
-                                      "both", "h1",  "h4", "stream"};
+  static const char *const names[] = {"env", "rst", "a1",     "a2", "both",
+                                      "h1",  "h4",  "stream", "fix"};
   unsigned i, n;
 
   for (i = 0; i < ESS_ARRAY_SIZE(names); i++) {
@@ -2472,8 +2595,8 @@ static void summary(void) {
 
 int esp_run(const struct esp_hal *hal, const struct esp_card *card,
             unsigned opts, unsigned groups, const char *only) {
-  static const char *const gname[] = {"env",  "rst", "a1", "a2",
-                                      "both", "h1",  "h4", "stream"};
+  static const char *const gname[] = {"env", "rst", "a1",     "a2", "both",
+                                      "h1",  "h4",  "stream", "fix"};
   static const char *const gwhat[] = {
       "the machine and the card",
       "what each reset clears",
@@ -2482,7 +2605,8 @@ int esp_run(const struct esp_hal *hal, const struct esp_card *card,
       "both engines at once",
       "the DMA controllers behind the memory manager",
       "what the engines do to the machine",
-      "a game's refills behind the count"};
+      "a game's refills behind the count",
+      "which start keeps a 16-bit stream in step"};
   u16 i;
   unsigned g, last_g = 0;
   int v;

@@ -8,7 +8,7 @@ these operations ([SB16.md](SB16.md#the-fronts-on-the-es1869)), and essprobe
 measures what the sources leave open ([ESSPROBE.md](ESSPROBE.md)).
 
 Each fact names its source. Where only the card can tell, the fact also
-names the essprobe cases that measure it, such as `a2.ch5`, and once a
+names the essprobe cases that measure it, such as `a2.wide`, and once a
 report of the probe has come back, what the card did follows as "Measured".
 Nothing on this page is copied from the sources' code.
 
@@ -142,8 +142,9 @@ it once, whatever bit 5 says. So there are two models of Audio 2 on a 16-bit
 channel: the low byte of each word, as ESS's drivers use it without bit 5,
 and the whole word, as NetBSD and 86Box use it with bit 5. DOSBox-X's notes
 say that ESS's chips use the 8-bit channel even for 16-bit sound. Probe:
-`a2.ch5` (the spread buffer), `a2.packed` (a game's 16-bit buffer as it is),
-`a2.wide` and `a2.wide_packed` (78h bit 5 set).
+`a2.base` on a card with Audio 2 on a 16-bit channel (the spread buffer),
+`a2.packed` (a game's 16-bit buffer as it is), `a2.wide` and
+`a2.wide_packed` (78h bit 5 set).
 
 Card register 25h bit 7 turns on the DRQ latch, which holds each audio DRQ
 high until a DACK pulse comes while the chip's own request is low, a
@@ -544,8 +545,7 @@ Probe: `a2.f8m` to `a2.u16` (the formats), `a2.r8000` to `a2.r48000`,
 `a2.t2_0`, `a2.t2_1` and `a2.t2_3` (78h bits 7:6, the base case being 10),
 `a2.dmd` (the 8237 in demand mode as well, ESS's own setup), `a2.slaved`
 (71h bit 1 clear), `a2.x4`, `a2.fb` (the filter), `a2.once`, `a2.pause_f`
-and `a2.pause_d` (78h bits 0 and 1), `a2.irq_off`, `a2.noack`, and `a2.ch0`
-to `a2.ch3` (Audio 2 on each 8-bit channel that a pin is wired to).
+and `a2.pause_d` (78h bits 0 and 1), `a2.irq_off` and `a2.noack`.
 
 ## Both channels at once
 
