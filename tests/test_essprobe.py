@@ -323,9 +323,13 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(skips, ["a2.ch0", "a2.ch1", "a2.ch3"])
 
     def test_undefined_uses(self):
-        """the chip sees only 78h bit 5, the DMA only the wrong way round"""
+        """the chip sees only 78h bit 5 and D0h and D4h in Extended mode,
+        which a1.pause_d0 looks for, and the DMA runs the wrong way round
+        only where h4.wrong asks for it"""
         self.assertEqual({w for _t, w in self.card.chip.violations},
-                         {"78h bit 5, which the data sheet reserves"})
+                         {"78h bit 5, which the data sheet reserves",
+                          "Compatibility command D0h in Extended mode",
+                          "Compatibility command D4h in Extended mode"})
         self.assertEqual({(ch, mode & 0x0C) for ch, mode in
                           self.card.chip.dmac.bad}, {(1, 0x04), (5, 0x04)})
 

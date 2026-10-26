@@ -20,9 +20,28 @@ Nothing on this page is copied from the sources' code.
   An address such as 6:28AC is a segment and offset in `ES1869.DRV`, as in
   [DRIVER_CONFIG.md](DRIVER_CONFIG.md), and one such as o5:3594 an object
   and offset in `ES1869.VXD`, as in [VXD_INTERNALS.md](VXD_INTERNALS.md).
-* **Linux's ALSA driver**, `sound/isa/es18xx.c`, which programs the chip in
-  Extended mode, as [AUDIO1.md](AUDIO1.md#programming-the-audio-1-dac)
-  compares it.
+* **Drivers by others** that program the chip in Extended mode, each at the
+  revision given, and named here as they are named in the text:
+  * es18xx: Linux's ALSA driver, `sound/isa/es18xx.c` at commit
+    2687c848e578, with `sound/core/isadma.c`
+    (https://github.com/torvalds/linux/blob/2687c848e578/sound/isa/es18xx.c);
+  * es1938: its driver of ESS's PCI Solo-1, a chip with the same two audio
+    channels, `sound/pci/es1938.c` at the same commit;
+  * NetBSD: `sys/dev/isa/ess.c` revision 1.91, with `essreg.h`
+    (https://github.com/NetBSD/src/blob/trunk/sys/dev/isa/ess.c);
+  * OSS: Linux 2.4.37.11's `drivers/sound/sb_ess.c`
+    (https://github.com/ReliefLabs/EasyTomato/blob/128481a88bef18a8fdf7f581e4cff02eee2bce6d/release/src/linux/linux/drivers/sound/sb_ess.c);
+  * Allegro: Allegro 4.4's `src/dos/essaudio.c`, with `sb.c` and `dma.c`
+    (https://github.com/liballeg/allegro5/blob/8796dd2d243b1027e7f65a0657f694dbf8d6ec5d/src/dos/essaudio.c);
+  * Impulse Tracker: its `SoundDrivers/ES1869.ASM`, which ES1868.ASM
+    matches, and ES1688.ASM
+    (https://github.com/jthlim/impulse-tracker/blob/master/SoundDrivers/ES1869.ASM).
+* **Emulators**: DOSBox-X's `src/hardware/sblaster.cpp` at commit
+  5f3ac7de3bfe
+  (https://github.com/joncampbell123/dosbox-x/blob/5f3ac7de3bfe0e0a9db4445917e4d4062f0cea99/src/hardware/sblaster.cpp),
+  and 86Box's `src/sound/snd_sb.c`, `snd_sb_dsp.c` and `snd_solo1.c` at
+  commit 236252e79721
+  (https://github.com/86Box/86Box/blob/236252e79721d314b6b019bdbf5e29ed65d63f04/src/sound/snd_sb.c).
 * **The first report** of `sb16test` from the card, which measured the rates
   of A1h ([SB16.md](SB16.md#rates)).
 
@@ -82,6 +101,17 @@ Four successive reads of mixer 40h return 18h, 69h and then Config_Base's
 high and low bytes (DS p.43). DSP command E1h returns 3 and 1, the Sound
 Blaster Pro's version (DS p.74).
 
+The data sheet doesn't list E7h, which the drivers ask first. es18xx
+(`snd_es18xx_identify`) takes 48h for an ES488 and 68h with a low nibble
+under 8 for an ES688, then reads mixer 40h twice: two different bytes are
+the chip's number, and the next two its control port. NetBSD and OSS tell
+the chips apart with the same reads and with probes of mixer 64h and 70h.
+Impulse Tracker's ES1688 driver expects 68h and then 88h to 8Fh. DOSBox-X
+answers E7h with 68h and 84h or 89h, and 86Box with 68h and 8Bh, which its
+notes give as a real ES1688's. es18xx gives only the ES1869 and the ES1879,
+of the 186x and 187x chips, the new rates and the second channel. Probe:
+`env.card`.
+
 ## DMA channels and interrupts
 
 The chip has four DRQ and DACK pin pairs. Card registers 23h (pins B and A)
@@ -101,7 +131,17 @@ low byte. ESS's drivers nevertheless play Audio 2 on channel 5, with each
 byte of the sound in the low byte of a word of a buffer twice as long:
 ES1869.DRV copies the sound so at 1:1B82, and ES1869.VXD at `L5_3309` for
 DirectSound (VXD_INTERNALS.md). On such a channel the 8237 counts words,
-which are bytes to the chip. Mixer 78h bit 5 is reserved (DS p.65). Probe:
+which are bytes to the chip. Mixer 78h bit 5 is reserved (DS p.65).
+
+The drivers by others set 78h bit 5 for Audio 2 on a 16-bit channel instead:
+es18xx writes B3h there, with its counts in bytes and a note that 16-bit DMA
+"seems broken" and wasn't tested, NetBSD writes the count in words ("use
+word count for 16 bit DMA"), and OSS sets bit 5 and 7Dh with its counts in
+bytes. 86Box's model takes a word a DMA cycle on a 16-bit channel and counts
+it once, whatever bit 5 says. So there are two models of Audio 2 on a 16-bit
+channel: the low byte of each word, as ESS's drivers use it without bit 5,
+and the whole word, as NetBSD and 86Box use it with bit 5. DOSBox-X's notes
+say that ESS's chips use the 8-bit channel even for 16-bit sound. Probe:
 `a2.ch5` (the spread buffer), `a2.packed` (a game's 16-bit buffer as it is),
 `a2.wide` and `a2.wide_packed` (78h bit 5 set).
 
@@ -177,10 +217,19 @@ p.63-64). The register pages add (DS p.64-70):
 
 ES1869.DRV resets the chip with 3 and then 0 and sends C6h (1:11A0), which
 clears the controller registers (DRIVER_CONFIG.md). ES1869.VXD writes 1,
-reads the port three times and writes 0 (`DSP_Reset`, o5:195C). Probe:
-`rst.ext` (3), `rst.compat` (1), `rst.fifo` (2) and `rst.mixer` (mixer 00h)
-set known values in 70h to 7Ch, the levels and A1h to B9h, then reset, and
-report what changed.
+reads the port three times and writes 0 (`DSP_Reset`, o5:195C).
+
+The drivers by others reset the chip with 3 and then 0, a few reads apart,
+and send C6h after it. es18xx resets the chip only when it identifies it
+(`snd_es18xx_identify`), and only the FIFO for a stream (+6 = 2, a read,
+then 0). es1938 resets it at its start (`snd_es1938_reset`) and Allegro when
+it starts (`ess_init`), and Impulse Tracker and OSS reset it before each
+playback and to stop one. OSS's notes say that a reset leaves 7Ah, 7Dh and
+7Fh alone, against the data sheet. DOSBox-X ends Extended mode at a reset as
+the data sheet does, but 86Box keeps it until C7h. Probe: `rst.ext` (3),
+`rst.compat` (1), `rst.fifo` (2) and `rst.mixer` (mixer 00h) set known
+values in 70h to 7Ch, the levels and A1h to B9h, then reset, and report what
+changed.
 
 ## Audio 1
 
@@ -222,13 +271,39 @@ sets the DAC to its middle with 10h 80h, waits 25 ms and sends D1h, and it
 ends each transfer with 10h 80h, so that the next one starts from the middle
 level (DS p.15-16).
 
-ESS's drivers never play on Audio 1 (AUDIO1.md). Linux's driver starts Audio
-1 in this order too, and differs in the details that AUDIO1.md compares with
+ESS's drivers never play on Audio 1 (AUDIO1.md). The drivers by others do,
+in about the data sheet's order, and AUDIO1.md compares es18xx's with
 `build/ES1869.DRV` ([Programming the Audio 1
-DAC](AUDIO1.md#programming-the-audio-1-dac)): a FIFO reset (+6 = 2, then 0)
-in place of the full reset, B9h = 02h, B6h and B7h for signed samples the
-other way round from Table 16, B1h and B2h written as 50h, and D1h sent
-once, at initialization.
+DAC](AUDIO1.md#programming-the-audio-1-dac)):
+* **es18xx** writes C6h, B9h = 02h, B1h and B2h = 50h and D1h once, at its
+  start (`snd_es18xx_initialize`). For each stream
+  (`snd_es18xx_playback2_prepare`) it resets the FIFO, then writes A8h's
+  bits 1:0, A1h and A2h, A4h and A5h, B6h, and B7h twice, 51h or 71h and
+  then 90h with 40h for mono or 08h for stereo, 04h for 16 bits and 20h for
+  signed samples. It starts with B8h = 05h and stops with 00h.
+* **es1938** goes the same way, but its second write of 51h or 71h goes to
+  B6h, not to B7h, before B7h's format (`snd_es1938_playback2_prepare`).
+* **NetBSD** writes B7h once, without B6h or a first write, and in another
+  order: A8h, B7h, the 8237, A4h and A5h, B9h, D1h, and B8h with bits 0 and
+  2 last (`ess_audio1_trigger_output`). It stops with B8h bit 0 cleared.
+* **Allegro** resets the chip, sends C6h, and writes A1h, A2h, B8h = 04h,
+  A8h, B6h = 00h, B7h = 71h and then 9Ch, B9h = 02h, B1h and B2h ORed with
+  50h, and starts the 8237. Each playback then writes A4h and A5h and B8h =
+  05h, and D1h comes 100 ms later (`ess_init`, `ess_play_buffer`). Its
+  samples are unsigned, and only the second B7h says so: B6h = 00h and the
+  first write of 71h are the values that the others use for signed samples.
+* **Impulse Tracker** resets the chip, then sends C6h, B8h = 04h, A8h, B9h =
+  02h, A1h, A2h = FEh, A4h and A5h, B6h = 00h, B7h = 71h and then BCh or
+  F4h, B1h = 50h, B2h = 50h, D1h, and B8h bit 0 (`StartESS`). It stops with
+  a reset.
+* **OSS** resets the chip, sends C6h, writes A1h and A2h, B8h = 04h, A8h,
+  B9h = 02h, B6h and B7h twice from a table, B1h and B2h, and D1h, and
+  starts with A4h and A5h and B8h's bits 0 and 2
+  (`ess_audio_prepare_for_output_audio1`). It stops with a reset.
+
+Every one of them writes B9h = 02h and sets B8h bit 0 last, and each
+acknowledges an interrupt with a read of Audio_Base+Eh; NetBSD checks +Ch
+bit 0 first.
 
 ### The registers
 
@@ -239,14 +314,26 @@ once, at initialization.
   at which 22050 and 44100 Hz come out exactly. With mixer 71h bit 5 set,
   A1h works as 70h does instead. ES1869.DRV's rate routine (6:1FF4) uses the
   high clock above 22050 Hz, and its recording sets 71h bit 5 for 48000 Hz
-  only (6:22D3). Probe: `a1.r8000` to `a1.r48000`, `a1.lo44100` and
-  `a1.hi22050` (the other clock), `a1.new48000` (71h bit 5).
+  only (6:22D3). es18xx takes 397722 and 795444 Hz for the old clocks, and
+  on the ES1869 and the ES1879 it sets 71h bit 5, with 793800 Hz for bit 7
+  clear and 768000 Hz over 256 minus the value for bit 7 set
+  (`snd_es18xx_rate_set`); NetBSD uses the new clocks too, 793800 Hz for
+  rates that aren't multiples of 8000 and 768000 Hz for those that are
+  (`ess_srtotc`). OSS gives the ES1869 the old clocks, switching at 22000
+  Hz, with its write of 71h bit 5 left out ("For ES1869 only???"), Allegro
+  the old ones switching at 22094 Hz, and Impulse Tracker only the high one.
+  Probe: `a1.r8000` to `a1.r48000`, `a1.lo44100` and `a1.hi22050` (the other
+  clock), `a1.new48000` (71h bit 5).
 * **A2h, the filter** (DS p.68, p.72). The filter's clock is 7.16 MHz over
   256 minus the value, and its roll-off is the clock over 82, best at 80 to
   90 percent of half the rate. For the high clock's divisors 18 to 35,
   ES1869.DRV takes the value from one of two tables, which its flag for the
   direction picks, one for playback (DGROUP 4Eh) and one for recording
-  (60h), and otherwise computes it (6:1FF4, 6:2308).
+  (60h), and otherwise computes it (6:1FF4, 6:2308). es18xx and es1938 write
+  256 minus 7.16 MHz times 20 over 8 times 82 times the rate, a roll-off at
+  80 percent, NetBSD 256 minus 200279 over the rate, at 87 percent
+  (`ess_srtofc`), OSS and Allegro about 90 percent, and Impulse Tracker
+  always FEh.
 * **A4h and A5h, the count** (DS p.68). They reload a 16-bit counter, which
   counts up once for each byte that the DMA moves, so a block is at most
   65536 bytes. At its overflow the counter reloads; in auto-initialize mode
@@ -305,9 +392,21 @@ acknowledged (SB16.md). The interrupt sets +Ch bit 0 and Config_Base+6 bit
 0, and a read of +Eh clears it (DS p.17, p.41). Probe: `a1.noack` (never
 acknowledged).
 
-The data sheet has no pause in Extended mode: its D0h and D4h pause and
-continue Compatibility mode's DMA (DS p.73). A front can pause through B2h
-bit 6, which keeps the chip's state, or through B8h bit 0, the DMA's reset.
+The 8237's count gives the position. es18xx's `snd_dma_pointer` masks the
+channel and reads the count twice, keeping the larger value, es1938 reads it
+until two reads agree, and Allegro reads it twice and again while the two
+differ by more than 40h (`_dma_todo`). Impulse Tracker counts the blocks
+instead.
+
+The data sheet's command list gives D0h and D4h as the pause and the
+continue of the DMA (DS p.73), and its steps for Extended mode count "DMA
+pause/continue" among the commands to send during a transfer (DS p.48), but
+its comparison of the modes counts only D1h and D3h as safe with Extended
+mode transfers (DS p.44). OSS pauses an Extended mode transfer with D0h and
+starts it anew to continue (`ess_audio_trigger`). The others never pause. A
+front can pause through B2h bit 6, which keeps the chip's state, through B8h
+bit 0, the DMA's reset, or perhaps through D0h. Probe: `a1.pause_b2`,
+`a1.pause_b8`, `a1.pause_d0`.
 
 ### Commands while the DMA runs
 
@@ -417,6 +516,30 @@ minus 199582 over the rate, rounded down, or FDh at 44100 and 48000 Hz
 (o5:34F6). When the DSP changes hands it sets 71h bits 4 and 1 and clears
 74h, 76h, 78h and 7Ah (VXD_INTERNALS.md).
 
+### What drivers by others do
+
+The drivers by others write the same registers, with these differences:
+* **es18xx** writes 70h, A2h and 72h for the rate, with a note from OSS that
+  72h doesn't seem to work, then 74h and 76h in bytes, 7Ah's bits 2:0, and
+  78h = 93h to start and 00h to stop (`snd_es18xx_playback1_prepare`,
+  `snd_es18xx_playback1_trigger`). 7Ch is written only in a mode that is
+  never built, and 71h = 32h at its start sets bit 1, Audio 2's own rate,
+  with 4x oversampling and A1h's new mode.
+* **es1938** writes 78h = 92h, waits 10 us and writes 93h, because the data
+  sheet's single 13h "randomly swaps" the stereo channels, and the two steps
+  give the FIFO's way to the DAC time to settle before the DMA's data comes
+  (`snd_es1938_playback1_trigger`).
+* **NetBSD** writes 78h once, with demand transfers of 8 bytes,
+  auto-initialize and bits 1:0, D3h, plus bit 5 on a 16-bit channel
+  (`ess_audio2_trigger_output`), and stops by clearing bits 1:0.
+* **OSS** writes 78h's demand transfers of 8 bytes and auto-initialize
+  first, D0h, and sets bits 1:0 to start.
+
+86Box's model plays while 78h bits 1:0 are set, and suspends while bit 2 is
+set or bits 1:0 are clear; 7Ah bits 7:6 both set give a test interrupt, and
+an ES1869 with 71h bit 1 clear plays Audio 2 at Audio 1's rate. Probe:
+`a2.start2` and `a2.left2` (78h's bit 1 before bit 0, as es1938 starts it).
+
 Probe: `a2.f8m` to `a2.u16` (the formats), `a2.r8000` to `a2.r48000`,
 `a2.t2_0`, `a2.t2_1` and `a2.t2_3` (78h bits 7:6, the base case being 10),
 `a2.dmd` (the 8237 in demand mode as well, ESS's own setup), `a2.slaved`
@@ -431,6 +554,15 @@ p.52). With the same count in A4h and A5h and in 74h and 76h, one interrupt
 serves both, and the steps start the playback first, so that its FIFO fills
 before the recording's first interrupt. The data sheet describes no playback
 on both DACs.
+
+es18xx's notes say that on the ES1869, with both channels playing 16-bit
+stereo at 44.1 kHz, Audio 1's DMA slows down irregularly and its sound is
+garbled, as it is when Audio 1 records meanwhile; that Windows' driver uses
+Audio 1 only to record; and that the ES1869's two rates are independent,
+against the data sheet, while the ES1868's are one. OSS's notes say that 78h
+survives a reset, so that Audio 2 plays on from Audio 1's DMA channel when
+both share it. The ES1869's case of es18xx's notes is the probe's
+`both.base`.
 
 ESS's drivers play only on Audio 2. `build/ES1869.DRV`'s dual playback plays
 on both, with Audio 2 slaved to Audio 1's clock through 71h bit 1, 4x
@@ -511,3 +643,19 @@ The data sheet contradicts itself, or ESS's drivers, in these places:
   ES1869.DRV writes it before the start (6:2D6D).
 * ES1869.VXD sends C3h, which returns a status byte, and C2h 01h, neither in
   the data sheet, before it restores a DOS box's mixer (VXD_INTERNALS.md).
+* D0h and D4h pause and continue an Extended mode transfer by the steps (DS
+  p.48) and OSS, but aren't safe with one by the comparison of the modes (DS
+  p.44). Probe: `a1.pause_d0`.
+* 78h bit 5 is reserved (DS p.65), and es18xx, NetBSD and OSS set it on a
+  16-bit channel, where NetBSD counts words and es18xx and OSS bytes. Probe:
+  `a2.wide`, `a2.wide_packed`.
+* A reset clears 7Ah (DS p.65), and OSS's notes say it doesn't. Probe:
+  `rst.ext`, `rst.compat`.
+* A reset ends Extended mode (DS p.43), as DOSBox-X has it, and 86Box keeps
+  it until C7h.
+* The data sheet writes 78h's bits 1:0 at once (DS p.52), and es1938 one
+  after the other, because the stereo channels can swap otherwise. Probe:
+  `a2.start2`, `a2.left2`.
+* The second B7h write's value is the FIFO's format for every driver, but
+  es1938 writes the first one's 51h or 71h to B6h, and NetBSD writes no
+  first one at all.

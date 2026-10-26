@@ -31,18 +31,19 @@ such as `t2=0` for Audio 2's single transfers.
   Hz by default, then each format, rates from 8000 to 48000 Hz on both
   clocks and in the new A1h mode, a single block, single and demand
   transfers (B9h, and the 8237's demand mode), the FIFO kept or filled
-  first, the pauses through B2h and B8h, the DMA unmasked after the start,
-  each side alone, and the interrupt off or never acknowledged.
+  first, the pauses through B2h, B8h and D0h, the DMA unmasked after the
+  start, each side alone, and the interrupt off or never acknowledged.
 * **a2**: Audio 2 alone, on the card's channel, with the same variations,
   its transfer types (78h bits 7 and 6), the 8237's demand mode with demand
   transfers of 4 bytes as ESS's drivers program it (`a2.dmd`), its slaving
-  to Audio 1's clock (71h bit 1), 4x oversampling, its filter, and its
-  pauses through 78h. On a 16-bit channel each byte of the sound goes into
-  the low byte of a word, as ESS's drivers do; `a2.packed` gives it a game's
-  own 16-bit buffer, and `a2.wide` and `a2.wide_packed` set 78h bit 5, which
-  the data sheet reserves and Linux calls 16-bit DMA. The `a2.chN` cases
-  move Audio 2 to another channel where one of the card's DMA pins is wired
-  to it.
+  to Audio 1's clock (71h bit 1), 4x oversampling, its filter, its pauses
+  through 78h, and a start in two steps, 78h's DMA before its FIFO's way to
+  the DAC (`a2.start2`, `a2.left2`). On a 16-bit channel each byte of the
+  sound goes into the low byte of a word, as ESS's drivers do; `a2.packed`
+  gives it a game's own 16-bit buffer, and `a2.wide` and `a2.wide_packed`
+  set 78h bit 5, which the data sheet reserves and Linux calls 16-bit DMA.
+  The `a2.chN` cases move Audio 2 to another channel where one of the card's
+  DMA pins is wired to it.
 * **both**: Audio 1 at 294 Hz and Audio 2 at 882 Hz at once, on their own
   clocks or slaved, in mixed formats and transfer types, and with Audio 2
   muted, as `esssb16`'s withdrawn pace ran it.
@@ -90,7 +91,7 @@ first. `/N` runs without the window.
    `esssb16`. Set `BLASTER` with the card's base, such as
    `SET BLASTER=A220 I5 D1 H5 P330 T6`.
 2. Run `ESSPROBE /S` for the short run, about a minute, then `ESSPROBE` for
-   all 102 cases, about three minutes. Each writes `ESSPROBE.TXT`; `/O:file`
+   all 105 cases, about three minutes. Each writes `ESSPROBE.TXT`; `/O:file`
    names another, such as `/O:FULL.TXT`. Esc stops at any time.
 3. Run the full probe once more without EMM386, with its `DEVICE=` line
    taken out of `CONFIG.SYS`, as `ESSPROBE /O:REAL.TXT`. Without a memory

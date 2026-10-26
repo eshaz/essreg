@@ -731,7 +731,7 @@ enum {
 #define E2 0x02 // Audio 2
 
 // the pauses
-enum { P_NONE, P_B2, P_B8, P_78F, P_78D };
+enum { P_NONE, P_B2, P_B8, P_78F, P_78D, P_D0 };
 
 // a case's spec, parsed
 struct pc {
@@ -756,6 +756,7 @@ struct pc {
   u8 irq1, irq2;    // the engines' interrupts on
   u8 noack;         // never acknowledged
   u8 after;         // the DMA unmasked after the start
+  u8 start2;        // Audio 2 started in two steps: 78h bit 1, then bit 0
   u16 ms;           // how long it plays
   u8 side;          // 0, 'l' or 'r'
   u16 hz1, hz2;     // the tones, 0 for none
@@ -806,6 +807,7 @@ static const struct ecase cases[] = {
     {"a1.prime", "fifo=prime", "tone"},
     {"a1.pause_b2", "pause=b2 S", "pause"},
     {"a1.pause_b8", "pause=b8", "pause"},
+    {"a1.pause_d0", "pause=d0", "any"},
     {"a1.after", "after S", "tone"},
     {"a1.left", "side=l", "left"},
     {"a1.right", "side=r S", "right"},
@@ -836,6 +838,8 @@ static const struct ecase cases[] = {
     {"a2.after", "after", "tone"},
     {"a2.left", "side=l", "left"},
     {"a2.right", "side=r", "right"},
+    {"a2.start2", "start2", "tone"},
+    {"a2.left2", "side=l start2", "left"},
     {"a2.irq_off", "irq=0", "tone"},
     {"a2.noack", "noack", "tone"},
     {"a2.muted", "v2=0", "none"},
@@ -1011,6 +1015,8 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
       p->pause = P_78F;
     else if (!strcmp(v, "d"))
       p->pause = P_78D;
+    else if (!strcmp(v, "d0"))
+      p->pause = P_D0;
     else
       return 0;
   } else if (IS("irq"))
@@ -1023,6 +1029,8 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
     p->noack = 1;
   else if (IS("after"))
     p->after = 1;
+  else if (IS("start2"))
+    p->start2 = 1;
   else if (IS("ms"))
     p->ms = (u16)n;
   else if (IS("side") && v != NULL && (!strcmp(v, "l") || !strcmp(v, "r")))
@@ -1265,9 +1273,13 @@ static void eng_start(const struct pc *p) {
     reg_w(0xB8, (u8)(b8_run | 1));
     mix_w(0x78, r78_run);
     H->unlock();
-  } else if (en[1].on)
+  } else if (en[1].on) {
+    if (p->start2) { // the DMA first, the FIFO onto the DAC 10 us later
+      mix_w(0x78, (u8)(r78_run & ~0x01));
+      pass_time(10);
+    }
     mix_w(0x78, r78_run);
-  else if (en[0].on)
+  } else if (en[0].on)
     reg_w(0xB8, (u8)(b8_run | 1));
   if (p->after) {
     if (en[0].on)
@@ -1479,6 +1491,8 @@ static int pause_on(const struct pc *p, int on) {
   case P_78D:
     mix_w(0x78, (u8)(on ? r78_run & ~0x02 : r78_run));
     return 1;
+  case P_D0:
+    return dsp_out((u8)(on ? 0xD0 : 0xD4)) == 0;
   }
   return 0;
 }
