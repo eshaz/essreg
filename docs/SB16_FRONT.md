@@ -164,8 +164,11 @@ and a length. Each becomes a transfer of its kind (`xfer`,
    auto-initialize as the command says and the transfer type. Audio 2 is
    RUN.
 
-A single-cycle block that follows one in the same format on Audio 1 goes on
-from it without FIFO, because the FIFO still holds the last block's end.
+An engine stays RUN when its single-cycle block ends: the chip stops by
+itself, and the engine is IDLE again only with the next transfer that stops
+it or the game's reset. A single-cycle block that follows one in the same
+format on Audio 1 goes on from it without FIFO, because the FIFO still holds
+the last block's end, and 82h names the ended block's interrupt by its kind.
 
 A 16-bit block of more than 32768 samples starts in halves (`half_count`):
 the counter gets half the block's bytes, the chip auto-initializes also for
