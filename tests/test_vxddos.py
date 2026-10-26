@@ -1262,7 +1262,7 @@ class SoundBlaster16Test(VxDBuilds, unittest.TestCase):
         self.assertEqual(self.mixer(m, 0x30), 0xF8)     # 5 bits
         self.assertEqual(m.hw.mixer[0x60], 0x3E)        # its level again
         self.cmd(m, 0xB6, 0x30, 0xFF, 0x0F)
-        self.assertEqual(m.hw.ctrl[0xA1], clocks(248, True)[0])  # 44100 Hz
+        self.assertEqual(m.hw.ctrl[0xA1], clocks(248)[0])  # 44100 Hz
         # a new program in the VM starts over, from Windows' levels and the
         # DSP's cold boot
         m.program_end(VM_DOS)
@@ -1271,7 +1271,7 @@ class SoundBlaster16Test(VxDBuilds, unittest.TestCase):
         m.outb(VM_DOS, 0x226, 0)
         self.assertEqual(self.mixer(m, 0x30), 0xB0)
         self.cmd(m, 0xB6, 0x30, 0xFF, 0x0F)
-        self.assertEqual(m.hw.ctrl[0xA1], clocks(0x38, True)[0])  # 9958 Hz
+        self.assertEqual(m.hw.ctrl[0xA1], clocks(0x38)[0])  # 9958 Hz
 
     def test_the_virtual_sound_blaster_is_one_too(self):
         # a recording took the DSP: the program's Sound Blaster 16 commands

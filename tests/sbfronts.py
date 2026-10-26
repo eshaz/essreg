@@ -57,16 +57,17 @@ DOS_MIXER = {0x60: 0x3A, 0x62: 0x7A, 0x14: 0xAB, 0x36: 0xCD, 0x38: 0x12,
 # A1h and A2h for the rate generator's value v (v * 44100 / 248 Hz), as
 # ES1869.DRV picks them for a rate: the 397.7 kHz clock up to 22050 Hz, the
 # 795.5 kHz one above, and the filter's divider from ESS's tables for the
-# fast clock's divisors 18 to 35, else 7.16 MHz over 35.9 times the rate
-FILTER_STEREO = (3, 5, 5, 5, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9)
-FILTER_MONO = (3, 5, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 10, 10)
+# fast clock's divisors 18 to 35, one for playback and one for recording
+# (6:2308), else 7.16 MHz over 35.9 times the rate
+FILTER_PLAY = (3, 5, 5, 5, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9)
+FILTER_REC = (3, 5, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 10, 10)
 
 
 def half_up(x):
     return int(x + 0.5)
 
 
-def clocks(v, stereo):
+def clocks(v, record=False):
     rate = v * 44100 / 248
     if v <= 124:
         d = half_up(397700 / rate)
@@ -75,7 +76,7 @@ def clocks(v, stereo):
         d = half_up(795500 / rate)
         a1 = 256 - d
     if v > 124 and 18 <= d <= 35:
-        n = (FILTER_STEREO if stereo else FILTER_MONO)[d - 18]
+        n = (FILTER_REC if record else FILTER_PLAY)[d - 18]
     else:
         n = half_up(1122.5 / v)
     return a1, (256 - n) & 0xFF

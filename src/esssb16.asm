@@ -1246,8 +1246,8 @@ rate_to_v:
 ; A1h and A2h for the rate v * 44100 / 248 Hz, as ES1869.DRV picks them
 ; for a rate (6:1FF4): the 795.5 kHz clock above 22050 Hz, the 397.7 kHz
 ; one up to it, and the filter clock from its tables between 22 and 44
-; kHz, else 7.16 MHz over 35.9 times the rate; stereo as A8h has it.
-; Clobbers AX, DX, SI
+; kHz, the playback one or, for a recording (xbits bit 3), the recording
+; one (6:2308), else 7.16 MHz over 35.9 times the rate. Clobbers AX, DX, SI
 a1_clocks:
         push    bx
         push    cx
@@ -1269,10 +1269,10 @@ a1_clocks:
         jb      .general
         cmp     cx,35
         ja      .general
-        mov     si,filter_stereo - 18
-        test    byte [V(ctrl)+0x07],0x01
-        jnz     .table
-        mov     si,filter_mono - 18
+        mov     si,filter_play - 18
+        test    byte [V(xbits)],0x08
+        jz      .table
+        mov     si,filter_rec - 18
 .table: add     si,cx
         mov     al,[si]
         jmp     short .a2
@@ -1291,9 +1291,10 @@ a1_clocks:
         shr     ax,1
         ret
 
-; ES1869.DRV's filter dividers for the 795.5 kHz clock's divisors 18 to 35
-filter_stereo:  db 3, 5, 5, 5, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9
-filter_mono:    db 3, 5, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 10, 10
+; ES1869.DRV's filter dividers for the 795.5 kHz clock's divisors 18 to
+; 35: for playback (DGROUP 4Eh) and for recording (60h)
+filter_play:    db 3, 5, 5, 5, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9
+filter_rec:     db 3, 5, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 10, 10
 
 ; --- the game's transfers: Audio 1 in Extended mode, and Audio 2 ----------
 

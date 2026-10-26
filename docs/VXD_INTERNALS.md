@@ -766,7 +766,7 @@ it by hand:
    `ES1869VX.ORG` in the same directory, the name essinst uses too.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
 3. Restart Windows. essctl's *Device information* page now shows "Register
-   API: version 1.18".
+   API: version 1.19".
 
 If sound stops working, run `essinst /restore`. If Windows doesn't start,
 restart, press F8 at "Starting Windows 95", choose *Command prompt only*,

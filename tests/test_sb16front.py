@@ -111,7 +111,7 @@ class FrontChecks:
         cmds = chip.commands
         self.assertEqual(cmds[:2], [(0xC6,), (0xD1,)])
         w = written(chip)
-        self.assertEqual((w[0xA1], w[0xA2]), clocks(248, True))
+        self.assertEqual((w[0xA1], w[0xA2]), clocks(248))
         self.assertEqual((w[0xA4], w[0xA5]), (0x00, 0xF0))      # 4096 bytes
         self.assertEqual((w[0xB6], w[0xB7]), (0x00, 0xBC))
         self.assertEqual((w[0xB9], chip.ctrl[0xA8] & 3), (0x02, 0x01))
@@ -138,14 +138,30 @@ class FrontChecks:
             play16(c, mode=0x10, samples=256, rate=rate)
             w = c.chip.ctrl
             self.assertEqual((w[0xA1], w[0xA2]),
-                             clocks(rate_to_v(rate), False), rate)
+                             clocks(rate_to_v(rate)), rate)
             self.assertEqual(c.chip.violations, [])
         for tc in (0x06, 0x83, 0xA5, 0xC8, 0xD3, 0xEB, 0xFF):
             c = self.card()
             write(c, 0x40, tc, 0xC6, 0x30, 0xFF, 0x00)
             w = c.chip.ctrl
-            self.assertEqual((w[0xA1], w[0xA2]), clocks(tc_to_v(tc), True),
+            self.assertEqual((w[0xA1], w[0xA2]), clocks(tc_to_v(tc)),
                              hex(tc))
+
+    def test_filter_by_direction(self):
+        """at 37800 Hz, the fast clock's divisor 21, where ES1869.DRV's two
+        filter tables differ: playback takes its playback table, a
+        recording the recording one (6:2308)"""
+        v = rate_to_v(37800)
+        self.assertNotEqual(clocks(v), clocks(v, record=True))
+        c = self.card()
+        play16(c, mode=0x10, samples=256, rate=37800)
+        self.assertEqual((c.chip.ctrl[0xA1], c.chip.ctrl[0xA2]), clocks(v))
+        c = self.card()
+        program_dma(c, 5, 0x60000, 4096, record=True)
+        write(c, 0x41, 37800 >> 8, 37800 & 0xFF, 0xBE, 0x10, 0xFF, 0x03)
+        self.assertEqual((c.chip.ctrl[0xA1], c.chip.ctrl[0xA2]),
+                         clocks(v, record=True))
+        self.assertEqual(c.chip.violations, [])
 
     def test_a_transfer_like_the_last(self):
         """the registers the chip has already aren't written again, and

@@ -85,7 +85,7 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0118
+ESSREG_VERSION          equ 0x0119
 ESSREG_FEATURES         equ 0xFFFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
@@ -4097,8 +4097,7 @@ ESSREG_S16_GD:
 .cont:  test    byte [edi+EX_S16_Flags],S16_PAUSE
         jz      ESSREG_S16_None
         and     byte [edi+EX_S16_Flags],~S16_PAUSE & 0xFF
-        mov     cl,[edi+EX_S16_Ctrl+0x08]       ; the rate as it is now
-        call    ESSREG_S16_Clocks
+        call    ESSREG_S16_Clocks               ; the rate as it is now
         mov     ax,0xB240
         jmp     ESSREG_S16_Or
 .a2:    shl     ah,2                    ; Audio 2: the same with 78h
@@ -4450,8 +4449,9 @@ ESSREG_S16_Rate_V:
 ; A1h and A2h for the rate v * 44100 / 248 Hz, as ES1869.DRV picks them
 ; for a rate (6:1FF4): the 795.5 kHz clock above 22050 Hz, the 397.7 kHz
 ; one up to it, and the filter clock from its tables between 22 and 44
-; kHz, else 7.16 MHz over 35.9 times the rate; CL = A8h (bit 0 stereo),
-; EDI = ADI
+; kHz, the playback one or, for a recording (EX_S16_Xbits bit 3), the
+; recording one (6:2308), else 7.16 MHz over 35.9 times the rate; EDI =
+; ADI
 ESSREG_S16_Clocks:
         pushad
         movzx   ebx,byte [edi+EX_S16_RateV]
@@ -4473,10 +4473,10 @@ ESSREG_S16_Clocks:
         jb      .general
         cmp     ebp,byte 35
         ja      .general
-        mov     esi,ESSREG_S16_Filter_Stereo
-        test    cl,0x01
-        jnz     .table
-        mov     esi,ESSREG_S16_Filter_Mono
+        mov     esi,ESSREG_S16_Filter_Play
+        test    byte [edi+EX_S16_Xbits],0x08
+        jz      .table
+        mov     esi,ESSREG_S16_Filter_Rec
 .table: movzx   eax,byte [esi+ebp-18]
         jmp     short .a2
 .general:
@@ -4493,11 +4493,11 @@ ESSREG_S16_Clocks:
         shr     eax,1
         ret
 
-; ES1869.DRV's filter dividers (DGROUP 4Eh and 60h) for the 795.5 kHz
-; clock's divisors 18 to 35 (44.2 to 22.7 kHz)
-ESSREG_S16_Filter_Stereo:
+; ES1869.DRV's filter dividers for the 795.5 kHz clock's divisors 18 to
+; 35 (44.2 to 22.7 kHz): for playback (DGROUP 4Eh) and for recording (60h)
+ESSREG_S16_Filter_Play:
         db 3, 5, 5, 5, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9
-ESSREG_S16_Filter_Mono:
+ESSREG_S16_Filter_Rec:
         db 3, 5, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 10, 10
 
 ; --- the program's transfers: Audio 1 in Extended mode, and Audio 2 ----------
@@ -4591,10 +4591,7 @@ ESSREG_S16_Xfer:
         xor     al,0x03
 .mono:  mov     ah,0xA8
         call    ESSREG_S16_Set
-        push    ecx
-        mov     cl,al
         call    ESSREG_S16_Clocks
-        pop     ecx
         mov     dx,0xD080               ; the format: B7h in DH, B6h in DL;
         test    cl,0x10                 ; 8-bit mono unsigned D0h and 80h,
         jz      .size                   ; signed F0h and 00h
