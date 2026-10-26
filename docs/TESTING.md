@@ -108,6 +108,10 @@ The Python tests, in `tests/test_*.py`, cover the following:
   `esssb16` under EMM386, whose recordings are made from what the DACs
   played, each frame at its time, and then broken: a flat tone, a 16-bit
   stream a byte out, a loop, a dead channel. Needs numpy.
+* `test_essprobe` runs essprobe's cases (`src/essp.c`) on the chip model,
+  also behind `tests/emm386dma.py`'s EMM386, its window in EMM386's call of
+  a trap handler, `build/essprobe.exe` itself, and `tools/essprec.py` on a
+  recording of the model's run and broken ones ([ESSPROBE.md](ESSPROBE.md)).
 * Other tests run `esfmpat` on copies of `ESFM.DRV` and check that the
   generated documentation is current.
 
@@ -316,15 +320,15 @@ and stop at the first surprise. Each step says what you should see.
 
 ### D2. esssb16 (DOS)
 
-1. Install `esssb16` as the [README](../README.md#installing-esssb16) says:
-   in real DOS with `EMM386.EXE` loaded
-   (`DEVICE=C:\WINDOWS\EMM386.EXE NOEMS` or `RAM` in `CONFIG.SYS`), run
-   `LH ESSSB16`. It prints the card's base, IRQ and channel, the game's
-   16-bit channel `on Audio 2's DMA` and Audio 2's channel, the `BLASTER`
-   line to set, and `traps: EMM386 4.95 for real-mode games` (4.49 with
-   MS-DOS 6.22). `MEM /C` shows it in upper memory, 4.4 KB. Run it again:
-   "already loaded". In a Windows DOS box it refuses with "not for a Windows
-   DOS box", and without a memory manager with "no EMM386: no EMMXXXX0 or
+1. Install `esssb16` as the [guide](ESSSB16.md#installing-esssb16) says: in
+   real DOS with `EMM386.EXE` loaded (`DEVICE=C:\WINDOWS\EMM386.EXE NOEMS`
+   or `RAM` in `CONFIG.SYS`), run `LH ESSSB16`. It prints the card's base,
+   IRQ and channel, the game's 16-bit channel `on Audio 2's DMA` and Audio
+   2's channel, the `BLASTER` line to set, and
+   `traps: EMM386 4.95 for real-mode games` (4.49 with MS-DOS 6.22).
+   `MEM /C` shows it in upper memory, 4.4 KB. Run it again: "already
+   loaded". In a Windows DOS box it refuses with "not for a Windows DOS
+   box", and without a memory manager with "no EMM386: no EMMXXXX0 or
    EMMQXXX0 device" and "no port traps". When EMM386 is there and it still
    says "no port traps", the line before says why: the version it found, or
    that EMM386 refused the traps.
@@ -438,6 +442,12 @@ so set the speakers to a normal level first.
    measures fewer rates, `/R` makes a recorded run and `/O:file` names the
    report. If the computer stops during a run, the next run puts the mixer
    back from `SB16TEST.RST` before it starts, and its report says so.
+
+### D4. essprobe
+
+`essprobe.exe` measures the chip itself, without `esssb16`. Run it and
+record it as [ESSPROBE.md](ESSPROBE.md#running-it) says, and send the
+reports and recordings back.
 
 ### E0. Installing with essinst
 

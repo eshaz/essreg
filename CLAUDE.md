@@ -5,19 +5,22 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
 
 ## Layout
 
-* `src/*.c` holds the DOS programs (`essreg`, `1869opl3`, `esfmpat` and
-  `sb16test`) and the shared code: `esshw` (the port protocols), `esscat`
-  (the register catalog, from `esscat.tbl`), `profile`, `vxdapi`, `simhw` (a
-  simulated ES1869 for the tests), `ess3d` (the commands of `ess3d.exe`),
-  `fmrec` (esfmrec's WAV header, file names and levels), `s3dmeas` (ess3d's
-  measurement of the 3-D effect, with an effect in `s3dsim` that follows one
-  card's measurement, for the tests, /sim and the tray panel's graph),
-  `wavestat` (what ES1869.DRV is doing, read from its data segment for
-  essctl), `drvinst` (essinst's checks of the drivers, and its staging
-  through WININIT.INI), `sb16t` (sb16test's checks of a Sound Blaster 16,
-  which the tests also run on the host), `sbtsound` (the tones and DTMF
-  markers of the recorded runs) and `dosplat` (the DOS programs' clock,
-  interrupt, report and crash-safe files).
+* `src/*.c` holds the DOS programs (`essreg`, `1869opl3`, `esfmpat`,
+  `sb16test` and `essprobe`) and the shared code: `esshw` (the port
+  protocols), `esscat` (the register catalog, from `esscat.tbl`), `profile`,
+  `vxdapi`, `simhw` (a simulated ES1869 for the tests), `ess3d` (the
+  commands of `ess3d.exe`), `fmrec` (esfmrec's WAV header, file names and
+  levels), `s3dmeas` (ess3d's measurement of the 3-D effect, with an effect
+  in `s3dsim` that follows one card's measurement, for the tests, /sim and
+  the tray panel's graph), `wavestat` (what ES1869.DRV is doing, read from
+  its data segment for essctl), `drvinst` (essinst's checks of the drivers,
+  and its staging through WININIT.INI), `sb16t` (sb16test's checks of a
+  Sound Blaster 16, which the tests also run on the host), `essp`
+  (essprobe's cases of the bare chip, also run on the host), `sbtsound` (the
+  tones and DTMF markers of the recorded runs) and `dosplat` (the DOS
+  programs' clock, interrupt, report and crash-safe files). `src/essp0.asm`
+  is essprobe's window on the 8237 under EMM386, a port trap's handler,
+  which `tools/build_essp0.py` turns into `src/essp0.h`.
 * `src/win/` holds `essctl.exe`, the 16-bit Windows control panel, and
   `ess3dw.c`, the Windows side of `ess3d.exe`, which sets the 3-D effect
   from the command line for keys. `ess3dtr.c` is ess3d's tray icon and
@@ -60,16 +63,18 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   no transfer may go to a 16-bit channel as words.
 * `tools/` holds the builders, the RE tools, `guard.py`, `wineshot.sh`,
   `dualwav.py`, which makes 4-channel files for dual playback, and
-  `sb16rec.py`, which analyzes a recording of `SB16TEST /R` against its
-  report. `tests/` holds the Python tests (`esfmemu.py`, `vxdemu.py` and
+  `sb16rec.py` and `essprec.py`, which analyze a recording of `SB16TEST /R`
+  and `ESSPROBE /R` against its report, on `recan.py`'s markers, clock and
+  measures. `tests/` holds the Python tests (`esfmemu.py`, `vxdemu.py` and
   `drvemu.py` run the drivers in a CPU emulator, `tsremu.py` runs
   `esssb16.com` in one, with DOS, the memory managers and the DPMI host in
-  Python, and `dosrun.py` a DOS program, `sb16test.exe`, in front of a
-  card), and `tests/host/` the C tests. `sb16.py` is the Sound Blaster 16
-  that the fronts are tested against, `esschip.py` the chip's audio behind
-  them, `dma8237.py` the DMA controllers, `sbgame.py` and `sbscenes.py` what
-  games do, and `sbfronts.py` the fronts as cards, with a model of VDMAD for
-  the VxD's.
+  Python, and `dosrun.py` a DOS program, `sb16test.exe` or `essprobe.exe`,
+  in front of a card), and `tests/host/` the C tests. `sb16.py` is the Sound
+  Blaster 16 that the fronts are tested against, `esschip.py` the chip's
+  audio behind them, `dma8237.py` the DMA controllers, `sbgame.py` and
+  `sbscenes.py` what games do, and `sbfronts.py` the fronts as cards, with a
+  model of VDMAD for the VxD's, and the bare chip with a VGA (`ChipCard`);
+  `emm386dma.py` is EMM386's DMA translation.
 * `docs/` holds [TESTING.md](docs/TESTING.md),
   [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md),
   [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md),
@@ -77,7 +82,8 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   [SPATIALIZER.md](docs/SPATIALIZER.md),
   [DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md),
   [AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md), [AUDIO1.md](docs/AUDIO1.md),
-  [SB16.md](docs/SB16.md), [RE_NOTES.md](docs/RE_NOTES.md) and
+  [SB16.md](docs/SB16.md), [ESSSB16.md](docs/ESSSB16.md),
+  [ESSPROBE.md](docs/ESSPROBE.md), [RE_NOTES.md](docs/RE_NOTES.md) and
   [STYLE.md](docs/STYLE.md). `REGISTERS.md` and the `REG_*.md` pages are
   generated, and `docs/datasheet/` has the ES1869, ES938 and ES1868 data
   sheets.
@@ -119,8 +125,12 @@ python3 tools/ess3dico.py              # the tray icons, src/win/ess3d*.ico
 # a 4-channel file for dual playback
 python3 tools/dualwav.py same in.wav out.wav
 
-# a recorded sb16test run (SB16TEST /R) against its report
+# a recorded sb16test or essprobe run against its report
 python3 tools/sb16rec.py SB16TEST.TXT run.wav
+python3 tools/essprec.py ESSPROBE.TXT run.wav
+
+# essprobe's window, src/essp0.h, from src/essp0.asm
+python3 tools/build_essp0.py
 
 # style
 flake8                                 # Python lint, clean
@@ -214,10 +224,21 @@ tools/wineshot.sh run ess3d.exe /sim tray
   lines (`record_one`) are what `tools/sb16rec.py` reads, so a change to
   them goes into both, and `tests/test_sb16rec.py` analyzes recordings made
   from the model's and a front's output.
+* **essprobe.** Its cases (`src/essp.c`) reach the card only through
+  `struct esp_hal`, with the same rules for the handler's path as
+  sb16test's. Each case starts and ends with the chip's reset, and whatever
+  else it changes (the mixer, PnP, Config_Base+7, the VGA DAC) goes to the
+  restore list before the change. It refuses in a Windows DOS box and with
+  esssb16 resident. The window (`src/essp0.asm`) passes every access unless
+  armed, belongs to DOS while its trap is in, and is removed at the end;
+  rebuild `src/essp0.h` after changing it. A new case goes in the table with
+  its spec and what the recording should hold, which `tools/essprec.py`
+  measures, and runs in `tests/test_essprobe.py`.
 * **Committed binaries.** After changing their sources, rebuild
   `build/ESFM.DRV`, `build/ES1869.VXD`, `build/ES1869.DRV` or
   `build/esssb16.com`, and copy the changed programs from `out/ow2/` to
-  `build/`. `test_build_is_current` checks `ESFM.DRV` and `ES1869.DRV`.
+  `build/`, `essprobe.exe` among them. `test_build_is_current` checks
+  `ESFM.DRV` and `ES1869.DRV`.
 * **ESFM_FIX code:**
   * A label at a relocation site is a `..@` name, so that it doesn't end
     NASM's local label scope.

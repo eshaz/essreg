@@ -10,8 +10,9 @@ card) and write() (the card to memory), one byte or word per DMA cycle. At
 terminal count the channel's status bit is set, and the channel either
 reloads its base address and count (auto-initialize) or masks itself. A
 cycle whose mode doesn't move data that way (verify, the other direction,
-or the undefined 0Ch) reads FFh, the floating bus, and writes nothing,
-and goes into `bad`.
+or the undefined 0Ch) goes into `bad`: a card that reads gets FFh, the
+floating bus, and where the channel writes into memory, the memory gets it
+too; a card that writes to a channel that reads memory loses its data.
 """
 
 PAGE_PORTS = {0: 0x87, 1: 0x83, 2: 0x81, 3: 0x82, 4: 0x8F, 5: 0x8B,
@@ -205,6 +206,8 @@ class DMA8237:
             else:
                 self.bad.append((n, c.mode))
                 out += b"\xFF" * size
+                if c.mode & 0x0C == MODE_WRITE:
+                    self.memory.write(c.phys(), b"\xFF" * size)
             self._step(c)
         return bytes(out)
 

@@ -33,24 +33,21 @@ Example:
 
 import argparse
 import math
-import re
-import struct
+import os
 import sys
 
 import numpy as np
 
-RATE = 8000                 # the analysis's rate, after the band limit
-HZ = 441.0                  # the listening sounds' pitch (src/sb16t.c)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from recan import (CENTS, CLEAN_DB, DTMF_HI, DTMF_LO, DTMF_SYMS,  # noqa: E402
+                   HZ, OFF_S, RATE, SIDE_DB, WORST_DB, Recording,
+                   band_limit, cents, cleanness, envelope, fit_clock,
+                   level_db, markers, pitch, read_report, read_wav,
+                   tone_fit, tone_text)
+
 DIRECT_HZ = 8000 * 56 / 1024        # s_direct: 437.5 Hz
 FM_HZ = 49716 * 0x241 / 65536       # s_fm: F-number 241h, block 4
-DTMF_SYMS = "123A456B789C*0#D"
-DTMF_LO = (697, 770, 852, 941)
-DTMF_HI = (1209, 1336, 1477, 1633)
-CENTS = 10                  # a pitch's tolerance
-CLEAN_DB = 25               # a steady tone's least median of tone to rest
-WORST_DB = 15               # and its least in any 20 ms
-SIDE_DB = 15                # the side a tone came from, louder by this
-OFF_S = 0.010               # a marker farther off the clock is left out
 CHECKS = {
     "l.tone8": "tone", "l.left16": "side", "l.right16": "side",
     "l.left8": "side", "l.right8": "side", "l.pitch": "pitch",
@@ -58,269 +55,15 @@ CHECKS = {
     "l.balance": "balance", "l.adpcm": "adpcm", "l.direct": "direct",
     "l.speaker": "tone", "l.blocks": "blocks", "l.fm": "fm",
 }
-
-# --- the recording ------------------------------------------------------------
-
-
-def read_wav(path):
-    """(rate, frames): floats in -1..1, an array of frames by channels"""
-    with open(path, "rb") as f:
-        data = f.read()
-    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
-        raise SystemExit("sb16rec: %s: not a WAV file" % path)
-    pos, fmt, body = 12, None, None
-    while pos + 8 <= len(data):
-        cid = data[pos:pos + 4]
-        size = struct.unpack_from("<I", data, pos + 4)[0]
-        if cid == b"fmt ":
-            fmt = data[pos + 8:pos + 8 + size]
-        elif cid == b"data":
-            body = data[pos + 8:pos + 8 + size]
-        pos += 8 + size + (size & 1)
-    if fmt is None or body is None:
-        raise SystemExit("sb16rec: %s: no fmt or data chunk" % path)
-    tag, chans, rate, _, align, bits = struct.unpack_from("<HHIIHH", fmt)
-    if tag == 0xFFFE and len(fmt) >= 26:        # WAVE_FORMAT_EXTENSIBLE
-        tag = struct.unpack_from("<H", fmt, 24)[0]
-    width = align // chans
-    n = len(body) // align
-    raw = np.frombuffer(body[:n * align], dtype=np.uint8)
-    if tag == 3 and width in (4, 8):
-        x = raw.view("<f%d" % width).astype(np.float64)
-    elif tag == 1 and width == 1:
-        x = (raw.astype(np.float64) - 128) / 128
-    elif tag == 1 and width in (2, 3, 4):
-        b = raw.reshape(-1, width).astype(np.int64)
-        v = np.zeros(len(b), dtype=np.int64)
-        for i in range(width):
-            v |= b[:, i] << (8 * i)
-        v -= (v >> (8 * width - 1)) << (8 * width)
-        x = v / float(1 << (8 * width - 1))
-    else:
-        raise SystemExit("sb16rec: %s: format %d with %d bits isn't PCM or "
-                         "float" % (path, tag, bits))
-    return rate, x.reshape(n, chans)
-
-
-def band_limit(x, rate, new=RATE):
-    """one channel at `new` Hz, what is above new / 2 cut: by the FFT, so
-    that the resampling is exact"""
-    m = int(round(len(x) * new / rate))
-    spec = np.fft.rfft(x)
-    return np.fft.irfft(spec[:m // 2 + 1], m) * (m / len(x))
-
-
-def level_db(x):
-    """the level in dB of full scale, where a full-scale sine is 0"""
-    return 10 * math.log10(max(2 * float(np.mean(x * x)), 1e-20)) \
-        if len(x) else -200.0
-
-
-# --- the markers ----------------------------------------------------------------
-
-def dtmf_frames(x, rate=RATE):
-    """each 20 ms frame's symbol, 5 ms apart, or None: one row tone and one
-    column tone that carry most of the frame, each well above the others
-    of its group"""
-    win, hop = int(0.020 * rate), int(0.005 * rate)
-    if len(x) < win:
-        return [], hop / rate
-    frames = np.lib.stride_tricks.sliding_window_view(x, win)[::hop]
-    t = np.arange(win) / rate
-    w = np.hanning(win)
-    freqs = np.array(DTMF_LO + DTMF_HI, dtype=float)
-    basis = np.exp(-2j * np.pi * np.outer(t, freqs)) * w[:, None]
-    amp2 = np.abs(frames @ basis) ** 2 / (w.sum() / 2) ** 2   # amplitudes²
-    total = 2 * np.mean(frames * frames, axis=1)
-    out = []
-    for a, tot in zip(amp2, total):
-        lo, hi = a[:4], a[4:]
-        r, c = int(np.argmax(lo)), int(np.argmax(hi))
-        lo2, hi2 = np.sort(lo)[-2], np.sort(hi)[-2]
-        ok = (tot > 1e-6 and lo[r] + hi[c] > 0.6 * tot and
-              lo[r] > 10 * lo2 and hi[c] > 10 * hi2 and
-              0.15 < lo[r] / hi[c] < 6.5)
-        out.append(DTMF_SYMS[4 * r + c] if ok else None)
-    return out, hop / rate
-
-
-def markers(x, rate=RATE):
-    """the markers in x: (text, start in s, level in dBFS), a marker's
-    symbols less than 120 ms apart, each in 3 frames or more; the level is
-    its first symbol's"""
-    syms, step = dtmf_frames(x, rate)
-    events, i = [], 0
-    while i < len(syms):
-        j = i
-        while j < len(syms) and syms[j] == syms[i]:
-            j += 1
-        if syms[i] is not None and j - i >= 3:
-            events.append((syms[i], i * step, j * step))
-        i = j
-    out = []
-    for s, t0, t1 in events:
-        if out and t0 - out[-1][2] < 0.120:
-            text, start, _, lv = out[-1]
-            out[-1] = (text + s, start, t1, lv)
-        else:
-            a, b = int(t0 * rate) + int(0.020 * rate), int(t1 * rate)
-            out.append((s, t0, t1, level_db(x[a:max(b, a + 1)])))
-    return [(text, start, lv) for text, start, _, lv in out]
-
-
-# --- the report ------------------------------------------------------------------
-
-REC_RE = re.compile(r"recorded: marker (\S+) at (\d+) us, sound((?: \d+-\d+)*)"
-                    r" us, (\w+) expected")
-MARK_RE = re.compile(r"marker (\w+) at (\d+) us")
-
-
-def read_report(path):
-    """(the check lines as (name, result, details), the recorded sounds as
-    {name: (marker, us, [(on, off)], expected)}, the markers {text: us})"""
-    with open(path, encoding="latin-1") as f:
-        lines = f.read().splitlines()
-    checks, sounds, marks = [], {}, {}
-    for line in lines:
-        parts = line.split(None, 2)
-        if len(parts) < 2 or parts[1] not in ("PASS", "FAIL", "KNOWN",
-                                              "INFO", "SKIP"):
-            continue
-        name, res, det = parts[0], parts[1], parts[2] if len(parts) > 2 else ""
-        checks.append((name, res, det))
-        m = REC_RE.search(det)
-        if m:
-            spans = [tuple(int(v) for v in p.split("-"))
-                     for p in m.group(3).split()]
-            sounds[name] = (m.group(1), int(m.group(2)), spans, m.group(4))
-            marks[m.group(1)] = int(m.group(2))
-        elif name in ("rec.start", "rec.end"):
-            m = MARK_RE.search(det)
-            if m:
-                marks[m.group(1)] = int(m.group(2))
-    return checks, sounds, marks
-
-
-def fit_clock(marks, found):
-    """the recording's time of the report's us, from the markers both have:
-    (a, b) for t = a * us + b, the worst error in s, how many markers fit,
-    and those left out, as (text, how much later than the line it was found,
-    in s). A marker more than OFF_S off the line, which something still
-    sounding hid the start of, is left out, the farthest first, while three
-    or more remain"""
-    pairs = [(marks[text] / 1e6, start, text) for text, start, _lv in found
-             if text in marks]
-    if len(pairs) < 2:
-        return None
-    out = []
-    while True:
-        u = np.array([p[0] for p in pairs])
-        t = np.array([p[1] for p in pairs])
-        a, b = np.polyfit(u, t, 1)
-        err = np.abs(a * u + b - t)
-        k = int(np.argmax(err))
-        if err[k] <= OFF_S or len(pairs) <= 3:
-            break
-        out.append(pairs.pop(k))
-    late = [(text, float(start - (a * us + b))) for us, start, text in out]
-    return a, b, float(err[k]), len(pairs), late
-
-
-# --- the measures --------------------------------------------------------------
-
-def pitch(x, near, span=0.08, rate=RATE):
-    """the frequency of x's strongest component near `near` Hz: the peak of
-    a Hann window's spectrum, 8 times zero-padded, refined by a parabola
-    through the log magnitudes"""
-    n = len(x)
-    nfft = 1 << int(math.ceil(math.log2(max(n, 16) * 8)))
-    spec = np.abs(np.fft.rfft(x * np.hanning(n), nfft))
-    freqs = np.arange(len(spec)) * rate / nfft
-    band = (freqs > near * (1 - span)) & (freqs < near * (1 + span))
-    if not band.any():
-        return 0.0
-    k = int(np.argmax(np.where(band, spec, 0)))
-    d = 0.0
-    if 0 < k < len(spec) - 1:
-        a, b, c = np.log(spec[k - 1:k + 2] + 1e-30)
-        if a - 2 * b + c < 0:
-            d = 0.5 * (a - c) / (a - 2 * b + c)
-    return (k + d) * rate / nfft
-
-
-def tone_fit(x, f, rate=RATE):
-    """the sine at f Hz (and the mean) that fits x best: the tone's power
-    and the rest's"""
-    t = np.arange(len(x)) / rate
-    m = np.column_stack((np.cos(2 * np.pi * f * t), np.sin(2 * np.pi * f * t),
-                         np.ones(len(x))))
-    coef = np.linalg.lstsq(m, x, rcond=None)[0]
-    rest = x - m @ coef
-    return (coef[0] ** 2 + coef[1] ** 2) / 2, float(np.mean(rest * rest))
-
-
-def cleanness(x, f, rate=RATE):
-    """the tone's power over the rest's, in dB, in 20 ms windows 10 ms
-    apart: (median, worst)"""
-    win, hop = int(0.020 * rate), int(0.010 * rate)
-    vals = []
-    for i in range(0, len(x) - win + 1, hop):
-        tone, rest = tone_fit(x[i:i + win], f, rate)
-        vals.append(10 * math.log10(max(tone, 1e-20) / max(rest, 1e-20)))
-    if not vals:
-        return 0.0, 0.0
-    return float(np.median(vals)), float(min(vals))
-
-
-def envelope(x, secs=0.010, rate=RATE):
-    """the level in dB of each `secs`"""
-    win = max(int(secs * rate), 1)
-    n = len(x) // win
-    return [level_db(x[i * win:(i + 1) * win]) for i in range(n)]
-
-
-def cents(f, want):
-    return 1200 * math.log2(f / want) if f > 0 else -9999.0
-
-
-class Recording:
-    """the recording at RATE: the left and right channels (the same for a
-    mono one), and the report's time of each moment"""
-
-    def __init__(self, rate, frames, clock, ref=-8.7):
-        self.ref = ref          # the level a sound's tone has
-        self.stereo = frames.shape[1] > 1
-        self.left = band_limit(frames[:, 0], rate)
-        self.right = band_limit(frames[:, 1], rate) if self.stereo \
-            else self.left
-        self.mono = (self.left + self.right) / 2
-        self.a, self.b = clock[:2]
-
-    def at(self, us):
-        return self.a * us / 1e6 + self.b
-
-    def part(self, on, off, chan="mono"):
-        """a sound's part, past its start and before its end, where the
-        FIFOs fill and empty: 40 ms and 20 ms, or a tenth of a short one"""
-        t0, t1 = self.at(on), self.at(off)
-        lead = min(0.040, (t1 - t0) / 10)
-        tail = min(0.020, (t1 - t0) / 10)
-        x = getattr(self, chan)
-        a, b = int(round((t0 + lead) * RATE)), int(round((t1 - tail) * RATE))
-        return x[max(a, 0):max(b, 0)]
+# the names the tests and other tools take from here
+__all__ = ["CENTS", "CLEAN_DB", "DTMF_HI", "DTMF_LO", "DTMF_SYMS", "HZ",
+           "OFF_S", "RATE", "SIDE_DB", "WORST_DB", "Recording", "band_limit",
+           "cents", "cleanness", "envelope", "fit_clock", "level_db",
+           "markers", "pitch", "read_report", "read_wav", "tone_fit",
+           "tone_text", "analyze", "judge", "main"]
 
 
 # --- the checks ----------------------------------------------------------------
-
-def tone_text(x, want):
-    """a tone's measures: (ok, text)"""
-    f = pitch(x, want)
-    c = cents(f, want)
-    med, worst = cleanness(x, f)
-    ok = abs(c) <= CENTS and med >= CLEAN_DB and worst >= WORST_DB
-    return ok, "%.2f Hz (%+.1f cents), clean %.0f dB, worst %.0f dB, " \
-        "%.1f dBFS" % (f, c, med, worst, level_db(x))
-
 
 def check_tone(rec, spans, want):
     ok, text = tone_text(rec.part(*spans[0]), HZ)

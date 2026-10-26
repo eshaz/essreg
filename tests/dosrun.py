@@ -47,6 +47,7 @@ ENV = 0x1F00                # its environment
 MCB = 0x2000                # its memory block's MCB
 SIZE = 0x17FE               # its block, in paragraphs
 ALLOC = 0x4000              # the block int 21h 48h gives
+ALLOC_MAX = 0x5000          # its paragraphs at most
 LOL = 0x0090
 PIT_HZ = 1193182
 PIT_US = 4                  # a PIT access, with the loop around it
@@ -338,17 +339,17 @@ class Dos(Cpu):
         elif ax == 0x3306:
             self.w16("ebx", 0x0A07)
         elif ah == 0x33:
-            self.w8("edx", 0)
+            self.w8("edx", 3 if al == 0x05 else 0)     # 3305h: booted from C:
         elif ah == 0x4A:
             ok(False)
         elif ah == 0x48:
             self.allocated.append(bx)
-            if bx > 0x1000:
+            if bx > ALLOC_MAX:
                 self.w16("eax", 8)
-                self.w16("ebx", 0x1000)
+                self.w16("ebx", ALLOC_MAX)
                 ok(True)
             else:
-                self.mcb(ALLOC - 1, b"Z", PSP, 0x1000)
+                self.mcb(ALLOC - 1, b"Z", PSP, max(bx, 0x1000))
                 self.w16("eax", ALLOC)
                 ok(False)
         elif ah == 0x49:

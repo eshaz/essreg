@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 import build_esssb16  # noqa: E402
 from dma8237 import DMA8237, PORT_PAGE  # noqa: E402
+from emm386dma import EMM386DMA  # noqa: E402
 from esschip import ES1869Audio  # noqa: E402
 from sbgame import Card, program_dma, write  # noqa: E402
 from tsremu import Chip, Machine, PMMachine  # noqa: E402
@@ -219,6 +220,112 @@ class TSRCard(Card):
 
     def peek(self, addr, n):
         return self.m.mem(addr, n)
+
+
+class VGA:
+    """a VGA in a text mode, as essprobe looks at it: the DAC's 256 entries
+    of 6 bits (3C7h, 3C8h, 3C9h, three reads or writes an entry), and
+    3DAh bit 3, the vertical retrace, 400 us in every 70 Hz frame"""
+
+    PERIOD, RETRACE = 14286, 400
+    PORTS = (0x3C7, 0x3C8, 0x3C9, 0x3DA)
+
+    def __init__(self, clock):
+        self.clock = clock
+        self.dac = [[(i * 3 + c) & 0x3F for c in range(3)] for i in range(256)]
+        self.read_at = self.write_at = 0        # entry * 3 + component
+
+    def inb(self, port):
+        if port == 0x3DA:
+            return 0x08 if self.clock.us % self.PERIOD < self.RETRACE else 0
+        if port == 0x3C9:
+            i, c = divmod(self.read_at, 3)
+            self.read_at = (self.read_at + 1) % 768
+            return self.dac[i][c]
+        return 0xFF
+
+    def outb(self, port, v):
+        if port == 0x3C7:
+            self.read_at = 3 * v
+        elif port == 0x3C8:
+            self.write_at = 3 * v
+        elif port == 0x3C9:
+            i, c = divmod(self.write_at, 3)
+            self.dac[i][c] = v & 0x3F
+            self.write_at = (self.write_at + 1) % 768
+
+
+class ChipCard(Card):
+    """the chip itself, without a front, for a program that drives it as
+    essprobe does: the chip model with the DMA controllers and their
+    memory; `pins` the channels the card's four DMA pins are wired to
+    (card registers 23h and 24h, 15 for none); `emm386` puts EMM386's DMA
+    translation (emm386dma, its keywords) between the program and the DMA
+    controllers, which phys_in() and phys_out() reach past it"""
+
+    def __init__(self, irq=5, dma8=1, dma2=5, pins=(1, 5, 15, 15),
+                 emm386=None):
+        super().__init__()
+        self.chip = TSRChip(irq, dma8, dma2)
+        self.chip.pnp[(None, 0x23)] = pins[0] | pins[1] << 4
+        self.chip.pnp[(None, 0x24)] = pins[2] | pins[3] << 4
+        self.dma = self.chip.dmac       # dosrun gives it the program's memory
+        self.memory = self.dma.memory
+        self.vga = VGA(self.chip.clock)
+        self.emm = None if emm386 is None else \
+            EMM386DMA(self.chip.dmac, **emm386)
+
+    def port_in(self, port):
+        if port in VGA.PORTS:
+            return self.vga.inb(port)
+        if self.emm is not None and self.emm.handles(port):
+            self.chip.catch_up()
+            self.chip.clock.advance(1)
+            return self.emm.inb(port)
+        return self.chip.inb(port)
+
+    def port_out(self, port, v):
+        if port in VGA.PORTS:
+            self.vga.outb(port, v)
+        elif self.emm is not None and self.emm.handles(port):
+            self.chip.catch_up()
+            self.chip.clock.advance(1)
+            self.emm.outb(port, v)
+        else:
+            self.chip.outb(port, v)
+
+    def phys_in(self, port):
+        """a port as ring 0 reaches it, past EMM386"""
+        v = self.chip.inb(port)
+        self._time(1)
+        return v
+
+    def phys_out(self, port, v):
+        self.chip.outb(port, v)
+        self._time(1)
+
+    def tick(self, us):
+        return self.chip.advance(us), len(self.chip.irq_edges)
+
+    def record_from(self, source):
+        self.chip.source = source
+
+    @property
+    def audio2(self):
+        return True
+
+    @property
+    def played(self):
+        return self.chip.heard
+
+    def dac(self, kind):
+        return self.chip.played2 if kind == 16 else self.chip.played
+
+    def poke(self, addr, data):
+        self.memory.write(addr, bytes(data))
+
+    def peek(self, addr, n):
+        return self.memory.read(addr, n)
 
 
 # --- ES1869.VXD in a DOS box ---------------------------------------------------

@@ -5,8 +5,8 @@ the build that runs its programs with IOPL 0, so that it can trap their port
 accesses. [`esssb16`](../../README.md#esssb16com) registers its port traps
 with it for protected-mode games, as
 [SBEMU](https://github.com/crazii/sbemu) does, and this copy saves the
-download: [Installing esssb16](../../README.md#installing-esssb16) says
-where it goes.
+download: [Installing esssb16](../../docs/ESSSB16.md#installing-esssb16)
+says where it goes.
 
 It is the one file of `HDPMI32i.zip` from release v0.1-beta4fix2 of crazii's
 HX fork, <https://github.com/crazii/HX/releases/tag/v0.1-beta4fix2>, the

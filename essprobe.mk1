@@ -1,0 +1,24 @@
+# Builds essprobe.exe, which measures the ES1869 itself in real DOS and
+# writes a report (DOS, small model).
+#
+# Notes:
+#
+# No stack checks, because the interrupt handler runs on whatever stack it
+# interrupts. sbtsound.obj and dosplat.obj are sb16test.mk1's.
+#
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+
+ESSP_FLAGS=-5 -osbhl+kp -fpi87 -s
+
+essp.obj : src\essp.c .AUTODEPEND
+ *wcc src\essp.c -i="$(%watcom)/h" $(ESSP_FLAGS) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+
+essprobe.obj : src\essprobe.c .AUTODEPEND
+ *wcc src\essprobe.c -i="$(%watcom)/h" $(ESSP_FLAGS) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+
+essprobe.exe : essp.obj essprobe.obj sbtsound.obj dosplat.obj .AUTODEPEND
+ @%write essprobe.lk1 FIL essprobe.obj,essp.obj,sbtsound.obj,dosplat.obj
+ @%append essprobe.lk1
+ *wlink name essprobe sys dos op m libf cstart_t op maxe=10 op q op DOSSEG op STACK=4096 op el sort @essprobe.lk1

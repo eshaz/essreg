@@ -12,4 +12,5 @@ copy ess3d.exe build\ess3d.exe /y
 copy esfmrec.exe build\esfmrec.exe /y
 copy essinst.exe build\essinst.exe /y
 copy sb16test.exe build\sb16test.exe /y
+copy essprobe.exe build\essprobe.exe /y
 
