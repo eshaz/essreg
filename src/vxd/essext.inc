@@ -108,7 +108,10 @@ EX_S16_To               equ 0x20E       ; byte: the channel the 16-bit
                                         ; Audio 2's
 EX_S16_Halves           equ 0x20F       ; byte: H16_* of Audio 1, and of
                                         ; Audio 2 << H16_A2
-ESSREG_ADI_SIZE         equ 0x210       ; ESS allocated E9h
+EX_S16_Sick             equ 0x210       ; byte: 1 while the chip took no
+                                        ; byte and gets none until its own
+                                        ; reset (ESSREG_S16_DSP)
+ESSREG_ADI_SIZE         equ 0x214       ; ESS allocated E9h
 
 VSB_RESET               equ 0x01        ; the reset port is at 1
 VSB_SPEAKER             equ 0x02        ; the speaker is on (D1h)

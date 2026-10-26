@@ -3708,7 +3708,8 @@ ESSREG_S16_Cold:
 
 ; the DSP held in reset, EDI = ADI: the front's transfers stop, the chip's
 ; interrupts are acknowledged (Audio 2's interrupt off and its latch clear
-; until its next transfer), and nothing waits in the latches
+; until its next transfer), a sick chip gets its own reset, and nothing
+; waits in the latches
 ESSREG_S16_Halt:
         call    ESSREG_S16_A1_Stop
         call    ESSREG_S16_A2_Stop
@@ -3716,7 +3717,10 @@ ESSREG_S16_Halt:
         movzx   edx,word [edi+ADI_AudioBase]
         add     edx,byte 0x0E
         in      al,dx
-        and     byte [edi+EX_S16_State],S16S_WARM | S16S_SPKR | S16S_UART | S16S_COMP
+        test    byte [edi+EX_S16_Sick],1
+        jz      .state
+        call    ESSREG_S16_Chip_Reset
+.state: and     byte [edi+EX_S16_State],S16S_WARM | S16S_SPKR | S16S_UART | S16S_COMP
         jmp     ESSREG_S16_Boot.clear
 
 ; Audio 1's transfer of the front's stops (B8h bit 0), at once, as a Sound
@@ -4192,9 +4196,13 @@ ESSREG_S16_GF:
 
 ; --- the chip ----------------------------------------------------------------
 
-; AL to the chip's command port, EDI = ADI, once it takes a byte, or after
-; a short wait anyway
+; AL to the chip's command port, EDI = ADI, once it takes a byte. A chip
+; that takes none in S16_POLL polls is sick: that byte and every later one
+; stay out until the chip's own reset (ESSREG_S16_Chip_Reset), so that no
+; byte goes where the chip waits for another
 ESSREG_S16_DSP:
+        test    byte [edi+EX_S16_Sick],1
+        jnz     .ret
         push    eax
         push    ecx
         push    edx
@@ -4205,12 +4213,14 @@ ESSREG_S16_DSP:
         test    al,0x80
         jz      .ready
         loop    .wait
+        mov     byte [edi+EX_S16_Sick],1
+        jmp     short .out
 .ready: mov     eax,[esp+8]
         out     dx,al
-        pop     edx
+.out:   pop     edx
         pop     ecx
         pop     eax
-        ret
+.ret:   ret
 
 ; the chip's register AH = AL (Extended mode), EDI = ADI
 ESSREG_S16_Reg:
@@ -4282,9 +4292,14 @@ ESSREG_S16_And:
 
 ; AL = the chip's register AH (command C0h), EDI = ADI, with interrupts off
 ; so that nothing reads the answer first, after any byte nobody read; 0
-; and CF set if none comes
+; and CF set if none comes, at once from a sick chip
 ESSREG_S16_Read:
-        push    ecx
+        test    byte [edi+EX_S16_Sick],1
+        jz      .ask
+        xor     al,al
+        stc
+        ret
+.ask:   push    ecx
         push    edx
         pushfd
         cli
@@ -4334,6 +4349,7 @@ ESSREG_S16_Chip_Reset:
         in      al,dx
         xor     al,al
         out     dx,al
+        mov     byte [edi+EX_S16_Sick],0        ; the chip starts anew
         add     edx,byte 6              ; +Ch
         mov     ecx,S16_POLL
         call    ESSREG_DSP_Get          ; the AAh
@@ -4350,11 +4366,14 @@ ESSREG_S16_Chip_Reset:
         ret
 
 ; the chip in Extended mode for a transfer, its DAC into the mixer, EDI =
-; ADI; after Compatibility mode, a reset of its own first
+; ADI; after Compatibility mode, and for a sick chip, a reset of its own
+; first
 ESSREG_S16_Ext:
         test    byte [edi+EX_S16_State],S16S_COMP
+        jnz     .reset
+        test    byte [edi+EX_S16_Sick],1
         jz      .ext
-        and     byte [edi+EX_S16_State],~S16S_COMP & 0xFF
+.reset: and     byte [edi+EX_S16_State],~S16S_COMP & 0xFF
         call    ESSREG_S16_Chip_Reset
 .ext:   test    byte [edi+EX_S16_Flags],S16_EXT
         jnz     .ok

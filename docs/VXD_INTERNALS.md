@@ -518,7 +518,10 @@ that it wrote or read since the chip's last reset (`EX_S16_Ctrl`,
 each of the others once, and a transfer like the last costs B8h twice. The
 work stays in the port trap, where the program waits for it: the chip takes
 each byte within microseconds, and a time-out would start the transfer
-later.
+later. A chip that takes no byte within the front's polls gets no more
+(`EX_S16_Sick`, `sick` in `esssb16.com`), so that no byte goes where the
+chip waits for another, until its own reset, which comes with the program's
+next reset or transfer.
 
 The DMA runs on the DACs' 8-bit channels, where a 16-bit sample is two
 bytes. A program that uses the 16-bit channel (`SoundBlaster16DMA`, 5 by

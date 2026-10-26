@@ -176,6 +176,27 @@ class FrontChecks:
             self.assertEqual(len(c.dac(16)), n // 2)
             self.assertClean()
 
+    def test_sick_chip(self):
+        """a chip that takes no byte: after the first one waits out its
+        polls, nothing goes to the chip, and no answer is waited for;
+        the game's next reset resets the chip, and the next transfer
+        plays"""
+        c, chip = self.c, self.chip
+        chip.busy = True
+        t = chip.clock.us
+        play16(c)
+        self.assertEqual(chip.commands, [])
+        self.assertLess(chip.clock.us - t, 5000)    # one wait, not one a byte
+        resets = chip.resets
+        chip.busy = False
+        self.assertTrue(reset(c))
+        self.assertEqual(chip.resets, resets + 1)
+        play16(c)
+        self.assertEqual(chip.commands[:2], [(0xC6,), (0xD1,)])
+        c.wait(30000)
+        self.assertGreater(len(chip.played), 1000)
+        self.assertClean()
+
     def test_filter_by_direction(self):
         """at 37800 Hz, the fast clock's divisor 21, where ES1869.DRV's two
         filter tables differ: playback takes its playback table, a

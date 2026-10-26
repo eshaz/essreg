@@ -209,6 +209,8 @@ vhigh:          db 0            ; a read's high byte, from its low byte's
 mpage:          db 0            ; the page Audio 1's channel got
 xbits:          db 0            ; the transfer's bits (xfer's BL)
 halves:         db 0            ; H_* of Audio 1, and of Audio 2 << H_A2
+sick:           db 0            ; 1: the chip took no byte, and gets none
+                                ; until its own reset (dsp_put)
 mix:            times MIX_LEN db 0      ; the game's view of 30h-47h
 
 ; --- the trap shims ------------------------------------------------------
@@ -380,9 +382,13 @@ port_of:
         add     dx,[V(base)]
         ret
 
-; AL to the DSP's command port once it takes a byte, or after DSP_POLLS
-; polls anyway
+; AL to the DSP's command port once it takes a byte. A chip that takes
+; none in DSP_POLLS polls is sick: that byte and every later one stay out
+; until the chip's own reset (chip_reset), so that no byte goes where the
+; chip waits for another
 dsp_put:
+        test    byte [V(sick)],1
+        jnz     .ret
         push    cx
         push    dx
         push    ax
@@ -393,10 +399,13 @@ dsp_put:
         test    al,0x80
         loopnz  .wait
         pop     ax
+        jnz     .sick
         call    chip_out
-        pop     dx
+.out:   pop     dx
         pop     cx
-        ret
+.ret:   ret
+.sick:  mov     byte [V(sick)],1
+        jmp     short .out
 
 ; the chip's register AH = AL (Extended mode)
 dsp_reg:
@@ -407,9 +416,15 @@ dsp_reg:
         jmp     dsp_put
 
 ; AL = the chip's next answer, polled at +Ch bit 6 so that no interrupt is
-; acknowledged (a read of +Eh would); CF set and AL = 0 if none comes
+; acknowledged (a read of +Eh would); CF set and AL = 0 if none comes, at
+; once from a sick chip
 chip_answer:
-        push    cx
+        test    byte [V(sick)],1
+        jz      .poll
+        mov     al,0
+        stc
+        ret
+.poll:  push    cx
         push    dx
         mov     al,0x0C
         call    port_of
@@ -534,6 +549,7 @@ chip_reset:
         call    chip_in
         xor     al,al
         call    chip_out
+        mov     byte [V(sick)],0        ; the chip starts anew
         call    chip_answer             ; the AAh
         and     byte [V(flags)],F_ESS | F_RESET
         and     dword [V(known)],0
@@ -547,11 +563,13 @@ chip_reset:
         ret
 
 ; the chip in Extended mode for a transfer, its DAC into the mixer; after
-; Compatibility mode, a reset of its own first
+; Compatibility mode, and for a sick chip, a reset of its own first
 ensure_ext:
         btr     word [V(state)],S_COMP_BIT
-        jnc     .ext
-        call    chip_reset
+        jc      .reset
+        test    byte [V(sick)],1
+        jz      .ext
+.reset: call    chip_reset
 .ext:   bts     word [V(flags)],F_EXT_BIT
         jc      .ok
         mov     al,0xC6
@@ -772,7 +790,8 @@ boot:
 
 ; the DSP held in reset: the front's transfers stop, the chip's interrupts
 ; are acknowledged (Audio 2's interrupt off and its latch clear until its
-; next transfer), and nothing waits in the latches
+; next transfer), a sick chip gets its own reset, and nothing waits in the
+; latches
 halt:
         call    a1_stop
         call    a2_stop
@@ -783,7 +802,10 @@ halt:
 .idle:  mov     al,0x0E
         call    port_of
         call    chip_in
-        and     byte [V(state)],S_WARM | S_SPKR | S_UART | S_COMP
+        test    byte [V(sick)],1
+        jz      .state
+        call    chip_reset
+.state: and     byte [V(state)],S_WARM | S_SPKR | S_UART | S_COMP
         jmp     short boot.clear
 
 ; Audio 1's transfer of the front's stops (B8h bit 0), at once, as a Sound
