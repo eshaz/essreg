@@ -85,7 +85,7 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0117
+ESSREG_VERSION          equ 0x0118
 ESSREG_FEATURES         equ 0xFFFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
@@ -4304,9 +4304,10 @@ ESSREG_S16_Read:
         ret
 
 ; the chip's own reset (DS p.43), EDI = ADI: +6 = 3, a few microseconds,
-; 0, then its AAh; it is in Compatibility mode, its registers unknown. The
-; reset clears Audio 2's format and interrupt (7Ah) and its volume (7Ch,
-; DS p.51), which go back while Audio 2 plays
+; 0, then its AAh; it is in Compatibility mode, its registers unknown,
+; and Audio 1's transfer is over. The reset clears Audio 2's format and
+; interrupt (7Ah) and its volume (7Ch, DS p.51), which go back while
+; Audio 2 plays
 ESSREG_S16_Chip_Reset:
         pushad
         movzx   edx,word [edi+ADI_AudioBase]
@@ -4329,7 +4330,7 @@ ESSREG_S16_Chip_Reset:
         add     edx,byte 6              ; +Ch
         mov     ecx,S16_POLL
         call    ESSREG_DSP_Get          ; the AAh
-        and     byte [edi+EX_S16_Flags],~(S16_EXT | S16_RUN) & 0xFF
+        and     byte [edi+EX_S16_Flags],S16_ESS | S16_RESET
         mov     dword [edi+EX_S16_Known],0
         test    byte [edi+EX_S16_Flags2],S16_RUN
         jz      .out

@@ -160,6 +160,12 @@ REGS = {"eax": UC_X86_REG_EAX, "ebx": UC_X86_REG_EBX, "ecx": UC_X86_REG_ECX,
         "ss": UC_X86_REG_SS, "eflags": UC_X86_REG_EFLAGS}
 
 
+def trap_eax(value=None):
+    """EAX at a trapped access: AL the byte written (A5h for a read), and
+    the rest whatever the game had there"""
+    return 0x5A5AA500 | (value if value is not None else 0xA5)
+
+
 class EmuError(Exception):
     pass
 
@@ -574,7 +580,7 @@ class Machine(Cpu):
 
     def _shim(self, name, port, value, cl, ds):
         self._frame()
-        self.w("eax", 0x5A5A0000 | (value if value is not None else 0xA5A5))
+        self.w("eax", trap_eax(value))
         self.w("ebx", 0x11112222)
         self.w("ecx", 0x3333_0000 | (IF | cl if value is not None else IF))
         self.w("edx", 0x44440000 | port)
@@ -776,7 +782,7 @@ class EmmCpu(Cpu):
         self.w("esp", esp)
         self.w16("ds", E_DATA16)
         self.w16("es", E_ES16)
-        self.w("eax", 0x5A5A0000 | (value if value is not None else 0xA5A5))
+        self.w("eax", trap_eax(value))
         for reg, v in regs.items():
             self.w(reg, v)
         self.w("eflags", 0x0402)                # DF set, IF clear
@@ -974,7 +980,7 @@ class PMMachine(Cpu):
         self.uc.context_restore(self.ring0)     # back from ring 3
         top = STACK32 + 0x8000
         self.put(top - 8, struct.pack("<II", STUB32 + SENTINEL32_OFF, SEL_CODE32))
-        self.w("eax", 0x5A5A0000 | (value if value is not None else 0xA5A5))
+        self.w("eax", trap_eax(value))
         self.w("ebx", 0x11112222)
         self.w("ecx", 1 if value is not None else 0)
         self.w("edx", port)
@@ -996,7 +1002,7 @@ class PMMachine(Cpu):
         if self.ports:
             raise EmuError("the handler touched the ports itself: %r"
                            % self.ports)
-        if value is not None and self.r("eax") != 0x5A5A0000 | value:
+        if value is not None and self.r("eax") != trap_eax(value):
             raise EmuError("the handler changed EAX on an out")
         return self.r8("eax")
 

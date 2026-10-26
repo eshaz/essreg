@@ -90,7 +90,7 @@ class ExtensionTest(VxDBuilds, unittest.TestCase):
         m, _hw = self.emu()
         out, cf = self.api(m, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0117)
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0118)
         # DrqLatch and the DirectSound lock are off
         self.assertEqual(out["EBX"] & 0xFFFF, 0x9FFF)
         self.assertEqual(out["EDX"] & 0xFFFF, 14)

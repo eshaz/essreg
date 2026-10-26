@@ -1181,13 +1181,12 @@ static void check_play_on8(void) {
 }
 
 // the chip's Audio 2 while a 16-bit transfer plays, and Audio 1 while an
-// 8-bit one does. Audio 2 plays the 16-bit sound in 16-bit (7Ah bit 0);
-// in 8-bit it only takes the words of the game's 16-bit channel, so that
-// the channel's count moves (esssb16 under EMM386, SB16.md)
+// 8-bit one does. Audio 2 plays the 16-bit sound only in 16-bit (7Ah
+// bit 0)
 static void check_routing(void) {
   struct xfer x;
   struct meas m;
-  u8 r78, on;
+  u8 r78;
 
   if (!front)
     return;
@@ -1198,8 +1197,7 @@ static void check_routing(void) {
   x_tone(&x, 22050);
   x_run(&x, 2, &m);
   r78 = mix_get(0x78);
-  on = (r78 & 0x03) == 0x03;
-  audio2 = on && (mix_get(0x7A) & 0x01);
+  audio2 = (r78 & 0x03) == 0x03 && (mix_get(0x7A) & 0x01);
   chip_now("route.16bit");
   if (audio2 || !cfg)
     res("route.audio2", R_INFO, "78h=%02X: 16-bit sound plays on %s", r78,
@@ -1207,9 +1205,8 @@ static void check_routing(void) {
   else
     res("route.audio2", R_INFO,
         "78h=%02X: 16-bit sound plays on Audio 1; Audio 2's DMA is %u (PnP "
-        "75h), and it needs an 8-bit one of its own (esssb16 /2)%s",
-        r78, pnp_get(1, 0x75) & 7,
-        on ? "; it moves the 16-bit channel's count" : "");
+        "75h), and it needs an 8-bit one of its own (esssb16 /2)",
+        r78, pnp_get(1, 0x75) & 7);
   quiet();
   rate41(22050);
   x_init(&x, 0xC6, 0x00, 0, 22050);

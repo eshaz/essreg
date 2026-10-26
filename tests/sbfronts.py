@@ -41,6 +41,7 @@ _BUILD = {}
 
 # the front's flags: esssb16.asm's F_*, essext.asm's S16_*
 F_ESS, F_EXT, F_AUTO, F_RUN, F_16 = 0x01, 0x02, 0x04, 0x08, 0x10
+F_LAST, F_PAUSE = 0x20, 0x40
 
 # the levels a DOS mixer program left: master 3Ah, muted on the right,
 # voice ABh, FM CDh, CD 12h, line 34h, mic 50h, PC speaker 6, the record

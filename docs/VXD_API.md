@@ -296,7 +296,7 @@ in another VM, or the driver's own interrupt code.
 
 The functions have these inputs and outputs:
 
-* **0400** takes nothing and returns AX = 0117h (version 1.17), BX = the
+* **0400** takes nothing and returns AX = 0118h (version 1.18), BX = the
   feature bits (FFFFh with every change on), CX = the SYSTEM.INI settings
   and DX = the number of functions (14).
 * **0401** takes BL = a mixer register and returns AL = its value.

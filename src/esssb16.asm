@@ -104,8 +104,6 @@ V_MASK          equ 0x01        ; masked
 V_FF            equ 0x02        ; its controller's flip-flop
 V_NEW           equ 0x04        ; programmed since it was carried over
 V_LIVE          equ 0x08        ; Audio 1's channel carries its programming
-V_PACE          equ 0x10        ; Audio 2 takes its words (pace)
-V_PACE_BIT      equ 4
 
 ; their bit numbers, for bt, bts and btr
 F_EXT_BIT       equ 1
@@ -180,8 +178,6 @@ dma16:          db 5            ; the Sound Blaster 16's 16-bit channel, 0
                                 ; for none (16-bit on Audio 1's then)
 dma2:           db 4            ; Audio 2's channel, 4 for none: the 16-bit
                                 ; playback's when it has one
-pace_ch:        db 0xFF         ; Audio 2's channel when it is a 16-bit one,
-                                ; else FFh
 mchan:          db 1            ; the channel the game's 16-bit one is
                                 ; carried over to, Audio 1's or Audio 2's
 b9:             db 2            ; B9h: 2 demand transfers, 0 single (/S)
@@ -502,9 +498,9 @@ reg_change:
         jmp     reg_set
 
 ; the chip's own reset (DS p.43): +6 = 3, a few microseconds, 0, then AAh;
-; it is in Compatibility mode, its registers unknown. The reset clears
-; Audio 2's format and interrupt (7Ah) and its volume (7Ch, DS p.51), which
-; go back while Audio 2 plays
+; it is in Compatibility mode, its registers unknown, and Audio 1's
+; transfer is over. The reset clears Audio 2's format and interrupt (7Ah)
+; and its volume (7Ch, DS p.51), which go back while Audio 2 plays
 chip_reset:
         pusha
         test    byte [V(flags2)],F_RUN
@@ -525,7 +521,7 @@ chip_reset:
         xor     al,al
         call    chip_out
         call    chip_answer             ; the AAh
-        and     byte [V(flags)],~(F_EXT | F_RUN) & 0xFF
+        and     byte [V(flags)],F_ESS | F_RESET
         and     dword [V(known)],0
         test    byte [V(flags2)],F_RUN
         jz      .out
@@ -777,11 +773,9 @@ halt:
         jmp     short boot.clear
 
 ; Audio 1's transfer of the front's stops (B8h bit 0), at once, as a Sound
-; Blaster 16's, with its pace, and its FIFO empties (a1_flush), so that
-; nothing of it plays on while Audio 2 plays the next, or in the next one's
-; format
+; Blaster 16's, and its FIFO empties (a1_flush), so that nothing of it
+; plays on while Audio 2 plays the next, or in the next one's format
 a1_stop:
-        call    pace_stop
         test    byte [V(flags)],F_RUN
         jz      a1_flush
         and     byte [V(flags)],~(F_RUN | F_AUTO | F_LAST | F_PAUSE) & 0xFF
@@ -806,13 +800,6 @@ a2_stop:
         mov     ax,0x78ED
         jmp     mix_and
 .ret:   ret
-
-; the pace stops: Audio 2's DMA and DAC off
-pace_stop:
-        btr     word [V(vbits)],V_PACE_BIT
-        jnc     pace.ret
-        mov     ax,0x7800
-        jmp     mix_write
 
 ; AL written to the command port, DX = the port: the front's DSP takes
 ; it, or waits for its answer to be read; the chip takes it in MIDI modes
@@ -1121,21 +1108,13 @@ gd:     cmp     al,8
         mov     ax,0xB8FB
         jmp     reg_and
 .pause: or      byte [V(flags)],F_PAUSE ; Audio 1's DMA requests off (B2h
-        mov     ax,0xB2BF               ; bit 6), and the pace's (78h bit 1)
-        call    reg_and
-        test    byte [V(vbits)],V_PACE
-        jz      none
-        mov     ax,0x78FD
-        jmp     mix_and
+        mov     ax,0xB2BF               ; bit 6)
+        jmp     reg_and
 .cont:  btr     word [V(flags)],F_PAUSE_BIT
         jnc     none
         call    a1_clocks               ; the rate as it is now
         mov     ax,0xB240
-        call    reg_or
-        test    byte [V(vbits)],V_PACE
-        jz      none
-        mov     ax,0x7802
-        jmp     mix_or
+        jmp     reg_or
 .a2:    shl     ah,2                    ; Audio 2: the same with 78h
         jc      .pause2
         js      .cont2
@@ -1416,44 +1395,7 @@ xfer:
         mov     al,[V(dma8)]
         call    xfer_dma
         mov     ax,0xB801               ; go
-        call    reg_or
-
-; Under EMM386, which traps no DMA controller, the game's 16-bit channel
-; keeps the position the game programmed while Audio 1 plays the buffer
-; from its own channel (mirror), yet a game can mix up to the position it
-; reads from there. Where that channel is Audio 2's, Audio 2 paces it: for
-; an auto-initialized 16-bit playback it takes the channel's words as
-; Audio 1 plays the samples, started after Audio 1, 8-bit, mono or stereo
-; as the game's, on Audio 1's sample clock (71h bit 1 off, and no FM mix,
-; bit 0), muted (7Ch), its interrupt off (7Ah), a word for each byte (78h,
-; single transfers, auto-initialize). Audio 2's FIFO (64 bytes, a word of
-; the buffer each) takes less of the buffer ahead than Audio 1's (256
-; bytes), so that Audio 1's channel stays ahead of the position the game
-; sees. Where the front traps the channel, the game reads Audio 1's
-; channel's position there, and the pace changes nothing. It stops with
-; Audio 1's transfer, at the acknowledge after its last block, and pauses
-; with it
-pace:
-        mov     al,[V(xbits)]
-        and     al,F_16 | 0x08 | F_AUTO
-        cmp     al,F_16 | F_AUTO
-        jne     .ret
-        mov     al,[V(pace_ch)]
-        cmp     al,[V(dma16)]
-        jne     .ret
-        or      byte [V(vbits)],V_PACE
-        mov     ax,0x71FC
-        call    mix_and
-        mov     ax,0x7C00
-        call    mix_write
-        mov     al,[V(ctrl)+0x07]       ; A8h bit 0, stereo, to 7Ah bit 1
-        and     al,0x01
-        shl     al,1
-        mov     ah,0x7A
-        call    mix_write
-        mov     ax,0x7813
-        jmp     mix_write
-.ret:   ret
+        jmp     reg_or
 
 ; a 16-bit playback on Audio 2: SI = the samples, CL = the mode. As
 ; ES1869.DRV starts Audio 2 (6:2C1A, docs/DRIVER_CONFIG.md): stopped (78h),
@@ -1704,29 +1646,16 @@ mirror:
         pop     ax
         pop     cx
         pop     dx
+        test    bl,F_AUTO               ; a single-cycle block, the channel
+        jnz     .have                   ; as it was carried over: it goes on
         test    byte [V(vbits)],V_LIVE
         jz      .have
-        test    bl,F_AUTO               ; a single-cycle block, the channel
-        jnz     .auto                   ; as it was carried over: it goes on
         cmp     ax,[V(vaddr)]
         jne     .have
         cmp     cx,[V(vcount)]
         jne     .have
         cmp     dl,[V(vpage)]
         jne     .have
-        ret
-.auto:  cmp     dl,[V(vpage)]           ; an auto-initialized one on the
-        jne     .have                   ; same programming (page and end),
-        mov     si,[V(vaddr)]           ; which the pace moves: from the
-        sub     si,ax                   ; start near it, else it goes on
-        mov     bp,cx                   ; from where Audio 1's channel is
-        sub     bp,[V(vcount)]
-        cmp     bp,si
-        jne     .have
-        mov     [V(vaddr)],ax
-        mov     [V(vcount)],cx
-        cmp     si,64
-        jb      .have
         ret
 .have:  mov     ah,[V(vmode)]
         and     ah,0x10                 ; auto-initialize
@@ -1989,9 +1918,8 @@ irq_src:
 
 ; the acknowledge of the kind CL (1 8-bit, 2 16-bit): Audio 1's interrupt
 ; when one of that kind is pending (a read of +Eh acknowledges them all),
-; and Audio 2's for the 16-bit kind (7Ah bit 7 cleared). After a transfer's
-; last block its pace stops; a queued block's turn has come: the
-; auto-initialize ends with it
+; and Audio 2's for the 16-bit kind (7Ah bit 7 cleared). A queued block's
+; turn has come: the auto-initialize ends with it
 ack:
         call    irq_src
         push    ax
@@ -2002,10 +1930,7 @@ ack:
         call    port_of
         call    chip_in
         pop     dx
-        test    byte [V(flags)],F_AUTO
-        jnz     .last
-        call    pace_stop
-.last:  btr     word [V(flags)],F_LAST_BIT
+        btr     word [V(flags)],F_LAST_BIT
         jnc     .a2
         and     byte [V(flags)],~F_AUTO & 0xFF
         mov     ax,0xB8FB
@@ -2080,7 +2005,7 @@ mix_out:
         ja      .chip
         jmp     short .done
 .select:
-        and     al,0xE0                 ; bit 5 channel 5, 6 and 7 theirs,
+        and     ax,0xE0                 ; bit 5 channel 5, 6 and 7 theirs,
         bsf     ax,ax                   ; the first that is set, as the
         jnz     .ch                     ; DSP picks it; none 0
         xor     ax,ax
@@ -2869,9 +2794,8 @@ three_d_off:
 ; registers 23h and 24h, a channel in each nibble), else on the card's
 ; (PnP 75h), if it is an 8-bit channel other than Audio 1's; its interrupt
 ; on the card's (PnP 72h = 70h) and unmasked (Config_Base+7 bit 1, which a
-; DOS program may have cleared, DS p.18), and its own rate (71h bit 1). On
-; a 16-bit channel, Audio 2 can pace the game's (pace). /2- leaves Audio 2
-; alone
+; DOS program may have cleared, DS p.18), and its own rate (71h bit 1).
+; /2- leaves Audio 2 alone
 audio2_setup:
         mov     al,[want2]
         cmp     al,4
@@ -2892,12 +2816,8 @@ audio2_setup:
         call    pnp_read
         and     al,0x07
         cmp     al,3
-        jbe     .eight
-        cmp     al,4
-        je      .out                    ; none
-        mov     [pace_ch],al            ; a 16-bit channel: the pace's
-        ret
-.eight: cmp     al,2
+        ja      .out                    ; none (4), or a 16-bit channel
+        cmp     al,2
         je      .out
         cmp     al,[dma8]
         je      .out

@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sb16 import encode  # noqa: E402
 from sbgame import (BASE, reset, write, read, read_all, mixer,  # noqa: E402
-                    program_dma, dma_count, samples16, words)
+                    program_dma, unmask_dma, dma_count, samples16, words)
 
 BUF = 0x40000               # the game's DMA buffer, below 1 MB
 BUF8 = 0x50000              # and its 8-bit one, while both play
@@ -362,6 +362,126 @@ def mix16_again(card):
     """B6h again between two ticks, the 16-bit channel as it was: the DMA
     goes on where it is"""
     return _mix16(card, again_us=25000)
+
+
+# --- Pinball Fantasies' drivers (FrontLine Design) ----------------------------
+
+PF_TICK = 20000             # the game's timer, in microseconds
+
+
+def pf_count(card, ch, top):
+    """the channel's count as FrontLine Design's drivers read it: twice,
+    until the second is at most 40h below the first; and whether it is
+    beyond the buffer's `top`, where the driver writes "dma count=" and
+    the count into segment B000h"""
+    for _ in range(100):
+        first, second = dma_count(card, ch), dma_count(card, ch)
+        if (first - second) & 0xFFFF <= 0x40:
+            break
+    return second, second > top
+
+
+def pf_mix(card, ch, frames, size, value, ticks):
+    """the game at each tick: the position from the count, and the frames
+    behind it mixed for their next time round, `value(f)` the bytes of
+    frame f; (the frames mixed, the counts beyond the buffer)"""
+    unit = 2 if ch >= 4 else 1          # the count's bytes
+    done = last = laps = wild = 0
+    for _ in range(ticks):
+        card.wait(PF_TICK)
+        count, beyond = pf_count(card, ch, size // unit)
+        wild += beyond
+        if beyond:
+            continue
+        pos = (size // unit - count) * unit * frames // size
+        laps += pos < last
+        last = pos
+        for f in range(done, laps * frames + pos):
+            card.poke(BUF + size // frames * (f % frames), value(f + frames))
+        done = max(done, laps * frames + pos)
+    return done, wild
+
+
+def pf_ack16(card):
+    card.blocks += 1
+    card.inp(BASE + 0x0F)
+
+
+@scene
+def resiplay(card):
+    """Pinball Fantasies' Sound Blaster 16 driver (SB16.SDR): the highest
+    channel of mixer 81h, programmed while it is masked for a buffer of
+    two ticks of 16-bit stereo at 44000 Hz; the DSP's reset, D1h, 41h,
+    mixer 0Eh, 04h and 22h, B6h for the most whole buffers that fit 65535
+    samples, and the unmask after it. At each tick it reads the count and
+    mixes up to it a counter of the frames, as mix16 does; its handler
+    only acknowledges"""
+    prepare(card)
+    card.isr = pf_ack16
+    bits = mixer(card, 0x81) & 0xEB
+    ch = bits.bit_length() - 1
+    frames, rate = 1760, 44000
+    size = 4 * frames
+    card.poke(BUF, b"".join(struct.pack("<hh", f, f) for f in range(frames)))
+    program_dma(card, ch, BUF, size, unmask=False)
+    reset(card)
+    write(card, 0xD1, 0x41, rate >> 8, rate & 0xFF)
+    for reg, v in ((0x0E, 0x02), (0x04, 0xFF), (0x22, 0xFF)):
+        mixer(card, reg, v)
+    n = 0xFFFF // size * size - 1
+    write(card, 0xB6, 0x30, n & 0xFF, n >> 8)
+    unmask_dma(card, ch)
+    done, wild = pf_mix(card, ch, frames, size,
+                        lambda f: struct.pack("<hh", f, f), 15)
+    got = [f[0] for f in card.dac(16)]
+    return {"channel": ch, "start": got[:32],
+            "back": sum(1 for a, b in zip(got, got[1:]) if b < a),
+            "mixed": done > 4 * frames, "wild": wild}
+
+
+def pf_isr_pro(n):
+    """SBPRO.SDR's handler: the acknowledge, then 48h and 91h again"""
+    def isr(card):
+        card.blocks += 1
+        card.inp(BASE + 0x0E)
+        write(card, 0x48, n & 0xFF, n >> 8, 0x91)
+    return isr
+
+
+@scene
+def pinball_sbpro(card):
+    """the game's Sound Blaster Pro driver (SBPRO.SDR), which plays on the
+    ES1869: channel 1 programmed while it is masked for a buffer of two
+    ticks of 8-bit stereo at 22 kHz; the DSP's reset, D1h, 40h, mixer 0Eh
+    and 04h, 48h for the most whole buffers that fit 65535 bytes and 91h,
+    and the unmask after them. Its handler acknowledges and sends 48h and
+    91h again; at each tick it mixes up to the count a counter of the
+    frames, its low byte left and its high byte right. 0Eh's stereo has no
+    effect on a Sound Blaster 16, so each byte plays as a sample. The
+    driver's position is up to a byte ahead of the DMA, so that where the
+    DMA is the DAC's, as on the card, one byte plays a lap early: a spike,
+    and no step back"""
+    prepare(card)
+    frames = 880
+    size = 2 * frames
+    n = 0xFFFF // size * size - 1
+    card.isr = pf_isr_pro(n)
+    card.poke(BUF, b"".join(struct.pack("<H", f) for f in range(frames)))
+    program_dma(card, 1, BUF, size, unmask=False)
+    reset(card)
+    write(card, 0xD1, 0x40, 256 - 500 // 22)
+    for reg, v in ((0x0E, 0x02), (0x04, 0xFF)):
+        mixer(card, reg, v)
+    write(card, 0x48, n & 0xFF, n >> 8, 0x91)
+    unmask_dma(card, 1)
+    done, wild = pf_mix(card, 1, frames, size,
+                        lambda f: struct.pack("<H", f & 0xFFFF), 80)
+    b = [((f[0] >> 8) + 128) & 0xFF for f in card.played]
+    got = [lo | hi << 8 for lo, hi in zip(b[0::2], b[1::2])]
+    return {"start": got[:32], "blocks": card.blocks,
+            "back": sum(1 for a, v, c in zip(got, got[1:], got[2:])
+                        if c < v and c < a),
+            "mixed": done > 30 * frames, "wild": wild}
 
 
 # --- 8-bit playback -----------------------------------------------------------

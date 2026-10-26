@@ -199,10 +199,11 @@ def mixer(card, reg, v=None, base=BASE):
 
 
 def program_dma(card, ch, addr, size, auto=True, record=False,
-                single=True):
+                single=True, unmask=True):
     """a channel for size bytes at physical addr, in Creative's order:
-    mask, mode, flip-flop, address, page, count, unmask; a 16-bit
-    channel's address and count in words"""
+    mask, mode, flip-flop, address, page, count, unmask (or still masked,
+    for unmask_dma later); a 16-bit channel's address and count in
+    words"""
     if ch >= 4:
         mask, mode_p, ff, port = 0xD4, 0xD6, 0xD8, 0xC0 + 4 * (ch - 4)
         a, n = (addr >> 1) & 0xFFFF, (size >> 1) - 1
@@ -220,7 +221,12 @@ def program_dma(card, ch, addr, size, auto=True, record=False,
     card.out(PAGE_PORTS[ch], page)
     card.out(port + (2 if ch >= 4 else 1), n & 0xFF)
     card.out(port + (2 if ch >= 4 else 1), n >> 8)
-    card.out(mask, ch & 3)
+    if unmask:
+        unmask_dma(card, ch)
+
+
+def unmask_dma(card, ch):
+    card.out(0xD4 if ch >= 4 else 0x0A, ch & 3)
 
 
 def dma_count(card, ch):

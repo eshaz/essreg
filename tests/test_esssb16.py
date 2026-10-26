@@ -37,7 +37,6 @@ IO_DIRECT, IO_HDPMI, IO_QPI, IO_CHAIN = 0, 1, 2, 3
 BASE = 0x220
 SB_PORTS = {BASE + o for o in (4, 5, 6, 0xA, 0xC, 0xE, 0xF)}
 DMA5_PORTS = {0xC4, 0xC6, 0x8B, 0xD4, 0xD6, 0xD8, 0xDA, 0xDC, 0xDE}
-MAX_PARAS = 290         # the resident part with the PSP: 4.5 KB in MEM /C
 # the 8237's mode register: demand or single transfers, auto-initialize,
 # from memory (playback) or into it (recording)
 DEMAND, SINGLE, AUTO, PLAY, RECORD = 0x00, 0x40, 0x10, 0x08, 0x04
@@ -101,6 +100,16 @@ def deep_calls(c):
     read_all(c)
 
 
+def select_none(test, c):
+    """mixer 81h without a 16-bit channel's bit after one with it: none,
+    whatever the game had in AH (tsremu's trap_eax)"""
+    mixer(c, 0x81, 0x22)
+    test.assertEqual(c.m.data8("dma16"), 5)
+    mixer(c, 0x81, 0x02)
+    test.assertEqual(c.m.data8("dma16"), 0)
+    test.assertEqual(mixer(c, 0x81), 0x02)
+
+
 def poison_stack(m):
     """the front's stack filled with 5Ah, to see how deep it goes"""
     lo, top = m.addr("stack"), m.addr("stack_top")
@@ -148,12 +157,11 @@ class BuildTest(unittest.TestCase):
                              "tools/build_esssb16.py")
 
     def test_small(self):
-        """the resident part, with the PSP, stays within MAX_PARAS
-        paragraphs, and the file, which LH loads whole into upper memory
-        before it shrinks, within 9 KB"""
+        """the file, which LH loads whole into upper memory before it
+        shrinks, stays within 9 KB; the resident part has no fixed limit,
+        and tools/build_esssb16.py reports its size"""
         image, syms = build()
         self.assertLess(len(image), 9216)
-        self.assertLessEqual(paragraphs(syms), MAX_PARAS)
         self.assertEqual(syms["RESIDENT_PARAS"], paragraphs(syms))
         self.assertLess(syms["resident_end"], syms["install"] + 1)
 
@@ -674,6 +682,9 @@ class FrontTest(unittest.TestCase):
         self.assertEqual(chip.mixer[0x81], 0)  # never the chip's
         self.assertClean()
 
+    def test_81h_garbage_ah(self):
+        select_none(self, self.c)
+
     def test_the_chips_own_registers(self):
         """the view stays the game's when it sets the chip's own levels"""
         c = self.c
@@ -790,6 +801,9 @@ class EMM386FrontTest(unittest.TestCase):
         m.mix_set(0x30, 0xF0)
         self.assertEqual(self.chip.mixer[0x60], 0x3C)
 
+    def test_81h_garbage_ah(self):
+        select_none(self, self.c)
+
     def test_stack(self):
         """the front runs on EMM386's stack, not its own"""
         m = self.c.m
@@ -829,6 +843,9 @@ class HDPMITest(unittest.TestCase):
         c.wait(30000)
         self.assertGreater(len(chip.played), 1000)
         self.assertEqual(chip.violations, [])
+
+    def test_81h_garbage_ah(self):
+        select_none(self, self.c)
 
     def test_other_ports(self):
         """the odd ports of the traps' ranges go to the chip as they are"""

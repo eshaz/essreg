@@ -27,8 +27,8 @@ from sbgame import (BASE, reset, write, read, read_all, mixer,  # noqa: E402
 
 if HAVE_UNICORN:
     from sbfronts import (TSRCard, VxDCard, DOS_MIXER, F_ESS,  # noqa: E402
-                          F_EXT, F_AUTO, F_RUN, F_16, clocks, written,
-                          play16)
+                          F_EXT, F_AUTO, F_RUN, F_16, F_LAST, F_PAUSE,
+                          clocks, written, play16)
 
 
 def fresh(c):
@@ -264,6 +264,34 @@ class FrontChecks:
         write(c, 0xC6, 0x00, 0xFF, 0x03)
         self.assertEqual(chip.resets, 2)
         self.assertEqual(chip.commands[:2], [(0xC6,), (0xD1,)])
+        self.assertClean()
+
+    def test_queued_block_then_firmware(self):
+        """a single-cycle block queued behind an auto-initialized
+        transfer, which a pause holds, then a command of the firmware's:
+        the chip's own reset ends the transfer and what was queued, so the
+        acknowledge of the firmware's interrupt sends the chip nothing, and
+        no Extended register in Compatibility mode"""
+        c, chip = self.c, self.chip
+        program_dma(c, 1, 0x14000, 4096)
+        write(c, 0x41, 0x56, 0x22, 0xC6, 0x00, 0xFF, 0x07)
+        write(c, 0xC0, 0x00, 0xFF, 0x03, 0xD0)
+        self.assertEqual(c.flags() & (F_RUN | F_AUTO | F_LAST | F_PAUSE),
+                         F_RUN | F_AUTO | F_LAST | F_PAUSE)
+        program_dma(c, 1, 0x20000, 512, auto=False)
+        write(c, 0x40, 0xA5, 0x75, 0xFF, 0x01)
+        self.assertEqual(chip.resets, 1)
+        self.assertFalse(chip.ext_mode)
+        self.assertEqual(c.flags() & (F_EXT | F_RUN | F_AUTO | F_16 | F_LAST
+                                      | F_PAUSE), 0)
+        c.wait(120000)
+        self.assertTrue(chip.a1_flags & 4)          # the firmware's
+        chip.commands = []
+        c.inp(BASE + 0x0E)
+        self.assertFalse(chip.a1_flags & 4)
+        self.assertEqual(chip.commands, [])
+        write(c, 0xD4)                              # nothing to continue
+        self.assertEqual(chip.commands, [])
         self.assertClean()
 
     def test_midi(self):

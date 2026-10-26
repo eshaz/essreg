@@ -9,7 +9,8 @@ Audio 2 is on channel 3, where the fronts play 16-bit sound, and the 8-bit
 transfers play on Audio 1; the classes named Audio1 put Audio 2 where the
 fronts can't use it, and everything plays on Audio 1, one transfer at a
 time, so the scenes of two transfers at once (sbscenes.DUAL) don't run
-there.
+there. EMM386H0Test is esssb16 /H0 against a Sound Blaster 16 without a
+16-bit channel, whose 16-bit transfers go to the 8-bit channel.
 
 Where the chip itself differs, the comparison allows for it. Audio 1's
 FIFO (256 bytes) and Audio 2's (64) take the DMA ahead of the DACs, so a
@@ -21,7 +22,9 @@ Under EMM386 the TSR doesn't trap the DMA controller, so a game's 16-bit
 channel keeps the position it was programmed with, its programming has to
 come before the transfer's command, and each command carries it over anew,
 from the buffer's start, but for a single-cycle block of the buffer it
-carried over last, which goes on from the block before.
+carried over last, which goes on from the block before. A game that mixes
+up to that channel's count (mix16, resiplay) plays its first fill over and
+over there.
 
 The chip model also has to see no undefined use (esschip's violations),
 every DMA cycle has to move data (dma8237's bad), and the VxD has to ask
@@ -47,11 +50,11 @@ FIFO = 256                  # Audio 1's FIFO, in bytes and so at most frames
 _MODEL = {}
 
 
-def model(name):
+def model(name, dma16=5):
     """the scene on the Sound Blaster 16 model, once"""
-    if name not in _MODEL:
-        _MODEL[name] = SCENES[name](ModelCard())
-    return _MODEL[name]
+    if (name, dma16) not in _MODEL:
+        _MODEL[name, dma16] = SCENES[name](ModelCard(dma16=dma16))
+    return _MODEL[name, dma16]
 
 
 def differences(want, got):
@@ -80,10 +83,11 @@ def differences(want, got):
 class Conformance:
     """the scenes on one front; `known` maps a scene to the keys it may
     differ in, as the module's text says; `audio2` the front plays 16-bit
-    sound on Audio 2"""
+    sound on Audio 2; `dma16` the model's 16-bit channel"""
 
     known = {"dma_ident": {"bytes"}}
     audio2 = True
+    dma16 = 5
 
     def card(self):
         raise NotImplementedError
@@ -91,7 +95,7 @@ class Conformance:
     def check(self, name):
         if name in DUAL and not self.audio2:
             self.skipTest("one transfer at a time on Audio 1")
-        want = model(name)
+        want = model(name, self.dma16)
         card = self.card()
         got = SCENES[name](card)
         self.assertEqual(card.audio2, self.audio2)
@@ -149,6 +153,7 @@ class EMM386Test(Conformance, unittest.TestCase):
 
     known = {**Conformance.known, "position16": {"moving"},
              "mix16": {"back", "mixed"}, "mix16_again": {"back", "mixed"},
+             "resiplay": {"back", "mixed"},
              "play16_dma_after": {"data", "ok", "per_block", "seen"}}
 
     def card(self):
@@ -157,16 +162,27 @@ class EMM386Test(Conformance, unittest.TestCase):
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
 class EMM386Audio1Test(Conformance, unittest.TestCase):
-    """the same with Audio 2 on the 16-bit channel 5, the game's: every
-    transfer on Audio 1, and Audio 2 takes the channel's words as Audio 1
-    plays, so that its count moves"""
+    """the same with Audio 2 on the 16-bit channel 5, the card of the
+    reports: every transfer on Audio 1, one at a time"""
 
-    known = {**Conformance.known,
-             "play16_dma_after": {"data", "ok", "per_block", "seen"}}
+    known = EMM386Test.known
     audio2 = False
 
     def card(self):
         return TSRCard("emm", dma2=5)
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class EMM386H0Test(Conformance, unittest.TestCase):
+    """/H0 under EMM386: mixer 81h has no 16-bit channel, so a game that
+    reads it, as Pinball Fantasies' driver does, programs the 8-bit
+    channel itself, and its count moves (resiplay)"""
+
+    audio2 = False
+    dma16 = 0
+
+    def card(self):
+        return TSRCard("emm", dma2=5, tail="/H0")
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
