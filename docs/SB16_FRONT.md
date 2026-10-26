@@ -178,9 +178,10 @@ format on Audio 1 goes on from it without FIFO, because the FIFO still holds
 the last block's end, and 82h names the ended block's interrupt by its kind.
 
 HOLD and SETTLE keep the DMA's bytes away from Audio 1 while its start
-settles. A byte that comes within a few microseconds of B8h bit 0 rising is
-lost but counted, and the stream plays a byte off from there: noise in
-16-bit sound, the sides swapped in 8-bit stereo (`fix.base1`, `fix.late0`,
+settles. The start's first byte, when it comes within a few microseconds of
+the start's first DMA request, is lost but counted, and the stream plays a
+byte off from there: noise in 16-bit sound, the sides swapped in 8-bit
+stereo (`fix.base1`, `fix.late0`, `fix.b2late1`,
 [ESS_EXTENDED.md](ESS_EXTENDED.md#a-16-bit-stream-a-byte-off)). With the
 channel unmasked 20 us or more after the start, every rate measured stayed
 in step. The game's own channel that the game unmasks after the command gets
@@ -199,10 +200,10 @@ and DAh end its auto-initialize with the block that plays. The 16-bit kind
 is Audio 2's while Audio 2 runs. A command for a kind that doesn't run does
 nothing:
 * **Audio 1**: the pause clears B2h bit 6, so that the chip asks for no more
-  DMA and the FIFO plays out, and the continue sets the rate again, then
-  HOLD, B2h bit 6 and SETTLE, because a byte right after B2h bit 6 rises can
-  be lost as at the start (`fix.pb2late` without a memory manager). The end
-  of auto-initialize clears B8h bit 2.
+  DMA and the FIFO plays out, and the continue sets the rate again, then B2h
+  bit 6. The end of auto-initialize clears B8h bit 2. On the card a resume
+  came back in step about half the time, held or not (`fix.pb2late`,
+  `fix.pb2hold1`): the pause stops the DMA inside a frame.
 * **Audio 2**: the pause clears 78h bit 0, which silences the DAC, though
   the card's DMA runs on meanwhile and the stream skips what it moved
   (`a2.pause_f`), and the continue sets the rate again, then 78h bit 0. The
@@ -290,10 +291,10 @@ The machine keeps these:
 * Every DMA cycle moves data in the direction of its transfer
   (`tests/dma8237.py`).
 * B8h bit 0 is the last write of Audio 1's start, and 78h the last of Audio
-  2's. No DMA byte reaches Audio 1 within SETTLE's polls of B8h bit 0 or B2h
-  bit 6 rising (`tests/esschip.py`'s RACE_US). Audio 2 starts with one write
-  of 78h, its DMA and its FIFO at once, which stayed in step on the card
-  where two steps did not (`a2.start2`).
+  2's. No DMA byte reaches Audio 1 within SETTLE's polls of its start
+  (`tests/esschip.py`'s RACE_US). Audio 2 starts with one write of 78h, its
+  DMA and its FIFO at once, which stayed in step on the card where two steps
+  did not (`a2.start2`).
 * The front sends DSP commands only while the game waits for the port access
   that caused them: in the trap's handler, never from an interrupt of its
   own.
@@ -347,9 +348,9 @@ These transitions follow the card's answers ([ESSPROBE.md](ESSPROBE.md),
   Fantasies' driver does.
 * `fix.late20` and the others: HOLD and SETTLE around Audio 1's start.
 * `a1.pause_b2`: B2h bit 6 stops Audio 1's DMA within a few bytes, so it is
-  the pause. Whether HOLD keeps the continue in step is for `fix.pb2hold1`
-  to `fix.pb2hold3`, and whether Audio 2's 78h bit 0, whose DMA runs on in
-  the pause, or bit 1 serves its pause better, for `fix.a2pdhold1` and the
-  others.
+  the pause, though a resume comes back in step only about half the time, as
+  after every pause measured, and HOLD doesn't help it (`fix.pb2hold1` to
+  `fix.pb2hold3`). `fix.pb7a` and the others try a pause through B7h bit 7,
+  whose DMA would stop after whole frames.
 * `a1.b9_0` to `a1.b9_3`: B9h 00, 01 and 10 run at the rate and 11 runs
   ahead of it, so the fronts write 10, or 00 with `/S`.

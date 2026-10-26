@@ -27,12 +27,15 @@ DSP version 4.05 with the CT1745 mixer, command for command
   own, 16-bit sound plays on Audio 1, one transfer at a time. A game that
   picks the 8-bit channel for 16-bit sound through mixer 81h, as a Sound
   Blaster 16 allows, programs that channel itself.
-* Each start of Audio 1, and each continue after a pause, keeps its DMA
-  channel masked for a moment: the chip loses a byte that comes right at its
-  start, and 16-bit sound would play a byte off, as noise
+* Each start of Audio 1 keeps its DMA channel masked for a moment: the chip
+  loses a byte that comes right at its start, and 16-bit sound would play a
+  byte off, as noise
   ([ESS_EXTENDED.md](ESS_EXTENDED.md#a-16-bit-stream-a-byte-off)). The
   game's own channel is masked only where the chipset reads its mask back,
-  as Intel's PIIX4 does, and the channel is unmasked.
+  as Intel's PIIX4 does, and the channel is unmasked. On the card,
+  `sb16test`'s recorded run then played every 16-bit sound clean. A pause
+  and continue (D5h and D6h, D0h and D4h) can still bring 16-bit or 8-bit
+  stereo sound back a byte off, about half the time.
 * The direct DAC and ADC, ADPCM, silence and MIDI, which Extended mode
   lacks, go to the chip in its Compatibility mode.
 * The Sound Blaster 16's mixer registers, 30h to 47h, show the levels the

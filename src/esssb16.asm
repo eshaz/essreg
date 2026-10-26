@@ -1156,12 +1156,8 @@ gd:     cmp     al,8
 .cont:  btr     word [V(flags)],F_PAUSE_BIT
         jnc     none
         call    a1_clocks               ; the rate as it is now
-        call    a1_hold                 ; the DMA requests on with the
-        push    ax                      ; channel masked
         mov     ax,0xB240
-        call    reg_or
-        pop     ax
-        jmp     settle
+        jmp     reg_or
 .a2:    shl     ah,2                    ; Audio 2: the same with 78h
         jc      .pause2
         js      .cont2
@@ -1763,28 +1759,10 @@ hold:
         pop     cx
         ret
 
-; the channel that plays Audio 1's transfer masked over its DMA's restart:
-; the game's own, or the one that carries its 16-bit channel unless the
-; game masked that; AL = the channel to unmask after, or FFh
-a1_hold:
-        mov     al,[V(dma8)]
-        test    byte [V(flags)],F_16
-        jz      hold
-        cmp     byte [V(dma16)],0
-        je      hold
-        call    vtrapped
-        jc      .held
-        test    byte [V(vbits)],V_MASK
-        mov     al,0xFF
-        jnz     .ret
-.held:  call    ch8_mask
-        mov     al,[V(mchan)]
-.ret:   ret
-
-; Audio 1's DMA (re)started: +Ch polled 64 + 22528 / v times, at least 32
-; us and two of its sample periods at an ISA read's half a microsecond,
-; before a byte may come (fix.late20, a byte off sooner); then AL, the
-; channel that the start held masked, unmasked (FFh: none)
+; Audio 1 started: +Ch polled 64 + 22528 / v times, at least 32 us and
+; two of its sample periods at an ISA read's half a microsecond, before a
+; byte may come (fix.late20, a byte off sooner); then AL, the channel that
+; the start held masked, unmasked (FFh: none)
 settle:
         push    cx
         push    dx

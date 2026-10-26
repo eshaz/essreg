@@ -476,13 +476,12 @@ def synthesize(run, rate=48000):
 RECORDED = ("a1.base,a1.left,a1.right,a1.pause_b2,a1.muted,a2.base,"
             "a2.slaved,both.base,both.muted2,stream.a1,stream.mirror,"
             "a2.wide_packed,fix.late100a,fix.a2pfd1,fix.pb2late,"
-            "fix.pb2hold1")
-# those whose Audio 1 stream plays a byte off, its DMA running at its
-# start or resume, as on the card (docs/ESS_EXTENDED.md); the names are
-# prefixes, so fix.pb2late runs fix.pb2late2 and 3 too
+            "fix.b2late1,fix.pb7a")
+# those whose Audio 1 stream plays a byte off, its DMA running when its
+# start's first request came, as on the card (docs/ESS_EXTENDED.md); the
+# names are prefixes, so fix.pb2late runs fix.pb2late2 and 3 too
 BYTE_OFF = {"a1.base", "a1.left", "a1.right", "a1.pause_b2", "both.base",
-            "both.muted2", "stream.a1", "fix.pb2late", "fix.pb2late2",
-            "fix.pb2late3"}
+            "both.muted2", "stream.a1", "fix.b2late1"}
 
 
 @unittest.skipUnless(HAVE_UNICORN and np is not None,
@@ -546,8 +545,8 @@ class RecordedTest(unittest.TestCase):
             self.assertIn(case, v, v["_text"])
         bad = {c for c, r in v.items() if c != "_text" and r[0] == "FAIL"}
         self.assertEqual(bad, BYTE_OFF, v["_text"])
-        self.assertRegex(v["fix.pb2late"][1], r"before: .*clean [3-9]\d dB.*"
-                         r"after: .*clean -?\d dB")
+        self.assertRegex(v["fix.b2late1"][1], r"clean -?\d dB")
+        self.assertEqual(v["fix.pb2late"][0], "PASS")
         self.assertEqual(v["a2.wide_packed"][0], "INFO")
         self.assertIn("plays at 220", v["a2.slaved"][1])
         self.assertIn("by spec key", v["_text"])
@@ -602,7 +601,7 @@ class RecordedTest(unittest.TestCase):
         def fill(x, a, b):
             t = np.arange(b - a) / self.RATE
             x[a:b, 0] = x[a:b, 1] = 0.3 * np.sin(2 * np.pi * 441 * t)
-        self.assertEqual(self.broken("fix.pb2hold1", fill)[0], "FAIL")
+        self.assertEqual(self.broken("fix.pb7a", fill)[0], "FAIL")
 
     def test_sides_swapped_after_a_pause(self):
         """a stream two bytes off after the pause: the tone on the right"""

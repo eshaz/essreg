@@ -472,7 +472,7 @@ Audio 2 has the same race, which a single write of 78h wins ([Audio
 2](#audio-2)). es18xx's note of Audio 1 garbled at 16-bit stereo may be the
 same fault.
 
-Measured by the fix group, run once in real mode and once under EMM386
+Measured by the fix group, run twice in real mode and twice under EMM386
 (`fix.*`): with the channel unmasked before B8h bit 0, the stream played a
 byte off every time, whatever came before the start: the FIFO emptied after
 the format as `build/ES1869.DRV`'s player does it (`fix.win1` to `fix.win3`,
@@ -485,25 +485,39 @@ after B8h bit 0, every stream played in step, at 44.1 kHz (`fix.late20` to
 (`fix.s8late`). Unmasked right after the start, the stream played in step
 under EMM386, which takes that long to pass the unmask on, and a byte off in
 real mode (`fix.late0`). The interrupts kept their time in every case: the
-lost byte counts. The fronts hold the channel masked over the start for at
-least 32 us and two sample periods
+lost byte counts. With B2h bit 6 set only 100 or 300 us after B8h bit 0 and
+the channel unmasked, the stream played a byte off in all eight runs
+(`fix.b2late1` to `fix.b2late3`, `fix.r11b2late`): the byte at risk is the
+first of the start's first DMA request, whenever the request comes, and a
+channel masked over it wins the race. The fronts hold the channel masked
+over the start for at least 32 us and two sample periods
 ([SB16_FRONT.md](SB16_FRONT.md#a-transfer)), and `tests/esschip.py` loses
-the first byte that comes within 10 us of the start.
+the start's first byte when it comes within 10 us of the request. With the
+fronts holding the channel, `sb16test`'s recorded run through `esssb16`
+under EMM386 played every 16-bit sound in step, 57 to 59 dB clean, its sides
+apart by 63 dB (`l.left16`, `l.right16`, `l.clean.16bit`,
+`l.clean.stereo16`).
 
-A pause can lose the step too. With the channel unmasked throughout, the
-stream resumed after B8h bit 0 one byte off under EMM386 and two bytes off,
-its sides swapped, in real mode (`fix.pb8late`), and after B2h bit 6 in step
-under EMM386 and a byte off in real mode (`fix.pb2late`). Audio 2 resumed in
-step in 7 of 9 runs after 78h bit 0, whose DMA runs on meanwhile
-(`a2.pause_f`, `fix.a2pf1`), in 6 of 11 after bit 1 (`a2.pause_d`,
-`fix.a2pd1`), and in 3 of 6 after both (`fix.a2pfd1`). The fronts' continue
-holds Audio 1's channel masked over B2h bit 6 as over the start, which
-`fix.pb2hold1` to `fix.pb2hold3` measure, with `fix.pb8hold1` and
-`fix.pb8hold2` for B8h bit 0 and `fix.a2pdhold1`, `fix.a2pdhold2` and
-`fix.a2pfdhold` for Audio 2. `fix.b2late1` to `fix.b2late3` and
-`fix.r11b2late` start with the channel unmasked and B2h bit 6 set only 100
-or 300 us after B8h bit 0, which would keep the step without the mask's
-readback, if the race is the start's and not the DMA request's.
+A pause loses the step about half the time, whichever way it pauses and
+continues, from an in-step start. Audio 1 resumed in step after B2h bit 6 in
+6 of 8 runs, all four under EMM386 and two of four in real mode
+(`fix.pb2late` to `fix.pb2late3`), and after B8h bit 0 in 2 of 4
+(`fix.pb8late`). With the channel masked over the resume and unmasked 100 us
+after, it resumed in step in 1 of 3 runs after B2h bit 6 and 1 of 2 after
+B8h bit 0 in real mode (`fix.pb2hold1` to `fix.pb8hold2`). Audio 2 resumed
+in step in 6 of 11 runs after 78h bit 0, whose DMA runs on meanwhile
+(`a2.pause_f`, `fix.a2pf1`), in 7 of 14 after bit 1 (`a2.pause_d`,
+`fix.a2pd1`), in 6 of 12 after both (`fix.a2pfd1`), and with the channel
+masked over the resume in 2 of 3 in real mode (`fix.a2pdhold1`). Under
+EMM386 the probe's unmask of a held channel went through EMM386, which
+started the channel over at the buffer's start ([The DMA controllers and the
+memory managers](#the-dma-controllers-and-the-memory-managers)), so those
+runs don't count. The offsets were one, two and three bytes. So a resume has
+no race of its own: the step goes where a pause stops the DMA inside a
+frame, which a demand transfer of 2 bytes does, half the time, in 16-bit
+stereo. `fix.pb7a` to `fix.pb7r22` pause through B7h bit 7, which takes the
+FIFO off the DAC: the FIFO fills, and the DMA stops when it is full, after
+whole frames.
 
 ### Commands while the DMA runs
 
@@ -742,7 +756,11 @@ for channel 1 and channel 5 alike (`h1.cross1`, `h1.cross5`), and the
 channel read back before the next unmask still pointed there (`h1.stale`). A
 program's reads come from the 8237 while the channel moves (`h1.read1`,
 `h1.read5`), and move the 8237's flip-flop, while its writes move EMM386's
-own (`h1.ff1`, `h1.ff5`).
+own (`h1.ff1`, `h1.ff5`). A program that masks a running channel and unmasks
+it has EMM386 program the 8237 anew at the unmask, from what the program
+wrote, so the transfer starts over at the buffer's start: the probe's count
+jumped back, and the rate it measured came out 4.6 percent high
+(`fix.pb2hold1` and the other held cases under EMM386).
 
 ## What the engines do to the machine
 

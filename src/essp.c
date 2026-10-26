@@ -731,7 +731,7 @@ enum {
 #define E2 0x02 // Audio 2
 
 // the pauses
-enum { P_NONE, P_B2, P_B8, P_78F, P_78D, P_78FD, P_D0 };
+enum { P_NONE, P_B2, P_B8, P_B7, P_78F, P_78D, P_78FD, P_D0 };
 
 // a case's spec, parsed
 struct pc {
@@ -888,10 +888,10 @@ static const struct ecase cases[] = {
     {"stream.mirror", "run=mirror S", "loop"},
     {"stream.a2", "run=stream e=2 S", "glide"},
     {"stream.a2w", "run=stream e=2 wide packed", "any"},
-    // which start keeps a 16-bit stream in step: the tone on the left
-    // alone, so that a stream a byte off is noise and two bytes off is on
-    // the right; Audio 1 by default, and the cases repeated, since a start
-    // is a race
+    // which start keeps a 16-bit stream in step, and which pause keeps it
+    // after the continue: the tone on the left alone, so that a stream a
+    // byte off is noise and two bytes off is on the right; Audio 1 by
+    // default, and the cases repeated, since a start is a race
     {"fix.base1", "S", "left"},
     {"fix.base2", "", "left"},
     {"fix.late0", "late=0", "left"},
@@ -931,6 +931,12 @@ static const struct ecase cases[] = {
     {"fix.b2late2", "b2late=100", "left"},
     {"fix.b2late3", "b2late=100", "left"},
     {"fix.r11b2late", "r=11025 b2late=300", "left"},
+    {"fix.pb7a", "late=100 pause=b7 S ms=1500", "lpause"},
+    {"fix.pb7b", "late=100 pause=b7 ms=1500", "lpause"},
+    {"fix.pb7c", "late=100 pause=b7 ms=1500", "lpause"},
+    {"fix.pb7m", "f=16m late=100 pause=b7 ms=1500", "pause"},
+    {"fix.pb7s8", "f=8s late=100 pause=b7 ms=1500", "lpause"},
+    {"fix.pb7r22", "r=22050 late=200 pause=b7 ms=1500", "lpause"},
     {"fix.a2base1", "e=2 S", "left"},
     {"fix.a2base2", "e=2", "left"},
     {"fix.a2pf1", "e=2 pause=f ms=1500", "lpause"},
@@ -1068,6 +1074,8 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
       p->pause = P_B2;
     else if (!strcmp(v, "b8"))
       p->pause = P_B8;
+    else if (!strcmp(v, "b7"))
+      p->pause = P_B7;
     else if (!strcmp(v, "f"))
       p->pause = P_78F;
     else if (!strcmp(v, "d"))
@@ -1609,9 +1617,10 @@ static void sound_line(const char *id, const char *syms, u32 tm,
 
 // the pause (on) or its end; with hold, the end comes with the engines'
 // channels masked, unmasked late us after it (100 without late); 0 if the
-// pause can't be made
+// pause can't be made. B7h bit 7 takes the FIFO off the DAC, so that it
+// fills and the DMA stops when it is full
 static int pause_on(const struct pc *p, int on) {
-  int ok = 1;
+  int ok = 1, r;
 
   if (!on && p->hold)
     eng_masks(1);
@@ -1621,6 +1630,13 @@ static int pause_on(const struct pc *p, int on) {
     break;
   case P_B8:
     reg_w(0xB8, (u8)(on ? b8_run : b8_run | 1));
+    break;
+  case P_B7:
+    r = reg_r(0xB7);
+    if (r < 0)
+      ok = 0;
+    else
+      reg_w(0xB7, (u8)(on ? r & ~0x80 : r | 0x80));
     break;
   case P_78F:
     mix_w(0x78, (u8)(on ? r78_run & ~0x01 : r78_run));

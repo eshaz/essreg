@@ -473,14 +473,13 @@ channel stays masked over B8h bit 0 (VDMAD_Mask_Channel, where the program's
 channel is unmasked or its 16-bit one carried over) until the front has
 polled the chip for at least 32 us and two sample periods, then
 VDMAD_UnMask_Channel, because the chip loses a byte that comes right at its
-start ([ESS_EXTENDED.md](ESS_EXTENDED.md#a-16-bit-stream-a-byte-off)); the
-continue after a pause does the same around B2h bit 6. A DSP reset would
-take the chip out of Extended mode, so the front emulates the program's
-reset: the transfer stops, the chip's interrupt is acknowledged, AAh comes
-back, and the chip stays in Extended mode. The firmware's commands that
-Extended mode doesn't have, the direct DAC and ADC, ADPCM, silence and MIDI,
-go to the chip in its Compatibility mode, after a reset of its own, with the
-rate as a time constant.
+start ([ESS_EXTENDED.md](ESS_EXTENDED.md#a-16-bit-stream-a-byte-off)). A DSP
+reset would take the chip out of Extended mode, so the front emulates the
+program's reset: the transfer stops, the chip's interrupt is acknowledged,
+AAh comes back, and the chip stays in Extended mode. The firmware's commands
+that Extended mode doesn't have, the direct DAC and ADC, ADPCM, silence and
+MIDI, go to the chip in its Compatibility mode, after a reset of its own,
+with the rate as a time constant.
 
 Pause and continue (D0h and D4h, D5h and D6h) turn Audio 1's DMA requests
 off and on (B2h bit 6), and D9h and DAh end the auto-initialize with the
@@ -785,7 +784,7 @@ it by hand:
    `ES1869VX.ORG` in the same directory, the name essinst uses too.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
 3. Restart Windows. essctl's *Device information* page now shows "Register
-   API: version 1.20".
+   API: version 1.21".
 
 If sound stops working, run `essinst /restore`. If Windows doesn't start,
 restart, press F8 at "Starting Windows 95", choose *Command prompt only*,

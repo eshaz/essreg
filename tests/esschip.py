@@ -44,9 +44,11 @@ FIFO_FW = 64                # the firmware's buffer in Compatibility mode
 FIFO2 = 64                  # Audio 2's FIFO: 32 words
 RESET_US = 25               # AAh this long after the reset's end (assumed)
 DMA_PER_US = 2              # bytes a DMA engine moves in a microsecond
-# Audio 1's playback loses the first byte the DMA brings within this long
-# of its start (B8h bit 0) or of its DMA request's (B2h bit 6), and counts
-# it: the stream plays a byte off (fix.late0 to fix.late20, pb2late)
+# Audio 1's playback loses the first byte of its start (B8h bit 0) when
+# the DMA brings it within this long of the start's first DMA request, at
+# the start or at B2h bit 6 after it, and counts it: the stream plays a
+# byte off (fix.late0 to fix.late20, fix.b2late1). A resume after a pause
+# has no such race (fix.pb2late)
 RACE_US = 10
 
 # Audio_Base+Ch's interrupt bits
@@ -118,7 +120,8 @@ class Stream:
         self.counter = 0
         self.halted = False
         self.credit = 0             # the bus time for DMA cycles, in bytes
-        self.race = None            # until when a DMA byte is lost (us)
+        self.first = False          # no byte moved since the start
+        self.race = None            # until when that byte is lost (us)
 
 
 class FwTransfer:
@@ -305,7 +308,7 @@ class ES1869Audio:
                             break
                         if s.race is None or self.a_us > s.race:
                             s.fifo += data
-                        s.race = None
+                        s.first, s.race = False, None
                     moved += 1
                     if self._a1_count():
                         break
@@ -361,6 +364,7 @@ class ES1869Audio:
         if new & 1 and not old & 1:
             self.a1.counter = self.ctrl[0xA4] | (self.ctrl[0xA5] << 8)
             self.a1.halted = False
+            self.a1.first, self.a1.race = not new & 0x08, None
             self._a1_race()
             if self.fw is not None:
                 self.violate("Extended DMA while the firmware transfers")
@@ -374,9 +378,9 @@ class ES1869Audio:
                 self.violate("B7h bit 6 is not the opposite of bit 3")
 
     def _a1_race(self):
-        """Audio 1's DMA (re)starts as it plays: the first byte that comes
-        within RACE_US is lost"""
-        if not self.ctrl[0xB8] & 0x08:
+        """the DMA request of a start that has moved no byte: the byte
+        that comes within RACE_US is lost"""
+        if self.a1.first and self.ctrl[0xB2] & 0x40:
             self.a1.race = self.clock.us + RACE_US
 
     # --- the firmware's transfers (Compatibility mode) -----------------------

@@ -85,7 +85,7 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0120
+ESSREG_VERSION          equ 0x0121
 ESSREG_FEATURES         equ 0xFFFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
@@ -4110,12 +4110,8 @@ ESSREG_S16_GD:
         jz      ESSREG_S16_None
         and     byte [edi+EX_S16_Flags],~S16_PAUSE & 0xFF
         call    ESSREG_S16_Clocks               ; the rate as it is now
-        call    ESSREG_S16_Hold                 ; the DMA requests on with
-        push    eax                             ; the channel masked
         mov     ax,0xB240
-        call    ESSREG_S16_Or
-        pop     eax
-        jmp     ESSREG_S16_Settle
+        jmp     ESSREG_S16_Or
 .a2:    shl     ah,2                    ; Audio 2: the same with 78h
         jc      .pause2
         js      .cont2
@@ -4657,9 +4653,9 @@ ESSREG_S16_Xfer:
         jmp     ESSREG_S16_Settle
 
 ; the channel that plays Audio 1's transfer, EDI = ADI, masked over its
-; DMA's (re)start while it runs: the program's own channel while unmasked,
-; or its 16-bit one carried over (EX_S16_DMA). EAX = its VDMAD handle, to
-; unmask once the start settled (ESSREG_S16_Settle), or 0
+; start while it runs: the program's own channel while unmasked, or its
+; 16-bit one carried over (EX_S16_DMA). EAX = its VDMAD handle, to unmask
+; once the start settled (ESSREG_S16_Settle), or 0
 ESSREG_S16_Hold:
         mov     eax,[edi+ADI_DMA1Handle]
         or      eax,eax
@@ -4688,11 +4684,11 @@ ESSREG_S16_Hold:
 .none:  xor     eax,eax
         ret
 
-; Audio 1's DMA (re)started, EDI = ADI: Audio_Base+Ch polled 64 + 22528 /
-; v times, at least 32 us and two of its sample periods at an ISA read's
-; half a microsecond, before a byte may come (fix.late20, a byte off
-; sooner); then the channel that the start held masked, EAX = its VDMAD
-; handle (0: none), unmasked
+; Audio 1 started, EDI = ADI: Audio_Base+Ch polled 64 + 22528 / v times,
+; at least 32 us and two of its sample periods at an ISA read's half a
+; microsecond, before a byte may come (fix.late20, a byte off sooner);
+; then the channel that the start held masked, EAX = its VDMAD handle (0:
+; none), unmasked
 ESSREG_S16_Settle:
         pushad
         mov     esi,eax

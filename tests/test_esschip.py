@@ -83,10 +83,11 @@ def reset(chip, fifo=True):
 
 
 def extended_play(chip, bits=16, stereo=True, signed=True, auto=True,
-                  nbytes=1024, rate_a1=0xF0, late=50):
+                  nbytes=1024, rate_a1=0xF0, late=50, drq=True):
     """the data sheet's sequence (DS p.48-49, table 16), with channel 1
     masked over B8h bit 0 and unmasked late us after it (fix.late50); None
-    leaves the channel as it is"""
+    leaves the channel as it is. drq False leaves B2h bit 6, the DMA
+    request, clear"""
     reset(chip)
     dsp(chip, 0xC6)
     reg(chip, 0xB8, 0x04 if auto else 0x00)
@@ -103,8 +104,8 @@ def extended_play(chip, bits=16, stereo=True, signed=True, auto=True,
     fmt = 0x90 | (0x20 if signed else 0) | (0x04 if bits == 16 else 0) | \
         (0x08 if stereo else 0x40)
     reg(chip, 0xB7, fmt)
-    for r in (0xB1, 0xB2):
-        reg(chip, r, reg_read(chip, r) | 0x50)
+    reg(chip, 0xB1, reg_read(chip, 0xB1) | 0x50)
+    reg(chip, 0xB2, reg_read(chip, 0xB2) | (0x50 if drq else 0x10))
     masked(chip, lambda: reg(chip, 0xB8, reg_read(chip, 0xB8) | 0x01), late)
     dsp(chip, 0xD1)
 
@@ -216,29 +217,43 @@ class ExtendedTest(unittest.TestCase):
             self.assertGreater(len(got), 100)
             self.assertEqual(got, stream(data, skip)[:len(got)], late)
 
-    def test_a_live_channel_at_a_resume_plays_a_byte_off(self):
-        """B2h bit 6 back on with the channel unmasked: a byte off from
-        there (fix.pb2late without a memory manager); masked over it, in
-        step"""
+    def test_a_resume_plays_on_in_step(self):
+        """B2h bit 6 back on with the channel unmasked: the stream goes on
+        in step, since only a start's first byte is at risk (fix.pb2late2
+        and others; where a pause leaves the stream on the card isn't
+        modelled)"""
+        chip = Chip()
+        data = words(samples16(4096, start=0x2222))
+        chip.dmac.memory.write(BUF, data)
+        program_dma(Card(chip), 1, BUF, len(data))
+        extended_play(chip, nbytes=4096)
+        run(chip, 3000)
+        reg(chip, 0xB2, reg_read(chip, 0xB2) & ~0x40)
+        run(chip, 10000)
+        before = len(chip.played)
+        reg(chip, 0xB2, reg_read(chip, 0xB2) | 0x40)
+        run(chip, 3000)
+        got = chip.played
+        self.assertGreater(len(got), before + 100)
+        self.assertEqual(got, stream(data)[:len(got)])
+
+    def test_dma_requests_on_after_the_start(self):
+        """B8h bit 0 with B2h bit 6 clear, the channel unmasked, and B2h
+        bit 6 100 us later: the start's first byte is still lost
+        (fix.b2late1); with the channel masked over B2h bit 6, in step"""
         for late, skip in ((None, 1), (50, 0)):
             chip = Chip()
-            data = words(samples16(4096, start=0x2222))
+            data = words(samples16(2048, start=0x3333))
             chip.dmac.memory.write(BUF, data)
             program_dma(Card(chip), 1, BUF, len(data))
-            extended_play(chip, nbytes=4096)
-            run(chip, 3000)
-            reg(chip, 0xB2, reg_read(chip, 0xB2) & ~0x40)
-            run(chip, 10000)
-            before = len(chip.played)
-            moved = len(data) - chip.dmac.left(1)
+            extended_play(chip, nbytes=1024, late=None, drq=False)
+            run(chip, 100)
             masked(chip, lambda: reg(chip, 0xB2, reg_read(chip, 0xB2) | 0x40),
                    late)
-            run(chip, 3000)
+            run(chip, 5000)
             got = chip.played
-            self.assertEqual(got[:before], stream(data)[:before])
-            want = stream(data[:moved]) + stream(data[moved + skip:])
-            self.assertGreater(len(got), before + 100)
-            self.assertEqual(got, want[:len(got)], late)
+            self.assertGreater(len(got), 100)
+            self.assertEqual(got, stream(data, skip)[:len(got)], late)
 
     def test_reset_stops_and_leaves_extended_mode(self):
         chip = Chip()

@@ -539,9 +539,7 @@ class Front:
             if self.flags & F_PAUSE:
                 self.flags &= ~F_PAUSE & 0xFF
                 self.a1_clocks()
-                held = self.a1_hold()
                 self.reg_or(0xB2, 0x40)
-                self.settle(held)
         elif self.flags & F_AUTO:
             self.flags &= ~(F_AUTO | F_LAST) & 0xFF
             if not self.half_last(0):
@@ -643,9 +641,9 @@ class Front:
         self.settle(held)
 
     def settle(self, ch):
-        """Audio 1's DMA (re)started: polls for at least 32 us and two of
-        its sample periods, before a byte may come (fix.late20), then the
-        channel ch that the start held masked unmasked"""
+        """Audio 1 started: polls for at least 32 us and two of its sample
+        periods, before a byte may come (fix.late20), then the channel ch
+        that the start held masked unmasked"""
         port = self.port_of(0x0C)
         for _ in range(64 + 22528 // self.rate_v):
             self.chip_in(port)
@@ -660,18 +658,6 @@ class Front:
             return None
         self.chip_out(0x0A, 0x04 | ch)
         return ch
-
-    def a1_hold(self):
-        """the channel that plays Audio 1's transfer masked over its DMA's
-        restart: the game's own, or the one that carries its 16-bit
-        channel unless the game masked that; the channel to unmask after,
-        or None"""
-        if not self.flags & F_16 or not self.dma16:
-            return self.hold(self.dma8)
-        if self.vtrapped() and self.vbits & V_MASK:
-            return None
-        self.ch8_set(4)
-        return self.mchan
 
     def a2_xfer(self, si, bl, mode):
         """a 16-bit playback on Audio 2, as ES1869.DRV starts Audio 2"""
