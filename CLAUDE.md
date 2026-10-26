@@ -83,10 +83,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   [DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md),
   [AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md), [AUDIO1.md](docs/AUDIO1.md),
   [SB16.md](docs/SB16.md), [ESSSB16.md](docs/ESSSB16.md),
-  [ESSPROBE.md](docs/ESSPROBE.md), [RE_NOTES.md](docs/RE_NOTES.md) and
-  [STYLE.md](docs/STYLE.md). `REGISTERS.md` and the `REG_*.md` pages are
-  generated, and `docs/datasheet/` has the ES1869, ES938 and ES1868 data
-  sheets.
+  [ESSPROBE.md](docs/ESSPROBE.md), [ESS_EXTENDED.md](docs/ESS_EXTENDED.md),
+  [RE_NOTES.md](docs/RE_NOTES.md) and [STYLE.md](docs/STYLE.md).
+  `REGISTERS.md` and the `REG_*.md` pages are generated, and
+  `docs/datasheet/` has the ES1869, ES938 and ES1868 data sheets.
 
 ## Environment
 

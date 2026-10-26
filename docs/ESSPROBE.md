@@ -9,7 +9,8 @@ programmed, and whether the engines disturb the rest of the machine. Each
 case of the probe is one combination of settings, and the report says what
 it measured. In a recorded run, each case's sound comes after a DTMF marker,
 and [`tools/essprec.py`](../tools/essprec.py) measures every sound in the
-recording.
+recording. [ESS_EXTENDED.md](ESS_EXTENDED.md) gives the sources of what the
+cases look for.
 
 ## What it measures
 
