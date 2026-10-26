@@ -106,6 +106,8 @@ EX_S16_A2               equ 0x20D       ; byte: Audio 2's channel while the
 EX_S16_To               equ 0x20E       ; byte: the channel the 16-bit
                                         ; channel goes to, 0 Audio 1's, 1
                                         ; Audio 2's
+EX_S16_Halves           equ 0x20F       ; byte: H16_* of Audio 1, and of
+                                        ; Audio 2 << H16_A2
 ESSREG_ADI_SIZE         equ 0x210       ; ESS allocated E9h
 
 VSB_RESET               equ 0x01        ; the reset port is at 1
@@ -138,6 +140,19 @@ S16_LAST                equ 0x20        ; a single-cycle block is queued: the
                                         ; acknowledge
 S16_PAUSE               equ 0x40        ; it is paused
 S16_RESET               equ 0x80        ; the reset port is at 1
+
+; a 16-bit block of more than 32768 samples, more bytes than the chip's
+; counter holds, runs in halves (EX_S16_Halves), as in esssb16.com: the
+; counter gets half the block and the chip auto-initializes, and the first
+; half's interrupt is the front's own
+H16_ON                  equ 0x01        ; the transfer runs in halves
+H16_SECOND              equ 0x02        ; the second half plays: its
+                                        ; interrupt is the program's
+H16_ONCE                equ 0x04        ; the transfer ends with this block:
+                                        ; the chip's auto-initialize ends at
+                                        ; the first half's interrupt
+H16_A2                  equ 4
+H16_ALL                 equ H16_ON | H16_SECOND | H16_ONCE
 
 ; the front's DSP (EX_S16_State), as esssb16.com's S_*
 S16S_FULL               equ 0x01        ; the read latch has a byte

@@ -3724,6 +3724,7 @@ ESSREG_S16_Halt:
 ; it plays on while Audio 2 plays the next, or in the next one's format;
 ; EDI = ADI
 ESSREG_S16_A1_Stop:
+        and     byte [edi+EX_S16_Halves],~H16_ALL & 0xFF
         test    byte [edi+EX_S16_Flags],S16_RUN
         jz      ESSREG_S16_Flush
         and     byte [edi+EX_S16_Flags],~(S16_RUN | S16_AUTO | S16_LAST | S16_PAUSE) & 0xFF
@@ -3745,6 +3746,7 @@ ESSREG_S16_Flush:
 ; Audio 2's transfer of the front's stops (78h bits 4 and 1), and what its
 ; FIFO holds plays out; EDI = ADI
 ESSREG_S16_A2_Stop:
+        and     byte [edi+EX_S16_Halves],~(H16_ALL << H16_A2) & 0xFF
         test    byte [edi+EX_S16_Flags2],S16_RUN
         jz      .out
         mov     byte [edi+EX_S16_Flags2],0
@@ -4089,6 +4091,9 @@ ESSREG_S16_GD:
         test    byte [edi+EX_S16_Flags],S16_AUTO        ; the block that
         jz      ESSREG_S16_None                         ; plays is the last
         and     byte [edi+EX_S16_Flags],~(S16_AUTO | S16_LAST) & 0xFF
+        mov     al,0
+        call    ESSREG_S16_Half_Last
+        jc      ESSREG_S16_None
         mov     ax,0xB8FB
         jmp     ESSREG_S16_And
 .pause: or      byte [edi+EX_S16_Flags],S16_PAUSE       ; Audio 1's DMA
@@ -4106,6 +4111,9 @@ ESSREG_S16_GD:
         test    byte [edi+EX_S16_Flags2],S16_AUTO       ; bit 4: the block
         jz      ESSREG_S16_None                         ; that plays is the
         and     byte [edi+EX_S16_Flags2],~(S16_AUTO | S16_LAST) & 0xFF ; last
+        mov     al,H16_A2
+        call    ESSREG_S16_Half_Last
+        jc      ESSREG_S16_None
         mov     ax,0x78EF
         jmp     ESSREG_S16_Mix_And
 .pause2:
@@ -4530,7 +4538,7 @@ ESSREG_S16_Xfer:
         cmp     al,S16_RUN | S16_AUTO
         jne     .q1
         or      byte [edi+EX_S16_Flags2],S16_LAST
-        jmp     ESSREG_S16_A2_Count
+        jmp     ESSREG_S16_A2_Count.queued
 .q1:    mov     dl,bl
         and     dl,S16_16
         or      dl,S16_RUN | S16_AUTO
@@ -4539,7 +4547,7 @@ ESSREG_S16_Xfer:
         cmp     al,dl
         jne     .start
         or      byte [edi+EX_S16_Flags],S16_LAST
-        jmp     ESSREG_S16_Count
+        jmp     ESSREG_S16_Count.queued
 .start: mov     [edi+EX_S16_Xbits],bl
         test    bl,S16_16
         jz      .eight
@@ -4571,8 +4579,11 @@ ESSREG_S16_Xfer:
         mov     [edi+EX_S16_Flags],al
         call    ESSREG_S16_Count
         mov     al,bl                   ; B8h: stopped, auto-initialize (bit
-        and     al,0x0C                 ; 2), the ADC (bit 3) and the DMA's
-        test    al,0x08                 ; direction (bit 1); bits 7:4 0
+        and     al,0x0C                 ; 2, also for a block in halves),
+        test    byte [edi+EX_S16_Halves],H16_ON ; the ADC (bit 3) and the
+        jz      .dir                    ; DMA's direction (bit 1); bits 7:4
+        or      al,0x04                 ; 0
+.dir:   test    al,0x08
         jz      .b8
         or      al,0x02
 .b8:    mov     ah,0xB8
@@ -4698,8 +4709,10 @@ ESSREG_S16_A2_Xfer:
         pop     edx
         mov     al,0x03                 ; 78h: the DMA, and the FIFO to the
         test    bl,S16_AUTO             ; DAC
+        jnz     .auto
+        test    byte [edi+EX_S16_Halves],H16_ON << H16_A2
         jz      .single
-        or      al,0x10
+.auto:  or      al,0x10
 .single:
         test    byte [edi+ADI_CfgFlags+2],0x01
         jz      .carry
@@ -4713,12 +4726,19 @@ ESSREG_S16_A2_Xfer:
         jmp     ESSREG_S16_Mix_Set
 
 ; 74h and 76h, Audio 2's counter reload, EDI = ADI: minus the bytes of ESI
-; 16-bit samples
+; 16-bit samples, or of half as many in halves; a queued block's as they
+; fit
 ESSREG_S16_A2_Count:
-        push    edx
-        movzx   edx,word [edi+ADI_AudioBase]
+        mov     al,H16_A2
+        call    ESSREG_S16_Half_Count
+        mov     eax,esi
+        jc      .bytes
+.queued:
+        and     byte [edi+EX_S16_Halves],~(H16_ALL << H16_A2) & 0xFF
         mov     eax,esi
         shl     eax,1
+.bytes: push    edx
+        movzx   edx,word [edi+ADI_AudioBase]
         neg     eax
         push    eax
         mov     ah,0x74
@@ -4812,9 +4832,60 @@ ESSREG_S16_Mix_Chg:
         pop     ecx
         ret
 
+; the engine's halves (AL = 0 for Audio 1's bits, H16_A2 for Audio 2's)
+; for a transfer of ESI 16-bit samples with the bits BL: halves for more
+; than 32768, and the end with this block unless it auto-initializes; CF
+; set in halves, ESI then the half's bytes; EDI = ADI. Keeps ECX
+ESSREG_S16_Half_Count:
+        push    ecx
+        mov     cl,al
+        mov     ch,H16_ALL
+        shl     ch,cl
+        not     ch
+        and     [edi+EX_S16_Halves],ch
+        cmp     esi,0x8001              ; from 32769 samples on
+        cmc
+        jnc     .out
+        mov     al,H16_ON
+        test    bl,S16_AUTO
+        jnz     .on
+        or      al,H16_ONCE
+.on:    shl     al,cl
+        or      [edi+EX_S16_Halves],al
+        stc
+.out:   pop     ecx
+        ret
+
+; D9h or DAh in the first half of a block in halves (AL as for
+; ESSREG_S16_Half_Count): the auto-initialize ends at that half's interrupt
+; instead, so that the block plays to its end; CF set then; EDI = ADI
+ESSREG_S16_Half_Last:
+        push    ecx
+        mov     cl,al
+        mov     al,[edi+EX_S16_Halves]
+        shr     al,cl
+        and     al,H16_ON | H16_SECOND
+        cmp     al,H16_ON
+        clc
+        jne     .out
+        mov     al,H16_ONCE
+        shl     al,cl
+        or      [edi+EX_S16_Halves],al
+        stc
+.out:   pop     ecx
+        ret
+
 ; A4h and A5h, the counter's reload, EDI = ADI: minus the bytes of ESI
-; samples
+; samples, or of half as many in halves; a queued block's as they fit
 ESSREG_S16_Count:
+        test    byte [edi+EX_S16_Flags],S16_16
+        jz      .queued
+        mov     al,0
+        call    ESSREG_S16_Half_Count
+        mov     eax,esi
+        jc      .bytes
+.queued:
+        and     byte [edi+EX_S16_Halves],~H16_ALL & 0xFF
         mov     eax,esi
         test    byte [edi+EX_S16_Flags],S16_16
         jz      .bytes
@@ -4887,6 +4958,8 @@ ESSREG_S16_Pending:
         xor     al,al
         test    ah,0x01
         jz      .proc
+        call    ESSREG_S16_A1_Half
+        jc      .proc
         inc     al
         test    byte [edi+EX_S16_Flags],S16_16
         jz      .proc
@@ -4908,9 +4981,54 @@ ESSREG_S16_Pending:
         test    al,0x80
         pop     eax
         jz      .ret
+        call    ESSREG_S16_A2_Half
+        jc      .ret
         mov     ah,2
 .ret:   pop     edx
         ret
+
+; an interrupt in the first half of a block in halves is the front's own:
+; acknowledged here (Audio 1's at +Eh, Audio 2's latch cleared), the second
+; half's turn, and the last if the block ends there (H16_ONCE: the chip's
+; auto-initialize off); CF set then. Keep EAX and EDX; EDI = ADI
+ESSREG_S16_A1_Half:
+        test    byte [edi+EX_S16_Halves],H16_ON
+        jz      .no
+        test    byte [edi+EX_S16_Halves],H16_SECOND
+        jnz     .no
+        push    eax
+        push    edx
+        movzx   edx,word [edi+ADI_AudioBase]
+        add     edx,byte 0x0E
+        in      al,dx
+        or      byte [edi+EX_S16_Halves],H16_SECOND
+        test    byte [edi+EX_S16_Halves],H16_ONCE
+        jz      .done
+        and     byte [edi+EX_S16_Halves],~H16_ONCE & 0xFF
+        mov     ax,0xB8FB
+        call    ESSREG_S16_And
+.done:  pop     edx
+        pop     eax
+        stc
+        ret
+.no:    clc
+        ret
+ESSREG_S16_A2_Half:
+        test    byte [edi+EX_S16_Halves],H16_ON << H16_A2
+        jz      ESSREG_S16_A1_Half.no
+        test    byte [edi+EX_S16_Halves],H16_SECOND << H16_A2
+        jnz     ESSREG_S16_A1_Half.no
+        push    eax
+        push    edx
+        mov     ax,0x7A7F
+        call    ESSREG_S16_Mix_And
+        or      byte [edi+EX_S16_Halves],H16_SECOND << H16_A2
+        test    byte [edi+EX_S16_Halves],H16_ONCE << H16_A2
+        jz      ESSREG_S16_A1_Half.done
+        and     byte [edi+EX_S16_Halves],~(H16_ONCE << H16_A2) & 0xFF
+        mov     ax,0x78EF
+        call    ESSREG_S16_Mix_And
+        jmp     short ESSREG_S16_A1_Half.done
 
 ; the acknowledge of the kind CL (1 8-bit, 2 16-bit), EDI = ADI: Audio 1's
 ; interrupt when one of that kind is pending (a read of +Eh acknowledges
@@ -4926,6 +5044,7 @@ ESSREG_S16_Ack:
         add     edx,byte 0x0E
         in      al,dx
         pop     edx
+        and     byte [edi+EX_S16_Halves],~H16_SECOND & 0xFF
         test    byte [edi+EX_S16_Flags],S16_LAST
         jz      .a2
         and     byte [edi+EX_S16_Flags],~(S16_LAST | S16_AUTO) & 0xFF
@@ -4936,6 +5055,7 @@ ESSREG_S16_Ack:
         jz      .ret
         mov     ax,0x7A7F
         call    ESSREG_S16_Mix_And
+        and     byte [edi+EX_S16_Halves],~(H16_SECOND << H16_A2) & 0xFF
         test    byte [edi+EX_S16_Flags2],S16_LAST
         jz      .ret
         and     byte [edi+EX_S16_Flags2],~(S16_LAST | S16_AUTO) & 0xFF

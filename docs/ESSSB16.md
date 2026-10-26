@@ -92,8 +92,10 @@ the game must program its 16-bit channel before the transfer command, as
 Creative's guide says, and its count stands still. A game that mixes up to
 that count, such as Pinball Fantasies' Sound Blaster 16 driver, repeats its
 first sound: use `/H0` or its Sound Blaster Pro driver. With QEMM, JEMM and
-HDPMI32i neither applies. A 16-bit buffer across a 64 KB boundary plays
-wrong, E2h writes no byte through the DMA, and FM plays as before.
+HDPMI32i neither applies. A 16-bit buffer longer than 64 KB or across a 64
+KB boundary plays wrong, because the 8-bit channel that carries it reaches
+64 KB in one page, E2h writes no byte through the DMA, and FM plays as
+before.
 
 It was tested in a CPU emulator, and [`sb16test`](../README.md#sb16testexe)
 checks it on real hardware ([docs/TESTING.md](TESTING.md#d2-esssb16-dos)).

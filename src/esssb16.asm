@@ -99,6 +99,19 @@ S_SPKR          equ 0x40        ; D1h's flag, for D8h
 S_T16           equ 0x80        ; the chip's processor interrupt is the
                                 ; 16-bit one (F3h)
 
+; a 16-bit block of more than 32768 samples, more bytes than the chip's
+; counter holds, runs in halves: the counter gets half the block and the
+; chip auto-initializes, and the first half's interrupt is the front's own
+; (halves: Audio 1's bits, and Audio 2's shifted by H_A2)
+H_ON            equ 0x01        ; the transfer runs in halves
+H_SECOND        equ 0x02        ; the second half plays: its interrupt is
+                                ; the game's
+H_ONCE          equ 0x04        ; the transfer ends with this block: the
+                                ; chip's auto-initialize ends at the first
+                                ; half's interrupt
+H_A2            equ 4
+H_ALL           equ H_ON | H_SECOND | H_ONCE
+
 ; the game's 16-bit channel
 V_MASK          equ 0x01        ; masked
 V_FF            equ 0x02        ; its controller's flip-flop
@@ -195,6 +208,7 @@ vmode:          db 0
 vhigh:          db 0            ; a read's high byte, from its low byte's
 mpage:          db 0            ; the page Audio 1's channel got
 xbits:          db 0            ; the transfer's bits (xfer's BL)
+halves:         db 0            ; H_* of Audio 1, and of Audio 2 << H_A2
 mix:            times MIX_LEN db 0      ; the game's view of 30h-47h
 
 ; --- the trap shims ------------------------------------------------------
@@ -776,6 +790,7 @@ halt:
 ; Blaster 16's, and its FIFO empties (a1_flush), so that nothing of it
 ; plays on while Audio 2 plays the next, or in the next one's format
 a1_stop:
+        and     byte [V(halves)],~H_ALL & 0xFF
         test    byte [V(flags)],F_RUN
         jz      a1_flush
         and     byte [V(flags)],~(F_RUN | F_AUTO | F_LAST | F_PAUSE) & 0xFF
@@ -794,6 +809,7 @@ a1_flush:
 ; Audio 2's transfer of the front's stops (78h bits 4 and 1), and what its
 ; FIFO holds plays out
 a2_stop:
+        and     byte [V(halves)],~(H_ALL << H_A2) & 0xFF
         test    byte [V(flags2)],F_RUN
         jz      .ret
         mov     byte [V(flags2)],0
@@ -1105,6 +1121,9 @@ gd:     cmp     al,8
         btr     word [V(flags)],F_AUTO_BIT      ; the block that plays is
         jnc     none                            ; the last
         and     byte [V(flags)],~F_LAST & 0xFF
+        mov     al,0
+        call    half_last
+        jc      none
         mov     ax,0xB8FB
         jmp     reg_and
 .pause: or      byte [V(flags)],F_PAUSE ; Audio 1's DMA requests off (B2h
@@ -1121,6 +1140,9 @@ gd:     cmp     al,8
         btr     word [V(flags2)],F_AUTO_BIT
         jnc     none
         and     byte [V(flags2)],~F_LAST & 0xFF
+        mov     al,H_A2
+        call    half_last
+        jc      none
         mov     ax,0x78EF               ; bit 4: auto-initialize
         jmp     mix_and
 .pause2:
@@ -1323,7 +1345,7 @@ xfer:
         cmp     al,F_RUN | F_AUTO
         jne     .q1
         or      byte [V(flags2)],F_LAST
-        jmp     a2_count
+        jmp     a2_count.queued
 .q1:    mov     dl,bl
         and     dl,F_16
         or      dl,F_RUN | F_AUTO
@@ -1332,7 +1354,7 @@ xfer:
         cmp     al,dl
         jne     .start
         or      byte [V(flags)],F_LAST
-        jmp     a1_count
+        jmp     a1_count.queued
 .start: mov     [V(xbits)],bl
         test    bl,F_16
         jz      .a1
@@ -1358,8 +1380,11 @@ xfer:
         mov     [V(flags)],al
         call    a1_count
         mov     al,bl                   ; B8h: stopped, auto-initialize (bit
-        and     al,0x0C                 ; 2), the ADC (bit 3) and the DMA's
-        test    al,0x08                 ; direction (bit 1); bits 7:4 0
+        and     al,0x0C                 ; 2, also for a block in halves),
+        test    byte [V(halves)],H_ON   ; the ADC (bit 3) and the DMA's
+        jz      .dir                    ; direction (bit 1); bits 7:4 0
+        or      al,0x04
+.dir:   test    al,0x08
         jz      .b8
         or      al,0x02
 .b8:    mov     ah,0xB8
@@ -1439,8 +1464,10 @@ a2_xfer:
         call    xfer_dma
         mov     al,0x03                 ; the DMA, and the FIFO to the DAC
         test    bl,F_AUTO
+        jnz     .auto
+        test    byte [V(halves)],H_ON << H_A2
         jz      .single
-        or      al,0x10
+.auto:  or      al,0x10
 .single:
         cmp     byte [V(b9)],0
         je      .go78
@@ -1449,10 +1476,15 @@ a2_xfer:
         jmp     mix_write
 
 ; 74h and 76h, Audio 2's counter reload: minus the bytes of SI 16-bit
-; samples
+; samples, or of half as many in halves; a queued block's as they fit
 a2_count:
+        mov     al,H_A2
+        call    half_count
+        jc      .bytes
+.queued:
+        and     byte [V(halves)],~(H_ALL << H_A2) & 0xFF
         shl     si,1
-        neg     si
+.bytes: neg     si
         mov     ax,si
         mov     ah,0x74
         call    mix_write
@@ -1515,8 +1547,60 @@ a2_rate:
 .pos:   pop     ax
         ret
 
-; A4h and A5h, the counter's reload: minus the bytes of SI samples
+; the engine's halves (AL = 0 for Audio 1's bits, H_A2 for Audio 2's)
+; for a transfer of SI 16-bit samples (0: 65536) with the bits BL: halves
+; for more than 32768, and the end with this block unless it
+; auto-initializes; CF set in halves, SI then the half's bytes. Keeps CX
+half_count:
+        push    cx
+        mov     cl,al
+        mov     ch,H_ALL
+        shl     ch,cl
+        not     ch
+        and     [V(halves)],ch
+        lea     ax,[si-1]
+        cmp     ax,0x8000               ; from 8000h on: more than 32768
+        cmc
+        jnc     .out
+        mov     al,H_ON
+        test    bl,F_AUTO
+        jnz     .on
+        or      al,H_ONCE
+.on:    shl     al,cl
+        or      [V(halves)],al
+        stc
+.out:   pop     cx
+        ret
+
+; D9h or DAh in the first half of a block in halves (AL as for
+; half_count): the auto-initialize ends at that half's interrupt instead,
+; so that the block plays to its end; CF set then
+half_last:
+        push    cx
+        mov     cl,al
+        mov     al,[V(halves)]
+        shr     al,cl
+        and     al,H_ON | H_SECOND
+        cmp     al,H_ON
+        clc
+        jne     .out
+        mov     al,H_ONCE
+        shl     al,cl
+        or      [V(halves)],al
+        stc
+.out:   pop     cx
+        ret
+
+; A4h and A5h, the counter's reload: minus the bytes of SI samples, or
+; of half as many in halves; a queued block's as they fit
 a1_count:
+        test    byte [V(flags)],F_16
+        jz      .queued
+        mov     al,0
+        call    half_count
+        jc      .bytes
+.queued:
+        and     byte [V(halves)],~H_ALL & 0xFF
         test    byte [V(flags)],F_16
         jz      .bytes
         shl     si,1
@@ -1893,6 +1977,8 @@ irq_src:
         mov     al,0
         test    ah,0x01
         jz      .proc
+        call    a1_half
+        jc      .proc
         inc     ax
         test    byte [V(flags)],F_16
         jz      .proc
@@ -1912,10 +1998,55 @@ irq_src:
         call    mix_read
         shl     al,1                    ; the latch, into CF
         jnc     .ret
+        call    a2_half
+        jc      .ret
         mov     dh,2
 .ret:   mov     ax,dx
         pop     dx
         ret
+
+; an interrupt in the first half of a block in halves is the front's own:
+; acknowledged here (Audio 1's at +Eh, Audio 2's latch cleared), the
+; second half's turn, and the last if the block ends there (H_ONCE: the
+; chip's auto-initialize off); CF set then. Keep AX and DX
+a1_half:
+        test    byte [V(halves)],H_ON
+        jz      .no
+        test    byte [V(halves)],H_SECOND
+        jnz     .no
+        push    ax
+        push    dx
+        mov     al,0x0E
+        call    port_of
+        call    chip_in
+        or      byte [V(halves)],H_SECOND
+        test    byte [V(halves)],H_ONCE
+        jz      .done
+        and     byte [V(halves)],~H_ONCE & 0xFF
+        mov     ax,0xB8FB
+        call    reg_and
+.done:  pop     dx
+        pop     ax
+        stc
+        ret
+.no:    clc
+        ret
+a2_half:
+        test    byte [V(halves)],H_ON << H_A2
+        jz      a1_half.no
+        test    byte [V(halves)],H_SECOND << H_A2
+        jnz     a1_half.no
+        push    ax
+        push    dx
+        mov     ax,0x7A7F
+        call    mix_and
+        or      byte [V(halves)],H_SECOND << H_A2
+        test    byte [V(halves)],H_ONCE << H_A2
+        jz      a1_half.done
+        and     byte [V(halves)],~(H_ONCE << H_A2) & 0xFF
+        mov     ax,0x78EF
+        call    mix_and
+        jmp     short a1_half.done
 
 ; the acknowledge of the kind CL (1 8-bit, 2 16-bit): Audio 1's interrupt
 ; when one of that kind is pending (a read of +Eh acknowledges them all),
@@ -1931,6 +2062,7 @@ ack:
         call    port_of
         call    chip_in
         pop     dx
+        and     byte [V(halves)],~H_SECOND & 0xFF
         btr     word [V(flags)],F_LAST_BIT
         jnc     .a2
         and     byte [V(flags)],~F_AUTO & 0xFF
@@ -1941,6 +2073,7 @@ ack:
         jz      .ret
         mov     ax,0x7A7F
         call    mix_and
+        and     byte [V(halves)],~(H_SECOND << H_A2) & 0xFF
         btr     word [V(flags2)],F_LAST_BIT
         jnc     .ret
         and     byte [V(flags2)],~F_AUTO & 0xFF

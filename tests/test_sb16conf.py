@@ -18,6 +18,9 @@ block's interrupt comes when its last byte is in the FIFO, up to 256 bytes
 before the DAC has played it: the frames heard at the first interrupt, at
 a pause and at the end of a scene can be that many fewer. E2h's byte
 doesn't reach memory: the front has no way to write it through the DMA.
+A 16-bit block of more than 32768 samples runs in halves of the chip's
+counter, so the game's handler also runs at each first half's end, where
+82h names neither kind (spurious).
 Under EMM386 the TSR doesn't trap the DMA controller, so a game's 16-bit
 channel keeps the position it was programmed with, its programming has to
 reach the 8237 before the transfer's command, and each command carries it
@@ -88,7 +91,9 @@ class Conformance:
     differ in, as the module's text says; `audio2` the front plays 16-bit
     sound on Audio 2; `dma16` the model's 16-bit channel"""
 
-    known = {"dma_ident": {"bytes"}}
+    known = {"dma_ident": {"bytes"}, "play16_long_single": {"spurious"},
+             "play16_long_auto": {"spurious"},
+             "play16_long_exit": {"spurious"}}
     audio2 = True
     dma16 = 5
 

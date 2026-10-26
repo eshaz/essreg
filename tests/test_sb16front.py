@@ -147,6 +147,35 @@ class FrontChecks:
             self.assertEqual((w[0xA1], w[0xA2]), clocks(tc_to_v(tc)),
                              hex(tc))
 
+    def test_long_block_in_halves(self):
+        """a 16-bit block of 33000 samples, 66000 bytes, more than the
+        chip's counter holds: the counter gets half of it and the chip
+        auto-initializes, also for a single-cycle block; the first half's
+        interrupt is the front's own, which 82h doesn't show, and a
+        single-cycle block's auto-initialize ends with it"""
+        for dma2, (lo, hi), on in ((5, (0xA4, 0xA5), "b8"),
+                                   (3, (0x74, 0x76), "78")):
+            c = self.card(dma2=dma2)
+            chip = c.chip
+            n = 33000
+            program_dma(c, 5, 0x40000, 32768)
+            write(c, 0x41, 0xAC, 0x44, 0xB0, 0x30, (n - 1) & 0xFF,
+                  (n - 1) >> 8)
+            regs = chip.ctrl if lo == 0xA4 else chip.mixer
+            self.assertEqual(regs[lo] | regs[hi] << 8, -n & 0xFFFF)
+
+            def auto():
+                return bool(chip.ctrl[0xB8] & 0x04) if on == "b8" else \
+                    bool(chip.mixer[0x78] & 0x10)
+            self.assertTrue(auto())
+            c.wait(250000)          # the first half's end: 16500 * 2 bytes
+            self.assertEqual(mixer(c, 0x82) & 0x03, 0, dma2)
+            self.assertFalse(auto())
+            c.wait(300000)
+            self.assertEqual(mixer(c, 0x82) & 0x03, 0x02, dma2)
+            self.assertEqual(len(c.dac(16)), n // 2)
+            self.assertClean()
+
     def test_filter_by_direction(self):
         """at 37800 Hz, the fast clock's divisor 21, where ES1869.DRV's two
         filter tables differ: playback takes its playback table, a

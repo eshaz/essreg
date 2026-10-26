@@ -296,6 +296,79 @@ def exit_auto16(card):
             "seen": card.seen}
 
 
+def careful_isr(card):
+    """a careful driver's handler: 82h, then the acknowledge of each kind
+    it names; one that names neither is no block of the game's"""
+    card.out(BASE + 4, 0x82)
+    st = card.inp(BASE + 5)
+    if not st & 3:
+        card.spurious += 1
+        return
+    card.marks.append(len(card.played))
+    card.seen.append(st)
+    if st & 2:
+        card.inp(BASE + 0x0F)
+    if st & 1:
+        card.inp(BASE + 0x0E)
+    card.blocks += 1
+
+
+def _long16(card, cmd, blocks, d9_us=None):
+    """a 16-bit block of 33000 samples, longer than the chip's counter
+    holds in bytes, over an auto-initialized buffer of 16384 samples, as
+    Pinball Fantasies' driver plays a long block over a short buffer;
+    D9h after d9_us. The frames played in all count where the playback
+    ends"""
+    prepare(card)
+    card.isr = careful_isr
+    card.spurious = 0
+    n, size = 33000, 16384
+    data = words(samples16(size, start=0x0555))
+    card.poke(BUF, data)
+    program_dma(card, 5, BUF, len(data))
+    write(card, 0x41, 0xAC, 0x44, cmd, 0x30, (n - 1) & 0xFF, (n - 1) >> 8)
+    t = 0
+    while card.blocks < blocks and t < 1600000:
+        card.wait(2000)
+        t += 2000
+        if d9_us is not None and t >= d9_us:
+            write(card, 0xD9)
+            d9_us = None
+    card.wait(30000)
+    flat = [s for f in played(card) for s in f]
+    out = {"blocks": card.blocks, "seen": card.seen,
+           "per_block": per_block(card), "data": flat[:2 * n],
+           "spurious": card.spurious}
+    if cmd == 0xB0:
+        out["frames"] = len(card.played)
+    return out
+
+
+@scene
+def play16_long_single(card):
+    """a single-cycle block of 33000 samples plays to its end, with one
+    interrupt"""
+    reset(card)
+    return _long16(card, 0xB0, 1)
+
+
+@scene
+def play16_long_auto(card):
+    """auto-initialized blocks of 33000 samples: an interrupt at the end
+    of each"""
+    reset(card)
+    return _long16(card, 0xB6, 2)
+
+
+@scene
+def play16_long_exit(card):
+    """D9h in the first half of a long block: the block plays to its end"""
+    reset(card)
+    out = _long16(card, 0xB6, 1, d9_us=100000)
+    out["frames"] = len(card.played)
+    return out
+
+
 @scene
 def position16(card):
     """a game that mixes ahead of the DMA position it reads from the

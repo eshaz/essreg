@@ -500,6 +500,15 @@ cycle on any channel, and `SoundBlaster16Audio2=1`, the default. Otherwise
 the 16-bit playback plays on Audio 1, as a 16-bit recording always does, and
 a transfer of one kind ends the other kind's.
 
+A 16-bit block of more than 32768 samples, more bytes than the chip's
+counters hold, runs in halves: the counter gets half the block and the chip
+auto-initializes, also for a single-cycle block. The first half's interrupt
+is the front's own, which it acknowledges when the program reads 82h or
+acknowledges, keeping it out of 82h, and a single-cycle block's
+auto-initialize ends there, as does the one of a D9h or DAh in the first
+half (`EX_S16_Halves`, as `halves` in `esssb16.com`). A single-cycle block
+queued behind an auto-initialized one keeps the counter as it fits.
+
 The whole sequence is about 30 bytes, and four of its registers are read
 first for the bits the front keeps, each read waiting for the chip's answer
 with interrupts off. A game that plays block by block sends a transfer
