@@ -1,10 +1,13 @@
 @ECHO OFF
 REM ESSCHECK.BAT: the checks of esssb16 and of the chip in one run, with
-REM the games after them. essprobe looks at the chip before esssb16 is in,
-REM HDPMI32i and esssb16 load, sb16test checks esssb16, and the games play
-REM with the game's 16-bit DMA on none and then on 5, which esssb16
-REM switches without a restart. Everything goes to RESULTS, to send back
-REM with the recording of the probe's pauses, if one was made.
+REM the games after them. essprobe plays a game's DMA 5 on the chip as
+REM esssb16 does, before esssb16 is in, HDPMI32i and esssb16 load,
+REM sb16test checks esssb16 with the game's 16-bit DMA as BLASTER has it
+REM and on 5, and the games play with it on none and then on 5, which
+REM esssb16 switches without a restart. Everything goes to RESULTS, to
+REM send back with the recording of the probe's sounds, if one was made.
+REM After each game, esssb16 run again logs the buffer that it last carried
+REM over from the game's 16-bit DMA, if any.
 REM
 REM Run it at the DOS prompt, without Windows, from the folder of the
 REM programs, C:\ESS unless ESSDIR names another, all on drive C:
@@ -34,7 +37,7 @@ IF "%PD%"=="" IF EXIST C:\21STCENT\DREAMS\SETSOUND.EXE SET PD=C:\21STCENT\DREAMS
 IF "%PD%"=="" IF EXIST C:\DREAMS\SETSOUND.EXE SET PD=C:\DREAMS
 IF "%PD%"=="" IF EXIST C:\GAMES\DREAMS\SETSOUND.EXE SET PD=C:\GAMES\DREAMS
 
-ECHO esscheck 2: Pinball World in %PW%, Pinball Dreams in %PD% >> %L%
+ECHO esscheck 3: Pinball World in %PW%, Pinball Dreams in %PD% >> %L%
 ECHO esscheck: the checks of esssb16 and the chip, saved in %R%
 VER >> %L%
 SET > %R%\SET.TXT
@@ -45,36 +48,28 @@ MEM /C > %R%\MEM1.TXT
 MEM /D > %R%\MEMD1.TXT
 
 ECHO.
-ECHO 1. essprobe: the chip as it is, before esssb16
-IF NOT EXIST %R%\MASK.TXT GOTO PROBE
-ECHO    Its reports are there from a run before.
+ECHO 1. essprobe: a game's DMA 5 on the chip as esssb16 plays it, before
+ECHO    esssb16 is in
+IF NOT EXIST %R%\STREAM.TXT GOTO PROBE
+ECHO    Its report is there from a run before.
 CHOICE /C:SR /N Press S to go on to esssb16 or R to run it again
 IF ERRORLEVEL 2 GOTO PROBE
 GOTO TSRLOAD
 :PROBE
-SET K=0
-%ESSDIR%\ESSPROBE /C:h1.mask /O:%R%\MASK.TXT
-IF ERRORLEVEL 6 GOTO PAUSES
-IF ERRORLEVEL 5 GOTO TSRLOAD
+ECHO    Its sounds, about half a minute, can be recorded: start the
+ECHO    recorder, then press Enter at the level tone.
+CHOICE /C:RS /N Press R to record them or S to play them unrecorded
+IF ERRORLEVEL 2 GOTO PRBQUIET
+%ESSDIR%\ESSPROBE /R /N /C:stream /O:%R%\STREAM.TXT
+GOTO PRBEND
+:PRBQUIET
+%ESSDIR%\ESSPROBE /N /C:stream /O:%R%\STREAM.TXT
+:PRBEND
+IF ERRORLEVEL 5 GOTO PRBDONE
 IF ERRORLEVEL 4 GOTO TSRIN
 IF ERRORLEVEL 2 GOTO STOPPED
-:PAUSES
-FIND "window: EMM386 kept" %R%\MASK.TXT > NUL
-IF NOT ERRORLEVEL 1 SET K=1
-ECHO.
-ECHO    Next, the pauses, recorded, about a minute: start the recorder,
-ECHO    then press Enter at the level tone.
-CHOICE /C:RS /N Press R to record them or S to skip them
-IF ERRORLEVEL 2 GOTO PRBDONE
-%ESSDIR%\ESSPROBE /R /N /C:fix.pb7 /O:%R%\PB7W.TXT
-ECHO essprobe: MASK.TXT, PB7W.TXT >> %L%
 :PRBDONE
-IF "%K%"=="0" GOTO TSRLOAD
-ECHO essprobe: EMM386 kept its trap, restart >> %L%
-ECHO.
-ECHO EMM386 kept essprobe's port trap, which esssb16 can't share: restart
-ECHO the machine, then run ESSCHECK again, which goes on from here.
-GOTO QUIT
+ECHO essprobe: STREAM.TXT >> %L%
 
 :TSRLOAD
 ECHO.
@@ -98,9 +93,13 @@ MEM /D > %R%\MEMD2.TXT
 IF "%E%"=="1" GOTO STOPPED
 
 ECHO.
-ECHO 3. sb16test: the automatic checks, about two minutes
+ECHO 3. sb16test: the automatic checks, about two minutes, then again with
+ECHO    the game's 16-bit DMA on 5
 %ESSDIR%\SB16TEST /A /Q /O:%R%\SB16TEST.TXT
 ECHO sb16test: SB16TEST.TXT >> %L%
+%ESSDIR%\ESSSB16 /H5 >> %L%
+%ESSDIR%\SB16TEST /A /Q /H:5 /O:%R%\SB16H5.TXT
+ECHO sb16test on DMA 5: SB16H5.TXT >> %L%
 
 ECHO.
 ECHO 4. The games: each with the game's 16-bit DMA on none, which plays
@@ -122,6 +121,7 @@ PAUSE
 CD %PW%
 SETSND
 CD %ESSDIR%
+%ESSDIR%\ESSSB16 >> %L%
 SET Q=SETSND tune with DMA %N%
 SET RET=PWGAME
 GOTO ASK
@@ -134,6 +134,7 @@ CD %PW%
 IF EXIST RUN.BAT CALL RUN.BAT
 IF NOT EXIST RUN.BAT PWORLD
 CD %ESSDIR%
+%ESSDIR%\ESSSB16 >> %L%
 SET Q=Pinball World with DMA %N%
 SET RET=PWNEXT
 GOTO ASK

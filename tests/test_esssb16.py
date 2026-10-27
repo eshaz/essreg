@@ -1182,6 +1182,26 @@ class EMM386FrontTest(unittest.TestCase):
     def test_81h_garbage_ah(self):
         select_none(self, self.c)
 
+    def test_last_buffer(self):
+        """loaded again, the copy in memory says once the last buffer that
+        it carried over from the game's 16-bit channel to Audio 1's: within
+        a 64 KB page, or across one, which an 8-bit channel can't play, its
+        address wrapping within the page"""
+        c = self.c
+        play16(c, addr=0x32468)
+        again = InstallTest.load_again(c.m)
+        self.assertIn("already loaded\r\nthe last 16-bit buffer carried over "
+                      "from DMA 5 to DMA 1: 32468h, 8192 bytes, within a 64 "
+                      "KB page\r\n", again.output)
+        self.assertEqual(again.exit, ("exit", E_LOADED))
+        again = InstallTest.load_again(c.m)
+        self.assertNotIn("the last 16-bit buffer", again.output)
+        play16(c, addr=0x3F000)
+        again = InstallTest.load_again(c.m, "/H0")
+        self.assertIn("3F000h, 8192 bytes, across a 64 KB page, which an "
+                      "8-bit channel can't play\r\n", again.output)
+        self.assertEqual(c.m.data8("dma16"), 0)
+
     def test_stack(self):
         """the front runs on EMM386's stack, not its own"""
         m = self.c.m

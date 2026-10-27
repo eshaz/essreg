@@ -685,6 +685,57 @@ class ExeBlasterTest(unittest.TestCase):
         self.assertEqual(bad, {}, "\n".join(lines))
         self.assertEqual(code, 0)
 
+    def test_h_option(self):
+        """/H in place of BLASTER's H: the 16-bit channel that esssb16 /H
+        gave a copy in memory, while BLASTER still has the one before"""
+        for h, dma16 in (("5", 5), ("1", 0)):
+            card = ModelCard(dma16=dma16)
+            env = "BLASTER=A220 I5 D1 H%d P330 T6" % (1 if dma16 else 5)
+            d, code = exe_run(card, "/A /T /Q /H:" + h, env=env)
+            lines = report(d)
+            self.assertTrue(any(line.startswith(
+                "blaster A220 I5 D1 H%d P330," % dma16) for line in lines),
+                lines[:12])
+            self.assertIn("/H: the 16-bit DMA %s, in place of BLASTER's H"
+                          % h, lines)
+            res = results(lines)
+            bad = {k: v for k, v in res.items()
+                   if v[0] in ("FAIL", "KNOWN")}
+            self.assertEqual(bad, {}, "\n".join(lines))
+            self.assertEqual(code, 0)
+
+    def test_h_option_wrong(self):
+        """/H without a channel, or with two digits: the usage"""
+        for tail in ("/H", "/H:", "/H:15", "/H:8"):
+            d, code = exe_run(ModelCard(), "/A " + tail)
+            self.assertEqual(code, 1, tail)
+            self.assertIn("usage: sb16test", d.output)
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class ExeEmmSwitchTest(unittest.TestCase):
+    """build/sb16test.exe /H:5 on esssb16 under EMM386, loaded with
+    BLASTER's H1 and given DMA 5 by /H on the copy in memory (mixer 81h),
+    as ESSCHECK.BAT checks it: Audio 2 paces the count of each
+    auto-initialized 16-bit playback"""
+
+    def test_switched(self):
+        env = "BLASTER=A220 I5 D1 H1 P330 T6"
+        card = TSRCard("emm", env=env, dma2=5)
+        card.port_out(0x224, 0x81)
+        card.port_out(0x225, 0x22)
+        d, code = exe_run(card, "/A /T /Q /H:5", env=env)
+        lines = report(d)
+        res = results(lines)
+        known = KNOWN | EMM_KNOWN | ALONE_KNOWN
+        bad = {k: v for k, v in res.items()
+               if v[0] == "FAIL" or (v[0] == "KNOWN" and k not in known)}
+        self.assertEqual(bad, {}, "\n".join(lines))
+        for k in ("p16.b6h_mono", "p16.b6h_stereo"):
+            self.assertIn("dma=moving", res[k][1], k)
+        self.assertIn("channel 5:", res["ctl.count16"][1])
+        self.assertEqual(code, 0)
+
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
 class ExeTSRTest(unittest.TestCase):

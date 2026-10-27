@@ -373,8 +373,9 @@ class ModelTest(unittest.TestCase):
 
     def test_streams(self):
         """the game's refills: its channel's count moves, but for the one
-        carried over to Audio 1's, which stands"""
-        for c in ("stream.a1", "stream.a1_8", "stream.a2"):
+        carried over to Audio 1's, which stands unless Audio 2 paces it"""
+        for c in ("stream.a1", "stream.a1_8", "stream.a2", "stream.pace",
+                  "stream.pacec", "stream.pacew"):
             self.assertRegex(self.probe.text(c), r"in 8 ticks, [1-9]\d* laps",
                              c)
         self.assertIn("mixed 0 frames in 8 ticks, 0 laps",
@@ -404,6 +405,17 @@ class EMM386Test(unittest.TestCase):
                           run.text("h1.mask" + ch))
         self.assertIn("(stale)", run.text("h1.stale"))
         self.assertIn("(the game's)", run.text("h1.fresh"))
+
+    def test_pace(self):
+        """the pace under EMM386 as measured on the laptop, programming
+        at the unmask and a write's flip-flop its own: the game's channel
+        reaches the 8237 before the command, and its count moves"""
+        card = ChipCard(emm386={"at_unmask": True, "virtual_ff": True})
+        run = Run(card, only="stream.pace,stream.mirror", phys="past")
+        self.assertEqual(run.errors, [])
+        for c in ("stream.pace", "stream.pacec", "stream.pacew"):
+            self.assertRegex(run.text(c), r"in 8 ticks, [1-9]\d* laps", c)
+        self.assertIn("mixed 0 frames", run.text("stream.mirror"))
 
     def test_flip_flop(self):
         """a program's reads go to the 8237's flip-flop; its writes to

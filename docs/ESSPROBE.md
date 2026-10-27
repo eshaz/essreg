@@ -64,7 +64,14 @@ such as `t2=0` for Audio 2's single transfers.
   mixes: a glide that rises by 400 Hz a second, refilled every 20 ms behind
   the position the count gives, on Audio 1's own channel, on Audio 2's, and
   through a channel carried over as `esssb16` does under EMM386
-  (`stream.mirror`), whose count stands still, so that it loops.
+  (`stream.mirror`), whose count stands still, so that it loops. Version 1.7
+  adds the game that unmasks its channel before the command, as DSMI does,
+  with Audio 2 on the game's channel, muted, moving its count as `esssb16`'s
+  pace does: started after Audio 1 as `esssb16` starts it (`stream.pace`),
+  the same after Audio 2's counter (`stream.pacec`), and started with Audio
+  1 as in `both.pace` (`stream.pacew`). Pinball World looped with `esssb16`
+  on DMA 5 although `both.pace` moved the count, and each case's line gives
+  the frames the game mixed: none means a count that stood still.
 * **fix**: which start keeps a 16-bit stream in step. In the first runs,
   Audio 1 played every 16-bit stream a byte off, as noise, but when its DMA
   began well after its start (`a1.after` under EMM386), and Audio 2 lost its
@@ -129,7 +136,7 @@ restart`, and so does the screen. `/N` runs without the window.
    `esssb16`. Set `BLASTER` with the card's base, such as
    `SET BLASTER=A220 I5 D1 H5 P330 T6`.
 2. Run `ESSPROBE /S` for the short run, about a minute, then `ESSPROBE` for
-   all 179 cases, about five minutes. Each writes `ESSPROBE.TXT`; `/O:file`
+   all 182 cases, about five minutes. Each writes `ESSPROBE.TXT`; `/O:file`
    names another, such as `/O:FULL.TXT`. Esc stops at any time. The report
    is on the disk after every line, so a run that stops the machine keeps
    what it measured until then.

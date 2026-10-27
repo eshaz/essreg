@@ -228,6 +228,11 @@ vpage:          db 0
 vmode:          db 0
 vhigh:          db 0            ; a read's high byte, from its low byte's
 mpage:          db 0            ; the page Audio 1's channel got
+maddr:          dw 0            ; and its address, the byte address in it
+mwords:         dw 0            ; the game's word count less one, carried
+mfrom:          db 0            ; over from this channel
+mlog:           db 0            ; 1: carried over since a copy run again
+                                ; last said it (copy_last)
 xbits:          db 0            ; the transfer's bits (xfer's BL)
 halves:         db 0            ; H_* of Audio 1, and of Audio 2 << H_A2
 sick:           db 0            ; 1: the chip took no byte, and gets none
@@ -2010,12 +2015,18 @@ mirror:
         call    chip_out
         inc     dx                      ; the flip-flop
         call    chip_out
+        mov     al,[V(dma16)]           ; noted for copy_last
+        mov     [V(mfrom)],al
+        mov     ax,[V(vcount)]
+        mov     [V(mwords)],ax
         mov     ax,[V(vaddr)]
         mov     cl,[V(vpage)]
         and     cl,0xFE
         shl     ax,1                    ; the byte address, its bit 16 into
         adc     cl,0                    ; the page
         mov     [V(mpage)],cl
+        mov     [V(maddr)],ax
+        mov     byte [V(mlog)],1
         mov     dx,si
         shl     dx,1                    ; the address port
         call    word_out
@@ -2931,7 +2942,8 @@ installed_check:
         add     ax,[es:3]
         inc     ax
         jmp     short .block
-.found: pop     bx                      ; the link back
+.found: mov     [copy_seg],es           ; the copy's PSP
+        pop     bx                      ; the link back
         xor     bh,bh
         mov     ax,0x5803
         int     0x21
@@ -3067,6 +3079,54 @@ copy_select:
         ret
 .none:  mov     dx,msg_none
         jmp     print
+
+; the buffer that the copy in memory last carried over from the game's
+; 16-bit channel to an 8-bit one, said once: its address, its bytes, and
+; whether it crosses a 64 KB page, which an 8-bit channel can't, since its
+; address wraps within the page
+copy_last:
+        push    es
+        mov     es,[copy_seg]
+        cmp     byte [es:mlog],0
+        je      .out
+        mov     byte [es:mlog],0
+        mov     dx,msg_last
+        call    print
+        movzx   ax,byte [es:mfrom]
+        call    print_dec
+        mov     dx,msg_to
+        call    print
+        movzx   ax,byte [es:mchan]
+        call    print_dec
+        mov     dx,msg_colon
+        call    print
+        movzx   eax,byte [es:mpage]     ; its address
+        shl     eax,16
+        mov     ax,[es:maddr]
+        mov     cx,5
+        cmp     byte [es:mpage],0x10
+        jb      .hex
+        inc     cx
+.hex:   call    print_hexn
+        mov     dx,msg_hcomma
+        call    print
+        movzx   ecx,word [es:mwords]    ; its bytes
+        inc     ecx
+        shl     ecx,1
+        push    eax
+        mov     eax,ecx
+        call    print_dec32
+        pop     eax
+        lea     edx,[eax+ecx-1]         ; its last byte's page, against
+        shr     eax,16                  ; its first's
+        shr     edx,16
+        cmp     ax,dx
+        mov     dx,msg_within
+        je      .say
+        mov     dx,msg_across
+.say:   call    print
+.out:   pop     es
+        ret
 
 ; AL = the DSP's next byte as a Sound Blaster gives it (+Eh bit 7, then
 ; +Ah), 0 if none comes; DX = +Ah
@@ -3434,8 +3494,10 @@ install:
         je      .say
         call    copy_select             ; /H: its 16-bit channel
         mov     dx,msg_crlf
-.say:   mov     al,E_LOADED
-        jmp     short .fail
+.say:   call    print
+        call    copy_last               ; the buffer it last carried over
+        mov     ax,0x4C00 | E_LOADED
+        int     0x21
 .nocard:
         mov     dx,msg_nocard
         mov     al,E_NOCARD
@@ -3457,40 +3519,56 @@ print:  push    ax
         pop     ax
         ret
 
-; the number in AX in decimal
+; the number in AX in decimal, or in EAX (print_dec32)
 print_dec:
-        push    ax
-        push    bx
+        push    eax
+        movzx   eax,ax
+        call    print_dec32
+        pop     eax
+        ret
+print_dec32:
+        push    eax
+        push    ebx
         push    cx
-        push    dx
-        mov     bx,10
+        push    edx
+        mov     ebx,10
         xor     cx,cx
-.digit: xor     dx,dx
-        div     bx
+.digit: xor     edx,edx
+        div     ebx
         push    dx
         inc     cx
-        or      ax,ax
+        or      eax,eax
         jnz     .digit
 .put:   pop     dx
         add     dl,'0'
         mov     ah,0x02
         int     0x21
         loop    .put
-        pop     dx
+        pop     edx
         pop     cx
-        pop     bx
-        pop     ax
+        pop     ebx
+        pop     eax
         ret
 
-; the number in AX in hex, 3 digits
+; the number in AX in hex, 3 digits, or EAX's low CX digits (print_hexn)
 print_hex3:
-        push    ax
+        push    cx
+        mov     cx,3
+        call    print_hexn
+        pop     cx
+        ret
+print_hexn:
+        push    eax
         push    cx
         push    dx
-        mov     cx,3
-        rol     ax,4                    ; past the top digit, a 0
-.digit: rol     ax,4
-        push    ax
+        mov     dx,cx
+        mov     cl,8                    ; past the digits above them
+        sub     cl,dl
+        shl     cl,2
+        rol     eax,cl
+        mov     cx,dx
+.digit: rol     eax,4
+        push    eax
         and     al,0x0F
         add     al,'0'
         cmp     al,'9'
@@ -3499,11 +3577,11 @@ print_hex3:
 .put:   mov     dl,al
         mov     ah,0x02
         int     0x21
-        pop     ax
+        pop     eax
         loop    .digit
         pop     dx
         pop     cx
-        pop     ax
+        pop     eax
         ret
 
 ; the traps for real-mode games: QPI (QEMM, or JEMM with QPIEMU), else
@@ -4200,6 +4278,7 @@ dma_trapped:
 want2:          db 0xFF         ; /2's channel for Audio 2, 4 for /2-,
                                 ; FFh for the card's
 h_set:          db 0            ; 1: /H on the command line
+copy_seg:       dw 0            ; the copy in memory's PSP (installed_check)
 irq:            db 5            ; the card's IRQ, and its bit in mixer 80h
 irq_bit:        db 0xF0, 0xF0, 0xF1, 0xF0, 0xF0, 0xF2, 0xF0, 0xF4
                 db 0xF0, 0xF1, 0xF8, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0
@@ -4240,6 +4319,12 @@ usage:          db "usage: esssb16 [/A220] [/H5|/H6|/H7|/H0] [/20|/21|/23|/2-] [
                 db "protected-mode games HDPMI32i, loaded resident first", 13, 10, "$"
 msg_windows:    db "not for a Windows DOS box: ES1869.VXD does this there", 13, 10, "$"
 msg_loaded:     db "already loaded", 13, 10, "$"
+msg_last:       db "the last 16-bit buffer carried over from DMA $"
+msg_to:         db " to DMA $"
+msg_colon:      db ": $"
+msg_hcomma:     db "h, $"
+msg_within:     db " bytes, within a 64 KB page", 13, 10, "$"
+msg_across:     db " bytes, across a 64 KB page, which an 8-bit channel can't play", 13, 10, "$"
 msg_now:        db "already loaded; the game's 16-bit DMA is now $"
 msg_none:       db "none: 16-bit sound goes through the 8-bit DMA$"
 msg_crlf:       db 13, 10, "$"

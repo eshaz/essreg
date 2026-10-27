@@ -46,6 +46,7 @@ static const char *envp[11];
 static int nenv;
 
 static char report_name[80] = "SB16TEST.TXT";
+static int h_over = -1; // /H: the 16-bit DMA in place of BLASTER's H
 
 static volatile int stop;
 
@@ -304,6 +305,8 @@ static void machine(void) {
   } else
     env_add("esssb16: not resident");
   env_add("blaster: %.60s", blaster.text[0] ? blaster.text : "(not set)");
+  if (h_over >= 0)
+    env_add("/H: the 16-bit DMA %d, in place of BLASTER's H", h_over);
 }
 
 static void cleanup(void) {
@@ -322,12 +325,13 @@ static void on_break(int sig) {
 }
 
 static void usage(void) {
-  puts("usage: sb16test [/A] [/L] [/Q] [/R] [/O:file]\n"
+  puts("usage: sb16test [/A] [/L] [/Q] [/R] [/H:n] [/O:file]\n"
        "  /A  the automatic checks only, no listening\n"
        "  /L  the listening checks only\n"
        "  /Q  quicker: fewer rates\n"
        "  /R  a recorded run: a tone to set the recorder's level, then each\n"
        "      sound after its DTMF marker, and no questions\n"
+       "  /H  the 16-bit DMA channel, in place of BLASTER's H\n"
        "  /O  the report's file, else SB16TEST.TXT\n"
        "Set BLASTER first (A I D H P), as for a game. Esc stops.");
 }
@@ -358,6 +362,13 @@ int main(int argc, char **argv) {
     case 'T': // short blocks and sounds, for the host tests' emulator
       opts |= SBT_O_SHORT;
       break;
+    case 'H':
+      if (a[2] != ':' || a[3] < '0' || a[3] > '7' || a[4]) {
+        usage();
+        return 1;
+      }
+      h_over = a[3] - '0';
+      break;
     case 'O':
       if (a[2] != ':' || !a[3]) {
         usage();
@@ -381,6 +392,8 @@ int main(int argc, char **argv) {
   card.irq = blaster.irq;
   card.dma8 = blaster.dma8;
   card.dma16 = blaster.dma16;
+  if (h_over >= 0) // as plat_blaster takes H: none for D's or an 8-bit one
+    card.dma16 = (u8)(h_over == card.dma8 || h_over < 4 ? 0 : h_over);
   card.mpu = blaster.mpu;
   restored = restore_old();
   card.area = plat_area(SBT_AREA);

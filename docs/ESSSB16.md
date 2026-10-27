@@ -85,7 +85,10 @@ has the steps. The options:
   8-bit channel, as a Sound Blaster 16 does without an `H`. With `esssb16`
   in memory already, `/H` gives that copy the channel instead, as a game
   picks it through mixer 81h, so that a game can be tried both ways without
-  a restart; the other options take a restart.
+  a restart; the other options take a restart. Run again, with or without
+  `/H`, the copy also says the last buffer that it carried over from the
+  game's 16-bit channel to an 8-bit one since it last said one, and whether
+  the buffer crosses a 64 KB page.
 * `/20`, `/21` or `/23`: Audio 2's DMA channel, otherwise the card's, if a
   DMA pin of the card is wired to it. `/2-` plays 16-bit sound on Audio 1.
 * `/S`: single DMA transfers instead of demand transfers of two bytes, ESS's
@@ -105,14 +108,16 @@ Creative's guide says, and its count stands still, but where Audio 2's DMA
 channel (PnP 75h) is the game's 16-bit one, as on the card of the reports
 with `H5`. There Audio 2 runs on that channel, muted, while Audio 1 plays
 the sound, so that the count moves as on a Sound Blaster 16 (the pace), and
-`esssb16` says so as it loads. A game that mixes up to that count, such as
-Pinball World's driver, plays then, and elsewhere repeats its first sound.
-Pinball Fantasies' Sound Blaster 16 driver, which Pinball Dreams and Pinball
-Dreams II share, programs its channel only after the command, so under
-EMM386 it plays what the channel held before: use `/H0`, or its Sound
-Blaster Pro driver. With QEMM, JEMM and HDPMI32i neither applies. A 16-bit
-buffer longer than 64 KB or across a 64 KB boundary plays wrong, because the
-8-bit channel that carries it reaches 64 KB in one page, E2h writes no byte
+`esssb16` says so as it loads. In the emulator a game that mixes up to that
+count, such as Pinball World's driver, plays then, and elsewhere repeats its
+first sound, but on the laptop of the reports Pinball World still loops with
+`H5`, so use `/H0` there. Pinball Fantasies' Sound Blaster 16 driver, which
+Pinball Dreams and Pinball Dreams II share, programs its channel only after
+the command, so under EMM386 it plays what the channel held before: use
+`/H0`, or its Sound Blaster Pro driver. With QEMM, JEMM and HDPMI32i neither
+applies. A 16-bit buffer longer than 64 KB or across a 64 KB boundary plays
+wrong, because the 8-bit channel that carries it reaches 64 KB in one page,
+which `esssb16` run again tells of the last buffer, E2h writes no byte
 through the DMA, and FM plays as before.
 
 It was tested in a CPU emulator, and [`sb16test`](../README.md#sb16testexe)
@@ -210,18 +215,20 @@ they find in a folder, `RESULTS`, to send back:
    `ESSCHECK C:\PW C:\PD`.
 
 It keeps the memory as `MEM` shows it, `CONFIG.SYS`, `AUTOEXEC.BAT`,
-`DOSSTART.BAT` and the environment, then runs `essprobe` on the chip: the
-8237's mask, then the pauses, recorded, when you press R and then Enter at
-the level tone. Where `essprobe`'s reports are there from a run before, S
-goes on without it, and R runs it again. When EMM386 kept `essprobe`'s
-window, it stops for a restart, after which `ESSCHECK` goes on from there.
-It loads HDPMI32i and `esssb16`, shows what `esssb16` said, stops if it
-didn't load, keeps the memory again and runs `sb16test`'s automatic checks.
-Then the games: Pinball World's `SETSND`, where you choose the Sound Blaster
-16 and play its test tune, and the game itself, first with the game's 16-bit
-DMA on none (`ESSSB16 /H0`), then on 5 (`ESSSB16 /H5`), each followed by Y
-or N for how it sounded, and last, if you like, Pinball Dreams' `SETSOUND`,
-which restarted the machine before, with the 16-bit DMA on none, after the
-results so far are on the disk. With `esssb16` in memory already, as after
-*Restart in MS-DOS mode* with it in `AUTOEXEC.BAT`, it skips the probe and
-checks that copy instead. Send `C:\ESS\RESULTS` back, with the recording.
+`DOSSTART.BAT` and the environment, then runs `essprobe` on the chip: a
+game's refills behind the DMA count, on DMA 5 as `esssb16` plays it under
+EMM386, recorded when you press R and then Enter at the level tone. Where
+`essprobe`'s report is there from a run before, S goes on without it, and R
+runs it again. It loads HDPMI32i and `esssb16`, shows what `esssb16` said,
+stops if it didn't load, keeps the memory again and runs `sb16test`'s
+automatic checks, then again with the game's 16-bit DMA on 5 (`ESSSB16 /H5`,
+`SB16TEST /H:5`). Then the games: Pinball World's `SETSND`, where you choose
+the Sound Blaster 16 and play its test tune, and the game itself, first with
+the game's 16-bit DMA on none (`ESSSB16 /H0`), then on 5 (`ESSSB16 /H5`),
+each followed by Y or N for how it sounded and by `esssb16` run again, which
+logs the buffer that the game last had carried over, and last, if you like,
+Pinball Dreams' `SETSOUND`, which restarted the machine before, with the
+16-bit DMA on none, after the results so far are on the disk. With `esssb16`
+in memory already, as after *Restart in MS-DOS mode* with it in
+`AUTOEXEC.BAT`, it skips the probe and checks that copy instead. Send
+`C:\ESS\RESULTS` back, with the recording.

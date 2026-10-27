@@ -23,7 +23,7 @@ NT_ONLY = (r"\bSETLOCAL\b", r"\bENDLOCAL\b", r"\bPUSHD\b", r"\bPOPD\b",
            r"&&", r"\|\|", r"\(\s*$", r"^\s*\)", r"!\w+!")
 # what each program takes, as its own parser does
 OPTIONS = {"ESSPROBE": re.compile(r"^/(R|S|A|N|T|C:[\w.,]+|O:\S+)$"),
-           "SB16TEST": re.compile(r"^/(A|L|Q|R|T|O:\S+)$"),
+           "SB16TEST": re.compile(r"^/(A|L|Q|R|T|H:[0-7]|O:\S+)$"),
            "ESSSB16": re.compile(r"^(/H[0567]|%H%)$")}
 
 
@@ -42,7 +42,7 @@ def commands():
 
 def case_names():
     with open(os.path.join(ROOT, "src", "essp.c"), encoding="latin-1") as f:
-        return set(re.findall(r'^\s*\{\s*"([a-z0-9]+\.[a-z0-9]+)"', f.read(),
+        return set(re.findall(r'^\s*\{\s*"([a-z0-9]+\.\w+)"', f.read(),
                               re.M))
 
 
@@ -109,20 +109,28 @@ class BatchTest(unittest.TestCase):
                                 "HDPMI32I"})
 
     def test_probe_cases(self):
-        """its /C: names select the cases they mean: the mask's two and
-        the 24 pauses of the fix group"""
+        """its /C: names select the cases they mean: the stream group, the
+        pace's three among them"""
         names = case_names()
         picked = {}
         for c in commands():
-            m = re.search(r"/C:([\w.,]+)", c)
+            m = re.search(r"\\ESSPROBE .*/C:([\w.,]+)", c)
             if m:
                 for prefix in m.group(1).split(","):
                     picked[prefix] = sorted(n for n in names
                                             if n.startswith(prefix))
-        self.assertEqual(picked["h1.mask"], ["h1.mask1", "h1.mask5"])
-        self.assertEqual(len(picked["fix.pb7"]), 24)
-        self.assertTrue(all(n.startswith("fix.pb7") for n in
-                            picked["fix.pb7"]))
+        self.assertEqual(list(picked), ["stream"])
+        self.assertEqual(len(picked["stream"]), 8)
+        self.assertTrue({"stream.mirror", "stream.pace", "stream.pacec",
+                         "stream.pacew"} <= set(picked["stream"]))
+
+    def test_probe_without_window(self):
+        """essprobe runs without its window (/N), so that EMM386 keeps no
+        trap of its for esssb16 to meet"""
+        runs = [c for c in commands() if "\\ESSPROBE " in c]
+        self.assertTrue(runs)
+        for c in runs:
+            self.assertIn(" /N ", c)
 
     def test_prompts(self):
         """CHOICE gets text without a slash, comma, semicolon or equals
@@ -277,17 +285,19 @@ class FlowTest(unittest.TestCase):
     """the batch's way through each case, on a model of COMMAND.COM"""
 
     def test_everything(self):
-        """the probe, its recorded pauses, both loads, sb16test, the games
-        with DMA none and then 5, and SETSOUND with none; the answers
-        logged"""
-        c = Command([], ESS + GAMES, {"ESSSB16": [0, 5, 5, 5], "PIPE": 0},
+        """the probe recorded, both loads, sb16test with BLASTER's DMA and
+        on 5, the games with DMA none and then 5, and SETSOUND with none;
+        the answers logged"""
+        c = Command([], ESS + GAMES, {"ESSSB16": [0] + [5] * 8, "PIPE": 0},
                     "RYYYNYY").run()
         self.assertEqual(c.ran, [
-            "ESSPROBE /C:h1.mask", "FIND", "CHOICE R",
-            "ESSPROBE /R /N /C:fix.pb7", "HDPMI32I -r -x", "ESSSB16",
-            "SB16TEST /A /Q",
-            "ESSSB16 /H0", "SETSND", "CHOICE Y", "PWORLD", "CHOICE Y",
-            "ESSSB16 /H5", "SETSND", "CHOICE Y", "PWORLD", "CHOICE N",
+            "CHOICE R", "ESSPROBE /R /N /C:stream", "HDPMI32I -r -x",
+            "ESSSB16", "SB16TEST /A /Q", "ESSSB16 /H5",
+            "SB16TEST /A /Q /H:5",
+            "ESSSB16 /H0", "SETSND", "ESSSB16", "CHOICE Y", "PWORLD",
+            "ESSSB16", "CHOICE Y",
+            "ESSSB16 /H5", "SETSND", "ESSSB16", "CHOICE Y", "PWORLD",
+            "ESSSB16", "CHOICE N",
             "ESSSB16 /H0", "CHOICE Y", "PIPE", "SMARTDRV /C", "SETSOUND",
             "CHOICE Y"])
         self.assertEqual(c.log[-7:], [
@@ -295,66 +305,67 @@ class FlowTest(unittest.TestCase):
             "SETSND tune with DMA 5: yes", "Pinball World with DMA 5: no",
             "setsound: started with DMA none", "SETSOUND with DMA none: yes",
             "done"])
+        self.assertIn("essprobe: STREAM.TXT", c.log)
+        self.assertIn("sb16test on DMA 5: SB16H5.TXT", c.log)
         self.assertEqual(c.env["PW"], "C:\\21STCENT\\PWORLD")
         self.assertEqual(c.cwd, "C:\\ESS")
 
     def test_run_bat(self):
         """a game folder with RUN.BAT, which starts the game from there"""
         c = Command(["C:\\PW"], ESS + ("C:\\PW\\RUN.BAT",),
-                    {"ESSSB16": [0, 5, 5]}, "SYYYY").run()
+                    {"ESSSB16": [0] + [5] * 7}, "SYYYY").run()
         self.assertIn("RUN", c.ran)
         self.assertNotIn("PWORLD", c.ran)
         self.assertEqual(c.ran.count("RUN"), 2)
 
     def test_esssb16_in_already(self):
         """no probe, then the copy in memory checked and on to the rest"""
-        c = Command([], ESS, {"ESSPROBE": 4, "ESSSB16": 5}, "").run()
-        self.assertEqual(c.ran, ["ESSPROBE /C:h1.mask", "ESSSB16",
-                                 "SB16TEST /A /Q"])
+        c = Command([], ESS, {"ESSPROBE": 4, "ESSSB16": 5}, "S").run()
+        self.assertEqual(c.ran, ["CHOICE S", "ESSPROBE /N /C:stream",
+                                 "ESSSB16", "SB16TEST /A /Q", "ESSSB16 /H5",
+                                 "SB16TEST /A /Q /H:5"])
         self.assertIn("essprobe: skipped, esssb16 in already", c.log)
         self.assertEqual(c.log[-1], "done")
 
     def test_no_card(self):
-        c = Command([], ESS, {"ESSPROBE": 2}).run()
-        self.assertEqual(c.ran, ["ESSPROBE /C:h1.mask"])
+        c = Command([], ESS, {"ESSPROBE": 2}, "S").run()
+        self.assertEqual(c.ran, ["CHOICE S", "ESSPROBE /N /C:stream"])
         self.assertIn("stopped: see the lines above", c.log)
 
     def test_no_traps(self):
         """esssb16 refuses: what it said is on the screen and in the log,
         then nothing after it"""
         c = Command([], ESS, {"ESSSB16": 3}, "S").run()
-        self.assertEqual(c.ran, ["ESSPROBE /C:h1.mask", "FIND", "CHOICE S",
+        self.assertEqual(c.ran, ["CHOICE S", "ESSPROBE /N /C:stream",
                                  "HDPMI32I -r -x", "ESSSB16"])
         self.assertIn("stopped: see the lines above", c.log)
         self.assertEqual(c.env["E"], "1")
 
     def test_failed_cases_go_on(self):
-        """cases that failed are in the report: on to the pauses"""
-        c = Command([], ESS, {"ESSPROBE": [6, 6]}, "R").run()
-        self.assertEqual(c.ran[:4], ["ESSPROBE /C:h1.mask", "FIND",
-                                     "CHOICE R", "ESSPROBE /R /N /C:fix.pb7"])
+        """cases that failed are in the report: on to esssb16"""
+        c = Command([], ESS, {"ESSPROBE": 6}, "R").run()
+        self.assertEqual(c.ran[:3], ["CHOICE R", "ESSPROBE /R /N /C:stream",
+                                     "HDPMI32I -r -x"])
+        self.assertIn("essprobe: STREAM.TXT", c.log)
         self.assertEqual(c.log[-1], "done")
 
-    def test_window_kept(self):
-        """EMM386 kept the probe's window: its pauses still, then a restart
-        before esssb16"""
-        c = Command([], ESS, {"FIND": 0}, "R").run()
-        self.assertEqual(c.ran, ["ESSPROBE /C:h1.mask", "FIND", "CHOICE R",
-                                 "ESSPROBE /R /N /C:fix.pb7"])
-        self.assertEqual(c.log[-1], "essprobe: EMM386 kept its trap, restart")
-        self.assertIn("the machine, then run ESSCHECK again, which goes on "
-                      "from here.", c.out)
+    def test_no_memory(self):
+        """essprobe without the memory for its buffers: on to esssb16"""
+        c = Command([], ESS, {"ESSPROBE": 5}, "S").run()
+        self.assertEqual(c.ran[:3], ["CHOICE S", "ESSPROBE /N /C:stream",
+                                     "HDPMI32I -r -x"])
 
     def test_run_again(self):
         """run again with the probe's reports there: on to esssb16, or the
         probe again"""
-        there = ESS + ("C:\\ESS\\RESULTS\\MASK.TXT",)
+        there = ESS + ("C:\\ESS\\RESULTS\\STREAM.TXT",)
         c = Command([], there, {"ESSSB16": 0}, "S").run()
         self.assertEqual(c.ran, ["CHOICE S", "HDPMI32I -r -x", "ESSSB16",
-                                 "SB16TEST /A /Q"])
+                                 "SB16TEST /A /Q", "ESSSB16 /H5",
+                                 "SB16TEST /A /Q /H:5"])
         c = Command([], there, {}, "RS").run()
-        self.assertEqual(c.ran[:3], ["CHOICE R", "ESSPROBE /C:h1.mask",
-                                     "FIND"])
+        self.assertEqual(c.ran[:3], ["CHOICE R", "CHOICE S",
+                                     "ESSPROBE /N /C:stream"])
 
     def test_not_there(self):
         """the programs elsewhere: it says so and stops"""

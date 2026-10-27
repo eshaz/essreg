@@ -725,7 +725,8 @@ enum {
   RUN_LOAD,    // what the engines do to the CPU, the VGA, memory
   RUN_STREAM,  // a game's refills behind the count
   RUN_MIRROR,  // the same through a channel carried over, as esssb16 does
-  RUN_MASK     // when a program's mask and unmask reach the 8237's mask
+  RUN_MASK,    // when a program's mask and unmask reach the 8237's mask
+  RUN_PACE     // the same with esssb16's pace on the game's channel
 };
 
 #define E1 0x01 // Audio 1
@@ -762,6 +763,7 @@ struct pc {
   u8 order;         // Audio 1's registers in the Windows player's order
   u8 b7;            // B7h's first write: 0 as Table 16, 1 none, 2 bit 0 clear
   u8 start2;        // Audio 2 started in two steps: 78h bit 1, then bit 0
+  u8 pv;            // the pace: 0 as esssb16's, 1 with 74h-76h, 2 with Audio 1
   u16 ms;           // how long it plays
   u8 side;          // 0, 'l' or 'r'
   u16 hz1, hz2;     // the tones, 0 for none
@@ -891,6 +893,9 @@ static const struct ecase cases[] = {
     {"stream.mirror", "run=mirror S", "loop"},
     {"stream.a2", "run=stream e=2 S", "glide"},
     {"stream.a2w", "run=stream e=2 wide packed", "any"},
+    {"stream.pace", "run=pace S", "glide"},
+    {"stream.pacec", "run=pace pv=1 S", "glide"},
+    {"stream.pacew", "run=pace pv=2 S", "glide"},
     // which start keeps a 16-bit stream in step, and which pause keeps it
     // after the continue: the tone on the left alone, so that a stream a
     // byte off is noise and two bytes off is on the right; Audio 1 by
@@ -1031,7 +1036,7 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
     static const char *const runs[] = {"play",   "machine", "card",  "mixer",
                                        "dma",    "rst",     "reach", "read",
                                        "ff",     "cross",   "stale", "load",
-                                       "stream", "mirror",  "mask"};
+                                       "stream", "mirror",  "mask",  "pace"};
     unsigned i;
     for (i = 0; i < ESS_ARRAY_SIZE(runs); i++)
       if (!strcmp(v, runs[i]))
@@ -1135,6 +1140,8 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
     p->b7 = (u8)(!strcmp(v, "once") ? 1 : 2);
   else if (IS("start2"))
     p->start2 = 1;
+  else if (IS("pv"))
+    p->pv = (u8)(n & 3);
   else if (IS("ms"))
     p->ms = (u16)n;
   else if (IS("side") && v != NULL && (!strcmp(v, "l") || !strcmp(v, "r")))
@@ -2552,10 +2559,54 @@ static u16 frames_at(const struct eng *e, u16 count, u8 ch) {
   return (u16)((u32)pos * e->frames / units);
 }
 
+// the pace's mode, as esssb16 sets it: 71h without bits 4, 1 and 0
+// (Audio 2 on Audio 1's clock), 7Ch muted, 7Ah 8-bit without the
+// interrupt, mono or stereo as r7a
+static void pace_regs(u8 r7a) {
+  mix_w(0x71, (u8)(mix_r(0x71) & 0xEC));
+  mix_w(0x7C, 0x00);
+  mix_w(0x7A, r7a);
+}
+
+// Audio 1 started with its channel held masked, unmasked 100 us later, as
+// esssb16 starts it, and Audio 2 on the game's channel in the pace's mode,
+// single transfers, auto-initialized, so that it moves the count the game
+// reads. pv 0: after Audio 1, as esssb16 does it; 1: the same after Audio
+// 2's counter (74h, 76h), with 78h stopped first; 2: with the counter,
+// started with Audio 1, its DMA 2 ms before both FIFOs reach their DACs,
+// as both.pace and ES1869.DRV's dual playback start
+static void pace_start(const struct pc *p, const struct eng *e) {
+  u16 cnt = (u16)(0 - e->sbytes / 4); // half the bytes Audio 2 takes a lap
+  u8 r7a = (u8)((e->fmt & FST) ? 0x02 : 0x00);
+
+  if (p->pv) {
+    mix_w(0x78, 0x00);
+    mix_w(0x74, (u8)cnt);
+    mix_w(0x76, (u8)(cnt >> 8));
+  }
+  if (p->pv == 2) {
+    pace_regs(r7a);
+    mix_w(0x78, 0x12);
+    pass_time(2000);
+    H->lock();
+    reg_w(0xB8, (u8)(b8_run | 1));
+    mix_w(0x78, 0x13);
+    H->unlock();
+  } else
+    reg_w(0xB8, (u8)(b8_run | 1));
+  pass_time(100);
+  dma_mask(dma1, 0);
+  if (p->pv != 2) {
+    pace_regs(r7a);
+    mix_w(0x78, 0x13);
+  }
+}
+
 // the game: a buffer of two ticks of 20 ms, and at each tick the frames
 // behind the position its channel's count gives filled for their next time
 // round. stream.mirror: the game's channel is 5, which Audio 1 plays from
-// its own, carried over at the command
+// its own, carried over at the command; stream.pace: the same for a game
+// that unmasks its channel before the command (DSMI), with esssb16's pace
 static void run_stream(const struct ecase *c, const struct pc *p) {
   static char syms[8];
   struct pc q = *p;
@@ -2564,7 +2615,8 @@ static void run_stream(const struct ecase *c, const struct pc *p) {
   u32 parts[4], tm, t0, ticks = 0, n_ticks, done, pos, last = 0, laps = 0;
   u16 np = 0, cnt, addr, count;
   u8 gch, page;
-  int mirror = p->run == RUN_MIRROR;
+  int pace = p->run == RUN_PACE;
+  int mirror = p->run == RUN_MIRROR || pace;
 
   if (mirror)
     q.eng = E1;
@@ -2595,16 +2647,17 @@ static void run_stream(const struct ecase *c, const struct pc *p) {
   glide_put(e, &g, 0, e->frames);
   set_71(&q);
   if (mirror) {
-    // the game's channel 5, masked, as a game programs it; Audio 1's own
-    // carried over from it as the 8237 has it, then the game's unmask
-    dma_set(gch, e->addr, e->sbytes, DMA_SINGLE | DMA_AUTO | DMA_READ, 0);
+    // the game's channel 5, masked, as a game programs it, and for the
+    // pace unmasked; Audio 1's own carried over from it as the 8237 has
+    // it, then the game's unmask, or for the pace Audio 1's held masked
+    dma_set(gch, e->addr, e->sbytes, DMA_SINGLE | DMA_AUTO | DMA_READ, pace);
     if (!dma_phys(gch, &cnt, &addr, &page)) {
       dma_read(gch, &cnt, &addr);
       page = H->inb(page_port[gch]);
     }
     a1_program(&q, e);
     dma_set(dma1, ((u32)page << 16) | ((u32)addr << 1), (u32)(cnt + 1) * 2,
-            DMA_SINGLE | DMA_AUTO | DMA_READ, 1);
+            DMA_SINGLE | DMA_AUTO | DMA_READ, !pace);
   } else if (e == &en[0]) {
     a1_program(&q, e);
     eng_dma(&q, e, 1);
@@ -2615,8 +2668,11 @@ static void run_stream(const struct ecase *c, const struct pc *p) {
   irq_clear();
   t0 = H->now();
   parts[np++] = t0;
-  eng_start(&q);
-  if (mirror)
+  if (pace)
+    pace_start(&q, e);
+  else
+    eng_start(&q);
+  if (mirror && !pace)
     dma_mask(gch, 0);
   done = e->frames;
   n_ticks = (O & ESP_O_TINY) ? 8 : 75;
@@ -2635,6 +2691,8 @@ static void run_stream(const struct ecase *c, const struct pc *p) {
     }
   }
   parts[np++] = H->now();
+  if (pace)
+    mix_w(0x78, 0x00);
   eng_stop();
   if (mirror)
     dma_mask(gch, 1);
@@ -2732,6 +2790,7 @@ static void run_case(const struct ecase *c) {
     break;
   case RUN_STREAM:
   case RUN_MIRROR:
+  case RUN_PACE:
     run_stream(c, &p);
     break;
   case RUN_MASK:
