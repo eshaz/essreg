@@ -685,8 +685,9 @@ version 4.05 with the CT1745 mixer, and plays its sound in Extended mode,
 8-bit sound on Audio 1 and 16-bit sound on Audio 2. It needs a memory
 manager that traps ports: EMM386 4.46 or later, QEMM, or JEMM with QPIEMU,
 and HDPMI32i for protected-mode games. [docs/ESSSB16.md](docs/ESSSB16.md)
-has how it works, its options and limits, how to install it, and
-`ESSCHECK.BAT`, which checks a machine in one go.
+has how it works, its options and limits, how to install it, `ESSCHECK.BAT`,
+which checks a machine in one go, and `DREAMS.BAT`, which finds what stops
+the machine in Pinball Dreams' setup.
 
 ## [`sb16test.exe`](build)
 

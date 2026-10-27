@@ -498,7 +498,8 @@ the volume of the program's voice level, 7Ah for the format and the
 interrupt, 71h bit 1 for Audio 2's own clock, and then 78h for the DMA and
 the FIFO to the DAC, auto-initialized as the command says, with demand
 transfers of 4 bytes, or single ones with "Single Mode DMA". D5h and D6h
-turn 78h bit 0 off and on, D9h ends the auto-initialize (78h bit 4), and a
+turn 78h bits 1:0 off and on, since with bit 0 alone the DMA runs on
+(SB16_FRONT.md), D9h ends the auto-initialize (78h bit 4), and a
 single-cycle 16-bit command while Audio 2 auto-initializes becomes its last
 block. The program's reset stops Audio 2 and clears only the interrupt bits
 of 7Ah (7 and 6), so that what its FIFO still holds plays out in the
@@ -788,7 +789,7 @@ it by hand:
    `ES1869VX.ORG` in the same directory, the name essinst uses too.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
 3. Restart Windows. essctl's *Device information* page now shows "Register
-   API: version 1.22".
+   API: version 1.23".
 
 If sound stops working, run `essinst /restore`. If Windows doesn't start,
 restart, press F8 at "Starting Windows 95", choose *Command prompt only*,

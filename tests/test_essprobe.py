@@ -310,13 +310,17 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(self.probe.hooked, [5, 0])
 
     def test_every_case(self):
+        """every case runs, and fails only where the laptop's card failed
+        it each time: Audio 2 paused through 78h bit 0 alone, whose DMA
+        runs on through the pause"""
         ran = set(self.probe.results)
         for cid, _s, _e in cases():
             self.assertIn(cid, ran)
         fails = [(c, r) for c, rs in self.probe.results.items() for r in rs
                  if r[0] == "FAIL"]
-        self.assertEqual(fails, [])
-        self.assertEqual(self.probe.failed, 0)
+        self.assertEqual(sorted(c for c, _r in fails),
+                         ["a2.pause_f", "fix.a2pf1", "fix.a2pf2"])
+        self.assertEqual(self.probe.failed, 3)
         skips = sorted(c for c, rs in self.probe.results.items()
                        if any(r[0] == "SKIP" for r in rs))
         self.assertEqual(skips, [])
@@ -382,8 +386,12 @@ class ModelTest(unittest.TestCase):
                       self.probe.text("stream.mirror"))
 
     def test_pauses(self):
-        for c in ("a1.pause_b2", "a1.pause_b8", "a2.pause_f", "a2.pause_d"):
+        """the DMA stands in a pause but through 78h bit 0 alone, where it
+        runs on at about twice the rate, the FIFO dropping its bytes"""
+        for c in ("a1.pause_b2", "a1.pause_b8", "a2.pause_d"):
             self.assertRegex(self.probe.text(c), r", \d moved in the pause", c)
+        self.assertRegex(self.probe.text("a2.pause_f"),
+                         r", \d{4,} moved in the pause")
 
 
 @unittest.skipUnless(HAVE_UNICORN, "needs unicorn")

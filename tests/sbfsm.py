@@ -543,12 +543,12 @@ class Front:
         if op & 0x40:
             # the FIFO off the DAC (B7h bit 7), so that it keeps whole
             # frames (fix.pb7a), then the DMA requests off (B2h bit 6),
-            # and the pace's FIFO off its DAC (78h bit 0)
+            # and the pace's (78h bits 1:0, as a2_dx)
             self.flags |= F_PAUSE
             self.reg_and(0xB7, 0x7F)
             self.reg_and(0xB2, 0xBF)
             if self.vbits & V_PACE:
-                self.mix_and(0x78, 0xFE)
+                self.mix_and(0x78, 0xFC)
         elif op & 0x20:
             if self.flags & F_PAUSE:
                 self.flags &= ~F_PAUSE & 0xFF
@@ -556,7 +556,7 @@ class Front:
                 self.reg_or(0xB2, 0x40)
                 self.reg_or(0xB7, 0x80)
                 if self.vbits & V_PACE:
-                    self.mix_or(0x78, 0x01)
+                    self.mix_or(0x78, 0x03)
         elif self.flags & F_AUTO:
             self.flags &= ~(F_AUTO | F_LAST) & 0xFF
             if not self.half_last(0):
@@ -564,14 +564,17 @@ class Front:
 
     def a2_dx(self, op):
         if op & 0x40:
-            # the FIFO off the DAC, whose DMA runs on (a2.pause_f)
+            # the DMA requests and the FIFO's way to the DAC off (bits
+            # 1:0): with bit 0 alone the DMA ran on at twice the rate, the
+            # FIFO dropping its bytes (a2.pause_f), and with both it stood
+            # within a few bytes (fix.a2pfd1); both come back at once
             self.flags2 |= F_PAUSE
-            self.mix_and(0x78, 0xFE)
+            self.mix_and(0x78, 0xFC)
         elif op & 0x20:
             if self.flags2 & F_PAUSE:
                 self.flags2 &= ~F_PAUSE & 0xFF
                 self.a2_rate()
-                self.mix_or(0x78, 0x01)
+                self.mix_or(0x78, 0x03)
         elif self.flags2 & F_AUTO:
             self.flags2 &= ~(F_AUTO | F_LAST) & 0xFF
             if not self.half_last(H_A2):

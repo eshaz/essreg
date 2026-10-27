@@ -122,6 +122,8 @@ class Stream:
         self.credit = 0             # the bus time for DMA cycles, in bytes
         self.first = False          # no byte moved since the start
         self.race = None            # until when that byte is lost (us)
+        # Audio 2's DAC took a frame since the DMA's start
+        self.played = False
 
 
 class FwTransfer:
@@ -555,13 +557,20 @@ class ES1869Audio:
         s.debt += self.a2_rate() / 1e6
         while s.debt >= 1:
             s.debt -= 1
-            if not self.mixer[0x78] & 0x01:
-                continue
             r7a = self.mixer[0x7A]
             bits, signed = (16 if r7a & 1 else 8), bool(r7a & 4)
             stereo = bool(r7a & 2)
             size = (bits // 8) * (2 if stereo else 1)
+            if not self.mixer[0x78] & 0x01:
+                # the FIFO taken off the DAC in a pause drops its bytes,
+                # about twice as fast as the DAC took them, while the DMA
+                # runs on (a2.pause_f on the laptop); before the DAC's
+                # first frame it fills, as a dual start has it
+                if self.mixer[0x78] & 0x02 and s.played:
+                    del s.fifo[:2 * size]
+                continue
             if len(s.fifo) >= size:
+                s.played = True
                 data = bytes(s.fifo[:size])
                 del s.fifo[:size]
                 self._heard2(decode(data, bits, signed, stereo))
@@ -569,6 +578,7 @@ class ES1869Audio:
     def _mixer_written(self, reg, old, v):
         if reg == 0x78 and v & 0x02 and not old & 0x02:
             self.a2.counter = self.mixer[0x74] | (self.mixer[0x76] << 8)
+            self.a2.played = False
         elif reg == 0x7A:
             # the latch: a 0 clears it, a 1 sets it
             self.mixer[0x7A] = v

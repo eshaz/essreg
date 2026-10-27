@@ -1,12 +1,13 @@
 # (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 #
 # Licensed under GPL Version 3.0
-"""build/ESSCHECK.BAT, the checks of a machine in one run, read the way
-MS-DOS 7's COMMAND.COM reads it: CR LF lines it can take, no command of
-Windows NT's, every label it jumps to there once in its first eight
-characters and none the start of another, the programs it runs in build/
-and the options they take, the essprobe cases it names, and prompts and
-lines that COMMAND.COM and CHOICE pass on as they are written.
+"""build/ESSCHECK.BAT, the checks of a machine in one run, and
+build/DREAMS.BAT, Pinball Dreams' SETSOUND in one setup after another,
+read the way MS-DOS 7's COMMAND.COM reads them: CR LF lines it can take, no
+command of Windows NT's, every label they jump to there once in its first
+eight characters and none the start of another, the programs they run in
+build/ and the options those take, the essprobe cases named, and prompts
+and lines that COMMAND.COM and CHOICE pass on as they are written.
 
 usage: python3 -m unittest tests.test_esscheck
 """
@@ -17,6 +18,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BAT = os.path.join(ROOT, "build", "ESSCHECK.BAT")
+DREAMS = os.path.join(ROOT, "build", "DREAMS.BAT")
 NT_ONLY = (r"\bSETLOCAL\b", r"\bENDLOCAL\b", r"\bPUSHD\b", r"\bPOPD\b",
            r"\bCALL\s+:", r"%~", r"%CD%", r"\bIF\s+/I\b", r"\bIF\s+DEFINED\b",
            r"\bFOR\s+/[FDRL]\b", r"\bEXIT\s+/B\b", r"\bGOTO\s+:EOF\b",
@@ -27,15 +29,15 @@ OPTIONS = {"ESSPROBE": re.compile(r"^/(R|S|A|N|T|C:[\w.,]+|O:\S+)$"),
            "ESSSB16": re.compile(r"^(/H[0567]|%H%)$")}
 
 
-def lines():
-    with open(BAT, "rb") as f:
+def lines(bat=BAT):
+    with open(bat, "rb") as f:
         data = f.read()
     return data
 
 
-def commands():
+def commands(bat=BAT):
     """the lines that aren't remarks, without CR LF"""
-    text = lines().decode("ascii")
+    text = lines(bat).decode("ascii")
     return [s for s in text.split("\r\n")
             if s.strip() and not s.upper().startswith("REM")]
 
@@ -46,10 +48,15 @@ def case_names():
                               re.M))
 
 
-class BatchTest(unittest.TestCase):
+class BatchChecks:
+    """what each batch file has to be: `bat`, running `programs`"""
+
+    bat = BAT
+    programs = set()
+
     def test_lines(self):
         """CR LF throughout, ASCII, within the 127 characters of a line"""
-        data = lines()
+        data = lines(self.bat)
         self.assertTrue(data.endswith(b"\r\n"))
         self.assertNotIn(b"\n", data.replace(b"\r\n", b""))
         data.decode("ascii")
@@ -57,7 +64,7 @@ class BatchTest(unittest.TestCase):
             self.assertLessEqual(len(line), 127, line)
 
     def test_dos_only(self):
-        for line in commands():
+        for line in commands(self.bat):
             for pattern in NT_ONLY:
                 self.assertIsNone(re.search(pattern, line, re.I),
                                   "%s: %s" % (pattern, line))
@@ -66,7 +73,7 @@ class BatchTest(unittest.TestCase):
         """every jump has its label, labels differ in their first eight
         characters and none starts another, and GOTO %RET% returns to
         labels only"""
-        cmds = commands()
+        cmds = commands(self.bat)
         labels = [c[1:].split()[0].upper() for c in cmds if c.startswith(":")]
         short = [x[:8] for x in labels]
         self.assertEqual(len(short), len(set(short)), labels)
@@ -89,7 +96,7 @@ class BatchTest(unittest.TestCase):
         """the programs it runs from its folder are in build/ (HDPMI32i
         comes from third_party/), with options they take"""
         seen = set()
-        for c in commands():
+        for c in commands(self.bat):
             run = re.sub(r"^IF\s+(NOT\s+)?EXIST\s+\S+\s+", "", c, flags=re.I)
             run = re.sub(r"^LH\s+", "", run, flags=re.I)
             m = re.match(r"%ESSDIR%\\(\w+)(\.\w+)?((?:\s+[^\s>]+)*)", run)
@@ -105,8 +112,24 @@ class BatchTest(unittest.TestCase):
                     ROOT, "build", name.lower() + ext)), name)
                 for a in args:
                     self.assertRegex(a, OPTIONS[name], c)
-        self.assertEqual(seen, {"ESSSB16", "ESSPROBE", "SB16TEST",
-                                "HDPMI32I"})
+        self.assertEqual(seen, self.programs)
+
+    def test_prompts(self):
+        """CHOICE gets text without a slash, comma, semicolon or equals
+        sign, which it would take apart, and ECHO lines redirect at their
+        end only"""
+        for c in commands(self.bat):
+            if c.upper().startswith("CHOICE"):
+                text = re.sub(r"^CHOICE((\s+/\w(:\w+)?)+)", "", c, flags=re.I)
+                self.assertIsNone(re.search(r"[/,;=]", text), c)
+            if c.upper().startswith("ECHO") or " ECHO " in c.upper():
+                body = re.sub(r"\s>>?\s*%[A-Z]+%\\?[\w.]*$", "", c)
+                self.assertIsNone(re.search(r"[<>|]", body), c)
+
+
+class BatchTest(BatchChecks, unittest.TestCase):
+    bat = BAT
+    programs = {"ESSSB16", "ESSPROBE", "SB16TEST", "HDPMI32I"}
 
     def test_probe_cases(self):
         """its /C: names select the cases they mean: the stream group, the
@@ -132,35 +155,37 @@ class BatchTest(unittest.TestCase):
         for c in runs:
             self.assertIn(" /N ", c)
 
-    def test_prompts(self):
-        """CHOICE gets text without a slash, comma, semicolon or equals
-        sign, which it would take apart, and ECHO lines redirect at their
-        end only"""
-        for c in commands():
-            if c.upper().startswith("CHOICE"):
-                text = re.sub(r"^CHOICE((\s+/\w(:\w+)?)+)", "", c, flags=re.I)
-                self.assertIsNone(re.search(r"[/,;=]", text), c)
-            if c.upper().startswith("ECHO") or " ECHO " in c.upper():
-                body = re.sub(r"\s>>?\s*%[A-Z]+%\\?[\w.]*$", "", c)
-                self.assertIsNone(re.search(r"[<>|]", body), c)
+
+class DreamsBatchTest(BatchChecks, unittest.TestCase):
+    bat = DREAMS
+    programs = {"ESSSB16", "HDPMI32I"}
+
+
+class Stopped(Exception):
+    """a program that stopped the machine"""
 
 
 class Command:
-    """MS-DOS 7's COMMAND.COM on a batch file, as far as ESSCHECK.BAT goes:
-    variables and arguments, IF with strings, EXIST, ERRORLEVEL and NOT,
-    GOTO to the first label of its first eight characters, SET, CD, C:,
-    CALL, and the programs, whose exit codes and CHOICE's keys come from
-    the scenario. `ran` is what ran, `log` what went into the log"""
+    """MS-DOS 7's COMMAND.COM on a batch file, as far as ESSCHECK.BAT and
+    DREAMS.BAT go: variables and arguments, IF with strings, EXIST,
+    ERRORLEVEL and NOT, GOTO to the first label of its first eight
+    characters, SET, CD, C:, CALL, FIND in the log, and the programs, whose
+    exit codes and CHOICE's keys come from the scenario; a program whose
+    code is "stop" stops the machine. `ran` is what ran, `log` what went
+    into the log (`log` given: the log of a run before, there already)"""
 
-    def __init__(self, args, exists=(), codes=None, keys=""):
+    def __init__(self, args, exists=(), codes=None, keys="", bat=BAT,
+                 log=()):
         self.env = {}
         self.args = list(args)
         self.exists = {p.upper() for p in exists}
         self.codes = codes or {}
         self.keys = list(keys)
+        self.bat = bat
         self.level = 0
         self.cwd = "C:\\"
-        self.ran, self.log, self.out = [], [], []
+        self.ran, self.log, self.out = [], list(log), []
+        self.stopped = False
 
     def expand(self, line):
         def var(m):
@@ -173,7 +198,7 @@ class Command:
             re.match(r"(\w+)", m.group(1) or m.group(2))), line)
 
     def run(self):
-        text = [s for s in lines().decode("ascii").split("\r\n")]
+        text = [s for s in lines(self.bat).decode("ascii").split("\r\n")]
         labels = {}
         for i, s in enumerate(text):
             if s.startswith(":"):
@@ -187,7 +212,11 @@ class Command:
             if not line.strip() or line.startswith(":") or \
                     line.upper().startswith("REM") or line == "@ECHO OFF":
                 continue
-            target = self.do(self.expand(line))
+            try:
+                target = self.do(self.expand(line))
+            except Stopped:
+                self.stopped = True
+                break
             if target is not None:
                 key = target[:8].upper()
                 if key not in labels:
@@ -210,7 +239,10 @@ class Command:
                     path = c.group(2).upper()
                     if not re.match(r"[A-Z]:\\", path):
                         path = self.cwd.rstrip("\\") + "\\" + path
-                    cond = path in self.exists
+                    if path == self.env.get("L", "").upper():
+                        cond = bool(self.log)
+                    else:
+                        cond = path in self.exists
                 else:
                     cond = self.level >= int(c.group(2))
                 cmd = c.group(3)
@@ -248,6 +280,11 @@ class Command:
             self.level = self.codes.get("PIPE", 1)
             return None
         if word == "FIND":              # in a file: 0 found, 1 not
+            m = re.match(r'FIND\s+"([^"]*)"\s+(\S+)', line, re.I)
+            if m and m.group(2).upper() == self.env.get("L", "").upper():
+                self.level = 0 if any(m.group(1) in t for t in self.log) \
+                    else 1
+                return None
             self.ran.append("FIND")
             self.level = self.codes.get("FIND", 1)
             return None
@@ -272,6 +309,8 @@ class Command:
         code = self.codes.get(name, 0)
         if isinstance(code, list):
             code = code.pop(0)
+        if code == "stop":
+            raise Stopped(name)
         self.level = code
         return None
 
@@ -372,6 +411,68 @@ class FlowTest(unittest.TestCase):
         c = Command([], ()).run()
         self.assertEqual(c.ran, [])
         self.assertIn("The programs aren't in C:\\ESS", c.out[0])
+
+
+DREAMS_GAME = ("C:\\21STCENT\\DREAMS\\SETSOUND.EXE",)
+HEAD = "dreams 1: SETSOUND in C:\\21STCENT\\DREAMS"
+
+
+class DreamsFlowTest(unittest.TestCase):
+    """DREAMS.BAT's way through the setups, one run after each restart"""
+
+    def run_(self, log=(), codes=None, keys=""):
+        codes = dict({"PIPE": 0}, **(codes or {}))
+        return Command([], ESS + DREAMS_GAME, codes, keys, bat=DREAMS,
+                       log=log).run()
+
+    def test_one_after_another(self):
+        """nothing loaded, then HDPMI32i in the same run; after restarts,
+        esssb16 alone, then both, which stops the machine"""
+        c = self.run_(keys="YN")
+        self.assertEqual(c.ran, ["PIPE", "SMARTDRV /C", "SETSOUND",
+                                 "CHOICE Y", "HDPMI32I -r -x", "PIPE",
+                                 "SMARTDRV /C", "SETSOUND", "CHOICE N"])
+        self.assertEqual(c.log, [
+            HEAD, "setup 1, nothing loaded: started",
+            "setup 1, nothing loaded: back, it sounded right",
+            "setup 2, HDPMI32i: started",
+            "setup 2, HDPMI32i: back, it sounded wrong"])
+        self.assertIn("Restart the machine, then run DREAMS again for the "
+                      "next setup.", c.out)
+        c = self.run_(c.log, keys="Y")
+        self.assertEqual(c.ran, ["ESSSB16", "PIPE", "SMARTDRV /C",
+                                 "SETSOUND", "CHOICE Y"])
+        self.assertEqual(c.log[-2:], [
+            "setup 3, esssb16 alone: started",
+            "setup 3, esssb16 alone: back, it sounded right"])
+        c = self.run_(c.log, {"SETSOUND": "stop"})
+        self.assertTrue(c.stopped)
+        self.assertEqual(c.ran, ["HDPMI32I -r -x", "ESSSB16", "PIPE",
+                                 "SMARTDRV /C", "SETSOUND"])
+        self.assertEqual(c.log[-1], "setup 4, HDPMI32i and esssb16: started")
+        c = self.run_(c.log)
+        self.assertEqual(c.ran, [])
+        self.assertIn("All four setups were tried:", c.out)
+        self.assertEqual(c.out[-1], "Done: send C:\\ESS\\RESULTS\\DREAMS.TXT "
+                         "back.")
+
+    def test_stopped_first(self):
+        """the setup with nothing loaded stops the machine: the next run
+        goes on with HDPMI32i"""
+        c = self.run_(codes={"SETSOUND": "stop"})
+        self.assertTrue(c.stopped)
+        self.assertEqual(c.log, [HEAD, "setup 1, nothing loaded: started"])
+        c = self.run_(c.log, keys="Y")
+        self.assertEqual(c.ran[0], "HDPMI32I -r -x")
+        self.assertEqual(c.log[-1], "setup 2, HDPMI32i: back, it sounded "
+                         "right")
+
+    def test_not_there(self):
+        """Pinball Dreams elsewhere: it says so and runs nothing"""
+        c = Command([], ESS, bat=DREAMS).run()
+        self.assertEqual(c.ran, [])
+        self.assertIn("Pinball Dreams isn't in its usual folders: DREAMS "
+                      "folder, to play it.", c.out)
 
 
 if __name__ == "__main__":

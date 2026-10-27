@@ -675,10 +675,13 @@ safe start. Clearing 78h bit 0 silences the DAC, but the DMA goes on at
 about twice the stream's rate while the FIFO drops its bytes, so the stream
 skips what moved meanwhile; it resumes in step (`a2.pause_f`). Clearing bit
 1 stops the DMA within a few bytes, but the stream resumed a byte off in one
-of two runs (`a2.pause_d`). With 71h bit 1 clear, Audio 2 plays at Audio 1's
-rate (`a2.slaved`). On channel 0, which a pin of the card reaches, it played
-as on channel 5 (`a2.ch0`, since taken out, because the probe keeps to the
-channels the card is configured for).
+of two runs (`a2.pause_d`). A pause for a game has to stop the count, so the
+fronts pause Audio 2, and the pace, through bits 1:0, whose DMA stood within
+a few bytes (`fix.a2pfd1`); with bit 0 alone, sb16test's `ctl.pause16` found
+the pace's count moving through the pause. With 71h bit 1 clear, Audio 2
+plays at Audio 1's rate (`a2.slaved`). On channel 0, which a pin of the card
+reaches, it played as on channel 5 (`a2.ch0`, since taken out, because the
+probe keeps to the channels the card is configured for).
 
 Probe: `a2.f8m` to `a2.u16` (the formats), `a2.r8000` to `a2.r48000`,
 `a2.t2_0`, `a2.t2_1` and `a2.t2_3` (78h bits 7:6, the base case being 10),
@@ -723,8 +726,13 @@ about 12 percent short while the probe read the 8237's counts (`both.base`,
 `both.f16_8`, `both.r22_44`). Muted, slaved, in 8-bit stereo and without its
 interrupt, Audio 2 moved its channel's count at Audio 1's rate
 (`both.pace`), which `esssb16` now does under EMM386 where Audio 2's channel
-is the game's 16-bit one ([ESSSB16.md](ESSSB16.md)). The recordings of the
-dual cases depend on Audio 1's stream being in step ([A 16-bit stream a byte
+is the game's 16-bit one ([ESSSB16.md](ESSSB16.md)). With a game's refills
+behind that count, Audio 1 playing the game's buffer from the channel
+carried over, the glide played clean on the laptop with the pace started
+after Audio 1, as `esssb16` starts it (`stream.pace`), also with Audio 2's
+counter set (`stream.pacec`), and broke up with Audio 2 started with Audio 1
+(`stream.pacew`). The recordings of the dual cases depend on Audio 1's
+stream being in step ([A 16-bit stream a byte
 off](#a-16-bit-stream-a-byte-off)).
 
 ## The DMA controllers and the memory managers

@@ -108,17 +108,19 @@ Creative's guide says, and its count stands still, but where Audio 2's DMA
 channel (PnP 75h) is the game's 16-bit one, as on the card of the reports
 with `H5`. There Audio 2 runs on that channel, muted, while Audio 1 plays
 the sound, so that the count moves as on a Sound Blaster 16 (the pace), and
-`esssb16` says so as it loads. In the emulator a game that mixes up to that
-count, such as Pinball World's driver, plays then, and elsewhere repeats its
-first sound, but on the laptop of the reports Pinball World still loops with
-`H5`, so use `/H0` there. Pinball Fantasies' Sound Blaster 16 driver, which
-Pinball Dreams and Pinball Dreams II share, programs its channel only after
-the command, so under EMM386 it plays what the channel held before: use
-`/H0`, or its Sound Blaster Pro driver. With QEMM, JEMM and HDPMI32i neither
-applies. A 16-bit buffer longer than 64 KB or across a 64 KB boundary plays
-wrong, because the 8-bit channel that carries it reaches 64 KB in one page,
-which `esssb16` run again tells of the last buffer, E2h writes no byte
-through the DMA, and FM plays as before.
+`esssb16` says so as it loads. A game that mixes up to that count, such as
+Pinball World's driver, plays then, as on the laptop of the reports, and
+elsewhere repeats its first sound. Such a game has to be set up with the
+same channel: Pinball World's `SETSND` keeps the DMA that it saved before,
+and with DMA 1 there while `esssb16` has 5, it repeated what channel 5 last
+played. Pinball Fantasies' Sound Blaster 16 driver, which Pinball Dreams and
+Pinball Dreams II share, programs its channel only after the command, so
+under EMM386 it plays what the channel held before: use `/H0`, or its Sound
+Blaster Pro driver. With QEMM, JEMM and HDPMI32i neither applies. A 16-bit
+buffer longer than 64 KB or across a 64 KB boundary plays wrong, because the
+8-bit channel that carries it reaches 64 KB in one page, which `esssb16` run
+again tells of the last buffer, E2h writes no byte through the DMA, and FM
+plays as before.
 
 It was tested in a CPU emulator, and [`sb16test`](../README.md#sb16testexe)
 checks it on real hardware ([docs/TESTING.md](TESTING.md#d2-esssb16-dos)).
@@ -223,12 +225,21 @@ runs it again. It loads HDPMI32i and `esssb16`, shows what `esssb16` said,
 stops if it didn't load, keeps the memory again and runs `sb16test`'s
 automatic checks, then again with the game's 16-bit DMA on 5 (`ESSSB16 /H5`,
 `SB16TEST /H:5`). Then the games: Pinball World's `SETSND`, where you choose
-the Sound Blaster 16 and play its test tune, and the game itself, first with
-the game's 16-bit DMA on none (`ESSSB16 /H0`), then on 5 (`ESSSB16 /H5`),
-each followed by Y or N for how it sounded and by `esssb16` run again, which
-logs the buffer that the game last had carried over, and last, if you like,
-Pinball Dreams' `SETSOUND`, which restarted the machine before, with the
-16-bit DMA on none, after the results so far are on the disk. With `esssb16`
-in memory already, as after *Restart in MS-DOS mode* with it in
-`AUTOEXEC.BAT`, it skips the probe and checks that copy instead. Send
-`C:\ESS\RESULTS` back, with the recording.
+the Sound Blaster 16 with the DMA that the batch names, 1 and then 5, and
+play its test tune, and the game itself, first with the game's 16-bit DMA on
+none (`ESSSB16 /H0`), then on 5 (`ESSSB16 /H5`), each followed by Y or N for
+how it sounded and by `esssb16` run again, which logs the buffer that the
+game last had carried over, and last, if you like, Pinball Dreams'
+`SETSOUND`, which restarted the machine before, with the 16-bit DMA on none,
+after the results so far are on the disk. With `esssb16` in memory already,
+as after *Restart in MS-DOS mode* with it in `AUTOEXEC.BAT`, it skips the
+probe and checks that copy instead. Send `C:\ESS\RESULTS` back, with the
+recording.
+
+`build\DREAMS.BAT` finds what stops the machine in Pinball Dreams'
+`SETSOUND`: copy it to `C:\ESS` as well, and run `C:\ESS\DREAMS` right after
+a restart, then again after each restart that it asks for or that a stop
+makes. Its first run plays `SETSOUND` with nothing loaded, then with
+HDPMI32i, and the next runs with `esssb16` alone and with both, as
+`ESSCHECK` loads them. `RESULTS\DREAMS.TXT` keeps where it got to: the setup
+that started and never came back is the one that stopped the machine.

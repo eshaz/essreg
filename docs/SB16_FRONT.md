@@ -210,16 +210,20 @@ is Audio 2's while Audio 2 runs. A command for a kind that doesn't run does
 nothing:
 * **Audio 1**: the pause clears B7h bit 7, so that the FIFO stops feeding
   the DAC and keeps whole frames, then B2h bit 6, so that the chip asks for
-  no more DMA, and when PACED, 78h bit 0. The continue sets the rate again,
-  then B2h bit 6, B7h bit 7 and 78h bit 0. The end of auto-initialize clears
-  B8h bit 2. A pause through B2h bit 6 alone came back in step only about
-  half the time, since the DAC played on and ran the FIFO down into a
-  half-done frame (`fix.pb2late`), and one through B7h bit 7 every time
-  (`fix.pb7a`).
-* **Audio 2**: the pause clears 78h bit 0, which silences the DAC, though
-  the card's DMA runs on meanwhile and the stream skips what it moved
-  (`a2.pause_f`), and the continue sets the rate again, then 78h bit 0. The
-  end of auto-initialize clears 78h bit 4.
+  no more DMA, and when PACED, 78h bits 1:0, as for Audio 2. The continue
+  sets the rate again, then B2h bit 6, B7h bit 7 and 78h bits 1:0. The end
+  of auto-initialize clears B8h bit 2. A pause through B2h bit 6 alone came
+  back in step only about half the time, since the DAC played on and ran the
+  FIFO down into a half-done frame (`fix.pb2late`), and one through B7h bit
+  7 every time (`fix.pb7a`).
+* **Audio 2**: the pause clears 78h bits 1:0, the DMA requests and the
+  FIFO's way to the DAC, and the continue sets the rate again, then both
+  bits in one write. With bit 0 alone the card's DMA ran on at about twice
+  the rate, the FIFO dropping its bytes, so that the count that a game reads
+  moved through the pause and Audio 2 kept interrupting (`a2.pause_f`, and
+  sb16test's `ctl.pause16` on the pace); with both bits the DMA stood within
+  a few bytes (`fix.a2pfd1`). Either way the stream resumed in step about
+  half the time. The end of auto-initialize clears 78h bit 4.
 
 In the first half of a block in halves, the end of auto-initialize sets ONCE
 instead (`half_last`), so that the block plays to its end.

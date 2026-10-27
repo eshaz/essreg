@@ -51,7 +51,9 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   byte-identical rebuilds, with ESS's ES1869F driver sets for Windows 3.1,
   NT 4.0, Windows 95 and OS/2 in `driver/es1869f/`, and `build/` the
   committed binaries, with `ESSCHECK.BAT`, which runs the checks of a
-  machine in one go (essprobe, esssb16, sb16test and the games).
+  machine in one go (essprobe, esssb16, sb16test and the games), and
+  `DREAMS.BAT`, which plays Pinball Dreams' SETSOUND in one setup after
+  another, a restart between them, to find what stops the machine.
   `third_party/hdpmi32i/` holds `HDPMI32i.EXE` as HX released it, for
   esssb16's protected-mode games, with its origin and hashes in its README.
 * `src/esssb16.asm` is `esssb16.com`, the DOS TSR that answers games as a
@@ -236,11 +238,12 @@ tools/wineshot.sh run ess3d.exe /sim tray
   fixed limit, and `tools/build_esssb16.py` reports its size; the file needs
   no LH, and `tests/test_esssb16.py` checks that `build/esssb16.com` is
   current.
-* **ESSCHECK.BAT** runs on MS-DOS 7's COMMAND.COM: CR LF, no command of
-  Windows NT's, labels that differ in their first eight characters, and the
-  programs' own options and case names. `tests/test_esscheck.py` checks
-  that, and its way through each case on a model of COMMAND.COM, so a change
-  to an option or a case it uses goes into it too.
+* **ESSCHECK.BAT and DREAMS.BAT** run on MS-DOS 7's COMMAND.COM: CR LF, no
+  command of Windows NT's, labels that differ in their first eight
+  characters, and the programs' own options and case names.
+  `tests/test_esscheck.py` checks that, and their way through each case on a
+  model of COMMAND.COM, so a change to an option or a case they use goes
+  into them too.
 * **sb16test.** Its checks (`src/sb16t.c`) reach the card only through
   `struct sbt_hal`: `src/sb16test.c` on the machine, and
   `tests/test_sb16test.py` on the model and on both fronts. The handler's

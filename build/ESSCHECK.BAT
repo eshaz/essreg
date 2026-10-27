@@ -37,7 +37,7 @@ IF "%PD%"=="" IF EXIST C:\21STCENT\DREAMS\SETSOUND.EXE SET PD=C:\21STCENT\DREAMS
 IF "%PD%"=="" IF EXIST C:\DREAMS\SETSOUND.EXE SET PD=C:\DREAMS
 IF "%PD%"=="" IF EXIST C:\GAMES\DREAMS\SETSOUND.EXE SET PD=C:\GAMES\DREAMS
 
-ECHO esscheck 3: Pinball World in %PW%, Pinball Dreams in %PD% >> %L%
+ECHO esscheck 4: Pinball World in %PW%, Pinball Dreams in %PD% >> %L%
 ECHO esscheck: the checks of esssb16 and the chip, saved in %R%
 VER >> %L%
 SET > %R%\SET.TXT
@@ -111,12 +111,13 @@ GOTO DREAMS
 :PWSTART
 SET H=/H0
 SET N=none
+SET D=1
 :PWPASS
 %ESSDIR%\ESSSB16 %H% >> %L%
 ECHO.
 ECHO    SETSND, with the game's 16-bit DMA on %N%: Setup Soundcard, then
-ECHO    Sound Blaster 16 (it finds the DMA), then Test Sound; listen to the
-ECHO    tune, then quit.
+ECHO    Sound Blaster 16 with DMA %D%, which SETSND may not find by itself,
+ECHO    then Test Sound; listen to the tune, then quit.
 PAUSE
 CD %PW%
 SETSND
@@ -142,6 +143,7 @@ GOTO ASK
 IF "%N%"=="5" GOTO DREAMS
 SET H=/H5
 SET N=5
+SET D=5
 GOTO PWPASS
 
 :DREAMS

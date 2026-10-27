@@ -480,20 +480,23 @@ class FrontChecks:
                              rate)
 
     def test_audio2_pause_continue_end(self):
-        """D5h and D6h: Audio 2's FIFO off and on its DAC (78h bit 0), the
-        DMA waiting in between; D9h: the block that plays is the last (78h
-        bit 4)"""
+        """D5h and D6h: Audio 2's DMA requests and its FIFO's way to the DAC
+        off and on (78h bits 1:0), so that the DMA stands in between, as
+        it doesn't with bit 0 alone (a2.pause_f); D9h: the block that plays
+        is the last (78h bit 4)"""
         c = self.a2()
         chip = c.chip
         play16(c)
         c.wait(3000)
         write(c, 0xD5)
-        self.assertEqual(chip.mixer[0x78], 0x92)
+        self.assertEqual(chip.mixer[0x78], 0x90)
         n = len(chip.played2)
+        at = chip.dmac.ch[chip.a2_channel()].count
         c.wait(10000)
         self.assertEqual(len(chip.played2), n)
+        self.assertEqual(chip.dmac.ch[chip.a2_channel()].count, at)
         write(c, 0xD0)                      # the 8-bit kind: nothing
-        self.assertEqual(chip.mixer[0x78], 0x92)
+        self.assertEqual(chip.mixer[0x78], 0x90)
         write(c, 0xD6)
         self.assertEqual(chip.mixer[0x78], 0x93)
         write(c, 0xD9)

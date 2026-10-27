@@ -1270,14 +1270,18 @@ class EMM386PaceTest(unittest.TestCase):
         self.assertEqual(self.chip.mixer[0x78], 0x00)
 
     def test_pause(self):
-        """D5h takes its FIFO off its DAC, which then takes no more words,
-        and D6h puts it back"""
+        """D5h turns its DMA requests and its FIFO's way to the DAC off
+        (78h bits 1:0), so that it takes no more words, as with bit 0
+        alone it would (ctl.pause16 on the laptop), and D6h puts both
+        back"""
         c = self.c
         play16(c)
         c.wait(5000)
         write(c, 0xD5)
         c.wait(2000)
-        self.assertEqual(self.chip.mixer[0x78], 0x12)
+        self.assertEqual(self.chip.mixer[0x78], 0x10)
+        self.assertEqual(self.moved(), 0)
+        c.wait(10000)
         self.assertEqual(self.moved(), 0)
         write(c, 0xD6)
         self.assertEqual(self.chip.mixer[0x78], 0x13)

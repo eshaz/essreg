@@ -1237,10 +1237,10 @@ gd:     cmp     al,8
         mov     ax,0xB77F               ; so that it keeps whole frames
         call    reg_and                 ; (fix.pb7a), then the DMA requests
         mov     ax,0xB2BF               ; off (B2h bit 6), and the pace's
-        call    reg_and                 ; FIFO off its DAC (78h bit 0)
+        call    reg_and                 ; (78h bits 1:0, .pause2)
         test    byte [V(vbits)],V_PACE
         jz      none
-        mov     ax,0x78FE
+        mov     ax,0x78FC
         jmp     mix_and
 .cont:  btr     word [V(flags)],F_PAUSE_BIT
         jnc     none
@@ -1251,7 +1251,7 @@ gd:     cmp     al,8
         call    reg_or
         test    byte [V(vbits)],V_PACE
         jz      none
-        mov     ax,0x7801
+        mov     ax,0x7803
         jmp     mix_or
 .a2:    shl     ah,2                    ; Audio 2: the same with 78h
         jc      .pause2
@@ -1265,14 +1265,14 @@ gd:     cmp     al,8
         mov     ax,0x78EF               ; bit 4: auto-initialize
         jmp     mix_and
 .pause2:
-        or      byte [V(flags2)],F_PAUSE ; the FIFO off the DAC (bit 0),
-        mov     ax,0x78FE               ; whose DMA runs on (a2.pause_f)
-        jmp     mix_and
-.cont2: btr     word [V(flags2)],F_PAUSE_BIT
-        jnc     none
-        call    a2_rate
-        mov     ax,0x7801
-        jmp     mix_or
+        or      byte [V(flags2)],F_PAUSE ; the DMA requests and the FIFO's
+        mov     ax,0x78FC               ; way to the DAC off (bits 1:0):
+        jmp     mix_and                 ; with bit 0 alone the DMA ran on
+.cont2: btr     word [V(flags2)],F_PAUSE_BIT    ; at twice the rate, the
+        jnc     none                    ; FIFO dropping its bytes
+        call    a2_rate                 ; (a2.pause_f), and with both it
+        mov     ax,0x7803               ; stood within a few bytes
+        jmp     mix_or                  ; (fix.a2pfd1); both back at once
 .speaker:
         dec     ah                      ; 1 on, 2 off, 0 nothing
         js      none
