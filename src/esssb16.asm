@@ -53,6 +53,13 @@
 ; registers with it too, entering protected mode once at installation and
 ; staying resident as its client.
 ;
+; The resident part, 5 KB with its PSP, moves into a block of upper memory
+; of its own, so that games keep their conventional memory: the installer
+; copies it there, registers the traps for it from where DOS loaded the
+; program, and gives that memory back (umb_take). Loaded before Windows,
+; the TSR does nothing while Windows runs, and takes the chip back from
+; Windows' driver at its first access after Windows ends (int2f, afresh).
+;
 ; Build: nasm -f bin -o esssb16.com esssb16.asm (tools/build_esssb16.py).
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
@@ -114,6 +121,11 @@ H_ONCE          equ 0x04        ; the transfer ends with this block: the
 H_A2            equ 4
 H_ALL           equ H_ON | H_SECOND | H_ONCE
 
+; what Windows changed (wflags), and /3
+W_FRESH         equ 0x01        ; Windows started or ended since the last
+                                ; access: the chip is as it left it
+W_KEEP3D        equ 0x02        ; /3: the 3-D effect stays as it is
+
 ; the game's 16-bit channel
 V_MASK          equ 0x01        ; masked
 V_FF            equ 0x02        ; its controller's flip-flop
@@ -162,6 +174,7 @@ vendor:         dd 0            ; HDPMI32i's vendor entry: offset
 vendor_sel:     dw 0            ; and selector
 pm_data:        dw 0            ; this segment's data selector, from the
                                 ; DPMI switch
+old2f:          dd 0            ; int 2Fh before ours
 save_ss:        dw 0            ; the caller's stack while a shim runs on
 save_esp:       dd 0            ; the front's
 ctrl:           times 25 db 0   ; the chip's registers A1h-B9h as the front
@@ -219,6 +232,7 @@ xbits:          db 0            ; the transfer's bits (xfer's BL)
 halves:         db 0            ; H_* of Audio 1, and of Audio 2 << H_A2
 sick:           db 0            ; 1: the chip took no byte, and gets none
                                 ; until its own reset (dsp_put)
+wflags:         db 0            ; W_*
 mix:            times MIX_LEN db 0      ; the game's view of 30h-47h
 
 ; --- the trap shims ------------------------------------------------------
@@ -572,6 +586,50 @@ chip_reset:
 .out:   popa
         ret
 
+; Windows' broadcasts at its start and its end (int 2Fh 1605h, 1606h),
+; for the next access: Windows' driver had the chip in between. A TSR
+; loaded before Windows keeps its traps for the DOS of Restart in MS-DOS
+; mode, after Windows
+int2f:  cmp     ax,0x1605
+        je      .win
+        cmp     ax,0x1606
+        jne     .on
+.win:   or      byte [cs:wflags],W_FRESH
+.on:    jmp     far [cs:old2f]
+
+; the first access after Windows: the chip as another program left it, in
+; whichever mode, so the front's transfers and its DSP's state are over,
+; the chip gets its own reset, Audio 2 stops, and the 3-D effect goes off
+; again as at the start. The view of the mixer stays the game's
+afresh:
+        and     byte [V(wflags)],~W_FRESH & 0xFF
+        xor     ax,ax
+        mov     [V(flags)],al
+        mov     [V(flags2)],al
+        mov     [V(state)],al
+        mov     [V(halves)],al
+        mov     [V(need)],ax            ; and alen
+        mov     byte [V(vbits)],V_MASK
+        call    chip_reset
+        mov     ax,0x7800
+        call    mix_write
+
+; the 3-D effect bypassed (mixer 50h bit 3), as after a hardware reset and
+; on a Sound Blaster 16, which has none, unless /3; CF set if it was on
+three_d:
+        test    byte [V(wflags)],W_KEEP3D
+        jnz     .no
+        mov     ah,0x50
+        call    mix_read
+        test    al,0x08
+        jz      .no
+        and     al,~0x08 & 0xFF
+        call    mix_write
+        stc
+        ret
+.no:    clc
+        ret
+
 ; the chip in Extended mode for a transfer, its DAC into the mixer; after
 ; Compatibility mode, and for a sick chip, a reset of its own first
 ensure_ext:
@@ -624,7 +682,10 @@ front:
         cld
         pushad
         mov     di,dbase
-        mov     bx,dx
+        test    byte [V(wflags)],W_FRESH
+        jz      .on
+        call    afresh
+.on:    mov     bx,dx
         sub     bx,[V(base)]
         test    cl,cl
         jnz     .out
@@ -2634,7 +2695,7 @@ parse_options:
         cmp     al,'3' & ~0x20
         je      .three
         jmp     .bad
-.three: mov     byte [keep3d],1
+.three: or      byte [wflags],W_KEEP3D
         jmp     .next
 .two:   test    cx,cx                   ; /2n: Audio 2's channel, 0, 1 or 3,
         jz      .bad                    ; and /2- none
@@ -2945,6 +3006,54 @@ find_card:
 .no:    stc
         ret
 
+; CF clear if a copy in memory answers through its traps, as a Sound
+; Blaster 16 answers a reset (AAh) and E1h (4.05), where without them the
+; chip would answer as itself (3.01)
+copy_answers:
+        mov     dx,[base]
+        add     dx,6
+        mov     al,1
+        out     dx,al
+        in      al,dx                   ; 3 us
+        in      al,dx
+        in      al,dx
+        xor     al,al
+        out     dx,al
+        call    sb_byte
+        cmp     al,0xAA
+        jne     .no
+        add     dx,2                    ; +Ch, once it takes a byte
+        mov     cx,DSP_POLLS
+.ready: in      al,dx
+        test    al,0x80
+        loopnz  .ready
+        jnz     .no
+        mov     al,0xE1
+        out     dx,al
+        call    sb_byte
+        cmp     al,4
+        jne     .no
+        call    sb_byte
+        cmp     al,5
+        je      .yes
+.no:    stc
+.yes:   ret
+
+; AL = the DSP's next byte as a Sound Blaster gives it (+Eh bit 7, then
+; +Ah), 0 if none comes; DX = +Ah
+sb_byte:
+        mov     dx,[base]
+        add     dx,0x0E
+        mov     cx,DSP_POLLS
+.wait:  in      al,dx
+        test    al,0x80
+        loopz   .wait
+        lea     dx,[edx-4]
+        mov     al,0
+        jz      .out
+        in      al,dx
+.out:   ret
+
 ; AL = the DSP's next answer byte, CF set if none comes
 find_byte:
         mov     dx,[base]
@@ -3100,18 +3209,12 @@ setup_card:
         jmp     pair_out
 .out:   ret
 
-; the 3-D effect bypassed (mixer 50h bit 3), as after a hardware reset and
-; on a Sound Blaster 16, which has none: Windows' driver turns it on, and
-; the chip keeps it through a restart to DOS. /3 keeps it as it is
+; the 3-D effect off (three_d): Windows' driver turns it on, and the chip
+; keeps it through a restart to DOS
 three_d_off:
-        cmp     byte [keep3d],0
-        jne     .out
-        mov     ah,0x50
-        call    mix_read
-        test    al,0x08
-        jz      .out
-        and     al,~0x08 & 0xFF
-        call    mix_write
+        mov     di,dbase
+        call    three_d
+        jnc     .out
         mov     dx,msg_3d_off
         call    print
 .out:   ret
@@ -3255,6 +3358,8 @@ install:
         mov     ds,ax
         mov     es,ax
         cld
+        mov     [low_seg],ax
+        mov     [res_seg],ax
         mov     dx,banner
         call    print
         call    parse_options
@@ -3269,10 +3374,17 @@ install:
         call    setup_card
         call    report
         call    three_d_off
+        call    free_environment
+        call    dpmi_find               ; the DPMI host's data, for umb_take
+        call    umb_take                ; upper memory, unless LH put it there
         call    trap_v86                ; QPI, else EMM386
         jc      .notrap
-        call    free_environment
+        call    hook_2f                 ; Windows' broadcasts
+        call    umb_commit
         call    trap_dpmi               ; HDPMI32i, and the TSR from there
+        mov     dx,[res_msg]            ; else here, in real mode
+        call    print
+        call    low_free
         mov     dx,RESIDENT_PARAS
         mov     ax,0x3100
         int     0x21
@@ -3285,14 +3397,18 @@ install:
         mov     al,E_WINDOWS
         jmp     short .fail
 .loaded:
+        call    copy_answers            ; the copy in memory still traps?
         mov     dx,msg_loaded
-        mov     al,E_LOADED
+        jnc     .say
+        mov     dx,msg_mute
+.say:   mov     al,E_LOADED
         jmp     short .fail
 .nocard:
         mov     dx,msg_nocard
         mov     al,E_NOCARD
         jmp     short .fail
 .notrap:
+        call    umb_drop
         mov     dx,msg_notrap
         mov     al,E_NOTRAP
 .fail:  push    ax
@@ -3358,7 +3474,8 @@ print_hex3:
         ret
 
 ; the traps for real-mode games: QPI (QEMM, or JEMM with QPIEMU), else
-; EMM386's API. CF set if neither is there, each having said why
+; EMM386's API, for the resident part where it stays (res_seg). CF set if
+; neither is there, each having said why
 trap_v86:
         call    qpi_find
         jc      .emm
@@ -3476,8 +3593,8 @@ qpi_install:
         or      ax,di
         jz      .first
         mov     byte [qpi_how],IO_CHAIN ; the ports not the front's go on
-.first: push    cs
-        pop     es
+.first: call    umb_sync_rm             ; the resident part as it is now
+        mov     es,[res_seg]
         mov     di,qpi_shim
         mov     ax,0x1A07
         call    far [qpi]
@@ -3560,11 +3677,15 @@ emm_install:
         movsw
         inc     ax
         loop    .fill
-        mov     si,emm_table
+        call    umb_sync_rm             ; the table and the handlers where
+        mov     si,emm_table            ; the TSR stays
         mov     cx,12
         mov     dx,[base]
         add     dx,4
+        push    ds
+        mov     ds,[res_seg]
         call    emm_call
+        pop     ds
         jc      .refused
         clc
         ret
@@ -3601,6 +3722,24 @@ emm_call:
         int     0x2F
         ret
 
+; int 2Fh into the resident part where it stays (int2f), once it has the
+; vector before
+hook_2f:
+        push    es
+        mov     ax,0x352F
+        int     0x21
+        mov     [old2f],bx
+        mov     [old2f+2],es
+        pop     es
+        call    umb_sync_rm
+        push    ds
+        mov     dx,int2f
+        mov     ds,[res_seg]
+        mov     ax,0x252F
+        int     0x21
+        pop     ds
+        ret
+
 ; the PSP's environment freed
 free_environment:
         push    es
@@ -3611,16 +3750,10 @@ free_environment:
         mov     word [0x2C],0
         ret
 
-; the traps for protected-mode games, through HDPMI32i, when the DPMI host
-; is HDPMI (its logo starts the entry's segment, as HDPMI itself checks):
-; the TSR enters protected mode as a 32-bit client and stays resident from
-; there, as SBEMU does, so that its selectors live on, with the host's data
-; in the paragraphs after the resident part. The host's first CS is a
-; 16-bit selector of this segment whatever the client (DPMI 0.9), so the
-; code after the switch is 16-bit, with the 32-bit registers a 32-bit
-; client passes, and that CS and DS serve the handler. Returns in real
-; mode only without the switch
-trap_dpmi:
+; the DPMI host, when it is HDPMI (its logo starts the entry's segment, as
+; HDPMI itself checks) and its data fit into HOST_PARAS: its entry and the
+; paragraphs of its data (host_paras), else both stay 0
+dpmi_find:
         mov     ax,0x1687
         int     0x2F
         or      ax,ax
@@ -3636,26 +3769,189 @@ trap_dpmi:
         mov     [dpmi_entry],di
         mov     [dpmi_entry+2],es
         mov     [host_paras],si
-        mov     ax,cs                   ; the host's data
+.none:  push    ds
+        pop     es
+        ret
+
+; The resident part goes into upper memory by itself, so that it needs
+; neither LH nor a block of upper memory as large as the file: a block of
+; its own, with its PSP, from where the installer, which runs on where DOS
+; loaded it, registers the traps. The block is the last free one with
+; room (strategy 42h, high only), which keeps the TSR out of B000h-B7FFh
+; while there is room above (a program that finds memory there may take it
+; for a monochrome screen's). When DOS loaded the program high (LH), it
+; stays where it is, as without a free block
+
+; the block for the resident part and the DPMI host's data, copied from
+; here with the PSP: res_seg and moved set, and res_msg what to say
+umb_take:
+        mov     word [res_msg],msg_upper
+        mov     ax,cs
+        cmp     ax,0xA000
+        jae     .out                    ; LH: upper memory already
+        mov     word [res_msg],msg_conv
+        mov     ax,0x5800               ; the strategy and the UMB link, kept
+        int     0x21
+        push    ax
+        mov     ax,0x5802
+        int     0x21
+        push    ax
+        mov     ax,0x5803               ; the UMBs linked
+        mov     bx,1
+        int     0x21
+        jc      .back
+        mov     ax,0x5801               ; the last block that fits, high only
+        mov     bx,0x42
+        int     0x21
+        jc      .back
+        mov     bx,RESIDENT_PARAS
+        add     bx,[host_paras]
+        mov     ah,0x48
+        int     0x21
+        jc      .back
+        cmp     ax,0xA000
+        jae     .got
+        mov     es,ax                   ; conventional memory: given back
+        mov     ah,0x49
+        int     0x21
+        jmp     short .back
+.got:   mov     [res_seg],ax
+        mov     byte [moved],1
+        mov     word [res_msg],msg_upper
+.back:  pop     bx                      ; the link and the strategy back
+        xor     bh,bh
+        mov     ax,0x5803
+        int     0x21
+        pop     bx
+        xor     bh,bh
+        mov     ax,0x5801
+        int     0x21
+        cmp     byte [moved],0
+        je      .out
+        mov     es,[res_seg]            ; the PSP and the resident part
+        xor     si,si
+        xor     di,di
+        mov     cx,RESIDENT_PARAS * 8
+        rep     movsw
+        mov     ax,es                   ; the PSP's end of memory, and its
+        add     ax,RESIDENT_PARAS       ; handle table where it is now
+        add     ax,[host_paras]
+        mov     [es:0x02],ax
+        mov     ax,cs
+        cmp     [0x36],ax
+        jne     .out
+        mov     [es:0x36],es
+.out:   push    ds
+        pop     es
+        ret
+
+; the block becomes the TSR's, once the traps are in: its own PSP owns it,
+; under the name MEM /C shows, and is DOS's current PSP from now on, so
+; that the DPMI host takes it for its client's and DOS keeps it at the end.
+; The resident part gets what the installer changed since
+umb_commit:
+        cmp     byte [moved],0
+        je      .out
+        push    es
+        mov     bx,[res_seg]
+        lea     ax,[bx-1]
+        mov     es,ax
+        mov     [es:1],bx               ; the owner
+        mov     si,signature            ; the name: ESSSB16 and its 0
+        mov     di,8
+        mov     cx,4
+        rep     movsw
+        pop     es
+        mov     ah,0x50                 ; the current PSP
+        int     0x21
+        call    umb_sync_rm
+.out:   ret
+
+; what the installer changed of the resident part, from EMM386's table in
+; the PSP on, into the block at ES (umb_sync: a segment, or after the DPMI
+; switch a selector), or at res_seg (umb_sync_rm)
+umb_sync_rm:
+        push    es
+        mov     es,[res_seg]
+        call    umb_sync
+        pop     es
+        ret
+umb_sync:
+        cmp     byte [moved],0
+        je      .out
+        push    cx
+        push    si
+        push    di
+        cld
+        mov     si,emm_table
+        mov     di,si
+        mov     cx,(RESIDENT_PARAS * 16 - emm_table) / 2
+        rep     movsw
+        pop     di
+        pop     si
+        pop     cx
+.out:   ret
+
+; the block given back when the program doesn't stay
+umb_drop:
+        cmp     byte [moved],0
+        je      .out
+        mov     es,[res_seg]
+        mov     ah,0x49
+        int     0x21
+        mov     byte [moved],0
+.out:   ret
+
+; the block DOS loaded the program into given back, once the TSR is in its
+; own: the installer runs on there to the end, and DOS takes nothing in
+; between
+low_free:
+        cmp     byte [moved],0
+        je      .out
+        mov     es,[low_seg]
+        mov     ah,0x49
+        int     0x21
+.out:   ret
+
+; the traps for protected-mode games, through HDPMI32i (dpmi_find): the TSR
+; enters protected mode as a 32-bit client and stays resident from there,
+; as SBEMU does, so that its selectors live on, with the host's data in
+; the paragraphs after the resident part. The host's first CS is a 16-bit
+; selector of this segment whatever the client (DPMI 0.9), so the code
+; after the switch is 16-bit, with the 32-bit registers a 32-bit client
+; passes. That CS and DS serve the handler, or when the resident part moved
+; to upper memory, selectors of its block like them. Returns in real mode
+; only without the switch
+trap_dpmi:
+        cmp     word [dpmi_entry+2],0
+        je      .none
+        mov     ax,[res_seg]            ; the host's data
         add     ax,RESIDENT_PARAS
         mov     es,ax
         mov     ax,1                    ; a 32-bit client
         call    far [dpmi_entry]
         jc      .none                   ; still in real mode
         mov     [pm_data],ds            ; protected mode: DS is this
-        mov     ax,0x168A               ; segment's data selector, CS its
-        mov     esi,hdpmi_name          ; code one; HDPMI's vendor API
+        mov     [pm_code],cs            ; segment's data selector, CS its
+        cmp     byte [moved],0          ; code one
+        je      .vendor
+        call    pm_moved
+        jc      .nohdpmi
+.vendor:
+        mov     ax,0x168A               ; HDPMI's vendor API
+        mov     esi,hdpmi_name
         int     0x2F
         or      al,al
         jnz     .nohdpmi
         mov     [vendor],edi
         mov     [vendor_sel],es
+        call    pm_sync
         mov     bx,hdpmi_ranges         ; the front's ports, trapped for it
 .trap:  push    bx
         movzx   esi,byte [bx]           ; ESI = the first port, EDI = how
         add     si,[base]               ; many, CX:EDX = the handler, BX
         movzx   edi,byte [bx+1]         ; its data
-        mov     cx,cs
+        mov     cx,[pm_code]
         mov     edx,hdpmi_shim
         mov     bx,[pm_data]
         mov     ax,6
@@ -3672,7 +3968,7 @@ trap_dpmi:
 .dtrap: push    bx
         movzx   esi,byte [bx]
         movzx   edi,byte [bx+1]
-        mov     cx,cs
+        mov     cx,[pm_code]
         mov     edx,hdpmi_shim
         mov     bx,[pm_data]
         mov     ax,6
@@ -3694,7 +3990,8 @@ trap_dpmi:
         mov     ax,7
         o32 call far [vendor]
         jmp     short .drelease
-.said:  mov     edx,msg_hdpmi
+.said:  call    pm_sync
+        mov     edx,msg_hdpmi
         jmp     short .tsr
 .release:                               ; all or none: HDPMI32, without the
         sub     bx,6                    ; i, refuses the first
@@ -3708,17 +4005,22 @@ trap_dpmi:
         mov     edx,msg_nohdpmi
 .tsr:   mov     ah,0x09
         int     0x21
-        mov     dword [rmcs_eax],0x3100 ; the TSR, as a real-mode call from
+        movzx   edx,word [res_msg]
+        mov     ah,0x09
+        int     0x21
+        push    ds
+        pop     es
+        cmp     byte [moved],0
+        je      .keep
+        mov     ax,[low_seg]            ; the block DOS loaded the program
+        mov     [rmcs_es],ax            ; into given back, as a real-mode call
+        mov     dword [rmcs_eax],0x4900
+        call    rm_dos
+.keep:  mov     dword [rmcs_eax],0x3100 ; the TSR, as a real-mode call from
         movzx   eax,word [host_paras]   ; which DOS doesn't return, with the
         add     ax,RESIDENT_PARAS       ; host's data
         mov     [rmcs_edx],eax
-        push    ds
-        pop     es
-        mov     edi,rmcs
-        mov     ax,0x0300
-        mov     bx,0x0021
-        xor     ecx,ecx
-        int     0x31
+        call    rm_dos
         mov     dx,[rmcs_edx]           ; not reached: the same through the
         mov     ax,0x3100               ; host
         int     0x21
@@ -3726,6 +4028,79 @@ trap_dpmi:
         pop     ds
         mov     dx,msg_nohdpmi
         call    print
+        ret
+
+; int 21h in real mode with the registers of rmcs, its flags, and its SS:SP
+; 0 for the host's stack (DPMI 0300h); ES = DS
+rm_dos: xor     eax,eax
+        mov     [rmcs_flags],ax
+        mov     [rmcs_sssp],eax
+        mov     edi,rmcs
+        mov     ax,0x0300
+        mov     bx,0x0021
+        xor     ecx,ecx
+        int     0x31
+        ret
+
+; the selectors of the block in upper memory, as the switch gave this
+; segment's: a 16-bit code one (pm_code) and a data one with B set
+; (pm_data); CF set if the host gives none
+pm_moved:
+        mov     cx,0x009A               ; present, code, readable
+        call    pm_sel
+        jc      .out
+        mov     [pm_code],ax
+        mov     cx,0x4092               ; present, data, writable, B
+        call    pm_sel
+        jc      .out
+        mov     [pm_data],ax
+.out:   ret
+
+; AX = a new selector of the block, 64 KB from its start, with the access
+; rights CL (the client's privilege put in) and CH; CF set if the host gives
+; none (DPMI 0000h, 0007h, 0008h, 0009h)
+pm_sel: push    cx
+        xor     ax,ax                   ; one descriptor
+        mov     cx,1
+        int     0x31
+        pop     cx
+        jc      .out
+        push    ax
+        mov     bx,ax
+        mov     ax,cs                   ; CS's privilege
+        and     al,3
+        shl     al,5
+        or      cl,al
+        push    cx
+        movzx   edx,word [res_seg]      ; the base
+        shl     edx,4
+        mov     ecx,edx
+        shr     ecx,16
+        mov     ax,0x0007
+        int     0x31
+        jc      .fail
+        xor     cx,cx                   ; the limit
+        mov     dx,0xFFFF
+        mov     ax,0x0008
+        int     0x31
+        jc      .fail
+        pop     cx                      ; the access rights
+        mov     ax,0x0009
+        int     0x31
+        pop     ax
+.out:   ret
+.fail:  pop     cx
+        pop     ax
+        stc
+        ret
+
+; what the installer changed of the resident part, after the switch into
+; the block in upper memory, through its data selector
+pm_sync:
+        push    es
+        mov     es,[pm_data]
+        call    umb_sync
+        pop     es
         ret
 
 ; the port offsets the front traps, and EMM386's handler for each of
@@ -3781,19 +4156,26 @@ dma_trapped:
         ret
 want2:          db 0xFF         ; /2's channel for Audio 2, 4 for /2-,
                                 ; FFh for the card's
-keep3d:         db 0            ; /3: the 3-D effect as it is
 irq:            db 5            ; the card's IRQ, and its bit in mixer 80h
 irq_bit:        db 0xF0, 0xF0, 0xF1, 0xF0, 0xF0, 0xF2, 0xF0, 0xF4
                 db 0xF0, 0xF1, 0xF8, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0
 emm_version:    db 2, 0         ; the IOCTL's subfunction 2, the version
-dpmi_entry:     dd 0
+dpmi_entry:     dd 0            ; HDPMI's entry, 0 if none (dpmi_find)
 host_paras:     dw 0            ; the DPMI host's data, in paragraphs
 hdpmi_name:     db "HDPMI", 0
+low_seg:        dw 0            ; where DOS loaded the program
+res_seg:        dw 0            ; where the resident part stays
+moved:          db 0            ; 1: in a block of upper memory of its own
+res_msg:        dw 0            ; which memory, said at the end
+pm_code:        dw 0            ; the handler's code selector
 rmcs:           times 7 dd 0    ; the real-mode call structure: EDI, ESI,
 rmcs_eax:       dd 0            ; EBP, reserved, EBX, EDX, ECX; EAX
                 dw 0, 0, 0, 0, 0, 0, 0, 0, 0    ; flags, ES, DS, FS, GS, IP,
-                                                ; CS; SP, SS = 0: the host's
+                                                ; CS, SP, SS
 rmcs_edx        equ rmcs + 5 * 4
+rmcs_flags      equ rmcs + 0x20
+rmcs_es         equ rmcs + 0x22
+rmcs_sssp       equ rmcs + 0x2E
 
 qemm_device:    db "QEMM386$", 0
 emm_device:     db "EMMXXXX0", 0
@@ -3814,6 +4196,8 @@ usage:          db "usage: esssb16 [/A220] [/H5|/H6|/H7|/H0] [/20|/21|/23|/2-] [
                 db "protected-mode games HDPMI32i, loaded resident first", 13, 10, "$"
 msg_windows:    db "not for a Windows DOS box: ES1869.VXD does this there", 13, 10, "$"
 msg_loaded:     db "already loaded", 13, 10, "$"
+msg_mute:       db "already loaded, but its port traps are gone (after Windows?): load it in", 13, 10
+                db "DOSSTART.BAT, not in AUTOEXEC.BAT, and restart", 13, 10, "$"
 msg_nocard:     db "no ES1869 at the base: set BLASTER or /A", 13, 10, "$"
 msg_notrap:     db "no port traps: load EMM386 4.46+, QEMM, or JEMM with QPIEMU first", 13, 10, "$"
 msg_card:       db "ES1869 at $"
@@ -3844,5 +4228,7 @@ msg_emm_old:    db " is older than 4.46", 13, 10, "$"
 msg_emm_refused: db " refused the port traps", 13, 10, "$"
 msg_hdpmi:      db ", HDPMI32i for protected-mode games", 13, 10, "$"
 msg_nohdpmi:    db "; protected-mode games play 8-bit without HDPMI32i", 13, 10, "$"
+msg_upper:      db "resident in upper memory", 13, 10, "$"
+msg_conv:       db "resident in conventional memory: no upper memory block was free", 13, 10, "$"
 
 install_end:

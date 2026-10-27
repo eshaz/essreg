@@ -4,8 +4,10 @@
 """The fronts as sbgame cards: esssb16.com and ES1869.VXD's front, each in
 the CPU emulator in front of the ES1869 model (esschip).
 
-TSRCard installs the TSR under QPIEMU, EMM386 or HDPMI32i, and sends the
-game's accesses of the ports the memory manager traps through the front;
+TSRCard installs the TSR under QPIEMU, EMM386 or HDPMI32i, its resident
+part in upper memory unless told otherwise, with the block it was loaded
+into reused, and sends the game's accesses of the ports the memory manager
+traps through the front;
 the others reach the chip and the DMA controllers directly, as on the
 machine, but under EMM386, whose own traps of the DMA controllers keep
 what the game programs until it unmasks the channel (emm386dma), while
@@ -39,7 +41,7 @@ from dma8237 import DMA8237, PORT_PAGE  # noqa: E402
 from emm386dma import EMM386DMA  # noqa: E402
 from esschip import ES1869Audio  # noqa: E402
 from sbgame import Card, program_dma, write  # noqa: E402
-from tsremu import Chip, Machine, PMMachine  # noqa: E402
+from tsremu import Chip, Machine, PMMachine, UMBS  # noqa: E402
 
 _BUILD = {}
 
@@ -157,17 +159,18 @@ class TSRCard(Card):
     0) or "pm" (a protected-mode game under HDPMI32i); `old_callback`: a
     QPI callback was there before the program's; the chip's mixer as
     `mixer` has it before the program is installed; `emm386` the keywords
-    of EMM386's DMA translation (emm386dma)"""
+    of EMM386's DMA translation (emm386dma); `umbs` the free upper memory,
+    where the resident part goes"""
 
     def __init__(self, path="qpi", env="BLASTER=A220 I5 D1 H5 P330 T6",
                  tail="", irq=5, dma8=1, dma2=None, old_callback=True,
-                 mixer=None, emm386=None):
+                 mixer=None, emm386=None, umbs=UMBS):
         super().__init__()
         self.chip = TSRChip(irq, dma8, dma2)
         for reg, v in (mixer or {}).items():
             self.chip.mixer[reg] = v
         image, syms = tsr_build()
-        self.m = Machine(image, syms, self.chip, env)
+        self.m = Machine(image, syms, self.chip, env, umbs=umbs)
         self.path = path
         self.pm = None
         self.emm = None

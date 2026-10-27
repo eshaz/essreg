@@ -18,9 +18,10 @@ the vector the program set.
 
 With a TSRCard the program shares the first megabyte of esssb16.com's
 machine, as a game does: the DMA reads its buffers there, its MCB chain
-includes the TSR's block, and the trapped ports run the TSR's shims on
-their own CPU. With `vxd`, the program runs in a Windows 98 DOS box, as
-far as int 2Fh tells, where ES1869.VXD's API answers functions 0001 and
+includes the TSR's block, in upper memory while the program links the
+UMBs, and the trapped ports run the TSR's shims on their own CPU. With
+`vxd`, the program runs in a Windows 98 DOS box, as far as int 2Fh tells,
+where ES1869.VXD's API answers functions 0001 and
 0400 (VXD_API.md) with vxd["adi"] and vxd["info"], AX, BX and CX, or None
 for ESS's driver, which fails 0400. With `umb`, (image, paragraphs), a
 program is resident in upper memory, as LH loads one: its block joins the
@@ -609,7 +610,7 @@ class Dos(Cpu):
             ok(False)
         elif ax == 0x5803:
             self.umb_calls.append(bx)
-            if self.umb is not None:
+            if self.umb is not None or getattr(self.tsr, "umbs", ()):
                 self.link_umbs(bool(bx & 1))
             ok(False)
         elif ax == 0x6601:          # the code page: 437

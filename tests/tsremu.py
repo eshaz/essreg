@@ -5,25 +5,28 @@
 
 DOS, the memory manager and the DPMI host are Python behind the interrupt
 hook: int 21h (the program's output, the device opens and IOCTLs of QEMM
-and EMM386, the memory block list, the UMB link, memory, and the exits),
-int 2Fh (Windows, QPIEMU's entry, EMM386's port traps, the DPMI host), and
-the QPI entry, the callback before the program's and the DPMI entry, which
-are stubs that interrupt. Every IN and OUT goes to vxdemu's FakeES1869,
-which has the mixer, the DSP and the PnP registers.
+and EMM386, the memory blocks with upper memory's, the UMB link and the
+allocation strategy, the current PSP, and the exits), int 2Fh (Windows,
+QPIEMU's entry, EMM386's port traps, the DPMI host), and the QPI entry,
+the callback before the program's and the DPMI entry, which are stubs that
+interrupt. Every IN and OUT goes to vxdemu's FakeES1869, which has the
+mixer, the DSP and the PnP registers.
 
 Machine runs the installer the way COMMAND.COM would, then calls the
-resident shims the way the memory manager does: qpi_io() is a QPI callback
-in V86 mode with a far frame, emm_io() EMM386's handler as EmmCpu calls it.
-PMMachine runs the protected-mode parts at ring 3: HDPMI32i's handler
-(hdpmi_io()), and the installer's code from the DPMI switch on (install()).
-The three share the memory.
+resident shims where the resident part stays (`seg`), the way the memory
+manager does: qpi_io() is a QPI callback in V86 mode with a far frame,
+emm_io() EMM386's handler as EmmCpu calls it. PMMachine runs the
+protected-mode parts at ring 3: HDPMI32i's handler (hdpmi_io()), and the
+installer's code from the DPMI switch on (install()), with the descriptor
+functions of DPMI. The three share the memory.
 
 The models keep what made the real thing fail: DOS reuses the memory past
-what the TSR keeps (resident() fills it with INT 3), EMM386 searches the
-program's dispatch table where the program left it at every trapped access
-and calls the handler at ring 0 through selectors as long as DI said, with
-the direction flag set, and HDPMI takes the client's real-mode stack at
-the switch and returns to it on a 16-bit code selector.
+what the TSR keeps, and all of the program's block when the resident part
+moved to a block of its own (resident() fills it with INT 3), EMM386
+searches the program's dispatch table where the program left it at every
+trapped access and calls the handler at ring 0 through selectors as long
+as DI said, with the direction flag set, and HDPMI takes the client's
+real-mode stack at the switch and returns to it on a 16-bit code selector.
 
 Needs the unicorn package.
 """
@@ -142,14 +145,20 @@ ENV_PARA = 0x0800           # its environment
 LOL_PARA = 0x0090           # DOS's list of lists
 MCB_PARA = 0x0FFF           # the first memory control block
 COPY_PARA = 0x3000          # a copy that is resident already (loaded=True)
+SYS_MCB = 0x4000            # the system's block up to upper memory, linked
 GAME_SS, GAME_SP = 0x5000, 0x1000       # the stack a trapped access comes with
 STUB_PARA = 0x6000          # the stubs that interrupt
-HOST_PARA = 0x7000          # a block that int 21h 48h gives
+HOST_PARA = 0x7000          # a block of conventional memory, from int 21h 48h
+# upper memory: each free block's MCB and paragraphs, where dosrun links
+# it too; UMBS one 32 KB block, UMBS2 another below it, at B000h
+UMBS = ((0xC800, 0x07FF),)
+UMBS2 = ((0xB000, 0x07FF), (0xC800, 0x07FF))
 DPMI_PARA = 0x6100          # the DPMI host's resident segment: its logo
-QPI_OFF, OLD_OFF, SENTINEL_OFF, DPMI_OFF = 0x00, 0x10, 0x20, 0x30
+QPI_OFF, OLD_OFF, SENTINEL_OFF, DPMI_OFF, MUX_OFF = 0x00, 0x10, 0x20, 0x30, 0x40
 HDPMI_LOGO = b"HDPMI\x03\x14\x01"     # HDPMI 3.20, 32-bit
 POISON = 0xCC               # INT 3: memory DOS or the host took back
 INT_QPI, INT_OLD, INT_SENTINEL, INT_DPMI, INT_VENDOR = 0xE0, 0xE1, 0xE2, 0xE4, 0xE5
+INT_MUX = 0xE6              # int 2Fh's handler before the program's: the stub
 CF = 0x0001
 IF = 0x0200
 
@@ -257,10 +266,15 @@ class Cpu:
 
 
 class Machine(Cpu):
-    """DOS, a memory manager and the chip around the real-mode program"""
+    """DOS, a memory manager and the chip around the real-mode program;
+    `umbs` the free blocks of upper memory (UMBS), `load_seg` the PSP that
+    DOS gives the program (a UMB's for LH), `memory` another machine's, for
+    the program loaded again where it is resident"""
 
-    def __init__(self, image, syms, chip=None, env="BLASTER=A220 I5 D1 H5 P330 T6"):
-        super().__init__(UC_MODE_16, chip or Chip())
+    def __init__(self, image, syms, chip=None,
+                 env="BLASTER=A220 I5 D1 H5 P330 T6", umbs=(),
+                 load_seg=PSP_PARA, memory=None):
+        super().__init__(UC_MODE_16, chip or Chip(), memory)
         if hasattr(self.chip, "dmac"):  # the DMA reaches the first megabyte
             self.chip.dmac.memory = BufferMemory(self.memory)
         self.image, self.syms = image, syms
@@ -292,44 +306,112 @@ class Machine(Cpu):
         self.windows = 0                # int 2Fh 1600h's AL
         self.umb_link = 0
         self.umb_links = []
+        self.umbs = tuple(umbs)
+        self.load_seg = load_seg
+        self.seg = load_seg             # where the resident part is
+        self.psp = load_seg             # DOS's current PSP (int 21h 50h)
+        self.psps = []                  # int 21h 50h's
+        self.tsr_psp = None             # the current PSP at int 21h 31h
+        self.strategy = 0               # int 21h 5801h's
+        self.strategies = []
         self.freed, self.resized, self.allocated = [], [], []
         self.alloc_fail = False
+        self.mux_chained = []           # int 2Fh's AX at the handler before
+        self.own_traps = False          # its accesses through EMM386's traps
         self.path = "qpi"               # how in() and out() reach the front
         self.load(env)
 
     # --- the program and its surroundings -----------------------------------
     def load(self, env):
-        psp = PSP_PARA * 16
+        psp = self.load_seg * 16
         self.put(psp, b"\xCD\x20" + struct.pack("<H", 0xA000))
+        self.put(psp + 0x16, struct.pack("<H", 0x0700))     # COMMAND.COM's
         self.put(psp + 0x2C, struct.pack("<H", ENV_PARA))
+        self.put(psp + 0x34, struct.pack("<HH", 0x18, self.load_seg))
         self.put(psp + 0x100, self.image)
         e = env.encode("latin-1") + b"\0" if env else b""
         self.put(ENV_PARA * 16, e + b"\0" + struct.pack("<H", 1) +
                  b"C:\\ESSSB16.COM\0")
-        # the memory blocks: the program's (64 KB), a free one, the last
+        # the memory blocks: the program's (64 KB), a free one, the last;
+        # loaded high, the program has upper memory's first block
         self.put(LOL_PARA * 16, struct.pack("<H", MCB_PARA))
-        self.mcb(MCB_PARA, b"M", PSP_PARA, 0x1000)
+        high = self.load_seg >= 0xA000
+        self.mcb(MCB_PARA, b"M", 0 if high else PSP_PARA, 0x1000)
         self.mcb(MCB_PARA + 0x1001, b"M", 0, 0xFFE)
         self.mcb(COPY_PARA - 1, b"Z", 0, 0x1000)
+        for i, (para, size) in enumerate(self.umbs):
+            last = i == len(self.umbs) - 1
+            self.mcb(para, b"Z" if last else b"M", 0, size)
+            if not last:                # the adapters' memory between
+                hole = para + size + 1
+                self.mcb(hole, b"M", 8, self.umbs[i + 1][0] - hole - 1, b"SC")
+        if high:
+            self.put((self.load_seg - 1) * 16 + 1,
+                     struct.pack("<H", self.load_seg))
         # the stubs: the QPI entry, the callback before ours, the sentinel
-        # the shims return to, the DPMI entry
+        # the shims return to, int 2Fh's handler before ours, the DPMI entry
         s = STUB_PARA * 16
         self.put(s + QPI_OFF, bytes([0xCD, INT_QPI, 0xCB]))
         self.put(s + OLD_OFF, bytes([0xCD, INT_OLD, 0xCB]))
         self.put(s + SENTINEL_OFF, bytes([0xCD, INT_SENTINEL, 0xF4]))
+        self.put(s + MUX_OFF, bytes([0xCD, INT_MUX, 0xCF]))
+        self.put(0x2F * 4, struct.pack("<HH", MUX_OFF, STUB_PARA))
         self.put(DPMI_PARA * 16 + DPMI_OFF, bytes([0xCD, INT_DPMI, 0xCB]))
 
-    def mcb(self, para, kind, owner, size):
-        self.put(para * 16, kind + struct.pack("<HH", owner, size) + b"\0" * 11)
+    def mcb(self, para, kind, owner, size, name=b""):
+        self.put(para * 16, kind + struct.pack("<HH", owner, size) + b"\0" * 3
+                 + name.ljust(8, b"\0"))
+
+    def block(self, seg):
+        """the memory block at seg: (kind, owner, paragraphs, name)"""
+        kind, owner, size = struct.unpack("<cHH", self.mem((seg - 1) * 16, 5))
+        name = self.mem((seg - 1) * 16 + 8, 8)
+        return kind, owner, size, name
+
+    def chain(self):
+        """the memory blocks as DOS walks them, from the first: (seg, kind,
+        owner, paragraphs)"""
+        para, blocks = MCB_PARA, []
+        while len(blocks) < 64:
+            kind, owner, size, _name = self.block(para + 1)
+            if kind not in (b"M", b"Z"):
+                raise EmuError("no memory block at %04Xh" % para)
+            blocks.append((para + 1, kind, owner, size))
+            if kind == b"Z":
+                return blocks
+            para += size + 1
+        raise EmuError("the memory blocks go round")
+
+    def link_umbs(self, on):
+        """upper memory joins the chain (int 21h 5803h): the last block of
+        conventional memory 'M', then the system's block over the rest up
+        to the first UMB's MCB; else 'Z' again"""
+        self.put((COPY_PARA - 1) * 16, b"M" if on and self.umbs else b"Z")
+        if on and self.umbs:
+            self.mcb(SYS_MCB, b"M", 8, self.umbs[0][0] - SYS_MCB - 1, b"SC")
 
     def tail(self, text):
         t = text.encode("latin-1")
-        self.put(PSP_PARA * 16 + 0x80, bytes([len(t)]) + t + b"\r")
+        self.put(self.load_seg * 16 + 0x80, bytes([len(t)]) + t + b"\r")
 
     def copy_resident(self):
         """a copy of the program at COPY_PARA, owned by its own PSP"""
         self.mcb(COPY_PARA - 1, b"Z", COPY_PARA, 0x1000)
         self.put(COPY_PARA * 16 + 0x100, self.image)
+
+    def _in(self, uc, port, size, _user):
+        if self.own_traps:
+            al, cf = self.emm_io(port)
+            if not cf:
+                return al
+        return super()._in(uc, port, size, _user)
+
+    def _out(self, uc, port, size, value, _user):
+        if self.own_traps:
+            _al, cf = self.emm_io(port, value & 0xFF)
+            if not cf:
+                return
+        super()._out(uc, port, size, value, _user)
 
     def flush(self):
         """the code the CPUs translated, dropped after memory changed"""
@@ -337,17 +419,37 @@ class Machine(Cpu):
             cpu.uc.ctl_flush_tb()
 
     def resident(self, paras):
-        """the TSR in: DOS reuses the rest of the program's block"""
+        """the TSR in: DOS shrinks the current PSP's block to what it keeps
+        and reuses the rest, and all of the program's block if that isn't
+        the one (the resident part moved)"""
         self.kept = paras
-        start = PSP_PARA * 16 + paras * 16
-        self.put(start, bytes([POISON]) * (PSP_PARA * 16 + 0x10000 - start))
+        seg = self.tsr_psp if self.tsr_psp is not None else self.load_seg
+        self.seg = seg
+        poison = bytes([POISON])
+        kind, owner, size, _name = self.block(seg)
+        if seg == PSP_PARA:             # the program's 64 KB, as COMMAND.COM
+            size = 0x1000               # loads it
+        elif kind not in (b"M", b"Z"):
+            raise EmuError("the TSR's PSP %04Xh has no memory block" % seg)
+        if paras > size:
+            raise EmuError("the TSR keeps %Xh paragraphs of a block of %Xh"
+                           % (paras, size))
+        if paras < size and seg != PSP_PARA:
+            self.mcb(seg - 1, b"M", owner, paras,
+                     self.mem((seg - 1) * 16 + 8, 8))
+            self.mcb(seg + paras, kind, 0, size - paras - 1)
+            self.put((seg + paras + 1) * 16, poison * ((size - paras - 1) * 16))
+        elif paras < size:
+            self.put((seg + paras) * 16, poison * ((size - paras) * 16))
+        if seg != self.load_seg:
+            self.put(self.load_seg * 16, poison * 0x10000)
         self.flush()
 
     def sym(self, name):
         return self.syms[name]
 
     def addr(self, name):
-        return PSP_PARA * 16 + self.syms[name]
+        return self.seg * 16 + self.syms[name]
 
     def data8(self, name):
         return self.mem(self.addr(name), 1)[0]
@@ -378,6 +480,8 @@ class Machine(Cpu):
             self.w8("eax", 0x5A)
         elif intno == INT_SENTINEL:
             self.stop("sentinel")
+        elif intno == INT_MUX:
+            self.mux_chained.append(self.r16("eax"))
         elif intno == INT_DPMI:
             ss, sp = self.r16("ss"), self.r16("esp")
             ip, cs = struct.unpack("<HH", self.mem(ss * 16 + sp, 4))
@@ -437,35 +541,114 @@ class Machine(Cpu):
         elif ah == 0x52:
             self.w16("es", LOL_PARA)
             self.w16("ebx", 2)
+        elif ax == 0x5800:
+            self.w16("eax", self.strategy)
+            self.carry(False)
+        elif ax == 0x5801:
+            bx = self.r16("ebx")
+            self.strategies.append(bx)
+            if bx & 0xFF3C or bx & 3 == 3:
+                self.w16("eax", 1)
+                self.carry(True)
+            else:
+                self.strategy = bx
+                self.carry(False)
         elif ax == 0x5802:
             self.w8("eax", self.umb_link)
             self.carry(False)
         elif ax == 0x5803:
-            self.umb_link = self.r16("ebx")
-            self.umb_links.append(self.umb_link)
-            self.carry(False)
+            bx = self.r16("ebx")
+            self.umb_links.append(bx)
+            if bx & 1 and not self.umbs:        # no upper memory (DOS=UMB)
+                self.w16("eax", 1)
+                self.carry(True)
+            else:
+                self.umb_link = bx
+                self.link_umbs(bool(bx & 1))
+                self.carry(False)
         elif ah == 0x49:
-            self.freed.append(self.r16("es"))
+            self.free(self.r16("es"))
             self.carry(False)
         elif ah == 0x4A:
             self.resized.append((self.r16("es"), self.r16("ebx")))
             self.carry(False)
         elif ah == 0x48:
-            self.allocated.append(self.r16("ebx"))
-            if self.alloc_fail:
-                self.w16("eax", 8)
-                self.carry(True)
-            else:
-                self.w16("eax", HOST_PARA)
-                self.carry(False)
+            self.alloc(self.r16("ebx"))
+        elif ah == 0x50:
+            self.psp = self.r16("ebx")
+            self.psps.append(self.psp)
+        elif ah == 0x35:
+            ip, cs = struct.unpack("<HH", self.mem((ax & 0xFF) * 4, 4))
+            self.w16("es", cs)
+            self.w16("ebx", ip)
+        elif ah == 0x25:
+            self.put((ax & 0xFF) * 4, struct.pack("<HH", dx, ds))
+        elif ah in (0x51, 0x62):
+            self.w16("ebx", self.psp)
         elif ah == 0x31:
             self.exit = ("tsr", dx)
+            self.tsr_psp = self.psp
             self.stop("tsr")
         elif ah == 0x4C:
             self.exit = ("exit", ax & 0xFF)
             self.stop("exit")
         else:
             raise EmuError("int 21h AX=%04X" % ax)
+
+    def alloc(self, paras):
+        """int 21h 48h: with the UMBs linked and a strategy of high memory,
+        a block of upper memory, the first, best or last that fits, else
+        (high first, or the strategy low) conventional memory; owned by the
+        current PSP"""
+        self.allocated.append((paras, self.strategy, self.umb_link & 1))
+        seg = None
+        high = self.umbs and self.umb_link & 1 and self.strategy & 0xC0
+        if high:
+            seg = self._umb_alloc(paras, self.strategy & 3)
+        if seg is None and not (high and self.strategy & 0x40) \
+                and not self.alloc_fail:
+            seg = HOST_PARA
+        if seg is None:
+            self.w16("eax", 8)
+            self.w16("ebx", 0)
+            self.carry(True)
+            return
+        self.w16("eax", seg)
+        self.carry(False)
+
+    def _umb_alloc(self, paras, fit):
+        free = []
+        para = self.umbs[0][0]
+        while True:
+            kind, owner, size, _name = self.block(para + 1)
+            if owner == 0 and size >= paras:
+                free.append((para, kind, size))
+            if kind == b"Z":
+                break
+            para += size + 1
+        if not free:
+            return None
+        if fit == 1:
+            para, kind, size = min(free, key=lambda b: b[2])
+        else:
+            para, kind, size = free[-1 if fit == 2 else 0]
+        if size == paras:
+            self.mcb(para, kind, self.psp, paras)
+            return para + 1
+        if fit == 2:                    # the top of the block
+            self.mcb(para, b"M", 0, size - paras - 1)
+            at = para + size - paras
+            self.mcb(at, kind, self.psp, paras)
+            return at + 1
+        self.mcb(para, b"M", self.psp, paras)
+        self.mcb(para + paras + 1, kind, 0, size - paras - 1)
+        return para + 1
+
+    def free(self, seg):
+        """int 21h 49h: the block's owner 0"""
+        self.freed.append(seg)
+        if self.mem((seg - 1) * 16, 1) in (b"M", b"Z"):
+            self.put((seg - 1) * 16 + 1, b"\0\0")
 
     def _mux(self):
         ax = self.r16("eax")
@@ -561,11 +744,14 @@ class Machine(Cpu):
             self.copy_resident()
         self.tail(tail)
         for name in ("cs", "ds", "es", "ss"):
-            self.w16(name, PSP_PARA)
-        self.w("esp", 0xFFFE)
+            self.w16(name, self.load_seg)
+        if self.load_seg == PSP_PARA:   # 64 KB, else the UMB that LH gave
+            self.w("esp", 0xFFFE)
+        else:
+            self.w("esp", self.block(self.load_seg)[2] * 16 - 2)
         self.w("eflags", IF | 2)
         self.w16("eip", 0x100)
-        why = self.run(PSP_PARA * 16 + 0x100)
+        why = self.run(self.load_seg * 16 + 0x100)
         if self.exit and self.exit[0] == "tsr":
             self.resident(self.exit[1])
         return why
@@ -590,7 +776,7 @@ class Machine(Cpu):
         self.w16("ds", ds)
         self.w16("es", 0xBBBB)
         self.w("eflags", IF | 2)
-        self.w16("cs", PSP_PARA)
+        self.w16("cs", self.seg)
         self.w16("eip", self.sym(name))
         self.run(self.addr(name))
         if (self.r16("ss"), self.r16("esp")) != (GAME_SS, GAME_SP):
@@ -605,6 +791,25 @@ class Machine(Cpu):
         if self.r("edx") != 0x44440000 | port:
             raise EmuError("%s changed DX" % name)
         return self.r8("eax"), bool(self.r("eflags") & CF)
+
+    def mux(self, ax):
+        """int 2Fh as a program calls it, through the vector table, such as
+        Windows' broadcasts at its start (1605h) and end (1606h)"""
+        self._frame()
+        ip, cs = struct.unpack("<HH", self.mem(0x2F * 4, 4))
+        sp = self.r16("esp") - 6        # the interrupt's frame: IP, CS, flags
+        frame = struct.pack("<HHH", SENTINEL_OFF, STUB_PARA, IF | 2)
+        self.put(GAME_SS * 16 + sp, frame)
+        self.w("esp", sp)
+        self.w("eax", ax)
+        self.w("eflags", 2)
+        self.w16("cs", cs)
+        self.w16("eip", ip)
+        self.run(cs * 16 + ip)
+        if (self.r16("ss"), self.r16("esp")) != (GAME_SS, GAME_SP - 4):
+            raise EmuError("int 2Fh left the stack at %04x:%04x" % (
+                self.r16("ss"), self.r16("esp")))
+        return self.r16("eax")
 
     def qpi_io(self, port, value=None):
         """a QPI callback: AL read, or the byte written; QPIEMU's CL"""
@@ -816,19 +1021,24 @@ class PMMachine(Cpu):
         self.handler = None             # (CS, EIP, DS) of function 6
         self.hdpmi = True               # int 2Fh 168Ah answers
         self.dpmi_calls = []            # int 31h: (function, regs)
+        self.dpmi_fail = set()          # int 31h functions that fail
         self.rmcs = None                # int 31h 0300h's structure
         self.gp = []                    # cli and sti at ring 3
-        base = PSP_PARA * 16
+        self.segs = {}                  # int 31h 0002h's selectors
+        # the program's segment as the switch gives it, and its PSP's: the
+        # current PSP at the switch
+        base, psp = machine.load_seg * 16, machine.psp * 16
         gdt = b"\0" * 8 + desc(0, 0xFFFFF, 0x9A, 0xC0) \
             + desc(0, 0xFFFFF, 0x92, 0xC0) \
             + desc(0, 0xFFFFF, 0xFA, 0xC0) + desc(0, 0xFFFFF, 0xF2, 0xC0) \
             + desc(base, 0xFFFF, 0xFA, 0x00) + desc(base, 0xFFFF, 0xF2, 0x40) \
-            + desc(base, 0xFF, 0xF2, 0x00) + desc(0, 0, 0, 0)
+            + desc(psp, 0xFF, 0xF2, 0x00)
+        self.next_sel = SEL_NEW         # what int 31h 0000h gives next
         self.uc.mem_map(GDT_BASE, 0x1000)
         self.uc.mem_map(STUB32, 0x1000)
         self.uc.mem_map(STACK32, 0x10000)
         self.put(GDT_BASE, gdt)
-        self.uc.reg_write(UC_X86_REG_GDTR, (0, GDT_BASE, len(gdt) - 1, 0))
+        self.uc.reg_write(UC_X86_REG_GDTR, (0, GDT_BASE, 0xFFF, 0))
         self.put(STUB32 + VENDOR_OFF, bytes([0xCD, INT_VENDOR, 0xCB]))
         self.put(STUB32 + SENTINEL32_OFF, bytes([0xCD, INT_SENTINEL, 0xF4]))
         self.ring0 = self.uc.context_save()     # the CPU at ring 0
@@ -837,7 +1047,24 @@ class PMMachine(Cpu):
         return self.syms[name]
 
     def addr(self, name):
-        return PSP_PARA * 16 + self.syms[name]
+        """the resident part's"""
+        return self.machine.seg * 16 + self.syms[name]
+
+    def descriptor(self, sel):
+        """(base, limit, access, flags) of a selector"""
+        d = self.mem(GDT_BASE + (sel & ~7), 8)
+        limit = d[0] | d[1] << 8 | (d[6] & 0x0F) << 16
+        base = d[2] | d[3] << 8 | d[4] << 16 | d[7] << 24
+        return base, limit, d[5], d[6] & 0xF0
+
+    def set_descriptor(self, sel, base=None, limit=None, access=None,
+                       flags=None):
+        old = self.descriptor(sel)
+        new = [old[0] if base is None else base,
+               old[1] if limit is None else limit,
+               old[2] if access is None else access,
+               old[3] if flags is None else flags]
+        self.put(GDT_BASE + (sel & ~7), desc(*new))
 
     def data8(self, name):
         return self.mem(self.addr(name), 1)[0]
@@ -861,7 +1088,7 @@ class PMMachine(Cpu):
         if intno == 13:
             eip = self.r("eip")
             cs = self.r16("cs")
-            base = PSP_PARA * 16 if cs == SEL_CODE16 else 0
+            base = self.descriptor(cs)[0]
             op = self.mem(base + eip, 1)[0]
             if op not in (0xFA, 0xFB):
                 raise EmuError("privileged instruction %02X at %04x:%08x"
@@ -909,28 +1136,80 @@ class PMMachine(Cpu):
         else:
             self.carry(True)
 
+    def _new_sel(self):
+        sel = self.next_sel
+        if sel >= 0x1000:
+            raise EmuError("no descriptors left")
+        self.next_sel += 8
+        self.put(GDT_BASE + (sel & ~7), bytes(8))
+        return sel
+
     def _dpmi(self):
+        """the descriptor functions (0000h, 0002h, 0007h-0009h), which check
+        what a strict host checks, and 0300h's int 21h: a block freed, or the
+        TSR, from which it doesn't come back"""
         ax = self.r16("eax")
         self.dpmi_calls.append((ax, self.regs()))
         self.carry(False)
-        if ax == 0x0000:
-            self.w16("eax", SEL_NEW)
+        bx = self.r16("ebx")
+        cxdx = (self.r16("ecx") << 16) | self.r16("edx")
+        if ax in self.dpmi_fail:
+            self.w16("eax", 0x8011)
+            self.carry(True)
+        elif ax == 0x0000:
+            if self.r16("ecx") != 1:
+                raise EmuError("int 31h 0000h for %d descriptors"
+                               % self.r16("ecx"))
+            self.w16("eax", self._new_sel())
+        elif ax == 0x0002:
+            if bx not in self.segs:
+                self.segs[bx] = self._new_sel()
+                self.set_descriptor(self.segs[bx], bx * 16, 0xFFFF, 0xF2, 0)
+            self.w16("eax", self.segs[bx])
         elif ax in (0x0007, 0x0008, 0x0009):
-            pass
+            if not SEL_NEW <= bx < self.next_sel or bx & 7 != 3 \
+                    or bx in self.segs.values():
+                self.w16("eax", 0x8022)         # not the client's to change
+                self.carry(True)
+            elif ax == 0x0007:
+                self.set_descriptor(bx, base=cxdx)
+            elif ax == 0x0008:
+                if cxdx > 0xFFFFF:
+                    raise EmuError("int 31h 0008h: a limit over 1 MB")
+                self.set_descriptor(bx, limit=cxdx)
+            else:
+                cl, ch = self.r8("ecx"), (self.r16("ecx") >> 8) & 0xFF
+                if cl & 0xF0 != 0xF0 or ch & 0x20:
+                    self.w16("eax", 0x8021)     # present, ring 3, code or
+                    self.carry(True)            # data, and nothing reserved
+                else:
+                    self.set_descriptor(bx, access=cl, flags=ch & 0xD0)
         elif ax == 0x0300:
             es, edi = self.r16("es"), self.r("edi")
-            if es != SEL_DATA or edi >> 16:
-                raise EmuError("int 31h 0300h with ES:EDI %04x:%08x"
-                               % (es, edi))
-            self.rmcs = self.mem(PSP_PARA * 16 + edi, 0x32)
-            self.stop("rmcs")
+            if es != SEL_DATA or edi >> 16 or bx != 0x21:
+                raise EmuError("int 31h 0300h with ES:EDI %04x:%08x, BX %04X"
+                               % (es, edi, bx))
+            at = self.descriptor(es)[0] + edi
+            rmcs = self.mem(at, 0x32)
+            fn = rmcs[0x1D]
+            if rmcs[0x2E:0x32] != b"\0\0\0\0":
+                raise EmuError("int 31h 0300h with a real-mode stack")
+            if fn == 0x49:
+                self.machine.free(int.from_bytes(rmcs[0x22:0x24], "little"))
+                self.put(at + 0x20, b"\x02\x00")        # flags: CF clear
+            elif fn == 0x31:
+                self.rmcs = rmcs
+                self.stop("rmcs")
+            else:
+                raise EmuError("int 31h 0300h: int 21h AH=%02Xh" % fn)
         else:
             raise EmuError("int 31h AX=%04X" % ax)
 
     def _mux(self):
         ax = self.r16("eax")
         if ax == 0x168A:
-            name = self.cstr(PSP_PARA * 16 + self.r("esi"))
+            name = self.cstr(self.descriptor(self.r16("ds"))[0]
+                             + self.r("esi"))
             if name == "HDPMI" and self.hdpmi:
                 self.w8("eax", 0)
                 self.w16("es", SEL_CODE32)
@@ -944,7 +1223,7 @@ class PMMachine(Cpu):
             if self.r16("ds") != SEL_DATA or self.r("edx") >> 16:
                 raise EmuError("int 21h 09h with DS:EDX %04x:%08x"
                                % (self.r16("ds"), self.r("edx")))
-            addr = PSP_PARA * 16 + self.r("edx")
+            addr = self.descriptor(SEL_DATA)[0] + self.r("edx")
             s = b""
             while self.mem(addr + len(s), 1) != b"$":
                 s += self.mem(addr + len(s), 1)
@@ -1013,7 +1292,7 @@ class PMMachine(Cpu):
         leaves for DOS, the real-mode call's structure; DOS keeps what it
         asks for"""
         ax, es, cs, ip, sp = machine.dpmi_call
-        if ax != 1 or cs != PSP_PARA:
+        if ax != 1 or cs != machine.load_seg:
             raise EmuError("the DPMI entry was called with AX=%d from %04x"
                            % (ax, cs))
         self.uc.context_restore(self.ring0)
@@ -1021,5 +1300,6 @@ class PMMachine(Cpu):
         self.w16("es", SEL_PSP)
         self._ring3(SEL_DATA, sp, SEL_CODE16, ip)
         if self.rmcs is not None:
+            machine.tsr_psp = machine.psp
             machine.resident(int.from_bytes(self.rmcs[0x14:0x16], "little"))
         return self.rmcs

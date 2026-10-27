@@ -338,6 +338,13 @@ In a DOS box, VDMAD has the game's channel virtualized for the front, and
 the front's carrying over goes through VDMAD's state of the engine's channel
 ([VXD_INTERNALS.md](VXD_INTERNALS.md)).
 
+A TSR loaded before Windows finds the chip as Windows' driver left it, so it
+watches int 2Fh for Windows' start and end (1605h, 1606h), and at its first
+access after either (`afresh`) it forgets every register, transfer and the
+DSP's state, as at its start, RESETs the chip, stops Audio 2, and turns the
+3-D effect off again unless `/3`, all in the handler. The reference has no
+Windows, and the VxD is Windows' own.
+
 ## Checking the fronts
 
 `tests/test_sbfsm.py` runs every scene on the reference and compares:

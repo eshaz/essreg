@@ -223,10 +223,18 @@ tools/wineshot.sh run ess3d.exe /sim tray
   (`RACE_US` in `tests/esschip.py`). Test it with a scene in
   `tests/sbscenes.py` (`@dual` for two transfers at once), which
   `tests/test_sb16conf.py` plays on the model and on both fronts, or a check
-  in `tests/test_sb16front.py`. The resident part has no fixed limit, and
-  `tools/build_esssb16.py` reports its size; the file stays within the 9 KB
-  that LH loads, and `tests/test_esssb16.py` checks that `build/esssb16.com`
-  is current.
+  in `tests/test_sb16front.py`. The installer moves the resident part, with
+  its PSP, into a block of upper memory of its own (`umb_take`), registers
+  the traps for it there, and frees the block DOS loaded it into, so what it
+  sets of the resident part after `umb_take` reaches the block only through
+  `umb_sync`; under HDPMI32i the block's PSP is DOS's current one at the
+  switch, and the handler gets selectors of the block. Its int 2Fh hook
+  (`int2f`) only notes Windows' start and end, and the front takes the chip
+  back at its next access (`afresh`): outside a handler, the TSR's own
+  accesses of its ports would come back to it. The resident part has no
+  fixed limit, and `tools/build_esssb16.py` reports its size; the file needs
+  no LH, and `tests/test_esssb16.py` checks that `build/esssb16.com` is
+  current.
 * **sb16test.** Its checks (`src/sb16t.c`) reach the card only through
   `struct sbt_hal`: `src/sb16test.c` on the machine, and
   `tests/test_sb16test.py` on the model and on both fronts. The handler's

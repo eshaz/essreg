@@ -679,13 +679,13 @@ c:\>1869opl3.com "c:\path\to\game.exe"
 
 A Sound Blaster 16 in front of the ES1869 for DOS games, in DOS itself. The
 chip answers a DOS program as a Sound Blaster Pro and plays 16-bit sound
-only in ESS's own Extended mode. `esssb16` stays resident, in upper memory
-with `LH`, answers a game as a Sound Blaster 16 does, DSP version 4.05 with
-the CT1745 mixer, and plays its sound in Extended mode, 8-bit sound on Audio
-1 and 16-bit sound on Audio 2. It needs a memory manager that traps ports:
-EMM386 4.46 or later, QEMM, or JEMM with QPIEMU, and HDPMI32i for
-protected-mode games. [docs/ESSSB16.md](docs/ESSSB16.md) has how it works,
-its options and limits, and how to install it.
+only in ESS's own Extended mode. `esssb16` stays resident in upper memory,
+which it moves itself into, answers a game as a Sound Blaster 16 does, DSP
+version 4.05 with the CT1745 mixer, and plays its sound in Extended mode,
+8-bit sound on Audio 1 and 16-bit sound on Audio 2. It needs a memory
+manager that traps ports: EMM386 4.46 or later, QEMM, or JEMM with QPIEMU,
+and HDPMI32i for protected-mode games. [docs/ESSSB16.md](docs/ESSSB16.md)
+has how it works, its options and limits, and how to install it.
 
 ## [`sb16test.exe`](build)
 

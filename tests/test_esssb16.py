@@ -3,16 +3,19 @@
 # Licensed under GPL Version 3.0
 """esssb16.com in a CPU emulator: the installer under QEMM, QPIEMU, EMM386
 and a DPMI host, its refusals and what it says about them, its options,
-and what only this front does: its traps of the game's 16-bit channel on
-each path, the ports it passes on, and its stack. What the fronts do with
-the chip is tests/test_sb16front.py's, and what the game sees is
+its move into upper memory, and what only this front does: its traps of
+the game's 16-bit channel on each path, the ports it passes on, its stack,
+and Windows' broadcasts. What the fronts do with the chip is
+tests/test_sb16front.py's, and what the game sees is
 tests/test_sb16conf.py's, against the Sound Blaster 16 model. Every
-resident test runs after DOS has reused the memory the TSR gave back.
+resident test runs after DOS has reused the memory the TSR gave back, all
+of the program's block once the resident part moved.
 
 usage: python3 -m unittest tests.test_esssb16   (needs nasm and unicorn)
 """
 
 import os
+import struct
 import sys
 import unittest
 
@@ -30,7 +33,8 @@ import build_esssb16  # noqa: E402
 if HAVE_UNICORN:
     from tsremu import (Machine, PMMachine, Chip, DeadChip,  # noqa: E402
                         PSP_PARA, ENV_PARA, STUB_PARA, OLD_OFF, STUB32,
-                        VENDOR_OFF, SEL_CODE16, SEL_DATA, SEL_CODE32, POISON)
+                        VENDOR_OFF, SEL_CODE16, SEL_DATA, SEL_CODE32, POISON,
+                        UMBS, UMBS2, HOST_PARA, MUX_OFF)
     from sbfronts import TSRCard, play16  # noqa: E402
 
 E_USAGE, E_NOCARD, E_NOTRAP, E_WINDOWS, E_LOADED = 1, 2, 3, 4, 5
@@ -58,9 +62,12 @@ def paragraphs(syms):
 HOST = 0x20             # HDPMI's data for a client, in paragraphs
 
 
-def machine(chip=None, env="BLASTER=A220 I5 D1 H5 P330 T6"):
+def machine(chip=None, env="BLASTER=A220 I5 D1 H5 P330 T6", umbs=None,
+            load_seg=PSP_PARA):
+    """a machine with 32 KB of upper memory free unless told"""
     image, syms = build()
-    return Machine(image, syms, chip, env)
+    return Machine(image, syms, chip, env,
+                   umbs=UMBS if umbs is None else umbs, load_seg=load_seg)
 
 
 def installed(**kw):
@@ -159,11 +166,10 @@ class BuildTest(unittest.TestCase):
                              "tools/build_esssb16.py")
 
     def test_small(self):
-        """the file, which LH loads whole into upper memory before it
-        shrinks, stays within 9 KB; the resident part has no fixed limit,
-        and tools/build_esssb16.py reports its size"""
-        image, syms = build()
-        self.assertLess(len(image), 9216)
+        """the resident part, whose size tools/build_esssb16.py reports,
+        ends before the installer; the installer moves it into upper
+        memory itself, so the file has no size that LH needs"""
+        _image, syms = build()
         self.assertEqual(syms["RESIDENT_PARAS"], paragraphs(syms))
         self.assertLess(syms["resident_end"], syms["install"] + 1)
 
@@ -177,7 +183,9 @@ class BuildTest(unittest.TestCase):
                                 HOST * 16)
         for name in ("install", "print", "trap_dpmi", "hdpmi_ranges",
                      "dma_ranges", "dma_trapped", "rmcs", "msg_nohdpmi",
-                     "msg_hdpmi", "hdpmi_name"):
+                     "msg_hdpmi", "hdpmi_name", "pm_moved", "pm_sel",
+                     "pm_sync", "umb_sync", "rm_dos", "res_msg", "low_seg",
+                     "moved", "pm_code", "msg_upper", "msg_conv"):
             self.assertGreaterEqual(syms[name], syms["host_code_end"], name)
 
     def test_rate_constants(self):
@@ -201,24 +209,32 @@ class InstallTest(unittest.TestCase):
         m.install(qpiemu=True)
         self.assertEqual(m.exit, ("tsr", paragraphs(m.syms)))
         self.assertEqual(m.data8("signature"), ord("E"))
-        self.assertEqual(m.mem(m.addr("install"), 1)[0], POISON)
         self.assertIn("ES1869 at 220h, IRQ 5, DMA 1, the game's DMA 5 "
                       "through it", m.output)
         self.assertIn("set BLASTER=A220 I5 D1 H5 P330 T6", m.output)
         self.assertIn("traps: QPI for real-mode games; protected-mode games "
-                      "play 8-bit without HDPMI32i", m.output)
+                      "play 8-bit without HDPMI32i\r\nresident in upper "
+                      "memory\r\n", m.output)
         fns = [c[0] for c in m.qpi_calls]
         self.assertEqual(fns, [0x1A06, 0x1A07] + [0x1A09] * 16)
-        self.assertEqual(m.qpi_callback, (PSP_PARA, m.sym("qpi_shim")))
+        self.assertEqual(m.qpi_callback, (m.seg, m.sym("qpi_shim")))
         self.assertEqual(m.qpi_trapped, SB_PORTS | DMA5_PORTS)
         self.assertEqual(vchan(m), [0xFF, 0xFF, 5, 5])
         # a callback before ours: the ports that aren't the front's go there
         self.assertEqual(m.mem(m.addr("qpi_old"), 4),
                          bytes([OLD_OFF, 0, STUB_PARA & 0xFF, STUB_PARA >> 8]))
-        self.assertEqual(m.mem(PSP_PARA * 16 + m.sym("qpi_how"), 1)[0],
-                         IO_CHAIN)
-        self.assertEqual(m.freed, [ENV_PARA])
-        self.assertEqual(m.umb_links, [1, 0])
+        self.assertEqual(m.data8("qpi_how"), IO_CHAIN)
+        # the resident part in upper memory, the program's block given back
+        self.assertGreaterEqual(m.seg, 0xA000)
+        self.assertEqual(m.freed, [ENV_PARA, PSP_PARA])
+        self.assertEqual(m.mem(PSP_PARA * 16 + m.sym("install"), 1)[0],
+                         POISON)
+        self.assertEqual(m.umb_links, [1, 0, 1, 0])
+        # int 2Fh through the resident part, for Windows' broadcasts
+        self.assertEqual(m.mem(0x2F * 4, 4),
+                         struct.pack("<HH", m.sym("int2f"), m.seg))
+        self.assertEqual(m.mem(m.addr("old2f"), 4),
+                         struct.pack("<HH", MUX_OFF, STUB_PARA))
         # the card is read, not set up: its channels and mixer stay
         self.assertEqual(m.chip.pnp[(1, 0x75)], 4)
         self.assertEqual((m.chip.mixer[0x71], m.chip.mixer[0x7C]), (0, 0))
@@ -233,8 +249,7 @@ class InstallTest(unittest.TestCase):
         m = machine()
         m.install(qpiemu=True, old_callback=False)
         self.assertEqual(m.exit[0], "tsr")
-        self.assertEqual(m.mem(PSP_PARA * 16 + m.sym("qpi_how"), 1)[0],
-                         IO_QPI)
+        self.assertEqual(m.data8("qpi_how"), IO_QPI)
 
     def test_qpi_dma_traps_all_or_none(self):
         """QPI refuses one of the 16-bit channel's ports: the others are
@@ -288,9 +303,10 @@ class InstallTest(unittest.TestCase):
                          [(BASE + o, shim if o in (4, 5, 6, 0xA, 0xC, 0xE, 0xF)
                            else skip) for o in range(4, 0x10)])
         # EMM386 searches the table where it is: in the resident part, in
-        # the size its selectors get
+        # the size its selectors get, in upper memory
         self.assertEqual((call["ds"], call["si"]),
-                         (PSP_PARA, m.sym("emm_table")))
+                         (m.seg, m.sym("emm_table")))
+        self.assertGreaterEqual(m.seg, 0xA000)
         self.assertEqual(call["size"], paragraphs(m.syms) * 16)
         self.assertLessEqual(call["si"] + 4 * 12, m.sym("stack"))
         self.assertEqual(vchan(m), [0xFF] * 4)      # no DMA traps
@@ -333,10 +349,41 @@ class InstallTest(unittest.TestCase):
         self.assertIn("ES1869.VXD", m.output)
 
     def test_loaded(self):
+        """a copy in memory whose traps don't answer: the chip answers a
+        reset and E1h as itself"""
         m = machine()
         m.install(qpiemu=True, loaded=True)
         self.assertEqual(m.exit, ("exit", E_LOADED))
         self.assertEqual(m.umb_links, [1, 0])
+        self.assertIn("already loaded, but its port traps are gone", m.output)
+        self.assertEqual(m.chip.commands, [(0xE1,)])
+
+    def test_loaded_answers(self):
+        """loaded again, in DOSSTART.BAT after one in AUTOEXEC.BAT: the copy
+        in upper memory answers through EMM386's traps, which the program's
+        own accesses meet in V86 mode, as a Sound Blaster 16; without them
+        (gone after Windows, if they were) it says so"""
+        for traps in (True, False):
+            m = machine()
+            m.install(emm386=(4, 95), noems=True)
+            self.assertEqual(m.exit[0], "tsr")
+            lo, hi = 0xC800 * 16, 0xD000 * 16
+            saved = m.mem(lo, hi - lo)
+            image, syms = build()
+            again = Machine(image, syms, m.chip, umbs=UMBS, memory=m.memory)
+            again.put(lo, saved)
+            again.emm_traps = m.emm_traps if traps else []
+            again.own_traps = True
+            again.install(emm386=(4, 95), noems=True)
+            self.assertEqual(again.exit, ("exit", E_LOADED), traps)
+            mute = "already loaded, but its port traps are gone"
+            if traps:
+                self.assertIn("already loaded\r\n", again.output)
+                self.assertNotIn(mute, again.output)
+                self.assertEqual(again.ports, [])
+            else:
+                self.assertIn(mute, again.output)
+                self.assertIn(("out", BASE + 0x0C, 0xE1), again.ports)
 
     def test_no_card(self):
         for chip in (DeadChip(), NoESS()):
@@ -521,12 +568,87 @@ class InstallTest(unittest.TestCase):
             self.assertEqual(vchan(m), [0xFF] * 4)
 
     def test_dpmi(self):
-        """HDPMI: the switch with the host's data after the resident part,
-        16-bit code on the host's first selectors, HDPMI32i's traps for
-        them and the 16-bit channel's ports, the TSR through a real-mode
+        """HDPMI with the resident part in upper memory: the block's PSP
+        DOS's current one at the switch, the host's data after the
+        resident part there, the handler on selectors of the block like
+        the host's first ones (16-bit code, data with B set), HDPMI32i's
+        traps for them and the 16-bit channel's ports, the program's block
+        given back and the TSR through real-mode int 21h calls; then games
+        in both modes through what the installer registered"""
+        m = machine()
+        m.install(qpiemu=True, dpmi=True)
+        self.assertEqual(m.stopped, "dpmi")
+        paras = paragraphs(m.syms)
+        u = m.psp                       # the block in upper memory
+        self.assertGreaterEqual(u, 0xA000)
+        self.assertEqual(m.psps, [u])
+        self.assertEqual(m.allocated, [(paras + HOST, 0x42, 1)])
+        self.assertEqual(m.dpmi_call[:2], (1, u + paras))
+        pm = PMMachine(m)
+        rmcs = pm.install(m)
+        self.assertEqual([c[0] for c in pm.dpmi_calls],
+                         [0, 7, 8, 9, 0, 7, 8, 9, 0x300, 0x300])
+        code, data = pm.handler[0], pm.handler[2]
+        for sel, want in ((code, (u * 16, 0xFFFF, 0xFA, 0x00)),
+                          (data, (u * 16, 0xFFFF, 0xF2, 0x40))):
+            base, limit, access, flags = pm.descriptor(sel)
+            self.assertEqual((base, limit, access & ~1, flags), want)
+        traps = [(r["esi"], r["edi"], r["ecx"] & 0xFFFF, r["edx"],
+                  r["ebx"] & 0xFFFF)
+                 for fn, r in pm.vendor_calls if fn == 6]
+        self.assertEqual(traps, [(p, n, code, m.sym("hdpmi_shim"), data)
+                                 for p, n in ((BASE + 4, 3), (BASE + 0xA, 1),
+                                              (BASE + 0xC, 1),
+                                              (BASE + 0xE, 2), (0xC4, 3),
+                                              (0x8B, 1), (0xD4, 11))])
+        self.assertIn("HDPMI32i for protected-mode games\r\nresident in "
+                      "upper memory\r\n", pm.output)
+        self.assertEqual(m.seg, u)
+        self.assertEqual(pm.data16("pm_data"), data)
+        self.assertEqual(pm.mem(pm.addr("vendor"), 6),
+                         (STUB32 + VENDOR_OFF).to_bytes(4, "little") +
+                         SEL_CODE32.to_bytes(2, "little"))
+        self.assertEqual(vchan(m), [0xFF, 5, 5, 5])
+        eax = int.from_bytes(rmcs[0x1C:0x20], "little")
+        edx = int.from_bytes(rmcs[0x14:0x18], "little")
+        self.assertEqual((eax, edx), (0x3100, paras + HOST))
+        self.assertEqual(rmcs[0x2E:0x32], b"\0\0\0\0")      # SS:SP: the host's
+        self.assertEqual(m.kept, paras + HOST)
+        self.assertEqual(m.freed, [ENV_PARA, PSP_PARA])
+        self.assertEqual(m.mem(PSP_PARA * 16 + m.sym("trap_dpmi"), 1)[0],
+                         POISON)
+        m.chip.commands = []
+        pm.hdpmi_io(BASE + 0xC, 0xE1)
+        self.assertEqual((pm.hdpmi_io(BASE + 0xA), pm.hdpmi_io(BASE + 0xA)),
+                         (4, 5))
+        self.assertEqual(m.chip.commands, [])
+        m.dsp(0xE1)
+        self.assertEqual((m.dsp_read(), m.dsp_read()), (4, 5))
+
+    def test_dpmi_selectors_refused(self):
+        """a host that gives no selector for the block: no traps for
+        protected-mode games, and the TSR in upper memory still"""
+        m = machine()
+        m.install(qpiemu=True, dpmi=True)
+        pm = PMMachine(m)
+        pm.dpmi_fail = {0x0009}
+        rmcs = pm.install(m)
+        self.assertEqual([fn for fn, _r in pm.vendor_calls], [])
+        self.assertIn("play 8-bit without HDPMI32i", pm.output)
+        self.assertEqual(int.from_bytes(rmcs[0x14:0x18], "little"),
+                         paragraphs(m.syms) + HOST)
+        self.assertEqual(m.freed, [ENV_PARA, PSP_PARA])
+        self.assertEqual(vchan(m), [0xFF, 0xFF, 5, 5])
+        m.dsp(0xE1)
+        self.assertEqual((m.dsp_read(), m.dsp_read()), (4, 5))
+
+    def test_dpmi_conventional(self):
+        """HDPMI without upper memory: the switch with the host's data
+        after the resident part, 16-bit code on the host's first
+        selectors, HDPMI32i's traps for them, the TSR through a real-mode
         int 21h that keeps the host's data; then a protected-mode game's
         accesses through the handler as the installer registered it"""
-        m = machine()
+        m = machine(umbs=())
         m.install(qpiemu=True, dpmi=True)
         self.assertEqual(m.stopped, "dpmi")
         self.assertEqual((m.resized, m.allocated), ([], []))
@@ -554,6 +676,8 @@ class InstallTest(unittest.TestCase):
         self.assertEqual((eax, edx), (0x3100, paragraphs(m.syms) + HOST))
         self.assertEqual(rmcs[0x2E:0x32], b"\0\0\0\0")      # SS:SP: the host's
         self.assertEqual(m.kept, paragraphs(m.syms) + HOST)
+        self.assertIn("resident in conventional memory: no upper memory "
+                      "block was free", pm.output)
         # a protected-mode game, through what the installer registered
         m.chip.commands = []
         pm.hdpmi_io(BASE + 0xC, 0xE1)
@@ -602,6 +726,8 @@ class InstallTest(unittest.TestCase):
         self.assertIsNotNone(m.dpmi_call)
         self.assertEqual(m.exit, ("tsr", paragraphs(m.syms)))
         self.assertIn("play 8-bit without HDPMI32i", m.output)
+        # the block in upper memory without the host's data
+        self.assertEqual(m.block(m.seg)[1:3], (m.seg, paragraphs(m.syms)))
         m.dsp(0xE1)
         self.assertEqual((m.dsp_read(), m.dsp_read()), (4, 5))
 
@@ -642,6 +768,193 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(calls[-1], (7, 0x1040))
         self.assertIn("HDPMI32i for protected-mode games", pm.output)
         self.assertEqual(vchan(m), [0xFF, 0xFF, 5, 5])
+
+
+class LowDOS(Machine):
+    """a DOS that gives conventional memory for any strategy"""
+
+    def _umb_alloc(self, paras, fit):
+        return HOST_PARA
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class UpperMemoryTest(unittest.TestCase):
+    """the resident part into a block of upper memory of its own, from
+    where DOS loaded the program, with LH or without"""
+
+    def test_block(self):
+        """the last free block that fits, high only, with the UMBs linked
+        for it and the strategy and the link put back; its own PSP owns it,
+        under the name MEM /C shows, with the PSP's handle table and end of
+        memory where it is now, and is DOS's current PSP at the end"""
+        m = machine()
+        m.install(qpiemu=True)
+        paras = paragraphs(m.syms)
+        u = 0xD000 - paras              # at the top of the block at C800h
+        self.assertEqual((m.seg, m.tsr_psp, m.psps), (u, u, [u]))
+        self.assertEqual(m.allocated, [(paras, 0x42, 1)])
+        self.assertEqual(m.strategies, [0x42, 0])
+        self.assertEqual((m.strategy, m.umb_link), (0, 0))
+        self.assertEqual(m.block(u), (b"Z", u, paras, b"ESSSB16\0"))
+        self.assertEqual(m.block(0xC801)[1:3], (0, 0x7FF - paras - 1))
+        psp = m.mem(u * 16, 0x100)
+        self.assertEqual(psp[0x34:0x38], bytes([0x18, 0, u & 0xFF, u >> 8]))
+        self.assertEqual(psp[0x02:0x04], (u + paras).to_bytes(2, "little"))
+        self.assertEqual(psp[0x16:0x18], (0x0700).to_bytes(2, "little"))
+        self.assertEqual(psp[0x2C:0x2E], b"\0\0")       # no environment
+        self.assertEqual(m.mem(u * 16 + 0x100, 8), b"\xE9" + m.image[1:8])
+        # MEM /C finds it as a program of its own, and so does the next load
+        owners = [(seg, size) for seg, _k, owner, size in m.chain()
+                  if owner == seg]
+        self.assertEqual(owners, [])            # the UMBs aren't linked
+        m.link_umbs(True)
+        owners = [(seg, size) for seg, _k, owner, size in m.chain()
+                  if owner == seg]
+        self.assertEqual(owners, [(u, paras)])
+        again = machine()
+        lo, hi = 0xC800 * 16, 0xD000 * 16
+        again.put(lo, m.mem(lo, hi - lo))
+        again.install(qpiemu=True)
+        self.assertEqual(again.exit, ("exit", E_LOADED))
+
+    def test_below_a_block_too_small(self):
+        """with room only in the block at B000h, there"""
+        m = machine(umbs=((0xB000, 0x07FF), (0xC800, 0x0100)))
+        m.install(emm386=(4, 95), noems=True)
+        self.assertEqual(m.seg, 0xB800 - paragraphs(m.syms))
+        self.assertIn("resident in upper memory", m.output)
+
+    def test_above_b000(self):
+        """with room in both, above B000h, where a program may take free
+        memory for a monochrome screen's"""
+        m = machine(umbs=UMBS2)
+        m.install(emm386=(4, 95), noems=True)
+        self.assertEqual(m.seg, 0xD000 - paragraphs(m.syms))
+        self.assertEqual(m.emm_traps[0]["ds"], m.seg)
+        m.chip.ports[6] = 0x33
+        self.assertEqual(m.emm_io(BASE + 6), (0x33, False))
+
+    def test_none_free(self):
+        """no upper memory (DOS=UMB), or none with room: in conventional
+        memory, as before, and it says why"""
+        for umbs in ((), ((0xC800, 0x0100),)):
+            m = machine(umbs=umbs)
+            m.install(qpiemu=True)
+            self.assertEqual(m.exit, ("tsr", paragraphs(m.syms)), umbs)
+            self.assertEqual((m.seg, m.psps), (PSP_PARA, []), umbs)
+            self.assertEqual(m.freed, [ENV_PARA], umbs)
+            self.assertEqual(m.qpi_callback, (PSP_PARA, m.sym("qpi_shim")))
+            self.assertIn("resident in conventional memory: no upper memory "
+                          "block was free", m.output)
+            self.assertEqual((m.strategy, m.umb_link), (0, 0), umbs)
+            m.dsp(0xE1)
+            self.assertEqual((m.dsp_read(), m.dsp_read()), (4, 5))
+
+    def test_conventional_given_back(self):
+        """a DOS that gives conventional memory for the high strategy: that
+        block back, and the TSR where DOS loaded it"""
+        image, syms = build()
+        m = LowDOS(image, syms, None, umbs=UMBS)
+        m.install(qpiemu=True)
+        self.assertEqual(m.freed, [ENV_PARA, HOST_PARA])
+        self.assertEqual(m.seg, PSP_PARA)
+        self.assertIn("resident in conventional memory", m.output)
+
+    def test_loaded_high(self):
+        """LH put it into upper memory: it stays there, its block shrunk"""
+        m = machine(load_seg=0xC801)
+        m.install(qpiemu=True)
+        paras = paragraphs(m.syms)
+        self.assertEqual(m.exit, ("tsr", paras))
+        self.assertEqual((m.seg, m.psps, m.allocated), (0xC801, [], []))
+        self.assertEqual(m.umb_links, [1, 0])
+        self.assertEqual(m.freed, [ENV_PARA])
+        self.assertEqual(m.block(0xC801)[1:3], (0xC801, paras))
+        self.assertEqual(m.mem(m.addr("install"), 1)[0], POISON)
+        self.assertIn("resident in upper memory", m.output)
+        self.assertEqual(m.qpi_callback, (0xC801, m.sym("qpi_shim")))
+        m.dsp(0xE1)
+        self.assertEqual((m.dsp_read(), m.dsp_read()), (4, 5))
+
+    def test_no_traps(self):
+        """without port traps the program ends, and the block goes back"""
+        m = machine()
+        m.install()
+        self.assertEqual(m.exit, ("exit", E_NOTRAP))
+        u = 0xD000 - paragraphs(m.syms)
+        self.assertEqual(m.freed, [ENV_PARA, u])
+        self.assertEqual(m.block(u)[1], 0)
+        self.assertEqual(m.psps, [])
+        self.assertNotIn("resident", m.output)
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class WindowsTest(unittest.TestCase):
+    """the TSR loaded before Windows, which starts and ends over it (int
+    2Fh 1605h, 1606h, on to the handler before), for a game in the DOS of
+    Restart in MS-DOS mode: Windows' driver left the chip in Extended mode
+    with registers of its own, Audio 2 running and the 3-D effect on. The
+    first access after takes the chip back, on each trap path"""
+
+    def windows(self, c):
+        m, chip = c.m, c.chip
+        for ax in (0x1605, 0x1606):
+            self.assertEqual(m.mux(ax), ax)
+        self.assertEqual(m.mux_chained[-2:], [0x1605, 0x1606])
+        self.assertTrue(m.data8("wflags") & 1)
+        chip.ext_mode = True            # what Windows' driver left
+        chip.ctrl[0xA1] = 0x10
+        chip.ctrl[0xB7] = 0x71
+        chip.mixer[0x50] |= 0x08
+        chip.mixer[0x78] = 0x03
+
+    def replay(self, c, chip_resets):
+        """the same sound again: the chip reset first, its registers all
+        written, the 3-D effect off; it plays"""
+        chip = c.chip
+        rate, b7 = chip.ctrl[0xA1], chip.ctrl[0xB7]
+        c.wait(5000)
+        write(c, 0xD9)
+        c.wait(20000)
+        self.windows(c)
+        chip.resets = 0
+        chip.played = []
+        play16(c)
+        self.assertEqual(chip.resets, chip_resets)
+        self.assertEqual((chip.ctrl[0xA1], chip.ctrl[0xB7]), (rate, b7))
+        self.assertFalse(c.m.data8("wflags") & 1)
+        c.wait(30000)
+        self.assertGreater(len(chip.played), 1000)
+        self.assertEqual(chip.violations, [])
+
+    def test_each_path(self):
+        for path in ("qpi", "emm", "pm"):
+            with self.subTest(path=path):
+                c = card(path)
+                play16(c)
+                self.replay(c, 1)
+                self.assertEqual(c.chip.mixer[0x50] & 0x08, 0)
+                self.assertEqual(c.chip.mixer[0x78], 0)
+
+    def test_3d_kept(self):
+        """/3: the 3-D effect as Windows left it"""
+        c = card(tail="/3")
+        play16(c)
+        self.replay(c, 1)
+        self.assertEqual(c.chip.mixer[0x50] & 0x08, 0x08)
+
+    def test_other_functions(self):
+        """int 2Fh's other functions go on, and the chip stays as it is"""
+        c = card()
+        play16(c)
+        c.chip.resets = 0
+        for ax in (0x1600, 0x1607, 0x4A15, 0x1687):
+            self.assertEqual(c.m.mux(ax), ax)
+        self.assertEqual(c.m.mux_chained, [0x1600, 0x1607, 0x4A15, 0x1687])
+        self.assertEqual(c.m.data8("wflags") & 1, 0)
+        write(c, 0xD9)
+        c.wait(5000)
+        self.assertEqual(c.chip.resets, 0)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")

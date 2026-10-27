@@ -671,7 +671,8 @@ class ExeTSRTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.d, cls.code = exe_run(TSRCard("qpi", dma2=3), "/A /T /Q")
+        cls.card = TSRCard("qpi", dma2=3)
+        cls.d, cls.code = exe_run(cls.card, "/A /T /Q")
         cls.lines = report(cls.d)
         cls.res = results(cls.lines)
 
@@ -682,8 +683,12 @@ class ExeTSRTest(unittest.TestCase):
         self.assertEqual(self.code, 0)
 
     def test_front(self):
-        self.assertTrue(any(line.startswith("esssb16: resident at 1000h")
-                            for line in self.lines))
+        """found in upper memory, where it moved itself"""
+        m = self.card.m
+        self.assertGreaterEqual(m.seg, 0xA000)
+        self.assertIn("esssb16: resident at %04Xh, %d bytes"
+                      % (m.seg, m.kept * 16), self.lines)
+        self.assertEqual(self.d.umb_calls, [1, 0])
         self.assertIn("behind a front", self.res["card.es1869"][1])
         self.assertIn("Audio 2", self.res["route.audio2"][1])
         self.assertEqual(self.res["loop.left"][0], "PASS")

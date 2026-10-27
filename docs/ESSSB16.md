@@ -11,8 +11,8 @@ A Sound Blaster 16 in front of the ES1869 for DOS games, in DOS itself. The
 chip answers a DOS program as a Sound Blaster Pro, version 3.01, and plays
 16-bit sound only in ESS's own Extended mode, so a game written for the
 Sound Blaster 16 plays 8-bit sound on it at best. `esssb16` stays resident,
-in upper memory with `LH`, and answers the game as a Sound Blaster 16 does,
-DSP version 4.05 with the CT1745 mixer, command for command
+in upper memory, which it moves itself into, and answers the game as a Sound
+Blaster 16 does, DSP version 4.05 with the CT1745 mixer, command for command
 ([SB16.md](SB16.md)). It works like the Windows driver's Sound Blaster 16:
 * Every transfer plays or records in ESS's Extended mode, at the rate the
   game asked for, up to 48 kHz: 8-bit sound and recordings on Audio 1, and
@@ -126,7 +126,7 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
    [HX](https://github.com/crazii/HX/releases), unchanged, and
    [third_party/hdpmi32i/README.md](../third_party/hdpmi32i/README.md) says
    which release and gives its hashes. Real-mode games do without it.
-3. In `CONFIG.SYS`, load EMM386 after HIMEM.SYS, with upper memory for `LH`:
+3. In `CONFIG.SYS`, load EMM386 after HIMEM.SYS, with upper memory:
    ```
    DEVICE=C:\WINDOWS\HIMEM.SYS
    DEVICE=C:\WINDOWS\EMM386.EXE NOEMS
@@ -143,30 +143,49 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
    ```
    SET BLASTER=A220 I5 D1 H5 P330 T6
    LH C:\ESS\HDPMI32I.EXE -r -x
-   LH C:\ESS\ESSSB16.COM
+   C:\ESS\ESSSB16.COM
    ```
    `-r` keeps HDPMI32i resident, for `esssb16` to find, and `-x` makes it
    report 256 MB of memory at most, which some games need. Leave its line
-   out without the file. If the card's base, IRQ or 8-bit channel differ
+   out without the file. `esssb16` needs no `LH`: it moves its resident
+   part, 5 KB, into the last free block of upper memory with room for it,
+   from where DOS loaded it, and gives that memory back. So it stays above
+   B000h-B7FFh, which `I=B000-B7FF` gives to upper memory, while there is
+   room above: a program that finds memory there may write into it as a
+   monochrome screen's, as the Sound Blaster drivers of Pinball Fantasies
+   and Pinball Dreams do. If the card's base, IRQ or 8-bit channel differ
    from this `BLASTER` line, `esssb16` prints the line to set.
 5. Start DOS with these files. On Windows 98, hold Ctrl as the machine
    starts, or press F8 at *Starting Windows 98*, and choose *Command prompt
-   only*: `CONFIG.SYS` and `AUTOEXEC.BAT` run, and Windows doesn't. The
-   batch file keeps `esssb16` to DOS sessions, since `AUTOEXEC.BAT` also
-   runs before Windows, where the VxD traps the ports itself. The other way
-   is an MS-DOS mode shortcut with its own files: right-click the game, or
+   only*: `CONFIG.SYS` and `AUTOEXEC.BAT` run, and Windows doesn't. From
+   Windows, *Restart in MS-DOS mode* in the Shut Down box ends Windows and
+   runs `C:\WINDOWS\DOSSTART.BAT`, the place for the lines of step 4 then,
+   with EMM386 still loaded from `CONFIG.SYS`. The batch file keeps
+   `esssb16` to DOS sessions, since `AUTOEXEC.BAT` also runs before Windows,
+   where the VxD traps the ports itself. Loaded there all the same,
+   `esssb16` does nothing while Windows runs, and at the first access after
+   Windows ends it takes the chip back from Windows' driver, with a reset of
+   the chip and the 3-D effect off again unless `/3`. Run again, as in
+   `DOSSTART.BAT`, it says `already loaded` when that copy still answers
+   through its traps, and otherwise that they are gone. HDPMI32i belongs
+   with it in `DOSSTART.BAT` or the batch file. The other way is an MS-DOS
+   mode shortcut with its own files: right-click the game, or
    `C:\COMMAND.COM` for a prompt, choose *Properties* > *Program* >
    *Advanced*, tick *MS-DOS mode* and *Specify a new MS-DOS configuration*,
    and put the lines of steps 3 and 4 into its `CONFIG.SYS` and
    `AUTOEXEC.BAT` boxes. Windows restarts into DOS with them when the
    shortcut runs, and comes back when the program ends. *Restart in MS-DOS
-   mode* in the Shut Down box runs such a shortcut, `Exit To Dos.pif` in
-   `C:\WINDOWS`, with the same settings.
-6. As it loads, `esssb16` prints the card, the `BLASTER` line and `traps:
-   EMM386 4.95 for real-mode games, HDPMI32i for protected-mode games`; the
-   HDPMI32i part is there only when HDPMI32i was resident first. With Audio
-   2 on the game's 16-bit channel it also prints `Audio 2 keeps the game's
-   DMA 5 moving under EMM386, muted`. `MEM /C` lists `ESSSB16` in upper
-   memory, 5.0 KB, or 5.5 KB with HDPMI32i. A game's setup program then
-   detects a Sound Blaster 16, DSP version 4.05, and offers 16-bit sound. To
-   take `esssb16` out again, restart without its line.
+   mode* does the same when its shortcut, `Exit To Dos.pif` in `C:\WINDOWS`,
+   has such settings.
+6. As it loads, `esssb16` prints the card, the `BLASTER` line, `traps:
+   EMM386 4.95 for real-mode games, HDPMI32i for protected-mode games` and
+   `resident in upper memory`; the HDPMI32i part is there only when HDPMI32i
+   was resident first. With Audio 2 on the game's 16-bit channel it also
+   prints `Audio 2 keeps the game's DMA 5 moving under EMM386, muted`.
+   `MEM /C` lists `ESSSB16` in upper memory, 5.1 KB, or 5.6 KB with
+   HDPMI32i. `resident in conventional memory: no upper memory block was
+   free` means that `DOS=UMB` is missing or that the blocks are full, which
+   `MEM /C` shows; a game such as Pinball World then may find too little
+   memory for its sound. A game's setup program detects a Sound Blaster 16,
+   DSP version 4.05, and offers 16-bit sound. To take `esssb16` out again,
+   restart without its line.

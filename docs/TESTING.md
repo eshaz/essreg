@@ -329,16 +329,16 @@ and stop at the first surprise. Each step says what you should see.
 
 1. Install `esssb16` as the [guide](ESSSB16.md#installing-esssb16) says: in
    real DOS with `EMM386.EXE` loaded (`DEVICE=C:\WINDOWS\EMM386.EXE NOEMS`
-   or `RAM` in `CONFIG.SYS`), run `LH ESSSB16`. It prints the card's base,
-   IRQ and channel, the game's 16-bit channel `on Audio 2's DMA` and Audio
-   2's channel, the `BLASTER` line to set, and
-   `traps: EMM386 4.95 for real-mode games` (4.49 with MS-DOS 6.22).
-   `MEM /C` shows it in upper memory, 5.0 KB. Run it again: "already
-   loaded". In a Windows DOS box it refuses with "not for a Windows DOS
-   box", and without a memory manager with "no EMM386: no EMMXXXX0 or
-   EMMQXXX0 device" and "no port traps". When EMM386 is there and it still
-   says "no port traps", the line before says why: the version it found, or
-   that EMM386 refused the traps.
+   or `RAM` in `CONFIG.SYS`), run `ESSSB16`. It prints the card's base, IRQ
+   and channel, the game's 16-bit channel `on Audio 2's DMA` and Audio 2's
+   channel, the `BLASTER` line to set, and
+   `traps: EMM386 4.95 for real-mode games` (4.49 with MS-DOS 6.22), then
+   `resident in upper memory`; `MEM /C` shows it there, 5.1 KB. Run it
+   again: "already loaded". In a Windows DOS box it refuses with "not for a
+   Windows DOS box", and without a memory manager with "no EMM386: no
+   EMMXXXX0 or EMMQXXX0 device" and "no port traps". When EMM386 is there
+   and it still says "no port traps", the line before says why: the version
+   it found, or that EMM386 refused the traps.
 2. Set `BLASTER` as printed. Run a real-mode game that supports the Sound
    Blaster 16, such as one with the Miles Sound System's `SETUP` or
    `SOUNDSET`. Its setup detects a Sound Blaster 16 (DSP version 4.05) and
@@ -352,7 +352,7 @@ and stop at the first surprise. Each step says what you should see.
    and try it once more with `/S`.
 4. With `LH HDPMI32I -r` before `esssb16` (`HDPMI32i.EXE` from
    `third_party\hdpmi32i`, HX's release), `esssb16` adds
-   `, HDPMI32i for protected-mode games`, and `MEM /C` shows it with 5.5 KB.
+   `, HDPMI32i for protected-mode games`, and `MEM /C` shows it with 5.6 KB.
    A DOS/4GW game set to the Sound Blaster 16 (Descent, Duke Nukem 3D,
    Quake) plays 16-bit sound. Without HDPMI32i the same game plays 8-bit
    sound, or finds no Sound Blaster 16, as before `esssb16`.
@@ -369,10 +369,9 @@ and stop at the first surprise. Each step says what you should see.
    Sound Blaster 16 instead, as on a real one; note any that then fails.
 7. If sound breaks up, `ESSSB16 /S` (single DMA transfers); with `/H0`, or
    with `BLASTER` without an `H`, the game programs the 8-bit channel for
-   its 16-bit sound itself, which rules out the carrying over of the 16-bit
-   channel's programming. Under EMM386, a game that repeats a short loop of
-   its sound, such as Pinball Fantasies with its Sound Blaster 16 driver,
-   plays with `/H0` ([SB16.md](SB16.md)).
+   its 16-bit sound itself, which rules out the carrying over. Under EMM386,
+   a game that repeats a short loop of its sound, such as Pinball Fantasies
+   with its Sound Blaster 16 driver, plays with `/H0` ([SB16.md](SB16.md)).
 8. Load `ESSSB16 /F1` and then `ESSSB16 /F0` (restart in between) and play
    the same 16-bit sound: with `/F1` the DACs' filters are on and the sound
    is duller, with `/F0` they are bypassed. `essreg` shows mixer 71h bits 3
@@ -386,11 +385,13 @@ and stop at the first surprise. Each step says what you should see.
    channel, `esssb16` says so as it loads; `/21` or `/23` then gives it one,
    if a DMA pin of the card is wired to it.
 10. With the 3-D effect on in Windows, as ESS's driver turns it on, choose
-    *Restart in MS-DOS mode* and load `esssb16`: the chip kept the effect,
-    and `esssb16` prints `3-D effect off (/3 keeps it)`. `essreg` shows
-    mixer 50h bit 3 clear, and a game plays without the effect, as on a
-    Sound Blaster 16. Do it again with `ESSSB16 /3`: no message, bit 3 stays
-    set, and the game plays with the effect.
+    *Restart in MS-DOS mode* and load `esssb16`: it prints
+    `3-D effect off (/3 keeps it)`, `essreg` shows mixer 50h bit 3 clear,
+    and a game plays without the effect, as on a Sound Blaster 16. With
+    `ESSSB16 /3`, no message, and bit 3 stays set. Load `esssb16` in
+    `AUTOEXEC.BAT`, before Windows, and do the same: the game of step 2
+    plays 16-bit sound, without the effect, and `ESSSB16` at the prompt says
+    `already loaded`.
 
 ### D3. sb16test
 
