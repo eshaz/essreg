@@ -294,6 +294,7 @@ class Machine(Cpu):
         self.emm386 = None              # (major, minor) of EMMXXXX0
         self.noems = False              # EMM386 with NOEMS: EMMQXXX0
         self.emm_fail = set()           # the 4A15h calls that fail (0, 1, ...)
+        self.emm_low_only = False       # EMM386 refuses tables in upper memory
         self.emm_traps = []             # 4A15h: dicts
         self.emm_out = 4                # EMM386's ECX for an out: 4, or 8
         self.dpmi = False               # int 2Fh 1687h answers
@@ -671,7 +672,8 @@ class Machine(Cpu):
                     "table": table, "size": size, "ds": ds, "si": si,
                     "handle": len(self.emm_traps) + 1}
             self.emm_traps.append(call)
-            if len(self.emm_traps) - 1 in self.emm_fail:
+            if len(self.emm_traps) - 1 in self.emm_fail or \
+                    (self.emm_low_only and ds >= 0xA000):
                 call["failed"] = True
                 return
             # EMM386 reaches the table and the handlers at ring 0 through

@@ -3711,7 +3711,7 @@ emm_install:
         inc     ax
         loop    .fill
         call    umb_sync_rm             ; the table and the handlers where
-        mov     si,emm_table            ; the TSR stays
+.again: mov     si,emm_table            ; the TSR stays
         mov     cx,12
         mov     dx,[base]
         add     dx,4
@@ -3719,8 +3719,13 @@ emm_install:
         mov     ds,[res_seg]
         call    emm_call
         pop     ds
-        jc      .refused
-        clc
+        jnc     .done
+        cmp     byte [moved],0          ; refused in upper memory: once more
+        je      .refused                ; from where DOS loaded the program
+        call    umb_drop
+        mov     word [res_msg],msg_emm_umb
+        jmp     short .again
+.done:  clc
         ret
 .nodev: mov     dx,msg_emm_nodev
         jmp     short .fail
@@ -3925,7 +3930,8 @@ umb_sync:
         pop     cx
 .out:   ret
 
-; the block given back when the program doesn't stay
+; the block given back, when the program doesn't stay or EMM386 won't
+; trap for it there: the resident part stays where DOS loaded it
 umb_drop:
         cmp     byte [moved],0
         je      .out
@@ -3933,6 +3939,10 @@ umb_drop:
         mov     ah,0x49
         int     0x21
         mov     byte [moved],0
+        mov     ax,[low_seg]
+        mov     [res_seg],ax
+        push    ds
+        pop     es
 .out:   ret
 
 ; the block DOS loaded the program into given back, once the TSR is in its
@@ -4262,10 +4272,11 @@ msg_qpi_refused: db "QPI refused the port traps", 13, 10, "$"
 msg_emm_nodev:  db "no EMM386: no EMMXXXX0 or EMMQXXX0 device", 13, 10, "$"
 msg_emm386:     db "EMM386 $"
 msg_emm_old:    db " is older than 4.46", 13, 10, "$"
-msg_emm_refused: db " refused the port traps", 13, 10, "$"
+msg_emm_refused: db " refused the port traps (after essprobe, restart first)", 13, 10, "$"
 msg_hdpmi:      db ", HDPMI32i for protected-mode games", 13, 10, "$"
 msg_nohdpmi:    db "; protected-mode games play 8-bit without HDPMI32i", 13, 10, "$"
 msg_upper:      db "resident in upper memory", 13, 10, "$"
 msg_conv:       db "resident in conventional memory: no upper memory block was free", 13, 10, "$"
+msg_emm_umb:    db "resident in conventional memory: EMM386 refused traps in upper memory", 13, 10, "$"
 
 install_end:

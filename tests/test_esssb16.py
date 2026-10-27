@@ -319,12 +319,17 @@ class InstallTest(unittest.TestCase):
         self.assertIn("traps: EMM386 4.95 for real-mode games", m.output)
 
     def test_emm386_refuses(self):
+        """refused in upper memory, and again from where DOS loaded it"""
         m = machine()
-        m.emm_fail = {0}
+        m.emm_fail = {0, 1}
         m.install(emm386=(4, 95), noems=True)
         self.assertEqual(m.exit, ("exit", E_NOTRAP))
-        self.assertIn("EMM386 4.95 refused the port traps", m.output)
+        self.assertIn("EMM386 4.95 refused the port traps (after essprobe, "
+                      "restart first)", m.output)
         self.assertIn("no port traps", m.output)
+        self.assertEqual([t["ds"] for t in m.emm_traps],
+                         [0xD000 - paragraphs(m.syms), PSP_PARA])
+        self.assertIn(0xD000 - paragraphs(m.syms), m.freed)
 
     def test_emm386_too_old(self):
         for version, text in (((4, 45), "4.45"), ((4, 5), "4.05"),
@@ -906,6 +911,26 @@ class UpperMemoryTest(unittest.TestCase):
         self.assertEqual(m.qpi_callback, (0xC801, m.sym("qpi_shim")))
         m.dsp(0xE1)
         self.assertEqual((m.dsp_read(), m.dsp_read()), (4, 5))
+
+    def test_emm386_low_only(self):
+        """an EMM386 that refuses a dispatch table in upper memory: once
+        more from where DOS loaded the program, which stays there"""
+        m = machine()
+        m.emm_low_only = True
+        m.install(emm386=(4, 95), noems=True)
+        self.assertEqual(m.exit, ("tsr", paragraphs(m.syms)))
+        u = 0xD000 - paragraphs(m.syms)
+        self.assertEqual([(t["ds"], bool(t.get("failed")))
+                          for t in m.emm_traps],
+                         [(u, True), (PSP_PARA, False)])
+        self.assertEqual((m.seg, m.psps), (PSP_PARA, []))
+        self.assertEqual(m.freed, [ENV_PARA, u])
+        self.assertIn("resident in conventional memory: EMM386 refused traps "
+                      "in upper memory", m.output)
+        self.assertEqual(m.mem(0x2F * 4, 4),
+                         struct.pack("<HH", m.sym("int2f"), PSP_PARA))
+        m.chip.ports[6] = 0x33
+        self.assertEqual(m.emm_io(BASE + 6), (0x33, False))
 
     def test_no_traps(self):
         """without port traps the program ends, and the block goes back"""

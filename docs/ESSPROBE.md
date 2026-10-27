@@ -102,8 +102,10 @@ Under EMM386 the probe sees the 8237 past EMM386's translation through a
 window: a port trap of Audio_Base+Dh, which the chip doesn't decode, through
 EMM386's int 2Fh 4A15h. Its handler runs at ring 0, where no port is
 trapped, and reads the 8237 for the probe. The probe removes the trap when
-it ends; a run that didn't end leaves it to the next run, which removes it
-first. `/N` runs without the window.
+it ends, and the report's last line says `window: removed`; a run that
+didn't end leaves it to the next run, which removes it first. When EMM386
+keeps it, the last line says `window: EMM386 kept its trap of 22Dh until a
+restart`, and so does the screen. `/N` runs without the window.
 
 ## Safety
 
@@ -117,8 +119,9 @@ first. `/N` runs without the window.
 * Every case starts and ends with the chip's reset, its DMA channels masked.
   The sounds are quiet tones, about 9 dB under full scale, but the level
   tone of a recorded run is at full scale: turn the speakers down for it.
-* Restart before you load `esssb16` again, since the probe leaves the chip
-  in its power-on state, not as `esssb16` set it up.
+* `esssb16` can load right after a run, since it sets the chip up from the
+  power-on state that the probe leaves. Only when EMM386 kept the window's
+  trap, restart first, because `esssb16` traps that port too.
 
 ## Running it
 

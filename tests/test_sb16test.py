@@ -584,7 +584,8 @@ class VxDTest(Checks, unittest.TestCase):
 
 # --- the program --------------------------------------------------------------
 
-def exe_run(card, tail, keys="", files=None, vxd=None, umb=None):
+def exe_run(card, tail, keys="", files=None, vxd=None, umb=None,
+            env="BLASTER=A220 I5 D1 H5 P330 T6"):
     """build/sb16test.exe on card until it exits, with files on the disk
     (in a DOS box with vxd, and a program in upper memory with umb, as
     dosrun has them): the runner and the exit code"""
@@ -592,7 +593,7 @@ def exe_run(card, tail, keys="", files=None, vxd=None, umb=None):
     with open(EXE, "rb") as f:
         exe = f.read()
     card.record_from(Input(card))
-    d = Dos(exe, card, keys=keys, vxd=vxd, umb=umb)
+    d = Dos(exe, card, env=env, keys=keys, vxd=vxd, umb=umb)
     for name, data in (files or {}).items():
         d.files[name] = bytearray(data)
     return d, d.run(tail)
@@ -663,6 +664,26 @@ class ExeModelTest(unittest.TestCase):
         self.assertTrue(self.card.dma.ch[1].masked)
         self.assertTrue(self.card.dma.ch[5].masked)
         self.assertEqual(set(d.files), {"SB16TEST.TXT"})
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class ExeBlasterTest(unittest.TestCase):
+    """BLASTER read field by field, past the first: another 8-bit channel,
+    and an H equal to the D, which leaves 16-bit sound on the 8-bit
+    channel, as on a Sound Blaster 16 set up so"""
+
+    def test_fields(self):
+        card = ModelCard(dma8=3, dma16=0)
+        d, code = exe_run(card, "/A /T /Q", env="BLASTER=A220 I5 D3 H3 "
+                          "P330 T6")
+        lines = report(d)
+        self.assertTrue(any(line.startswith("blaster A220 I5 D3 H0 P330,")
+                            for line in lines), lines[:12])
+        res = results(lines)
+        self.assertEqual(res["mix.81"][0], "PASS", res["mix.81"])
+        bad = {k: v for k, v in res.items() if v[0] in ("FAIL", "KNOWN")}
+        self.assertEqual(bad, {}, "\n".join(lines))
+        self.assertEqual(code, 0)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")

@@ -71,6 +71,7 @@ static int v86; // the processor runs DOS in V86 mode: a memory manager
 static unsigned win_seg; // the window's block, 0 without one
 static u16 win_port;
 static u16 win_handle;
+static int win_kept; // EMM386 kept the window's trap at the end
 
 // --- the hardware layer
 // --------------------------------------------------------
@@ -265,13 +266,24 @@ static int win_install(u16 port) {
   return 1;
 }
 
+// the window's trap removed and its block freed, which the report's last
+// line says; an EMM386 that keeps the trap keeps the block, DOS's, until a
+// restart, and esssb16 can't trap that port meanwhile
 static void win_remove(void) {
+  static char line[80];
+
   if (!win_seg)
     return;
   *win(ESSP0_O_ARMED) = 0;
   if (emm_trap(1, (u16)win_seg, win_port, &win_handle)) {
     *(u16 __far *)MK_FP(win_seg - 1, 1) = _psp;
     _dos_freemem(win_seg);
+    plat_line("window: removed");
+  } else {
+    win_kept = 1;
+    _bprintf(line, sizeof(line),
+             "window: EMM386 kept its trap of %Xh until a restart", win_port);
+    plat_line(line);
   }
   win_seg = 0;
 }
@@ -738,8 +750,10 @@ int main(int argc, char **argv) {
   plat_pit_init();
   failed = esp_run(&hal, &card, opts, ESP_G_ALL, only);
   cleanup();
-  printf("\n%d cases failed. The report is %.60s: send it back.\n"
-         "Restart before you load esssb16.\n",
-         failed, report_name);
+  printf("\n%d cases failed. The report is %.60s: send it back.\n", failed,
+         report_name);
+  if (win_kept)
+    puts("EMM386 kept the window's port trap: restart before you load "
+         "esssb16.");
   return failed ? X_FAILED : 0;
 }

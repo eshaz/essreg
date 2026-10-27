@@ -118,6 +118,7 @@ class Dos(Cpu):
         self.emm386, self.noems = emm386, noems
         self.emm_traps, self.emm_calls = [], []     # 4A15h: dicts, (BX, SI)
         self.emm_fail = set()       # the 4A15h installs that fail (0, 1, ...)
+        self.emm_keep = False       # EMM386 removes no trap (BX 1 refused)
         self.emm_ring0 = _Ring0(self)
         card.isr = self._raise
         if tsr is None:
@@ -393,6 +394,9 @@ class Dos(Cpu):
         bx, si = self.r16("ebx"), self.r16("esi")
         self.emm_calls.append((bx, si))
         if bx == 1:
+            if self.emm_keep:
+                self.carry(True)
+                return
             for t in self.emm_traps:
                 if t["handle"] == si:
                     self.emm_traps.remove(t)

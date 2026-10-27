@@ -222,7 +222,11 @@ void plat_blaster(struct plat_blaster *b) {
     return;
   strncpy(b->text, v, sizeof(b->text) - 1);
   b->text[sizeof(b->text) - 1] = 0;
-  for (p = v; *p; p++) {
+  for (p = v; *p;) {
+    if (*p == ' ') { // between the fields
+      p++;
+      continue;
+    }
     switch (toupper(*p)) {
     case 'A':
       b->base = (u16)strtoul(p + 1, NULL, 16);
@@ -240,7 +244,7 @@ void plat_blaster(struct plat_blaster *b) {
       b->mpu = (u16)strtoul(p + 1, NULL, 16);
       break;
     }
-    while (p[1] && p[1] != ' ')
+    while (*p && *p != ' ') // past the field
       p++;
   }
   if (b->irq == 2)

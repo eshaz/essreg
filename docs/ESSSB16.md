@@ -189,9 +189,12 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
    HDPMI32i. `resident in conventional memory: no upper memory block was
    free` means that `DOS=UMB` is missing or that the blocks are full, which
    `MEM /C` shows; a game such as Pinball World then may find too little
-   memory for its sound. A game's setup program detects a Sound Blaster 16,
-   DSP version 4.05, and offers 16-bit sound. To take `esssb16` out again,
-   restart without its line.
+   memory for its sound. `EMM386 refused traps in upper memory` in its place
+   means that EMM386 took the traps only for a copy in conventional memory.
+   `EMM386 refused the port traps` stops the load; after `essprobe`, restart
+   first. A game's setup program detects a Sound Blaster 16, DSP version
+   4.05, and offers 16-bit sound. To take `esssb16` out again, restart
+   without its line.
 
 ## Checking it on the machine
 
@@ -209,13 +212,16 @@ they find in a folder, `RESULTS`, to send back:
 It keeps the memory as `MEM` shows it, `CONFIG.SYS`, `AUTOEXEC.BAT`,
 `DOSSTART.BAT` and the environment, then runs `essprobe` on the chip: the
 8237's mask, then the pauses, recorded, when you press R and then Enter at
-the level tone. It loads HDPMI32i and `esssb16`, keeps the memory again and
-runs `sb16test`'s automatic checks. Then the games: Pinball World's
-`SETSND`, where you choose the Sound Blaster 16 and play its test tune, and
-the game itself, first with the game's 16-bit DMA on none (`ESSSB16 /H0`),
-then on 5 (`ESSSB16 /H5`), each followed by Y or N for how it sounded, and
-last, if you like, Pinball Dreams' `SETSOUND`, which restarted the machine
-before, after the results so far are on the disk. With `esssb16` in memory
-already, as after *Restart in MS-DOS mode* with it in `AUTOEXEC.BAT`, it
-skips the probe and checks that copy instead. Send `C:\ESS\RESULTS` back,
-with the recording.
+the level tone. Where `essprobe`'s reports are there from a run before, S
+goes on without it, and R runs it again. When EMM386 kept `essprobe`'s
+window, it stops for a restart, after which `ESSCHECK` goes on from there.
+It loads HDPMI32i and `esssb16`, shows what `esssb16` said, stops if it
+didn't load, keeps the memory again and runs `sb16test`'s automatic checks.
+Then the games: Pinball World's `SETSND`, where you choose the Sound Blaster
+16 and play its test tune, and the game itself, first with the game's 16-bit
+DMA on none (`ESSSB16 /H0`), then on 5 (`ESSSB16 /H5`), each followed by Y
+or N for how it sounded, and last, if you like, Pinball Dreams' `SETSOUND`,
+which restarted the machine before, with the 16-bit DMA on none, after the
+results so far are on the disk. With `esssb16` in memory already, as after
+*Restart in MS-DOS mode* with it in `AUTOEXEC.BAT`, it skips the probe and
+checks that copy instead. Send `C:\ESS\RESULTS` back, with the recording.

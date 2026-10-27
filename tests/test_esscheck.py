@@ -236,6 +236,10 @@ class Command:
         if word in ("SET", "VER", "TYPE", "MD", "PAUSE"):
             return None
         if "|" in line:                 # MEM /C | FIND: FIND's answer
+            self.ran.append("PIPE")
+            self.level = self.codes.get("PIPE", 1)
+            return None
+        if word == "FIND":              # in a file: 0 found, 1 not
             self.ran.append("FIND")
             self.level = self.codes.get("FIND", 1)
             return None
@@ -274,19 +278,23 @@ class FlowTest(unittest.TestCase):
 
     def test_everything(self):
         """the probe, its recorded pauses, both loads, sb16test, the games
-        with DMA none and then 5, and SETSOUND; the answers logged"""
-        c = Command([], ESS + GAMES, {"ESSSB16": [0, 5, 5, 5]},
+        with DMA none and then 5, and SETSOUND with none; the answers
+        logged"""
+        c = Command([], ESS + GAMES, {"ESSSB16": [0, 5, 5, 5], "PIPE": 0},
                     "RYYYNYY").run()
         self.assertEqual(c.ran, [
-            "ESSPROBE /C:h1.mask", "CHOICE R", "ESSPROBE /R /C:fix.pb7",
-            "HDPMI32I -r -x", "ESSSB16", "SB16TEST /A /Q",
+            "ESSPROBE /C:h1.mask", "FIND", "CHOICE R",
+            "ESSPROBE /R /N /C:fix.pb7", "HDPMI32I -r -x", "ESSSB16",
+            "SB16TEST /A /Q",
             "ESSSB16 /H0", "SETSND", "CHOICE Y", "PWORLD", "CHOICE Y",
             "ESSSB16 /H5", "SETSND", "CHOICE Y", "PWORLD", "CHOICE N",
-            "ESSSB16 /H5", "CHOICE Y", "FIND", "SETSOUND", "CHOICE Y"])
+            "ESSSB16 /H0", "CHOICE Y", "PIPE", "SMARTDRV /C", "SETSOUND",
+            "CHOICE Y"])
         self.assertEqual(c.log[-7:], [
             "SETSND tune with DMA none: yes", "Pinball World with DMA none: yes",
             "SETSND tune with DMA 5: yes", "Pinball World with DMA 5: no",
-            "setsound: started", "SETSOUND: yes", "done"])
+            "setsound: started with DMA none", "SETSOUND with DMA none: yes",
+            "done"])
         self.assertEqual(c.env["PW"], "C:\\21STCENT\\PWORLD")
         self.assertEqual(c.cwd, "C:\\ESS")
 
@@ -312,18 +320,41 @@ class FlowTest(unittest.TestCase):
         self.assertIn("stopped: see the lines above", c.log)
 
     def test_no_traps(self):
-        """esssb16 refuses: nothing after it"""
+        """esssb16 refuses: what it said is on the screen and in the log,
+        then nothing after it"""
         c = Command([], ESS, {"ESSSB16": 3}, "S").run()
-        self.assertEqual(c.ran, ["ESSPROBE /C:h1.mask", "CHOICE S",
+        self.assertEqual(c.ran, ["ESSPROBE /C:h1.mask", "FIND", "CHOICE S",
                                  "HDPMI32I -r -x", "ESSSB16"])
         self.assertIn("stopped: see the lines above", c.log)
+        self.assertEqual(c.env["E"], "1")
 
     def test_failed_cases_go_on(self):
         """cases that failed are in the report: on to the pauses"""
         c = Command([], ESS, {"ESSPROBE": [6, 6]}, "R").run()
-        self.assertEqual(c.ran[:3], ["ESSPROBE /C:h1.mask", "CHOICE R",
-                                     "ESSPROBE /R /C:fix.pb7"])
+        self.assertEqual(c.ran[:4], ["ESSPROBE /C:h1.mask", "FIND",
+                                     "CHOICE R", "ESSPROBE /R /N /C:fix.pb7"])
         self.assertEqual(c.log[-1], "done")
+
+    def test_window_kept(self):
+        """EMM386 kept the probe's window: its pauses still, then a restart
+        before esssb16"""
+        c = Command([], ESS, {"FIND": 0}, "R").run()
+        self.assertEqual(c.ran, ["ESSPROBE /C:h1.mask", "FIND", "CHOICE R",
+                                 "ESSPROBE /R /N /C:fix.pb7"])
+        self.assertEqual(c.log[-1], "essprobe: EMM386 kept its trap, restart")
+        self.assertIn("the machine, then run ESSCHECK again, which goes on "
+                      "from here.", c.out)
+
+    def test_run_again(self):
+        """run again with the probe's reports there: on to esssb16, or the
+        probe again"""
+        there = ESS + ("C:\\ESS\\RESULTS\\MASK.TXT",)
+        c = Command([], there, {"ESSSB16": 0}, "S").run()
+        self.assertEqual(c.ran, ["CHOICE S", "HDPMI32I -r -x", "ESSSB16",
+                                 "SB16TEST /A /Q"])
+        c = Command([], there, {}, "RS").run()
+        self.assertEqual(c.ran[:3], ["CHOICE R", "ESSPROBE /C:h1.mask",
+                                     "FIND"])
 
     def test_not_there(self):
         """the programs elsewhere: it says so and stops"""

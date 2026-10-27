@@ -760,7 +760,8 @@ class ExeTest(unittest.TestCase):
         self.assertIn("pass=0 fail=0", "\n".join(lines))
         self.assertEqual(snapshot(card), before)
         self.assertNotIn("ESSPROBE.RST", d.files)
-        self.assertIn("Restart before you load esssb16", d.output)
+        self.assertNotIn("restart before", d.output)    # no window, no trap
+        self.assertNotIn("window: removed", lines)
 
     def test_under_emm386(self):
         """/A /T under EMM386: V86 mode, EMMQXXX0's version, the window on
@@ -782,6 +783,28 @@ class ExeTest(unittest.TestCase):
         self.assertEqual([b for b, _si in d.emm_calls], [0, 1])
         self.assertEqual(d.emm_traps, [])
         self.assertEqual(snapshot(card), before)
+        self.assertEqual(self.report(d)[-1], "window: removed")
+        self.assertNotIn("restart before", d.output)
+
+    def test_window_kept(self):
+        """an EMM386 that removes no trap: the window's block stays DOS's,
+        disarmed, and the report and the screen say to restart before
+        esssb16, which can't trap that port meanwhile"""
+        from dosrun import Dos
+        card = ChipCard(emm386={})
+        d = Dos(self.exe(), card, emm386=(4, 95))
+        d.emm_keep = True
+        code = d.run("/A /T /C:env.machine,h1.reach5")
+        self.assertEqual(code, 0, d.output)
+        self.assertEqual([b for b, _si in d.emm_calls], [0, 1])
+        self.assertEqual(len(d.emm_traps), 1)
+        self.assertEqual(self.report(d)[-1],
+                         "window: EMM386 kept its trap of 22Dh until a "
+                         "restart")
+        self.assertIn("EMM386 kept the window's port trap: restart before "
+                      "you load esssb16.", d.output)
+        trap = d.emm_traps[0]
+        self.assertEqual(d.mem((trap["ds"] - 1) * 16 + 1, 2), b"\x08\x00")
 
     def test_window_refused(self):
         """EMM386 refuses the trap: the 8237 as a program sees it"""

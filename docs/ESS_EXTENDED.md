@@ -528,7 +528,11 @@ bytes to it. The fronts therefore pause through B7h bit 7 and then B2h bit
 `fix.pb72r22` measure. Under EMM386, 5 of those 6 resumed in step, and
 `fix.pb72a`, in 16-bit stereo, resumed a sample off, with the sides swapped.
 Version 1.5 of the probe repeats each pause, and has one that turns the DMA
-requests off only once the FIFO is full (`fix.pb7wa` to `fix.pb7wf`).
+requests off only once the FIFO is full (`fix.pb7wa` to `fix.pb7wf`). In its
+run under EMM386, all 9 pauses through B7h alone and all 9 through B7h and
+B2h resumed in step, and 5 of the 6 that wait for the full FIFO did, while
+`fix.pb7wd`, in 16-bit stereo, resumed with the sides swapped. Waiting for
+the full FIFO doesn't help, so the fronts keep B7h and then B2h.
 
 ### Commands while the DMA runs
 
@@ -759,21 +763,24 @@ the program's unmask, on channels 1 and 5 alike, and until then the program
 reads back what it wrote (`h1.reach1`, `h1.reach5`). So a channel read back
 before the unmask carries over what the 8237 had before (`h1.stale`), which
 played another buffer. In real mode the 8237 gets each write at once. The
-8237's mask register reads back, 0Fh where the channels 0 to 3 are masked,
-and DEh 0Eh with channel 4, the cascade, unmasked (`env.dma`). The first
-full run stopped in the h1 group with EMM386's "DMA mode not supported", at
-`h1.cross1`, an auto-initialized transfer across a 64 KB page, which EMM386
-would have to buffer. Made single-cycle, as the probe now makes it under a
-memory manager, the transfer went through a buffer of EMM386's at 120000h,
-for channel 1 and channel 5 alike (`h1.cross1`, `h1.cross5`), and the
-channel read back before the next unmask still pointed there (`h1.stale`). A
-program's reads come from the 8237 while the channel moves (`h1.read1`,
-`h1.read5`), and move the 8237's flip-flop, while its writes move EMM386's
-own (`h1.ff1`, `h1.ff5`). A program that masks a running channel and unmasks
-it has EMM386 program the 8237 anew at the unmask, from what the program
-wrote, so the transfer starts over at the buffer's start: the probe's count
-jumped back, and the rate it measured came out 4.6 percent high
-(`fix.pb2hold1` and the other held cases under EMM386).
+8237's mask, on the other hand, follows the program's mask and unmask at
+once under EMM386, and stays set while the program programs the masked
+channel (`h1.mask1`, `h1.mask5`), so a front that reads it at ring 0 sees
+the game's. The 8237's mask register reads back, 0Fh where the channels 0 to
+3 are masked, and DEh 0Eh with channel 4, the cascade, unmasked (`env.dma`).
+The first full run stopped in the h1 group with EMM386's "DMA mode not
+supported", at `h1.cross1`, an auto-initialized transfer across a 64 KB
+page, which EMM386 would have to buffer. Made single-cycle, as the probe now
+makes it under a memory manager, the transfer went through a buffer of
+EMM386's at 120000h, for channel 1 and channel 5 alike (`h1.cross1`,
+`h1.cross5`), and the channel read back before the next unmask still pointed
+there (`h1.stale`). A program's reads come from the 8237 while the channel
+moves (`h1.read1`, `h1.read5`), and move the 8237's flip-flop, while its
+writes move EMM386's own (`h1.ff1`, `h1.ff5`). A program that masks a
+running channel and unmasks it has EMM386 program the 8237 anew at the
+unmask, from what the program wrote, so the transfer starts over at the
+buffer's start: the probe's count jumped back, and the rate it measured came
+out 4.6 percent high (`fix.pb2hold1` and the other held cases under EMM386).
 
 ## What the engines do to the machine
 
