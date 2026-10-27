@@ -706,7 +706,7 @@ has an 8-bit channel of its own. Probe: `both.base` (each on its own clock),
 `both.slaved`, `both.f8_16` and `both.f16_8` (mixed formats), `both.r22_44`
 (two rates), `both.t2_0` and `both.single` (single transfers), `both.dmd`
 (both channels in the 8237's demand mode), `both.muted2` and `both.pace`
-(Audio 2 muted, as `esssb16`'s withdrawn pace ran it).
+(Audio 2 muted, as `esssb16`'s pace runs it).
 
 Measured: under EMM386 both engines kept their rates at 16-bit stereo and
 44.1 kHz. In real mode, with the 8237 in single mode, Audio 2's DMA fell
@@ -715,8 +715,10 @@ about 12 percent short while the probe read the 8237's counts (`both.base`,
 (`both.dmd`). Mixed formats and rates kept them too (`both.f8_16`,
 `both.f16_8`, `both.r22_44`). Muted, slaved, in 8-bit stereo and without its
 interrupt, Audio 2 moved its channel's count at Audio 1's rate
-(`both.pace`). The recordings of the dual cases depend on Audio 1's stream
-being in step ([A 16-bit stream a byte off](#a-16-bit-stream-a-byte-off)).
+(`both.pace`), which `esssb16` now does under EMM386 where Audio 2's channel
+is the game's 16-bit one ([ESSSB16.md](ESSSB16.md)). The recordings of the
+dual cases depend on Audio 1's stream being in step ([A 16-bit stream a byte
+off](#a-16-bit-stream-a-byte-off)).
 
 ## The DMA controllers and the memory managers
 

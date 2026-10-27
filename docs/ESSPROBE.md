@@ -45,7 +45,7 @@ such as `t2=0` for Audio 2's single transfers.
   These three run only where the card has Audio 2 on a 16-bit channel.
 * **both**: Audio 1 at 294 Hz and Audio 2 at 882 Hz at once, on their own
   clocks or slaved, in mixed formats and transfer types, and with Audio 2
-  muted, as `esssb16`'s withdrawn pace ran it.
+  muted, as `esssb16`'s pace runs it.
 * **h1**: the DMA controllers behind the memory manager. When the 8237 gets
   what a program programmed while the channel is masked, what a program
   reads of a channel that moves, whose flip-flop a program's reads and

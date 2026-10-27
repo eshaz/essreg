@@ -333,7 +333,7 @@ and stop at the first surprise. Each step says what you should see.
    IRQ and channel, the game's 16-bit channel `on Audio 2's DMA` and Audio
    2's channel, the `BLASTER` line to set, and
    `traps: EMM386 4.95 for real-mode games` (4.49 with MS-DOS 6.22).
-   `MEM /C` shows it in upper memory, 4.4 KB. Run it again: "already
+   `MEM /C` shows it in upper memory, 5.0 KB. Run it again: "already
    loaded". In a Windows DOS box it refuses with "not for a Windows DOS
    box", and without a memory manager with "no EMM386: no EMMXXXX0 or
    EMMQXXX0 device" and "no port traps". When EMM386 is there and it still
@@ -352,7 +352,7 @@ and stop at the first surprise. Each step says what you should see.
    and try it once more with `/S`.
 4. With `LH HDPMI32I -r` before `esssb16` (`HDPMI32i.EXE` from
    `third_party\hdpmi32i`, HX's release), `esssb16` adds
-   `, HDPMI32i for protected-mode games`, and `MEM /C` shows it with 4.9 KB.
+   `, HDPMI32i for protected-mode games`, and `MEM /C` shows it with 5.5 KB.
    A DOS/4GW game set to the Sound Blaster 16 (Descent, Duke Nukem 3D,
    Quake) plays 16-bit sound. Without HDPMI32i the same game plays 8-bit
    sound, or finds no Sound Blaster 16, as before `esssb16`.
@@ -423,7 +423,8 @@ so set the speakers to a normal level first.
    `esssb16`'s variables after each section. Under EMM386 the 16-bit
    transfers' lines are KNOWN with `dma=still, ch 1 moved`: EMM386 doesn't
    trap the DMA controllers, so the 16-bit channel's count stands still
-   while the 8-bit channel plays. On a card whose Audio 2 has no 8-bit
+   while the 8-bit channel plays, but for the auto-initialized ones where
+   Audio 2 moves it (`dma=moving`). On a card whose Audio 2 has no 8-bit
    channel of its own (`route.audio2`), the two transfers at once are KNOWN,
    `one at a time on Audio 1`.
 4. If a tone sounded distorted or looping, restart, load `ESSSB16 /S` and

@@ -212,17 +212,21 @@ tools/wineshot.sh run ess3d.exe /sim tray
   sends the chip the reference's operations (`tests/test_sbfsm.py`), with
   the chip's registers written only where they change. A 16-bit playback
   plays on Audio 2 where it has an 8-bit channel of its own (`dma2` in the
-  TSR, `EX_S16_A2` in the VxD), and everything else on Audio 1. Audio 1's
-  start holds the channel that plays masked over B8h bit 0, and unmasks it
-  after the polls that let the start settle (`settle`, `ESSREG_S16_Settle`),
-  because the chip loses the start's first byte when it comes right after
-  the start's first DMA request (`RACE_US` in `tests/esschip.py`). Test it
-  with a scene in `tests/sbscenes.py` (`@dual` for two transfers at once),
-  which `tests/test_sb16conf.py` plays on the model and on both fronts, or a
-  check in `tests/test_sb16front.py`. The resident part has no fixed limit,
-  and `tools/build_esssb16.py` reports its size; the file stays within the 9
-  KB that LH loads, and `tests/test_esssb16.py` checks that
-  `build/esssb16.com` is current.
+  TSR, `EX_S16_A2` in the VxD), and everything else on Audio 1. Under
+  EMM386, where Audio 2's channel is the game's 16-bit one (`pace_ch`),
+  Audio 2 runs on it muted for an auto-initialized 16-bit playback, so that
+  the count the game reads moves (`pace`, `both.pace`); the VxD's channel is
+  virtual and needs none. Audio 1's start holds the channel that plays
+  masked over B8h bit 0, and unmasks it after the polls that let the start
+  settle (`settle`, `ESSREG_S16_Settle`), because the chip loses the start's
+  first byte when it comes right after the start's first DMA request
+  (`RACE_US` in `tests/esschip.py`). Test it with a scene in
+  `tests/sbscenes.py` (`@dual` for two transfers at once), which
+  `tests/test_sb16conf.py` plays on the model and on both fronts, or a check
+  in `tests/test_sb16front.py`. The resident part has no fixed limit, and
+  `tools/build_esssb16.py` reports its size; the file stays within the 9 KB
+  that LH loads, and `tests/test_esssb16.py` checks that `build/esssb16.com`
+  is current.
 * **sb16test.** Its checks (`src/sb16t.c`) reach the card only through
   `struct sbt_hal`: `src/sb16test.c` on the machine, and
   `tests/test_sb16test.py` on the model and on both fronts. The handler's

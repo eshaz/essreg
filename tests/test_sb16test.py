@@ -50,11 +50,10 @@ IDLE_US = 25                # the time an idle() of the checks takes
 # what the fronts can't do as the card does (docs/SB16.md)
 KNOWN = {"dsp.ram", "dsp.e2", "dsp.reset_held", "ctl.unacknowledged"}
 # esssb16 under EMM386, which doesn't trap the DMA controllers: the 16-bit
-# channel's count stands still, the transfer runs on the 8-bit one's
-EMM_KNOWN = {"p16.b0h", "p16.b6h_mono", "p16.b6h_stereo", "p16.b6h_unsigned",
-             "p16.b6h_stunsign", "rate.16bit_22050", "rate.16bit_11025",
-             "rate.16bit_8000", "ctl.count16", "rec.beh_mono",
-             "rec.beh_stereo"}
+# channel's count stands still, the transfer runs on the 8-bit one's, but
+# for an auto-initialized playback where Audio 2's channel is the game's,
+# which Audio 2 moves (the pace)
+EMM_KNOWN = {"p16.b0h", "rec.beh_mono", "rec.beh_stereo"}
 # a front whose Audio 2 has no 8-bit channel: one transfer at a time
 ALONE_KNOWN = {"dual.play", "dual.end16", "dual.duplex"}
 
@@ -554,8 +553,8 @@ class TSRTest(Checks, unittest.TestCase):
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
 class TSREmmTest(Checks, unittest.TestCase):
     """esssb16.com under EMM386, Audio 2 on DMA 5, as on the card of the
-    first report: the 16-bit count stands still, and everything plays on
-    Audio 1, one transfer at a time"""
+    first report: the 16-bit count stands still but where Audio 2 paces
+    it, and everything plays on Audio 1, one transfer at a time"""
 
     known = KNOWN | EMM_KNOWN | ALONE_KNOWN
 
@@ -566,7 +565,9 @@ class TSREmmTest(Checks, unittest.TestCase):
         res = self.run_.results()
         for k in EMM_KNOWN | ALONE_KNOWN:
             self.assertEqual(res[k][0], "KNOWN", (k, res[k]))
-        self.assertIn("still, ch 1 moved", res["p16.b6h_mono"][1])
+        self.assertIn("still, ch 1 moved", res["p16.b0h"][1])
+        self.assertIn("dma=moving", res["p16.b6h_mono"][1])
+        self.assertEqual(res["ctl.count16"][0], "PASS")
         self.assertIn("Audio 2's DMA is 5 (PnP 75h)", res["route.audio2"][1])
         self.assertIn("one at a time", res["dual.play"][1])
 

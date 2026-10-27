@@ -26,11 +26,12 @@ channel keeps the position it was programmed with, its programming has to
 reach the 8237 before the transfer's command, and each command carries it
 over anew, from the buffer's start, but for a single-cycle block of the
 buffer it carried over last, which goes on from the block before. A game
-that mixes up to that channel's count (mix16) plays its first fill over
-and over there. EMM386 gives the 8237 the game's programming when the game
-unmasks the channel (emm386dma), so one that unmasks it after the command
-(resiplay, Pinball Fantasies' driver) plays what the channel held before;
-EMM386PinballTest shows both.
+that mixes up to that channel's count (mix16, dsmi) plays its first fill
+over and over there, unless Audio 2's channel is the game's, where Audio 2
+paces it (EMM386Audio1Test). EMM386 gives the 8237 the game's programming
+when the game unmasks the channel (emm386dma), so one that unmasks it
+after the command (resiplay, Pinball Fantasies' driver) plays what the
+channel held before; EMM386PinballTest shows both.
 
 The chip model also has to see no undefined use (esschip's violations),
 every DMA cycle has to move data (dma8237's bad), and the VxD has to ask
@@ -174,6 +175,7 @@ class EMM386Test(Conformance, unittest.TestCase):
 
     known = {**Conformance.known, "position16": {"moving"},
              "mix16": {"back", "mixed"}, "mix16_again": {"back", "mixed"},
+             "dsmi": {"back", "mixed"},
              "resiplay": {"back", "mixed", "start"},
              "play16_dma_after": {"data", "ok", "per_block", "seen"}}
 
@@ -184,9 +186,12 @@ class EMM386Test(Conformance, unittest.TestCase):
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
 class EMM386Audio1Test(Conformance, unittest.TestCase):
     """the same with Audio 2 on the 16-bit channel 5, the card of the
-    reports: every transfer on Audio 1, one at a time"""
+    reports: every transfer on Audio 1, one at a time, and Audio 2 paces
+    the game's channel, so that its count moves"""
 
-    known = EMM386Test.known
+    known = {**Conformance.known,
+             "resiplay": {"back", "mixed", "start"},
+             "play16_dma_after": {"data", "ok", "per_block", "seen"}}
     audio2 = False
 
     def card(self):

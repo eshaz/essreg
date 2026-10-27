@@ -39,7 +39,7 @@ S_COMP, S_WARM, S_SPKR, S_T16 = 0x10, 0x20, 0x40, 0x80
 H_ON, H_SECOND, H_ONCE, H_A2 = 0x01, 0x02, 0x04, 4
 H_ALL = H_ON | H_SECOND | H_ONCE
 # the game's 16-bit channel
-V_MASK, V_FF, V_NEW, V_LIVE = 0x01, 0x02, 0x04, 0x08
+V_MASK, V_FF, V_NEW, V_LIVE, V_PACE = 0x01, 0x02, 0x04, 0x08, 0x20
 
 # the operands each DSP command takes, as DSP 4.05's firmware takes them
 OPTABLE = bytes((0x10, 0x09, 0x40, 0x61, 0x55, 0xAA, 0x00, 0x00,
@@ -187,8 +187,9 @@ class Front:
 
     def chip_reset(self):
         """RESET: +6 = 3, three reads, 0, the AAh: COMP, the registers
-        unknown, Audio 1's transfer over; 7Ah and 7Ch back while Audio 2
-        plays"""
+        unknown, Audio 1's transfer over with its pace; 7Ah and 7Ch back
+        while Audio 2 plays"""
+        self.pace_stop()
         saved = None
         if self.flags2 & F_RUN:
             saved = (self.mix_read(0x7C), self.mix_read(0x7A))
@@ -351,7 +352,8 @@ class Front:
         self.need, self.answer = 0, []
 
     def a1_stop(self):
-        """Audio 1 IDLE: B8h bit 0 off, then FIFO"""
+        """Audio 1 IDLE, with its pace: B8h bit 0 off, then FIFO"""
+        self.pace_stop()
         self.halves &= ~H_ALL & 0xFF
         if self.flags & F_RUN:
             self.flags &= ~(F_RUN | F_AUTO | F_LAST | F_PAUSE) & 0xFF
@@ -370,6 +372,12 @@ class Front:
         if self.flags2 & F_RUN:
             self.flags2 = 0
             self.mix_and(0x78, 0xED)
+
+    def pace_stop(self):
+        """PACE off: 78h = 0"""
+        if self.vbits & V_PACE:
+            self.vbits &= ~V_PACE & 0xFF
+            self.mix_write(0x78, 0x00)
 
     # --- the DSP: a command and its operands -------------------------------
     def s16_write(self, port, v):
@@ -534,16 +542,21 @@ class Front:
             return
         if op & 0x40:
             # the FIFO off the DAC (B7h bit 7), so that it keeps whole
-            # frames (fix.pb7a), then the DMA requests off (B2h bit 6)
+            # frames (fix.pb7a), then the DMA requests off (B2h bit 6),
+            # and the pace's FIFO off its DAC (78h bit 0)
             self.flags |= F_PAUSE
             self.reg_and(0xB7, 0x7F)
             self.reg_and(0xB2, 0xBF)
+            if self.vbits & V_PACE:
+                self.mix_and(0x78, 0xFE)
         elif op & 0x20:
             if self.flags & F_PAUSE:
                 self.flags &= ~F_PAUSE & 0xFF
                 self.a1_clocks()
                 self.reg_or(0xB2, 0x40)
                 self.reg_or(0xB7, 0x80)
+                if self.vbits & V_PACE:
+                    self.mix_or(0x78, 0x01)
         elif self.flags & F_AUTO:
             self.flags &= ~(F_AUTO | F_LAST) & 0xFF
             if not self.half_last(0):
@@ -643,6 +656,23 @@ class Front:
         held = self.xfer_dma(self.dma8, bl)
         self.reg_or(0xB8, 0x01)
         self.settle(held)
+        self.pace()
+
+    def pace(self):
+        """PACE, under EMM386, for an auto-initialized 16-bit playback
+        where Audio 2's channel is the game's 16-bit one: Audio 2 on it
+        after Audio 1's start, slaved, without the FM mix or 4x, muted,
+        without its interrupt, mono or stereo as A8h has it, single
+        transfers, auto-initialized (both.pace), so that the count the game
+        reads moves"""
+        if self.xbits & (F_16 | 0x08 | F_AUTO) != F_16 | F_AUTO or \
+                self.pace_ch != self.dma16 or self.vtrapped():
+            return
+        self.vbits |= V_PACE
+        self.mix_and(0x71, 0xEC)
+        self.mix_write(0x7C, 0x00)
+        self.mix_write(0x7A, (self.ctrl[0xA8] & 0x01) << 1)
+        self.mix_write(0x78, 0x13)
 
     def settle(self, ch):
         """Audio 1 started: polls for at least 32 us and two of its sample
@@ -805,8 +835,10 @@ class Front:
     def mirror(self, bl, go=True):
         """the game's 16-bit channel carried over to mchan: read back
         without the traps, where a single-cycle block of the buffer
-        carried over last goes on from it; unmasked unless the game masked
-        its channel, or masked for Audio 1's start (go False)"""
+        carried over last goes on from it, and so does an auto-initialized
+        one on that buffer that the pace moved 64 words or more; unmasked
+        unless the game masked its channel, or masked for Audio 1's start
+        (go False)"""
         if not self.vtrapped():
             last = (self.vpage, self.vcount, self.vaddr)
             self.chip_out(0xD8, 0)
@@ -815,8 +847,7 @@ class Front:
             self.vcount = self.word_in(self.vport + 2)
             self.chip_out(0xD8, 0)
             self.vmode = 0x10
-            if not bl & F_AUTO and self.vbits & V_LIVE and \
-                    last == (self.vpage, self.vcount, self.vaddr):
+            if self.vbits & V_LIVE and self.goes_on(bl, last):
                 if not go:
                     self.ch8_set(4)
                 return
@@ -842,6 +873,22 @@ class Front:
             self.ch8_set(4)
         else:
             self.ch8_set(0)
+
+    def goes_on(self, bl, last):
+        """the channel read back is the one carried over last (page,
+        count, address): a single-cycle block on it as it was, or an
+        auto-initialized one on its line, which takes back the start it
+        had, moved 64 words or more"""
+        page, count, addr = last
+        if not bl & F_AUTO:
+            return last == (self.vpage, self.vcount, self.vaddr)
+        if page != self.vpage:
+            return False
+        moved = (self.vaddr - addr) & 0xFFFF
+        if (count - self.vcount) & 0xFFFF != moved:
+            return False
+        self.vaddr, self.vcount = addr, count
+        return moved >= 64
 
     def ch8_set(self, mask):
         self.chip_out(0x0A, mask | self.mchan)
@@ -984,12 +1031,15 @@ class Front:
         return True
 
     def ack(self, kind):
-        """the acknowledge of kind (1 8-bit, 2 16-bit); a queued block's
-        turn ends the auto-initialize"""
+        """the acknowledge of kind (1 8-bit, 2 16-bit); after a transfer's
+        last block its pace stops, and a queued block's turn ends the
+        auto-initialize"""
         a1, a2 = self.irq_src()
         if a1 & kind:
             self.chip_in(self.port_of(0x0E))
             self.halves &= ~H_SECOND & 0xFF
+            if not self.flags & F_AUTO:
+                self.pace_stop()
             if self.flags & F_LAST:
                 self.flags &= ~(F_LAST | F_AUTO) & 0xFF
                 self.reg_and(0xB8, 0xFB)
@@ -1152,7 +1202,7 @@ def rate_to_v(rate):
 
 
 SETTINGS = ("base", "cfg", "mix80", "mix81", "dma8", "dma16", "dma2",
-            "mchan", "b9", "keep71", "set71", "how_io", "rate_v",
+            "pace_ch", "mchan", "b9", "keep71", "set71", "how_io", "rate_v",
             "test_reg", "index", "vbits", "vport", "vpagep", "mpage",
             "xbits", "halves", "sick", "flags", "flags2", "state", "cmd",
             "prev", "got", "need", "latch", "held")

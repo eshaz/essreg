@@ -23,6 +23,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from dma8237 import PAGE_PORTS  # noqa: E402
 from sb16 import encode  # noqa: E402
 from sbgame import (BASE, reset, write, read, read_all, mixer,  # noqa: E402
                     program_dma, unmask_dma, dma_count, samples16, words)
@@ -555,6 +556,109 @@ def pinball_sbpro(card):
             "back": sum(1 for a, v, c in zip(got, got[1:], got[2:])
                         if c < v and c < a),
             "mixed": done > 30 * frames, "wild": wild}
+
+
+# --- Pinball World's driver (DSMI) --------------------------------------------
+
+def dsmi_reset(card, reads=5, answer=True):
+    """DSMI's reset: 1, reads of the reset port, 0, then AAh within 1000
+    polls, which its second reset leaves in the latch"""
+    card.out(BASE + 6, 1)
+    for _ in range(reads):
+        card.inp(BASE + 6)
+    card.out(BASE + 6, 0)
+    if not answer:
+        return None
+    for _ in range(1000):
+        if card.inp(BASE + 0x0E) & 0x80:
+            return card.inp(BASE + 0x0A) == 0xAA
+    return False
+
+
+def dsmi_pos(card, ch, size):
+    """the position as DSMI's DMA library reads it: the flip-flop cleared
+    with FFh, then the count twice until the two are at most 40h apart;
+    minus the count, in bytes, past the buffer's length"""
+    ff = 0xD8 if ch >= 4 else 0x0C
+    port = (0xC2 + 4 * (ch - 4)) if ch >= 4 else 2 * ch + 1
+    for _ in range(100):
+        card.out(ff, 0xFF)
+        first = card.inp(port) | card.inp(port) << 8
+        second = card.inp(port) | card.inp(port) << 8
+        d = (first - second) & 0xFFFF
+        if d <= 0x40 or d >= 0x10000 - 0x40:
+            break
+    moved = -second & 0xFFFF
+    if ch >= 4:
+        moved = (moved << 1) & 0xFFFF
+    return (size + moved) % size
+
+
+def dsmi_isr(card):
+    """DSMI's handler acknowledges the 16-bit interrupt, whatever 82h says"""
+    card.blocks += 1
+    card.inp(BASE + 0x0F)
+
+
+@scene
+def dsmi(card):
+    """Pinball World's Sound Blaster 16 driver (Otto Chrons' DSMI, its SDI
+    for SB16 2.0), on the channel its setup takes from mixer 81h, the
+    16-bit one first: the reset, E1h, the reset again, 41h, D1h, the
+    channel programmed and unmasked for a buffer of 16-bit stereo at 44100
+    Hz, then B6h for 60002 samples, more than the chip's counter holds.
+    At each tick of 14 ms it mixes up to the position it reads from the
+    count a counter of the frames, as mix16 does; its handler acknowledges
+    at +Fh. At the end D9h, the reset, +Eh and +Fh, and the mask"""
+    prepare(card)
+    card.isr = dsmi_isr
+    bits = mixer(card, 0x81)
+    ch = next((c for b, c in ((0x20, 5), (0x40, 6), (0x80, 7), (0x04, 3),
+                              (0x01, 0)) if bits & b), 1)
+    frames, size = 4096, 16384
+    card.poke(BUF, b"".join(struct.pack("<hh", f, f) for f in range(frames)))
+    out = {"channel": ch, "reset": dsmi_reset(card)}
+    write(card, 0xE1)
+    out["version"] = (read(card), read(card))
+    dsmi_reset(card, answer=False)
+    write(card, 0x41, 0xAC, 0x44, 0xD1)
+    if ch >= 4:
+        mask, mode, ff, port = 0xD4, 0xD6, 0xD8, 0xC0 + 4 * (ch - 4)
+        addr, n, page = (BUF >> 1) & 0xFFFF, size // 2 - 1, BUF >> 16
+    else:
+        mask, mode, ff, port = 0x0A, 0x0B, 0x0C, 2 * ch
+        addr, n, page = BUF & 0xFFFF, size - 1, BUF >> 16
+    card.out(mask, 4 | (ch & 3))
+    card.out(mode, 0x58 | (ch & 3))
+    card.out(PAGE_PORTS[ch], page)
+    card.out(ff, 0xFF)
+    card.out(port, addr & 0xFF)
+    card.out(port, addr >> 8)
+    card.out(port + (2 if ch >= 4 else 1), n & 0xFF)
+    card.out(port + (2 if ch >= 4 else 1), n >> 8)
+    card.out(mask, ch & 3)
+    write(card, 0xB6, 0x30, 0x61, 0xEA)
+    done = last = laps = 0
+    for _ in range(18):
+        card.wait(14000)
+        pos = dsmi_pos(card, ch, size) // 4
+        laps += pos < last
+        last = pos
+        for f in range(done, laps * frames + pos):
+            v = (f + frames) & 0x7FFF
+            card.poke(BUF + 4 * (f % frames), struct.pack("<hh", v, v))
+        done = max(done, laps * frames + pos)
+    card.isr = None
+    write(card, 0xD9)
+    dsmi_reset(card, reads=8, answer=False)
+    card.inp(BASE + 0x0E)
+    card.inp(BASE + 0x0F)
+    card.out(mask, 4 | (ch & 3))
+    card.wait(2000)
+    got = [f[0] for f in card.dac(16)]
+    out["back"] = sum(1 for a, b in zip(got, got[1:]) if b < a)
+    out["mixed"] = done > 2 * frames
+    return out
 
 
 # --- 8-bit playback -----------------------------------------------------------

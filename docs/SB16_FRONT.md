@@ -62,6 +62,13 @@ of the chip and the DMA controllers:
   gives the mask back, with DEh bit 0, the cascade, clear. The VxD holds
   through VDMAD (VDMAD_Mask_Channel and VDMAD_UnMask_Channel), for the
   program's channel while its virtual state is unmasked.
+* **PACE**: Audio 2 runs on the game's 16-bit channel, muted, so that the
+  channel's count moves while Audio 1 plays: M(71h) with bits 4, 1 and 0
+  clear, for Audio 1's clock without 4x or the FM mix, M(7Ch, 0), M(7Ah)
+  with bit 1 for stereo as A8h has it and no interrupt, and M(78h, 13h),
+  single transfers, auto-initialized, the DMA and the FIFO to the DAC. Each
+  byte that Audio 2 takes is a word of the channel. **PACE off** is M(78h,
+  0).
 
 ## The state
 
@@ -94,10 +101,11 @@ The front's state has these parts:
   last reset (`ctrl` and `known`), so that a transfer writes only what
   changes.
 * **The 16-bit channel** (`vbits`): its programming as the game wrote it,
-  and four marks: MASKED, the flip-flop of the game's reads and writes, NEW
-  when the game programmed it since it was carried over, and LIVE while the
-  engine's channel holds what was carried over. Which backend the front has
-  decides how it sees the channel: TRAPPED or READBACK.
+  and five marks: MASKED, the flip-flop of the game's reads and writes, NEW
+  when the game programmed it since it was carried over, LIVE while the
+  engine's channel holds what was carried over, and PACED while Audio 2
+  paces it. Which backend the front has decides how it sees the channel:
+  TRAPPED or READBACK.
 * **The DSP**: the parser (the operands still to come), the read latch and
   the answer that it gives a byte at a time, a byte held while an answer is
   read, the MIDI modes (`S_UART`, `S_MIDI`), D1h's flag (`S_SPKR`), whether
@@ -116,8 +124,8 @@ the state after it.
 ### The game's reset
 
 A write of 1 to the reset port halts the DSP (`halt`, `ESSREG_S16_Halt`):
-1. Audio 1 stops, R(B8h) with bit 0 clear if it runs, and its FIFO empties,
-   FIFO.
+1. Audio 1 stops, with PACE off if it is PACED, R(B8h) with bit 0 clear if
+   it runs, and its FIFO empties, FIFO.
 2. A running Audio 2 stops, M(78h) with bits 4 and 1 clear. Where Audio 2
    has a channel, M(7Ah) clears bits 7:3, the latch and the interrupt, and
    keeps the format, so that what its FIFO holds plays out.
@@ -162,7 +170,8 @@ and a length. Each becomes a transfer of its kind (`xfer`,
    the rate, and B6h and B7h for the format. A changed format starts with
    FIFO, then R(B6h), R(B7h) 51h (71h for B6h 00h), and R(B7h) with the
    format. Then R(B1h) and R(B2h) with bits 6 and 4 set, mixer 71h for the
-   DACs' mode, the DMA with HOLD, R(B8h) with bit 0 set, and SETTLE. Of the
+   DACs' mode, the DMA with HOLD, R(B8h) with bit 0 set, SETTLE, and PACE
+   where it paces ([The 16-bit channel](#the-16-bit-channel)). Of the
    registers, only those that change are written. Audio 1 is RUN.
 4. **Audio 2.** M(78h, 0), M(74h) and M(76h) with minus the bytes, M(70h)
    and M(72h) for the rate, M(7Ch) for the voice level, M(7Ah) for the
@@ -201,11 +210,12 @@ is Audio 2's while Audio 2 runs. A command for a kind that doesn't run does
 nothing:
 * **Audio 1**: the pause clears B7h bit 7, so that the FIFO stops feeding
   the DAC and keeps whole frames, then B2h bit 6, so that the chip asks for
-  no more DMA. The continue sets the rate again, then B2h bit 6 and B7h bit
-  7. The end of auto-initialize clears B8h bit 2. A pause through B2h bit 6
-     alone came back in step only about half the time, since the DAC played
-     on and ran the FIFO down into a half-done frame (`fix.pb2late`), and
-     one through B7h bit 7 every time (`fix.pb7a`).
+  no more DMA, and when PACED, 78h bit 0. The continue sets the rate again,
+  then B2h bit 6, B7h bit 7 and 78h bit 0. The end of auto-initialize clears
+  B8h bit 2. A pause through B2h bit 6 alone came back in step only about
+  half the time, since the DAC played on and ran the FIFO down into a
+  half-done frame (`fix.pb2late`), and one through B7h bit 7 every time
+  (`fix.pb7a`).
 * **Audio 2**: the pause clears 78h bit 0, which silences the DAC, though
   the card's DMA runs on meanwhile and the stream skips what it moved
   (`a2.pause_f`), and the continue sets the rate again, then 78h bit 0. The
@@ -233,21 +243,22 @@ M(78h) with bit 2 or bit 4 clear, so that the chip stops at the block's end.
 A read of +Eh acknowledges the 8-bit kind, and one of +Fh the 16-bit kind
 (`ack`, `ESSREG_S16_Ack`): ACK when Audio 1's pending interrupt is of that
 kind, and M(7Ah) with bit 7 clear for Audio 2's. The acknowledge ends
-SECOND, and a LAST engine ends its auto-initialize: Audio 1 with B8h bit 2
-cleared, Audio 2 with 78h bit 4 cleared.
+SECOND, an acknowledge of Audio 1 at the end of a block that doesn't
+auto-initialize turns PACE off, and a LAST engine ends its auto-initialize:
+Audio 1 with B8h bit 2 cleared, Audio 2 with 78h bit 4 cleared.
 
 ### The firmware's commands
 
 The direct DAC and ADC (10h, 20h), ADPCM (16h, 17h, 1Fh, 74h to 77h, 7Dh,
 7Fh), silence (80h) and MIDI (30h to 38h) have no counterpart in Extended
 mode, so the chip runs them in Compatibility mode. From EXT, RESET ends
-Extended mode, which also ends Audio 1's transfer. While Audio 2 runs, the
-front reads 7Ah and 7Ch before the reset and writes them back after it. Then
-D1h, and the chip is COMP. A transfer of the firmware's gets the time
-constant, 256 minus 1 MHz over the rate (40h), then the command and its
-length. An auto-initialized one, which the chip doesn't have, plays the
-8-bit block once. The next transfer of the front's brings the chip back to
-EXT.
+Extended mode, which also ends Audio 1's transfer, with PACE off before it.
+While Audio 2 runs, the front reads 7Ah and 7Ch before the reset and writes
+them back after it. Then D1h, and the chip is COMP. A transfer of the
+firmware's gets the time constant, 256 minus 1 MHz over the rate (40h), then
+the command and its length. An auto-initialized one, which the chip doesn't
+have, plays the 8-bit block once. The next transfer of the front's brings
+the chip back to EXT.
 
 ### The 16-bit channel
 
@@ -271,7 +282,17 @@ command, with the controller's flip-flop cleared before and after, so the
 game has to program the channel before the command. The engine's channel
 auto-initializes, since the chip asks for a block's bytes only. A
 single-cycle block whose channel still holds what was carried over goes on
-from it. The count that the game reads stands still.
+from it. The count that the game reads stands still, but where Audio 2's
+channel is the game's 16-bit one (`pace_ch`): there an auto-initialized
+16-bit playback on Audio 1 gets PACE after SETTLE, and is PACED until Audio
+1 stops, the chip's RESET, or the acknowledge of a block that doesn't
+auto-initialize. Audio 2's FIFO holds 64 bytes, a word of the channel each,
+fewer frames than Audio 1's 256 bytes, so the count stays behind Audio 1's
+channel, and a game that mixes up to it writes only what Audio 1 has taken.
+An auto-initialized command on the channel carried over last, which PACE
+moved along its line (the page the same, and the address on as far as the
+count back), takes back the start it had and goes on where Audio 1's channel
+is, unless the channel moved less than 64 words.
 
 ### The mixer
 
@@ -310,7 +331,7 @@ programming and the chip's interrupts:
 |-------|------------------|----------------|--------------------|
 | TSR   | QPI (QEMM, JEMM) | TRAPPED        | the game's handler |
 | TSR   | HDPMI32i         | TRAPPED        | the game's handler |
-| TSR   | EMM386           | READBACK       | the game's handler |
+| TSR   | EMM386           | READBACK, PACE | the game's handler |
 | VxD   | Windows (VDMAD)  | VDMAD          | the hardware's     |
 
 In a DOS box, VDMAD has the game's channel virtualized for the front, and
@@ -349,6 +370,10 @@ These transitions follow the card's answers ([ESSPROBE.md](ESSPROBE.md),
   before when a game unmasks its channel after the command, as Pinball
   Fantasies' driver does.
 * `fix.late20` and the others: HOLD and SETTLE around Audio 1's start.
+* `both.pace` and `h4.pace`: Audio 2, muted, on Audio 1's clock, 8-bit and
+  without its interrupt, moved its 16-bit channel's count at Audio 1's rate,
+  and left the machine alone, so READBACK paces where Audio 2's channel is
+  the game's 16-bit one.
 * `a1.pause_b2` and `fix.pb7a`: B2h bit 6 stops Audio 1's DMA within a few
   bytes, but the stream came back in step only about half the time, held or
   not (`fix.pb2hold1`); with B7h bit 7, which takes the FIFO off the DAC, it

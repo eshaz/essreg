@@ -22,7 +22,8 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 from test_vxdext import HAVE_UNICORN, have_nasm  # noqa: E402
 from sb16 import tc_to_v  # noqa: E402
-from sbgame import read_all, mixer, program_dma, write  # noqa: E402
+from sbgame import (read_all, mixer, program_dma, write,  # noqa: E402
+                    dma_count, reset)
 
 import build_esssb16  # noqa: E402
 
@@ -40,6 +41,7 @@ DMA5_PORTS = {0xC4, 0xC6, 0x8B, 0xD4, 0xD6, 0xD8, 0xDA, 0xDC, 0xDE}
 # the 8237's mode register: demand or single transfers, auto-initialize,
 # from memory (playback) or into it (recording)
 DEMAND, SINGLE, AUTO, PLAY, RECORD = 0x00, 0x40, 0x10, 0x08, 0x04
+V_PACE = 0x20           # vbits: Audio 2 paces the game's 16-bit channel
 _BUILD = {}
 
 
@@ -470,15 +472,22 @@ class InstallTest(unittest.TestCase):
 
     def test_audio2_not_its_own(self):
         """Audio 2 on a 16-bit channel, on Audio 1's, or on none: the
-        16-bit sound plays on Audio 1, and the card is left as it is"""
+        16-bit sound plays on Audio 1, and the card is left as it is. On
+        the game's 16-bit channel, Audio 2 paces it under EMM386"""
         for dma2 in (5, 1, 4):
             m = self.audio2(dma2)
             self.assertEqual(m.data8("dma2"), 4, dma2)
+            self.assertEqual(m.data8("pace_ch"), 5 if dma2 == 5 else 0xFF)
             self.assertEqual(m.chip.pnp[(1, 0x72)], 0, dma2)
             self.assertEqual(m.chip.cfg_ports[7], 0xFD, dma2)
             self.assertEqual(m.chip.mixer[0x71], 0, dma2)
             self.assertIn("the game's DMA 5 through it\r\n16-bit sound plays "
                           "on Audio 1", m.output)
+            pace = "Audio 2 keeps the game's DMA 5 moving under EMM386, muted"
+            if dma2 == 5:
+                self.assertIn(pace, m.output)
+            else:
+                self.assertNotIn(pace, m.output)
 
     def test_audio2_moved(self):
         """/23 puts Audio 2 on channel 3 when a DMA pin of the card is
@@ -810,6 +819,98 @@ class EMM386FrontTest(unittest.TestCase):
         poison_stack(m)
         play16(self.c)
         self.assertEqual(stack_depth(m), 0)
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class EMM386PaceTest(unittest.TestCase):
+    """under EMM386 with Audio 2 on the game's 16-bit channel 5, the card
+    of the reports, Audio 2 paces that channel for an auto-initialized
+    16-bit playback: muted, on Audio 1's clock, without the FM mix or 4x,
+    8-bit in the game's channels, without its interrupt, single transfers,
+    auto-initialized (both.pace), so that the count the game reads moves.
+    It stops and pauses with Audio 1's transfer"""
+
+    def setUp(self):
+        self.c = card("emm", dma2=5)
+        self.chip = self.c.chip
+        self.chip.mixer[0x71] = 0x13    # its own rate, the FM mix, 4x
+
+    def paced(self, c=None):
+        return bool((c or self.c).m.data8("vbits") & V_PACE)
+
+    def moved(self, us=10000):
+        """the words the game's channel moves in us, once Audio 2's FIFO
+        has its fill"""
+        self.c.wait(2000)
+        first = dma_count(self.c, 5)
+        self.c.wait(us)
+        return (first - dma_count(self.c, 5)) & 0xFFFF
+
+    def test_pace(self):
+        """16-bit stereo at 44100 Hz: two words of the channel a frame"""
+        play16(self.c)
+        mix = self.chip.mixer
+        self.assertTrue(self.paced())
+        self.assertEqual((mix[0x71] & 0x13, mix[0x7A], mix[0x7C], mix[0x78]),
+                         (0x00, 0x02, 0x00, 0x13))
+        self.assertAlmostEqual(self.moved(), 882, delta=10)
+        self.assertEqual(self.chip.violations, [])
+        self.assertEqual(self.chip.dmac.bad, [])
+
+    def test_mono(self):
+        play16(self.c, mode=0x10)
+        self.assertEqual(self.chip.mixer[0x7A], 0x00)
+        self.assertAlmostEqual(self.moved(), 441, delta=10)
+
+    def test_stops_after_the_last_block(self):
+        """D9h: at the acknowledge of the block's end"""
+        c = self.c
+        c.isr = lambda card: card.inp(BASE + 0x0F)
+        play16(c, samples=1024)
+        c.wait(2000)
+        write(c, 0xD9)
+        c.wait(40000)
+        self.assertFalse(self.paced())
+        self.assertEqual(self.chip.mixer[0x78], 0x00)
+        self.assertEqual(self.moved(), 0)
+
+    def test_stops_at_a_reset(self):
+        play16(self.c)
+        reset(self.c)
+        self.assertFalse(self.paced())
+        self.assertEqual(self.chip.mixer[0x78], 0x00)
+
+    def test_pause(self):
+        """D5h takes its FIFO off its DAC, which then takes no more words,
+        and D6h puts it back"""
+        c = self.c
+        play16(c)
+        c.wait(5000)
+        write(c, 0xD5)
+        c.wait(2000)
+        self.assertEqual(self.chip.mixer[0x78], 0x12)
+        self.assertEqual(self.moved(), 0)
+        write(c, 0xD6)
+        self.assertEqual(self.chip.mixer[0x78], 0x13)
+        self.assertAlmostEqual(self.moved(), 882, delta=40)
+
+    def test_none(self):
+        """no pace for a single-cycle block or a recording, with /H0, with
+        Audio 2 on an 8-bit channel, or under QPI, which traps the
+        channel"""
+        play16(self.c, cmd=0xB0, auto=False)
+        self.assertFalse(self.paced())
+        c = card("emm", dma2=5)
+        program_dma(c, 5, 0x24680, 8192, record=True)
+        write(c, 0xBE, 0x30, 0xFF, 0x07)
+        self.assertFalse(self.paced(c))
+        c = card("emm", dma2=5, tail="/H0")
+        play16(c, ch=1)
+        self.assertFalse(self.paced(c))
+        for c in (card("emm", dma2=3), card("qpi", dma2=5)):
+            play16(c)
+            self.assertFalse(self.paced(c))
+            self.assertEqual(c.chip.violations, [])
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")

@@ -98,13 +98,19 @@ The exit codes are 1 for a bad option, 2 when no ES1869 answers at the base,
 3 without port traps, 4 in a Windows DOS box and 5 when it is loaded
 already. The limits: EMM386 doesn't trap the DMA controllers, so under it
 the game must program its 16-bit channel before the transfer command, as
-Creative's guide says, and its count stands still. A game that mixes up to
-that count, such as Pinball Fantasies' Sound Blaster 16 driver, repeats its
-first sound: use `/H0` or its Sound Blaster Pro driver. With QEMM, JEMM and
-HDPMI32i neither applies. A 16-bit buffer longer than 64 KB or across a 64
-KB boundary plays wrong, because the 8-bit channel that carries it reaches
-64 KB in one page, E2h writes no byte through the DMA, and FM plays as
-before.
+Creative's guide says, and its count stands still, but where Audio 2's DMA
+channel (PnP 75h) is the game's 16-bit one, as on the card of the reports
+with `H5`. There Audio 2 runs on that channel, muted, while Audio 1 plays
+the sound, so that the count moves as on a Sound Blaster 16 (the pace), and
+`esssb16` says so as it loads. A game that mixes up to that count, such as
+Pinball World's driver, plays then, and elsewhere repeats its first sound.
+Pinball Fantasies' Sound Blaster 16 driver, which Pinball Dreams and Pinball
+Dreams II share, programs its channel only after the command, so under
+EMM386 it plays what the channel held before: use `/H0`, or its Sound
+Blaster Pro driver. With QEMM, JEMM and HDPMI32i neither applies. A 16-bit
+buffer longer than 64 KB or across a 64 KB boundary plays wrong, because the
+8-bit channel that carries it reaches 64 KB in one page, E2h writes no byte
+through the DMA, and FM plays as before.
 
 It was tested in a CPU emulator, and [`sb16test`](../README.md#sb16testexe)
 checks it on real hardware ([docs/TESTING.md](TESTING.md#d2-esssb16-dos)).
@@ -158,8 +164,9 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
    `C:\WINDOWS`, with the same settings.
 6. As it loads, `esssb16` prints the card, the `BLASTER` line and `traps:
    EMM386 4.95 for real-mode games, HDPMI32i for protected-mode games`; the
-   HDPMI32i part is there only when HDPMI32i was resident first. `MEM /C`
-   lists `ESSSB16` in upper memory, 4.4 KB, or 4.9 KB with HDPMI32i. A
-   game's setup program then detects a Sound Blaster 16, DSP version 4.05,
-   and offers 16-bit sound. To take `esssb16` out again, restart without its
-   line.
+   HDPMI32i part is there only when HDPMI32i was resident first. With Audio
+   2 on the game's 16-bit channel it also prints `Audio 2 keeps the game's
+   DMA 5 moving under EMM386, muted`. `MEM /C` lists `ESSSB16` in upper
+   memory, 5.0 KB, or 5.5 KB with HDPMI32i. A game's setup program then
+   detects a Sound Blaster 16, DSP version 4.05, and offers 16-bit sound. To
+   take `esssb16` out again, restart without its line.
