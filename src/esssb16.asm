@@ -135,6 +135,8 @@ V_HOLD          equ 0x10        ; carried over for Audio 1's start, which
                                 ; unmasks the channel (settle)
 V_PACE          equ 0x20        ; Audio 2 takes its words (pace)
 V_PACE_BIT      equ 5
+V_PEND          equ 0x40        ; masked in the 8237 at the command: the
+                                ; carry-over waits for its unmask
 
 ; their bit numbers, for bt, bts and btr
 F_EXT_BIT       equ 1
@@ -175,6 +177,7 @@ vendor_sel:     dw 0            ; and selector
 pm_data:        dw 0            ; this segment's data selector, from the
                                 ; DPMI switch
 old2f:          dd 0            ; int 2Fh before ours
+old08:          dd 0            ; int 08h before ours (int08)
 save_ss:        dw 0            ; the caller's stack while a shim runs on
 save_esp:       dd 0            ; the front's
 ctrl:           times 25 db 0   ; the chip's registers A1h-B9h as the front
@@ -286,6 +289,15 @@ emm_shim:
         call    front
         retf
 emm_pass:                               ; a port in the range but not the front's
+        stc
+        retf
+emm_bell:                               ; +Dh, which the chip doesn't decode:
+        mov     byte [how_io],IO_DIRECT ; as it is, after a look for the
+        cld                             ; game's unmask that a carry-over
+        pushad                          ; waits for (int08)
+        mov     di,dbase
+        call    pend_check
+        popad
         stc
         retf
 
@@ -602,6 +614,25 @@ int2f:  cmp     ax,0x1605
 .win:   or      byte [cs:wflags],W_FRESH
 .on:    jmp     far [cs:old2f]
 
+; IRQ 0, the timer, under EMM386 (hook_08): the handler before, then, while
+; a carry-over waits for the game's unmask (V_PEND), a read of
+; Audio_Base+Dh, which the chip doesn't decode and EMM386 traps, so that
+; the front looks at the 8237 at ring 0 (emm_bell). A game that unmasks its
+; 16-bit channel after the command and then waits for the count to move,
+; with no access of the card's ports in between, starts there
+int08:  pushf
+        call    far [cs:old08]
+        test    byte [cs:vbits],V_PEND
+        jz      .out
+        push    ax
+        push    dx
+        mov     dx,[cs:base]
+        add     dl,0x0D
+        in      al,dx
+        pop     dx
+        pop     ax
+.out:   iret
+
 ; the first access after Windows: the chip as another program left it, in
 ; whichever mode, so the front's transfers and its DSP's state are over,
 ; the chip gets its own reset, Audio 2 stops, and the 3-D effect goes off
@@ -696,10 +727,12 @@ front:
         jnz     .out
         call    port_in
         mov     [V(result)],al
+        call    pend_check
         popad
         mov     al,[result]
         ret
 .out:   call    port_out
+        call    pend_check
         popad
         ret
 
@@ -891,7 +924,10 @@ halt:
 a1_stop:
         call    pace_stop
         and     byte [V(halves)],~H_ALL & 0xFF
-        test    byte [V(flags)],F_RUN
+        test    byte [V(flags)],F_16    ; a carry-over that waits is over
+        jz      .run
+        and     byte [V(vbits)],~V_PEND & 0xFF
+.run:   test    byte [V(flags)],F_RUN
         jz      a1_flush
         and     byte [V(flags)],~(F_RUN | F_AUTO | F_LAST | F_PAUSE) & 0xFF
         mov     ax,0xB8FE
@@ -910,6 +946,7 @@ a1_flush:
 ; FIFO holds plays out
 a2_stop:
         and     byte [V(halves)],~(H_ALL << H_A2) & 0xFF
+        and     byte [V(vbits)],~V_PEND & 0xFF
         test    byte [V(flags2)],F_RUN
         jz      .ret
         mov     byte [V(flags2)],0
@@ -1574,6 +1611,8 @@ pace:
         jne     .ret
         call    vtrapped
         jnc     .ret
+        test    byte [V(vbits)],V_PEND  ; after the carry-over (pend_check)
+        jnz     .ret
         or      byte [V(vbits)],V_PACE
         mov     ax,0x71EC
         call    mix_and
@@ -1826,9 +1865,12 @@ dac_options:
 ; the game programmed it; a 16-bit one has the game's 16-bit channel
 ; carried over to AL's, Audio 1's or Audio 2's. Where the front traps that
 ; channel, it is carried over when the game programmed it anew or it goes
-; to the other channel, and AL's waits while the game's is masked. Audio
-; 1's start (V_HOLD) holds the channel that plays masked: AL = the channel
-; to unmask once the start settled (settle), FFh for none
+; to the other channel, and AL's waits while the game's is masked. Without
+; the traps, a channel that reads masked in the 8237 hasn't had the game's
+; programming yet, which EMM386 gives it at the unmask: AL's waits masked
+; for it (V_PEND, pend_check). Audio 1's start (V_HOLD) holds the channel
+; that plays masked: AL = the channel to unmask once the start settled
+; (settle), FFh for none
 xfer_dma:
         test    bl,0x10
         jz      .own
@@ -1839,7 +1881,7 @@ xfer_dma:
         mov     [V(mchan)],al
         and     byte [V(vbits)],~V_LIVE & 0xFF
 .same:  call    vtrapped
-        jc      .mirror
+        jc      .free
         test    byte [V(vbits)],V_MASK
         jnz     .masked
         mov     al,[V(vbits)]
@@ -1850,6 +1892,10 @@ xfer_dma:
         jz      .none                   ; the start
         call    ch8_mask
         jmp     short .held
+.free:  call    vmasked
+        jz      .mirror
+        or      byte [V(vbits)],V_PEND
+        jmp     short .masked
 .mirror:
         call    mirror
         test    byte [V(vbits)],V_HOLD
@@ -1919,6 +1965,49 @@ settle:
         call    chip_out
 .out:   pop     dx
         pop     cx
+        ret
+
+; ZF clear if the game's 16-bit channel reads masked in the 8237, where the
+; chipset gives the mask back (DEh bit 0, the cascade, clear, as for hold):
+; under EMM386 the 8237 gets a channel's programming at the game's unmask,
+; and its mask at once (h1.reach5, h1.mask5)
+vmasked:
+        push    cx
+        push    dx
+        mov     dx,0xDE
+        call    chip_in
+        mov     cl,[V(dma16)]
+        and     cl,3
+        test    al,0x01
+        jnz     .no
+        shr     al,cl
+        and     al,0x01
+        jmp     short .out
+.no:    xor     al,al
+.out:   pop     dx
+        pop     cx
+        ret
+
+; a carry-over that waits for the game's unmask (V_PEND), at each trapped
+; access and from the timer (int08): once the channel reads unmasked,
+; EMM386 has given the 8237 the game's programming, which is carried over
+; then from the buffer's start, the channel that plays unmasked and the
+; pace started, as after a command with the channel unmasked; in a pause,
+; after the continue. The flags come back
+pend_check:
+        pushf
+        test    byte [V(vbits)],V_PEND
+        jz      .out
+        mov     al,[V(flags)]
+        or      al,[V(flags2)]
+        test    al,F_PAUSE
+        jnz     .out
+        call    vmasked
+        jnz     .out
+        and     byte [V(vbits)],~(V_PEND | V_LIVE) & 0xFF
+        call    mirror
+        call    pace
+.out:   popf
         ret
 
 ; CF clear if this trap path traps the game's 16-bit channel (the one the
@@ -3469,6 +3558,7 @@ install:
         call    trap_v86                ; QPI, else EMM386
         jc      .notrap
         call    hook_2f                 ; Windows' broadcasts
+        call    hook_08                 ; the timer, under EMM386
         call    umb_commit
         call    trap_dpmi               ; HDPMI32i, and the TSR from there
         mov     dx,[res_msg]            ; else here, in real mode
@@ -3751,12 +3841,13 @@ qpi_install:
         ret
 
 ; the front's ports trapped through EMM386 (int 2Fh 4A15h, 4.46 or later):
-; one dispatch table of Audio_Base+4h to +Fh, where +7h to +9h, +Bh and
-; +Dh pass. EMM386 keeps the table where it is and searches it at every
-; trapped access, through a ring 0 selector of this segment as long as DI
-; says, so the table and its handlers are resident. CF set, having said
-; why, without EMM386's device (EMMXXXX0, or EMMQXXX0 with NOEMS), with an
-; older one, or when it refuses
+; one dispatch table of Audio_Base+4h to +Fh, where +7h to +9h and +Bh
+; pass, and +Dh too, after a look for the game's unmask (emm_bell). EMM386
+; keeps the table where it is and searches it at every trapped access,
+; through a ring 0 selector of this segment as long as DI says, so the
+; table and its handlers are resident. CF set, having said why, without
+; EMM386's device (EMMXXXX0, or EMMQXXX0 with NOEMS), with an older one, or
+; when it refuses
 emm_install:
         mov     dx,emm_device
         call    dev_open
@@ -3797,13 +3888,14 @@ emm_install:
         mov     ds,[res_seg]
         call    emm_call
         pop     ds
-        jnc     .done
+        jnc     .on
         cmp     byte [moved],0          ; refused in upper memory: once more
         je      .refused                ; from where DOS loaded the program
         call    umb_drop
         mov     word [res_msg],msg_emm_umb
         jmp     short .again
-.done:  clc
+.on:    mov     byte [emm_on],1
+        clc
         ret
 .nodev: mov     dx,msg_emm_nodev
         jmp     short .fail
@@ -3855,6 +3947,26 @@ hook_2f:
         int     0x21
         pop     ds
         ret
+
+; int 08h into the resident part where it stays (int08), under EMM386,
+; where a game's 16-bit channel can be masked at the command
+hook_08:
+        cmp     byte [emm_on],0
+        je      .ret
+        push    es
+        mov     ax,0x3508
+        int     0x21
+        mov     [old08],bx
+        mov     [old08+2],es
+        pop     es
+        call    umb_sync_rm
+        push    ds
+        mov     dx,int08
+        mov     ds,[res_seg]
+        mov     ax,0x2508
+        int     0x21
+        pop     ds
+.ret:   ret
 
 ; the PSP's environment freed
 free_environment:
@@ -4229,7 +4341,7 @@ pm_sync:
 trap_ports:     db 0x04, 0x05, 0x06, 0x0A, 0x0C, 0x0E, 0x0F
 trap_handlers:  dw emm_shim, emm_shim, emm_shim, emm_pass    ; +4h to +7h
                 dw emm_pass, emm_pass, emm_shim, emm_pass    ; +8h to +Bh
-                dw emm_shim, emm_pass, emm_shim, emm_shim    ; +Ch to +Fh
+                dw emm_shim, emm_bell, emm_shim, emm_shim    ; +Ch to +Fh
 ; HDPMI32i's ranges of them: the first port, how many, the trap's handle
 hdpmi_ranges:   db 0x04, 3
                 dd 0
@@ -4289,6 +4401,7 @@ hdpmi_name:     db "HDPMI", 0
 low_seg:        dw 0            ; where DOS loaded the program
 res_seg:        dw 0            ; where the resident part stays
 moved:          db 0            ; 1: in a block of upper memory of its own
+emm_on:         db 0            ; 1: EMM386 traps the ports (hook_08)
 res_msg:        dw 0            ; which memory, said at the end
 pm_code:        dw 0            ; the handler's code selector
 rmcs:           times 7 dd 0    ; the real-mode call structure: EDI, ESI,
@@ -4305,7 +4418,7 @@ emm_device:     db "EMMXXXX0", 0
 emm_device2:    db "EMMQXXX0", 0
 blaster_name:   db "BLASTER=", 0
 
-banner:         db "esssb16 1.0: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
+banner:         db "esssb16 1.1: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
 usage:          db "usage: esssb16 [/A220] [/H5|/H6|/H7|/H0] [/20|/21|/23|/2-] [/S] [/F0|/F1]", 13, 10
                 db "       [/O0|/O1] [/3]", 13, 10
                 db "  /A  the card's base, else BLASTER's A (220)", 13, 10

@@ -567,6 +567,9 @@ class TSREmmTest(Checks, unittest.TestCase):
             self.assertEqual(res[k][0], "KNOWN", (k, res[k]))
         self.assertIn("still, ch 1 moved", res["p16.b0h"][1])
         self.assertIn("dma=moving", res["p16.b6h_mono"][1])
+        # the channel unmasked after B6h: the transfer waits for the unmask
+        self.assertEqual(res["p16.unmask_after"][0], "PASS")
+        self.assertIn("dma=moving", res["p16.unmask_after"][1])
         self.assertEqual(res["ctl.count16"][0], "PASS")
         self.assertIn("Audio 2's DMA is 5 (PnP 75h)", res["route.audio2"][1])
         self.assertIn("one at a time", res["dual.play"][1])

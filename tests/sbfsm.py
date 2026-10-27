@@ -40,6 +40,7 @@ H_ON, H_SECOND, H_ONCE, H_A2 = 0x01, 0x02, 0x04, 4
 H_ALL = H_ON | H_SECOND | H_ONCE
 # the game's 16-bit channel
 V_MASK, V_FF, V_NEW, V_LIVE, V_PACE = 0x01, 0x02, 0x04, 0x08, 0x20
+V_PEND = 0x40               # PENDING: the carry-over waits for the unmask
 
 # the operands each DSP command takes, as DSP 4.05's firmware takes them
 OPTABLE = bytes((0x10, 0x09, 0x40, 0x61, 0x55, 0xAA, 0x00, 0x00,
@@ -234,10 +235,13 @@ class Front:
     def port_in(self, port):
         bx = port - self.base
         if 0 <= bx <= 0x0F:
-            return self.s16_in(bx, port)
-        if self.dma_port(port):
-            return self.dma_in(port)
-        return self.chip_in(port)
+            v = self.s16_in(bx, port)
+        elif self.dma_port(port):
+            v = self.dma_in(port)
+        else:
+            v = self.chip_in(port)
+        self.pend_check()
+        return v
 
     def port_out(self, port, v):
         bx = port - self.base
@@ -247,6 +251,15 @@ class Front:
             self.dma_out(port, v)
         else:
             self.chip_out(port, v)
+        self.pend_check()
+
+    def timer(self):
+        """IRQ 0 through esssb16's int08: while a carry-over waits, its
+        read of Audio_Base+Dh, which EMM386 gives the front first
+        (emm_bell), then the chip"""
+        if self.vbits & V_PEND:
+            self.pend_check()
+            self.chip_in(self.port_of(0x0D))
 
     def s16_in(self, bx, port):
         if bx == 0x05:
@@ -352,9 +365,12 @@ class Front:
         self.need, self.answer = 0, []
 
     def a1_stop(self):
-        """Audio 1 IDLE, with its pace: B8h bit 0 off, then FIFO"""
+        """Audio 1 IDLE, with its pace and a 16-bit carry-over that waits:
+        B8h bit 0 off, then FIFO"""
         self.pace_stop()
         self.halves &= ~H_ALL & 0xFF
+        if self.flags & F_16:
+            self.vbits &= ~V_PEND & 0xFF
         if self.flags & F_RUN:
             self.flags &= ~(F_RUN | F_AUTO | F_LAST | F_PAUSE) & 0xFF
             self.reg_and(0xB8, 0xFE)
@@ -367,8 +383,10 @@ class Front:
         self.chip_out(port, 0)
 
     def a2_stop(self):
-        """Audio 2 IDLE: 78h bits 4 and 1 off, its FIFO plays out"""
+        """Audio 2 IDLE, with a carry-over that waits: 78h bits 4 and 1
+        off, its FIFO plays out"""
         self.halves &= ~(H_ALL << H_A2) & 0xFF
+        self.vbits &= ~V_PEND & 0xFF
         if self.flags2 & F_RUN:
             self.flags2 = 0
             self.mix_and(0x78, 0xED)
@@ -669,7 +687,8 @@ class Front:
         transfers, auto-initialized (both.pace), so that the count the game
         reads moves"""
         if self.xbits & (F_16 | 0x08 | F_AUTO) != F_16 | F_AUTO or \
-                self.pace_ch != self.dma16 or self.vtrapped():
+                self.pace_ch != self.dma16 or self.vtrapped() or \
+                self.vbits & V_PEND:
             return
         self.vbits |= V_PACE
         self.mix_and(0x71, 0xEC)
@@ -814,6 +833,25 @@ class Front:
     def vtrapped(self):
         return self.vchan[self.how_io] == self.dma16
 
+    def vmasked(self):
+        """the game's 16-bit channel reads masked in the 8237, where the
+        chipset gives the mask back (DEh bit 0, the cascade, clear): under
+        EMM386 the 8237 gets its programming at the unmask"""
+        de = self.chip_in(0xDE)
+        return not de & 0x01 and bool(de >> (self.dma16 & 3) & 1)
+
+    def pend_check(self):
+        """PENDING at each trapped access and at the timer: once the
+        channel reads unmasked, carried over from the buffer's start, the
+        channel that plays unmasked, then the pace; in a pause, after the
+        continue"""
+        if not self.vbits & V_PEND or \
+                (self.flags | self.flags2) & F_PAUSE or self.vmasked():
+            return
+        self.vbits &= ~(V_PEND | V_LIVE) & 0xFF
+        self.mirror(self.xbits)
+        self.pace()
+
     def xfer_dma(self, ch, bl, go=False):
         """the channel ch plays the transfer: the game's own (8-bit), or
         the game's 16-bit one carried over to it. Audio 1's is held masked
@@ -827,6 +865,10 @@ class Front:
             self.mchan = ch
             self.vbits &= ~V_LIVE & 0xFF
         if self.vtrapped() and self.vbits & V_MASK:
+            self.ch8_set(4)
+            return None
+        if not self.vtrapped() and self.vmasked():
+            self.vbits |= V_PEND
             self.ch8_set(4)
             return None
         if not self.vtrapped() or self.vbits & (V_NEW | V_LIVE) != V_LIVE:
@@ -1245,6 +1287,9 @@ class FSMCard(TSRCard):
             super().port_out(port, v)
         else:
             self.fsm.port_out(port, v)
+
+    def timer(self):
+        self.fsm.timer()
 
     def flags(self):
         return self.fsm.flags

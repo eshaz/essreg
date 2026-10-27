@@ -44,6 +44,7 @@ from sbgame import Card, program_dma, write  # noqa: E402
 from tsremu import Chip, Machine, PMMachine, UMBS  # noqa: E402
 
 _BUILD = {}
+TIMER_US = 54925            # IRQ 0 at the BIOS's 18.2 Hz
 
 # the front's flags: esssb16.asm's F_*, essext.asm's S16_*
 F_ESS, F_EXT, F_AUTO, F_RUN, F_16 = 0x01, 0x02, 0x04, 0x08, 0x10
@@ -160,11 +161,13 @@ class TSRCard(Card):
     QPI callback was there before the program's; the chip's mixer as
     `mixer` has it before the program is installed; `emm386` the keywords
     of EMM386's DMA translation (emm386dma); `umbs` the free upper memory,
-    where the resident part goes"""
+    where the resident part goes. Under EMM386 the timer's interrupt runs
+    through the vector table every TIMER_US, as the BIOS's 18.2 Hz has it,
+    unless `timer` is False"""
 
     def __init__(self, path="qpi", env="BLASTER=A220 I5 D1 H5 P330 T6",
                  tail="", irq=5, dma8=1, dma2=None, old_callback=True,
-                 mixer=None, emm386=None, umbs=UMBS):
+                 mixer=None, emm386=None, umbs=UMBS, timer=True):
         super().__init__()
         self.chip = TSRChip(irq, dma8, dma2)
         for reg, v in (mixer or {}).items():
@@ -174,10 +177,13 @@ class TSRCard(Card):
         self.path = path
         self.pm = None
         self.emm = None
+        self.timer_at = None
         if path == "emm":
             self.m.install(tail=tail, emm386=(4, 95), noems=True)
             self.m.path = "emm"
             self.emm = EMM386DMA(_GameDMA(self.chip), **(emm386 or {}))
+            if timer:
+                self.timer_at = self.chip.clock.us + TIMER_US
         elif path == "pm":
             self.m.install(tail=tail, qpiemu=True, dpmi=True,
                            old_callback=old_callback)
@@ -229,7 +235,18 @@ class TSRCard(Card):
             self.m.out(port, v)
 
     def tick(self, us):
+        if self.timer_at is not None:
+            due = self.timer_at - self.chip.clock.us
+            if due <= 0:
+                self.timer_at += TIMER_US
+                self.timer()
+                due = TIMER_US
+            us = min(us, due)
         return self.chip.advance(us), len(self.chip.irq_edges)
+
+    def timer(self):
+        """IRQ 0 through the vector table, esssb16's int08 first"""
+        self.m.timer()
 
     def record_from(self, source):
         self.chip.source = source

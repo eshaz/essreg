@@ -101,11 +101,12 @@ The front's state has these parts:
   last reset (`ctrl` and `known`), so that a transfer writes only what
   changes.
 * **The 16-bit channel** (`vbits`): its programming as the game wrote it,
-  and five marks: MASKED, the flip-flop of the game's reads and writes, NEW
+  and six marks: MASKED, the flip-flop of the game's reads and writes, NEW
   when the game programmed it since it was carried over, LIVE while the
-  engine's channel holds what was carried over, and PACED while Audio 2
-  paces it. Which backend the front has decides how it sees the channel:
-  TRAPPED or READBACK.
+  engine's channel holds what was carried over, PACED while Audio 2 paces
+  it, and PENDING while a carry-over waits for the game's unmask. Which
+  backend the front has decides how it sees the channel: TRAPPED or
+  READBACK.
 * **The DSP**: the parser (the operands still to come), the read latch and
   the answer that it gives a byte at a time, a byte held while an answer is
   read, the MIDI modes (`S_UART`, `S_MIDI`), D1h's flag (`S_SPKR`), whether
@@ -282,21 +283,38 @@ carries it over. The game's reads of the address and count answer those of
 the engine's channel, in words, the high byte from the read of the low byte.
 
 With READBACK, the front reads the game's channel back at each 16-bit
-command, with the controller's flip-flop cleared before and after, so the
-game has to program the channel before the command. The engine's channel
-auto-initializes, since the chip asks for a block's bytes only. A
-single-cycle block whose channel still holds what was carried over goes on
-from it. The count that the game reads stands still, but where Audio 2's
-channel is the game's 16-bit one (`pace_ch`): there an auto-initialized
-16-bit playback on Audio 1 gets PACE after SETTLE, and is PACED until Audio
-1 stops, the chip's RESET, or the acknowledge of a block that doesn't
-auto-initialize. Audio 2's FIFO holds 64 bytes, a word of the channel each,
-fewer frames than Audio 1's 256 bytes, so the count stays behind Audio 1's
-channel, and a game that mixes up to it writes only what Audio 1 has taken.
-An auto-initialized command on the channel carried over last, which PACE
-moved along its line (the page the same, and the address on as far as the
-count back), takes back the start it had and goes on where Audio 1's channel
-is, unless the channel moved less than 64 words.
+command, with the controller's flip-flop cleared before and after, once it
+reads unmasked (PENDING, below). The engine's channel auto-initializes,
+since the chip asks for a block's bytes only. A single-cycle block whose
+channel still holds what was carried over goes on from it. The count that
+the game reads stands still, but where Audio 2's channel is the game's
+16-bit one (`pace_ch`): there an auto-initialized 16-bit playback on Audio 1
+gets PACE after SETTLE, and is PACED until Audio 1 stops, the chip's RESET,
+or the acknowledge of a block that doesn't auto-initialize. Audio 2's FIFO
+holds 64 bytes, a word of the channel each, fewer frames than Audio 1's 256
+bytes, so the count stays behind Audio 1's channel, and a game that mixes up
+to it writes only what Audio 1 has taken. An auto-initialized command on the
+channel carried over last, which PACE moved along its line (the page the
+same, and the address on as far as the count back), takes back the start it
+had and goes on where Audio 1's channel is, unless the channel moved less
+than 64 words.
+
+Under EMM386 the 8237 gets the game's programming of a channel only at its
+unmask, and its mask at once (`h1.reach5`, `h1.mask5`), so a channel that
+reads masked at the command, where the chipset gives the mask back (DEh,
+with bit 0, the cascade, clear), still holds what it had before. The
+engine's channel then waits masked, PENDING, and PACE with it, as a Sound
+Blaster 16's DSP waits for the masked channel's first byte (`pend_check`).
+At each trapped access, and at each tick of the timer, where the TSR's int
+08h handler (`int08`) reads Audio_Base+Dh, which EMM386 traps and the chip
+doesn't decode, a channel that reads unmasked is carried over from the
+buffer's start, the engine's channel unmasked, then PACE; in a pause, after
+the continue. A stop of the engine ends PENDING. At the tick the check runs
+at interrupt time: it reaches the 8237 and the mixer, with the mixer's index
+put back as the game left it, never the DSP, and it clears the 16-bit
+controller's flip-flop once, at the carry-over. A game whose timer handler
+never calls the one before it, and that reaches no port of the card's after
+its unmask, waits until it does.
 
 ### The mixer
 
@@ -331,12 +349,12 @@ The machine keeps these:
 The fronts run the same machine with different ways to see the game's DMA
 programming and the chip's interrupts:
 
-| Front | Memory manager   | 16-bit channel | Interrupts         |
-|-------|------------------|----------------|--------------------|
-| TSR   | QPI (QEMM, JEMM) | TRAPPED        | the game's handler |
-| TSR   | HDPMI32i         | TRAPPED        | the game's handler |
-| TSR   | EMM386           | READBACK, PACE | the game's handler |
-| VxD   | Windows (VDMAD)  | VDMAD          | the hardware's     |
+| Front | Memory manager   | 16-bit channel          | Interrupts         |
+|-------|------------------|-------------------------|--------------------|
+| TSR   | QPI (QEMM, JEMM) | TRAPPED                 | the game's handler |
+| TSR   | HDPMI32i         | TRAPPED                 | the game's handler |
+| TSR   | EMM386           | READBACK, PENDING, PACE | the game's handler |
+| VxD   | Windows (VDMAD)  | VDMAD                   | the hardware's     |
 
 In a DOS box, VDMAD has the game's channel virtualized for the front, and
 the front's carrying over goes through VDMAD's state of the engine's channel

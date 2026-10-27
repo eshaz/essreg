@@ -155,10 +155,12 @@ UMBS = ((0xC800, 0x07FF),)
 UMBS2 = ((0xB000, 0x07FF), (0xC800, 0x07FF))
 DPMI_PARA = 0x6100          # the DPMI host's resident segment: its logo
 QPI_OFF, OLD_OFF, SENTINEL_OFF, DPMI_OFF, MUX_OFF = 0x00, 0x10, 0x20, 0x30, 0x40
+TIMER_OFF = 0x50
 HDPMI_LOGO = b"HDPMI\x03\x14\x01"     # HDPMI 3.20, 32-bit
 POISON = 0xCC               # INT 3: memory DOS or the host took back
 INT_QPI, INT_OLD, INT_SENTINEL, INT_DPMI, INT_VENDOR = 0xE0, 0xE1, 0xE2, 0xE4, 0xE5
 INT_MUX = 0xE6              # int 2Fh's handler before the program's: the stub
+INT_TIMER = 0xE7            # int 08h's before the program's: the BIOS's
 CF = 0x0001
 IF = 0x0200
 
@@ -318,6 +320,7 @@ class Machine(Cpu):
         self.freed, self.resized, self.allocated = [], [], []
         self.alloc_fail = False
         self.mux_chained = []           # int 2Fh's AX at the handler before
+        self.ticks = 0                  # timer interrupts the BIOS's took
         self.own_traps = False          # its accesses through EMM386's traps
         self.path = "qpi"               # how in() and out() reach the front
         self.load(env)
@@ -350,13 +353,16 @@ class Machine(Cpu):
             self.put((self.load_seg - 1) * 16 + 1,
                      struct.pack("<H", self.load_seg))
         # the stubs: the QPI entry, the callback before ours, the sentinel
-        # the shims return to, int 2Fh's handler before ours, the DPMI entry
+        # the shims return to, int 2Fh's and int 08h's handlers before
+        # ours, the DPMI entry
         s = STUB_PARA * 16
         self.put(s + QPI_OFF, bytes([0xCD, INT_QPI, 0xCB]))
         self.put(s + OLD_OFF, bytes([0xCD, INT_OLD, 0xCB]))
         self.put(s + SENTINEL_OFF, bytes([0xCD, INT_SENTINEL, 0xF4]))
         self.put(s + MUX_OFF, bytes([0xCD, INT_MUX, 0xCF]))
         self.put(0x2F * 4, struct.pack("<HH", MUX_OFF, STUB_PARA))
+        self.put(s + TIMER_OFF, bytes([0xCD, INT_TIMER, 0xCF]))
+        self.put(0x08 * 4, struct.pack("<HH", TIMER_OFF, STUB_PARA))
         self.put(DPMI_PARA * 16 + DPMI_OFF, bytes([0xCD, INT_DPMI, 0xCB]))
 
     def mcb(self, para, kind, owner, size, name=b""):
@@ -483,6 +489,8 @@ class Machine(Cpu):
             self.stop("sentinel")
         elif intno == INT_MUX:
             self.mux_chained.append(self.r16("eax"))
+        elif intno == INT_TIMER:
+            self.ticks += 1
         elif intno == INT_DPMI:
             ss, sp = self.r16("ss"), self.r16("esp")
             ip, cs = struct.unpack("<HH", self.mem(ss * 16 + sp, 4))
@@ -812,6 +820,33 @@ class Machine(Cpu):
             raise EmuError("int 2Fh left the stack at %04x:%04x" % (
                 self.r16("ss"), self.r16("esp")))
         return self.r16("eax")
+
+    def timer(self):
+        """IRQ 0 in V86 mode, through the vector table as the PIC gives it,
+        interrupts off, down to the BIOS's handler; the program's own
+        accesses of the ports EMM386 traps for it come back to it"""
+        self._frame()
+        ip, cs = struct.unpack("<HH", self.mem(0x08 * 4, 4))
+        sp = self.r16("esp") - 6
+        frame = struct.pack("<HHH", SENTINEL_OFF, STUB_PARA, IF | 2)
+        self.put(GAME_SS * 16 + sp, frame)
+        self.w("esp", sp)
+        for reg in ("eax", "ebx", "ecx", "edx", "esi", "edi", "ebp"):
+            self.w(reg, 0x5A5A5A5A)
+        self.w("eflags", 2)
+        self.w16("cs", cs)
+        self.w16("eip", ip)
+        own, self.own_traps = self.own_traps, self.path != "qpi"
+        try:
+            self.run(cs * 16 + ip)
+        finally:
+            self.own_traps = own
+        if (self.r16("ss"), self.r16("esp")) != (GAME_SS, GAME_SP - 4):
+            raise EmuError("int 08h left the stack at %04x:%04x" % (
+                self.r16("ss"), self.r16("esp")))
+        for reg in ("eax", "ebx", "ecx", "edx", "esi", "edi", "ebp"):
+            if self.r(reg) != 0x5A5A5A5A:
+                raise EmuError("int 08h changed %s" % reg)
 
     def qpi_io(self, port, value=None):
         """a QPI callback: AL read, or the byte written; QPIEMU's CL"""

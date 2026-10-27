@@ -51,9 +51,7 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   byte-identical rebuilds, with ESS's ES1869F driver sets for Windows 3.1,
   NT 4.0, Windows 95 and OS/2 in `driver/es1869f/`, and `build/` the
   committed binaries, with `ESSCHECK.BAT`, which runs the checks of a
-  machine in one go (essprobe, esssb16, sb16test and the games), and
-  `DREAMS.BAT`, which plays Pinball Dreams' SETSOUND in one setup after
-  another, a restart between them, to find what stops the machine.
+  machine in one go (essprobe, esssb16, sb16test and the games).
   `third_party/hdpmi32i/` holds `HDPMI32i.EXE` as HX released it, for
   esssb16's protected-mode games, with its origin and hashes in its README.
 * `src/esssb16.asm` is `esssb16.com`, the DOS TSR that answers games as a
@@ -234,16 +232,19 @@ tools/wineshot.sh run ess3d.exe /sim tray
   switch, and the handler gets selectors of the block. Its int 2Fh hook
   (`int2f`) only notes Windows' start and end, and the front takes the chip
   back at its next access (`afresh`): outside a handler, the TSR's own
-  accesses of its ports would come back to it. The resident part has no
-  fixed limit, and `tools/build_esssb16.py` reports its size; the file needs
-  no LH, and `tests/test_esssb16.py` checks that `build/esssb16.com` is
-  current.
-* **ESSCHECK.BAT and DREAMS.BAT** run on MS-DOS 7's COMMAND.COM: CR LF, no
-  command of Windows NT's, labels that differ in their first eight
-  characters, and the programs' own options and case names.
-  `tests/test_esscheck.py` checks that, and their way through each case on a
-  model of COMMAND.COM, so a change to an option or a case they use goes
-  into them too.
+  accesses of its ports would come back to it. Under EMM386 a 16-bit channel
+  that reads masked in the 8237 at the command waits (`V_PEND`): its int 08h
+  hook (`int08`) only reads Audio_Base+Dh while one waits, which EMM386
+  traps (`emm_bell`), and the front carries the channel over once it reads
+  unmasked (`pend_check`), there and after every trapped access. The
+  resident part has no fixed limit, and `tools/build_esssb16.py` reports its
+  size; the file needs no LH, and `tests/test_esssb16.py` checks that
+  `build/esssb16.com` is current.
+* **ESSCHECK.BAT** runs on MS-DOS 7's COMMAND.COM: CR LF, no command of
+  Windows NT's, labels that differ in their first eight characters, and the
+  programs' own options and case names. `tests/test_esscheck.py` checks
+  that, and its way through each case on a model of COMMAND.COM, so a change
+  to an option or a case it uses goes into it too.
 * **sb16test.** Its checks (`src/sb16t.c`) reach the card only through
   `struct sbt_hal`: `src/sb16test.c` on the machine, and
   `tests/test_sb16test.py` on the model and on both fronts. The handler's

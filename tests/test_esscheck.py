@@ -1,13 +1,13 @@
 # (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 #
 # Licensed under GPL Version 3.0
-"""build/ESSCHECK.BAT, the checks of a machine in one run, and
-build/DREAMS.BAT, Pinball Dreams' SETSOUND in one setup after another,
-read the way MS-DOS 7's COMMAND.COM reads them: CR LF lines it can take, no
-command of Windows NT's, every label they jump to there once in its first
-eight characters and none the start of another, the programs they run in
-build/ and the options those take, the essprobe cases named, and prompts
-and lines that COMMAND.COM and CHOICE pass on as they are written.
+"""build/ESSCHECK.BAT, the checks of a machine in one run, read the way
+MS-DOS 7's COMMAND.COM reads it: CR LF lines it can take, no command of
+Windows NT's, every label it jumps to there once in its first eight
+characters and none the start of another, the programs it runs in build/
+and the options those take, the essprobe cases named, prompts and lines
+that COMMAND.COM and CHOICE pass on as they are written, and its way
+through each case on a model of COMMAND.COM.
 
 usage: python3 -m unittest tests.test_esscheck
 """
@@ -18,7 +18,6 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BAT = os.path.join(ROOT, "build", "ESSCHECK.BAT")
-DREAMS = os.path.join(ROOT, "build", "DREAMS.BAT")
 NT_ONLY = (r"\bSETLOCAL\b", r"\bENDLOCAL\b", r"\bPUSHD\b", r"\bPOPD\b",
            r"\bCALL\s+:", r"%~", r"%CD%", r"\bIF\s+/I\b", r"\bIF\s+DEFINED\b",
            r"\bFOR\s+/[FDRL]\b", r"\bEXIT\s+/B\b", r"\bGOTO\s+:EOF\b",
@@ -156,18 +155,13 @@ class BatchTest(BatchChecks, unittest.TestCase):
             self.assertIn(" /N ", c)
 
 
-class DreamsBatchTest(BatchChecks, unittest.TestCase):
-    bat = DREAMS
-    programs = {"ESSSB16", "HDPMI32I"}
-
-
 class Stopped(Exception):
     """a program that stopped the machine"""
 
 
 class Command:
-    """MS-DOS 7's COMMAND.COM on a batch file, as far as ESSCHECK.BAT and
-    DREAMS.BAT go: variables and arguments, IF with strings, EXIST,
+    """MS-DOS 7's COMMAND.COM on a batch file, as far as ESSCHECK.BAT
+    goes: variables and arguments, IF with strings, EXIST,
     ERRORLEVEL and NOT, GOTO to the first label of its first eight
     characters, SET, CD, C:, CALL, FIND in the log, and the programs, whose
     exit codes and CHOICE's keys come from the scenario; a program whose
@@ -317,7 +311,8 @@ class Command:
 
 ESS = ("C:\\ESS\\ESSSB16.COM", "C:\\ESS\\HDPMI32I.EXE",
        "C:\\ESS\\RESULTS\\NUL", "C:\\CONFIG.SYS", "C:\\AUTOEXEC.BAT")
-GAMES = ("C:\\21STCENT\\PWORLD\\SETSND.EXE", "C:\\DREAMS\\SETSOUND.EXE")
+GAMES = ("C:\\21STCENT\\PWORLD\\SETSND.EXE", "C:\\DREAMS\\PD.EXE",
+         "C:\\DREAMS\\SOUND.CFG", "C:\\21STCENT\\ABSOLUTE\\ABS.EXE")
 
 
 class FlowTest(unittest.TestCase):
@@ -325,44 +320,54 @@ class FlowTest(unittest.TestCase):
 
     def test_everything(self):
         """the probe recorded, both loads, sb16test with BLASTER's DMA and
-        on 5, the games with DMA none and then 5, and SETSOUND with none;
-        the answers logged"""
-        c = Command([], ESS + GAMES, {"ESSSB16": [0] + [5] * 8, "PIPE": 0},
-                    "RYYYNYY").run()
+        on 5, then the games on 5: Pinball World's SETSND and the game,
+        Pinball Dreams, Absolute Pinball's SETUP and the game; the answers
+        logged"""
+        c = Command([], ESS + GAMES, {"ESSSB16": [0] + [5] * 7},
+                    "RYYYNY").run()
         self.assertEqual(c.ran, [
             "CHOICE R", "ESSPROBE /R /N /C:stream", "HDPMI32I -r -x",
             "ESSSB16", "SB16TEST /A /Q", "ESSSB16 /H5",
-            "SB16TEST /A /Q /H:5",
-            "ESSSB16 /H0", "SETSND", "ESSSB16", "CHOICE Y", "PWORLD",
-            "ESSSB16", "CHOICE Y",
-            "ESSSB16 /H5", "SETSND", "ESSSB16", "CHOICE Y", "PWORLD",
-            "ESSSB16", "CHOICE N",
-            "ESSSB16 /H0", "CHOICE Y", "PIPE", "SMARTDRV /C", "SETSOUND",
-            "CHOICE Y"])
-        self.assertEqual(c.log[-7:], [
-            "SETSND tune with DMA none: yes", "Pinball World with DMA none: yes",
-            "SETSND tune with DMA 5: yes", "Pinball World with DMA 5: no",
-            "setsound: started with DMA none", "SETSOUND with DMA none: yes",
-            "done"])
+            "SB16TEST /A /Q /H:5", "ESSSB16 /H5",
+            "SETSND", "ESSSB16", "CHOICE Y", "PWORLD", "ESSSB16", "CHOICE Y",
+            "PD", "ESSSB16", "CHOICE Y",
+            "SETUP", "ESSSB16", "CHOICE N", "ABS", "ESSSB16", "CHOICE Y"])
+        self.assertEqual(c.log[-6:], [
+            "SETSND tune with DMA 5: yes", "Pinball World with DMA 5: yes",
+            "Pinball Dreams with DMA 5: yes",
+            "Absolute Pinball's test sound with DMA 5: no",
+            "Absolute Pinball with DMA 5: yes", "done"])
         self.assertIn("essprobe: STREAM.TXT", c.log)
         self.assertIn("sb16test on DMA 5: SB16H5.TXT", c.log)
         self.assertEqual(c.env["PW"], "C:\\21STCENT\\PWORLD")
+        self.assertEqual(c.env["PD"], "C:\\DREAMS")
+        self.assertEqual(c.env["AP"], "C:\\21STCENT\\ABSOLUTE")
         self.assertEqual(c.cwd, "C:\\ESS")
 
     def test_run_bat(self):
         """a game folder with RUN.BAT, which starts the game from there"""
         c = Command(["C:\\PW"], ESS + ("C:\\PW\\RUN.BAT",),
-                    {"ESSSB16": [0] + [5] * 7}, "SYYYY").run()
+                    {"ESSSB16": [0] + [5] * 4}, "SYY").run()
         self.assertIn("RUN", c.ran)
         self.assertNotIn("PWORLD", c.ran)
-        self.assertEqual(c.ran.count("RUN"), 2)
+        self.assertEqual(c.ran.count("RUN"), 1)
+        self.assertEqual(c.log[-1], "done")
+
+    def test_no_sound_cfg(self):
+        """Pinball Dreams without SOUND.CFG: left out, as its SETSOUND
+        can't run under EMM386 with much memory"""
+        c = Command(["", "C:\\PD"], ESS + ("C:\\PD\\PD.EXE",),
+                    {"ESSSB16": [0] + [5] * 2}, "S").run()
+        self.assertNotIn("PD", c.ran)
+        self.assertIn("Pinball Dreams: no SOUND.CFG", c.log)
+        self.assertEqual(c.log[-1], "done")
 
     def test_esssb16_in_already(self):
         """no probe, then the copy in memory checked and on to the rest"""
         c = Command([], ESS, {"ESSPROBE": 4, "ESSSB16": 5}, "S").run()
         self.assertEqual(c.ran, ["CHOICE S", "ESSPROBE /N /C:stream",
                                  "ESSSB16", "SB16TEST /A /Q", "ESSSB16 /H5",
-                                 "SB16TEST /A /Q /H:5"])
+                                 "SB16TEST /A /Q /H:5", "ESSSB16 /H5"])
         self.assertIn("essprobe: skipped, esssb16 in already", c.log)
         self.assertEqual(c.log[-1], "done")
 
@@ -401,7 +406,7 @@ class FlowTest(unittest.TestCase):
         c = Command([], there, {"ESSSB16": 0}, "S").run()
         self.assertEqual(c.ran, ["CHOICE S", "HDPMI32I -r -x", "ESSSB16",
                                  "SB16TEST /A /Q", "ESSSB16 /H5",
-                                 "SB16TEST /A /Q /H:5"])
+                                 "SB16TEST /A /Q /H:5", "ESSSB16 /H5"])
         c = Command([], there, {}, "RS").run()
         self.assertEqual(c.ran[:3], ["CHOICE R", "CHOICE S",
                                      "ESSPROBE /N /C:stream"])
@@ -411,69 +416,3 @@ class FlowTest(unittest.TestCase):
         c = Command([], ()).run()
         self.assertEqual(c.ran, [])
         self.assertIn("The programs aren't in C:\\ESS", c.out[0])
-
-
-DREAMS_GAME = ("C:\\21STCENT\\DREAMS\\SETSOUND.EXE",)
-HEAD = "dreams 1: SETSOUND in C:\\21STCENT\\DREAMS"
-
-
-class DreamsFlowTest(unittest.TestCase):
-    """DREAMS.BAT's way through the setups, one run after each restart"""
-
-    def run_(self, log=(), codes=None, keys=""):
-        codes = dict({"PIPE": 0}, **(codes or {}))
-        return Command([], ESS + DREAMS_GAME, codes, keys, bat=DREAMS,
-                       log=log).run()
-
-    def test_one_after_another(self):
-        """nothing loaded, then HDPMI32i in the same run; after restarts,
-        esssb16 alone, then both, which stops the machine"""
-        c = self.run_(keys="YN")
-        self.assertEqual(c.ran, ["PIPE", "SMARTDRV /C", "SETSOUND",
-                                 "CHOICE Y", "HDPMI32I -r -x", "PIPE",
-                                 "SMARTDRV /C", "SETSOUND", "CHOICE N"])
-        self.assertEqual(c.log, [
-            HEAD, "setup 1, nothing loaded: started",
-            "setup 1, nothing loaded: back, it sounded right",
-            "setup 2, HDPMI32i: started",
-            "setup 2, HDPMI32i: back, it sounded wrong"])
-        self.assertIn("Restart the machine, then run DREAMS again for the "
-                      "next setup.", c.out)
-        c = self.run_(c.log, keys="Y")
-        self.assertEqual(c.ran, ["ESSSB16", "PIPE", "SMARTDRV /C",
-                                 "SETSOUND", "CHOICE Y"])
-        self.assertEqual(c.log[-2:], [
-            "setup 3, esssb16 alone: started",
-            "setup 3, esssb16 alone: back, it sounded right"])
-        c = self.run_(c.log, {"SETSOUND": "stop"})
-        self.assertTrue(c.stopped)
-        self.assertEqual(c.ran, ["HDPMI32I -r -x", "ESSSB16", "PIPE",
-                                 "SMARTDRV /C", "SETSOUND"])
-        self.assertEqual(c.log[-1], "setup 4, HDPMI32i and esssb16: started")
-        c = self.run_(c.log)
-        self.assertEqual(c.ran, [])
-        self.assertIn("All four setups were tried:", c.out)
-        self.assertEqual(c.out[-1], "Done: send C:\\ESS\\RESULTS\\DREAMS.TXT "
-                         "back.")
-
-    def test_stopped_first(self):
-        """the setup with nothing loaded stops the machine: the next run
-        goes on with HDPMI32i"""
-        c = self.run_(codes={"SETSOUND": "stop"})
-        self.assertTrue(c.stopped)
-        self.assertEqual(c.log, [HEAD, "setup 1, nothing loaded: started"])
-        c = self.run_(c.log, keys="Y")
-        self.assertEqual(c.ran[0], "HDPMI32I -r -x")
-        self.assertEqual(c.log[-1], "setup 2, HDPMI32i: back, it sounded "
-                         "right")
-
-    def test_not_there(self):
-        """Pinball Dreams elsewhere: it says so and runs nothing"""
-        c = Command([], ESS, bat=DREAMS).run()
-        self.assertEqual(c.ran, [])
-        self.assertIn("Pinball Dreams isn't in its usual folders: DREAMS "
-                      "folder, to play it.", c.out)
-
-
-if __name__ == "__main__":
-    unittest.main()

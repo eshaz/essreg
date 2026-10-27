@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 from test_vxdext import HAVE_UNICORN, have_nasm  # noqa: E402
 from sb16 import tc_to_v  # noqa: E402
 from sbgame import (read_all, mixer, program_dma, write,  # noqa: E402
-                    dma_count, reset)
+                    dma_count, reset, unmask_dma)
 
 import build_esssb16  # noqa: E402
 
@@ -34,7 +34,7 @@ if HAVE_UNICORN:
     from tsremu import (Machine, PMMachine, Chip, DeadChip,  # noqa: E402
                         PSP_PARA, ENV_PARA, STUB_PARA, OLD_OFF, STUB32,
                         VENDOR_OFF, SEL_CODE16, SEL_DATA, SEL_CODE32, POISON,
-                        UMBS, UMBS2, HOST_PARA, MUX_OFF)
+                        UMBS, UMBS2, HOST_PARA, MUX_OFF, TIMER_OFF)
     from sbfronts import TSRCard, play16  # noqa: E402
 
 E_USAGE, E_NOCARD, E_NOTRAP, E_WINDOWS, E_LOADED = 1, 2, 3, 4, 5
@@ -46,6 +46,7 @@ DMA5_PORTS = {0xC4, 0xC6, 0x8B, 0xD4, 0xD6, 0xD8, 0xDA, 0xDC, 0xDE}
 # from memory (playback) or into it (recording)
 DEMAND, SINGLE, AUTO, PLAY, RECORD = 0x00, 0x40, 0x10, 0x08, 0x04
 V_PACE = 0x20           # vbits: Audio 2 paces the game's 16-bit channel
+V_PEND = 0x40           # and a carry-over waits for the game's unmask
 _BUILD = {}
 
 
@@ -235,6 +236,9 @@ class InstallTest(unittest.TestCase):
                          struct.pack("<HH", m.sym("int2f"), m.seg))
         self.assertEqual(m.mem(m.addr("old2f"), 4),
                          struct.pack("<HH", MUX_OFF, STUB_PARA))
+        # the timer stays the BIOS's: QPI traps the DMA ports
+        self.assertEqual(m.mem(0x08 * 4, 4),
+                         struct.pack("<HH", TIMER_OFF, STUB_PARA))
         # the card is read, not set up: its channels and mixer stay
         self.assertEqual(m.chip.pnp[(1, 0x75)], 4)
         self.assertEqual((m.chip.mixer[0x71], m.chip.mixer[0x7C]), (0, 0))
@@ -301,7 +305,14 @@ class InstallTest(unittest.TestCase):
                          (BASE + 4, BASE + 0xF, 12))
         self.assertEqual(call["table"],
                          [(BASE + o, shim if o in (4, 5, 6, 0xA, 0xC, 0xE, 0xF)
-                           else skip) for o in range(4, 0x10)])
+                           else m.sym("emm_bell") if o == 0xD else skip)
+                          for o in range(4, 0x10)])
+        # the timer through the resident part, for a carry-over that waits
+        # for the game's unmask (int08)
+        self.assertEqual(m.mem(0x08 * 4, 4),
+                         struct.pack("<HH", m.sym("int08"), m.seg))
+        self.assertEqual(m.mem(m.addr("old08"), 4),
+                         struct.pack("<HH", TIMER_OFF, STUB_PARA))
         # EMM386 searches the table where it is: in the resident part, in
         # the size its selectors get, in upper memory
         self.assertEqual((call["ds"], call["si"]),
@@ -1304,6 +1315,90 @@ class EMM386PaceTest(unittest.TestCase):
             play16(c)
             self.assertFalse(self.paced(c))
             self.assertEqual(c.chip.violations, [])
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class EMM386PendingTest(unittest.TestCase):
+    """under EMM386 a 16-bit channel that reads masked in the 8237 at the
+    command hasn't had the game's programming yet, which EMM386 gives it at
+    the unmask: Audio 1's channel waits masked, and the pace with it, until
+    a trapped access or the timer's tick (int08) finds the channel
+    unmasked, and the game's buffer is carried over from its start then"""
+
+    def setUp(self):
+        self.c = card("emm", dma2=5)
+        data = struct.pack("<hh", 0x1234, 0x1234) * 1024
+        self.c.poke(0x40000, data)
+        program_dma(self.c, 5, 0x40000, len(data), unmask=False)
+        write(self.c, 0x41, 0xAC, 0x44, 0xB6, 0x30, 0xFF, 0x07)
+
+    def pending(self):
+        return bool(self.c.m.data8("vbits") & V_PEND)
+
+    def bells(self):
+        return sum(1 for e in self.c.chip.log if e[:2] == ("in", BASE + 0xD))
+
+    def test_waits(self):
+        """masked at B6h: Audio 1's channel masked, no pace, nothing played,
+        and a read of +Dh at each tick"""
+        c = self.c
+        self.assertTrue(self.pending())
+        self.assertTrue(c.chip.dmac.ch[1].masked)
+        self.assertEqual(c.chip.mixer[0x78], 0x00)
+        ticks = c.m.ticks
+        c.wait(120000)
+        self.assertEqual(c.m.ticks - ticks, 2)
+        self.assertEqual(self.bells(), 2)
+        self.assertEqual(c.dac(16), [])
+        self.assertTrue(self.pending())
+
+    def test_timer(self):
+        """the unmask, then the timer's tick: the game's buffer from its
+        start, and the pace; no read of +Dh after"""
+        c = self.c
+        unmask_dma(c, 5)
+        c.wait(60000)
+        self.assertFalse(self.pending())
+        self.assertTrue(c.m.data8("vbits") & V_PACE)
+        self.assertFalse(c.chip.dmac.ch[1].masked)
+        bells = self.bells()
+        c.wait(60000)
+        self.assertEqual(self.bells(), bells)
+        got = c.dac(16)
+        self.assertGreater(len(got), 1000)
+        self.assertEqual(set(got), {(0x1234, 0x1234)})
+        self.assertEqual(c.chip.violations, [])
+        self.assertEqual(c.chip.dmac.bad, [])
+
+    def test_access(self):
+        """the unmask, then an access of the card's ports: at once"""
+        c = self.c
+        unmask_dma(c, 5)
+        c.inp(BASE + 0x0E)
+        self.assertFalse(self.pending())
+        self.assertFalse(c.chip.dmac.ch[1].masked)
+
+    def test_reset(self):
+        """a reset before the unmask ends it: nothing starts after"""
+        c = self.c
+        reset(c)
+        self.assertFalse(self.pending())
+        unmask_dma(c, 5)
+        c.wait(60000)
+        self.assertEqual(c.dac(16), [])
+        self.assertEqual(c.chip.mixer[0x78], 0x00)
+
+    def test_pause(self):
+        """D5h before the unmask: it waits for the continue"""
+        c = self.c
+        write(c, 0xD5)
+        unmask_dma(c, 5)
+        c.wait(60000)
+        self.assertTrue(self.pending())
+        write(c, 0xD6)
+        self.assertFalse(self.pending())
+        c.wait(20000)
+        self.assertGreater(len(c.dac(16)), 500)
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")

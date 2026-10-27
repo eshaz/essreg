@@ -661,6 +661,146 @@ def dsmi(card):
     return out
 
 
+# --- Absolute Pinball's drivers (SETUP.EXE and ABS.EXE) -----------------------
+
+ABS_ACK = 0x0F              # their handlers acknowledge at +Fh, then EOI
+
+
+def abs_ack(card):
+    card.blocks += 1
+    card.inp(BASE + ABS_ACK)
+
+
+def abs_reset(card, answer=True):
+    """their reset: 1, four reads of the reset port, 0, then 2xE bit 7 and
+    one read, which has to be AAh"""
+    card.out(BASE + 6, 1)
+    for _ in range(4):
+        card.inp(BASE + 6)
+    card.out(BASE + 6, 0)
+    if not answer:
+        return None
+    for _ in range(0x10000):
+        if card.inp(BASE + 0x0E) & 0x80:
+            break
+    return card.inp(BASE + 0x0A) == 0xAA
+
+
+def abs_start(card, addr, size, ff):
+    """channel 5 for size bytes at addr, unmasked before the DSP's 41h,
+    B6h 20h (16-bit stereo, unsigned) for the whole buffer, and a stray
+    00h; ff is the byte they write to the flip-flop"""
+    n = size // 2 - 1
+    write(card, 0xD1)
+    card.out(0xD4, 0x05)
+    card.out(0xD8, ff)
+    card.out(0xD6, 0x59)
+    card.out(0x8B, addr >> 16)
+    card.out(0xC4, (addr >> 1) & 0xFF)
+    card.out(0xC4, (addr >> 9) & 0xFF)
+    card.out(0xC6, n & 0xFF)
+    card.out(0xC6, n >> 8)
+    card.out(0xD4, 0x01)
+    write(card, 0x41, 0xAC, 0x44, 0xB6, 0x20, n & 0xFF, n >> 8, 0x00)
+
+
+def abs_pair(card):
+    """the count, low byte and high byte, without the flip-flop cleared"""
+    return card.inp(0xC6) | card.inp(0xC6) << 8
+
+
+def abs_chunk_order(card):
+    """the steps back of the 16-bit DAC's left samples"""
+    got = [f[0] for f in card.dac(16)]
+    return sum(1 for a, b in zip(got, got[1:]) if b < a)
+
+
+@scene
+def abs_setup(card):
+    """Absolute Pinball's SETUP.EXE, its test sound with the Sound Blaster
+    16 of its CFG (DMA 5): the reset, D1h, channel 5 for a buffer of three
+    chunks of 440 frames in DOS memory, filled with 80h, then 41h, B6h 20h
+    for the whole buffer and 00h. A chunk takes 220 samples of 8-bit
+    sound, each twice, its byte + 80h in the high bytes and 80h in the low
+    ones, once the position is out of it: the count read in pairs until
+    two agree. A count that stands still holds it there for good (hung).
+    Its handler acknowledges at +Fh; at the end the reset, without AAh
+    read. Each chunk here is one sample, a step up from the last. SETUP's
+    buffer was at 50000h, where the emulator keeps the stack of a trapped
+    access, so it is at 80000h here"""
+    prepare(card)
+    card.isr = abs_ack
+    addr, chunk, n = 0x80000, 1760, 3
+    card.poke(addr, b"\x80" * (n * chunk))
+    out = {"reset": abs_reset(card)}
+    abs_start(card, addr, n * chunk, 0x00)
+    w, out["hung"] = addr, False
+    for k in range(24):
+        for _ in range(2000):
+            cur, prev = abs_pair(card) + 1, None
+            for _ in range(100):
+                if prev == cur:
+                    break
+                prev, cur = cur, abs_pair(card) + 1
+            pos = addr + n * chunk - 2 * prev
+            if w > pos or pos - chunk > w:
+                break
+            card.wait(100)
+        else:
+            out["hung"] = True
+            break
+        card.poke(w, bytes((0x80, k + 0x81)) * (chunk // 2))
+        w = addr if w + chunk == addr + n * chunk else w + chunk
+    abs_reset(card, answer=False)
+    out["back"] = abs_chunk_order(card)
+    return out
+
+
+@scene
+def abs_game(card):
+    """Absolute Pinball's ABS.EXE (PMODE), its sound with the Sound
+    Blaster 16 of its CFG (DMA 5): the reset, D1h, channel 5 for a buffer
+    of 14 chunks of 220 frames in its image, filled with 8000h, then 41h,
+    B6h 20h for the whole buffer and 00h. Its main loop asks twice every
+    2.5 ms for a chunk, mixed at the write position when the position from
+    the count is out of it: two pairs of reads, the second taken. A pair
+    torn by a DMA cycle between its two bytes, which the game takes as it
+    comes, and which a Sound Blaster 16 gives too now and then, has it
+    write a chunk that still plays: the pairs are read again here while
+    they are more than 40h apart, so that the scene doesn't depend on
+    where a DMA cycle falls. Its handler acknowledges at +Fh; at the end
+    the reset. The frames count up, as mix16's do; runaway when the game
+    mixed more than the DAC played and two buffers"""
+    prepare(card)
+    card.isr = abs_ack
+    addr, chunk, n = 0x44000, 880, 14
+    end = addr + n * chunk
+    card.poke(addr, b"\x00\x80" * (n * chunk // 2))
+    out = {"reset": abs_reset(card)}
+    abs_start(card, addr, n * chunk, 0x05)
+    w = addr
+    mixed = 0
+    for _ in range(120):
+        card.wait(2500)
+        for _ in range(2):
+            first, second = abs_pair(card), abs_pair(card)
+            while (first - second) & 0xFFFF > 0x40:
+                first, second = second, abs_pair(card)
+            pos = end - ((second + 1) * 2 & 0xFFFF)
+            if not (w >= pos or w + chunk < pos):
+                continue
+            card.poke(w, b"".join(struct.pack("<HH", f | 0x8000, f | 0x8000)
+                                  for f in range(mixed & 0x7FFF,
+                                                 (mixed & 0x7FFF) + chunk // 4)))
+            mixed += chunk // 4
+            w = addr if w + chunk == end else w + chunk
+    abs_reset(card)
+    played = len(card.dac(16))
+    out["back"] = abs_chunk_order(card)
+    out["runaway"] = mixed > played + 2 * n * chunk // 4
+    return out
+
+
 # --- 8-bit playback -----------------------------------------------------------
 
 def _bytes(n, start=0x10):

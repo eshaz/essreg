@@ -3,15 +3,18 @@ REM ESSCHECK.BAT: the checks of esssb16 and of the chip in one run, with
 REM the games after them. essprobe plays a game's DMA 5 on the chip as
 REM esssb16 does, before esssb16 is in, HDPMI32i and esssb16 load,
 REM sb16test checks esssb16 with the game's 16-bit DMA as BLASTER has it
-REM and on 5, and the games play with it on none and then on 5, which
-REM esssb16 switches without a restart. Everything goes to RESULTS, to
-REM send back with the recording of the probe's sounds, if one was made.
-REM After each game, esssb16 run again logs the buffer that it last carried
-REM over from the game's 16-bit DMA, if any.
+REM and on 5, and the games play with it on 5, which esssb16 switches
+REM without a restart: Pinball World, Pinball Dreams, whose driver unmasks
+REM its DMA after the command, and Absolute Pinball, a protected-mode game,
+REM through HDPMI32i. Everything goes to RESULTS, to send back with the
+REM recording of the probe's sounds, if one was made. After each game,
+REM esssb16 run again logs the buffer that it last carried over from the
+REM game's 16-bit DMA, if any.
 REM
 REM Run it at the DOS prompt, without Windows, from the folder of the
 REM programs, C:\ESS unless ESSDIR names another, all on drive C:
 REM   ESSCHECK [Pinball World's folder] [Pinball Dreams' folder]
+REM            [Absolute Pinball's folder]
 REM Without them, the usual folders are looked in.
 REM
 REM (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
@@ -30,14 +33,19 @@ IF NOT EXIST %R%\NUL MD %R%
 SET L=%R%\ESSCHECK.TXT
 SET PW=%1
 SET PD=%2
+SET AP=%3
 IF "%PW%"=="" IF EXIST C:\21STCENT\PWORLD\SETSND.EXE SET PW=C:\21STCENT\PWORLD
 IF "%PW%"=="" IF EXIST C:\PWORLD\SETSND.EXE SET PW=C:\PWORLD
 IF "%PW%"=="" IF EXIST C:\GAMES\PWORLD\SETSND.EXE SET PW=C:\GAMES\PWORLD
-IF "%PD%"=="" IF EXIST C:\21STCENT\DREAMS\SETSOUND.EXE SET PD=C:\21STCENT\DREAMS
-IF "%PD%"=="" IF EXIST C:\DREAMS\SETSOUND.EXE SET PD=C:\DREAMS
-IF "%PD%"=="" IF EXIST C:\GAMES\DREAMS\SETSOUND.EXE SET PD=C:\GAMES\DREAMS
+IF "%PD%"=="" IF EXIST C:\21STCENT\DREAMS\PD.EXE SET PD=C:\21STCENT\DREAMS
+IF "%PD%"=="" IF EXIST C:\DREAMS\PD.EXE SET PD=C:\DREAMS
+IF "%PD%"=="" IF EXIST C:\GAMES\DREAMS\PD.EXE SET PD=C:\GAMES\DREAMS
+IF "%AP%"=="" IF EXIST C:\21STCENT\ABSOLUTE\ABS.EXE SET AP=C:\21STCENT\ABSOLUTE
+IF "%AP%"=="" IF EXIST C:\ABSOLUTE\ABS.EXE SET AP=C:\ABSOLUTE
+IF "%AP%"=="" IF EXIST C:\GAMES\ABSOLUTE\ABS.EXE SET AP=C:\GAMES\ABSOLUTE
 
-ECHO esscheck 4: Pinball World in %PW%, Pinball Dreams in %PD% >> %L%
+ECHO esscheck 5: Pinball World in %PW%, Pinball Dreams in %PD% >> %L%
+ECHO esscheck 5: Absolute Pinball in %AP% >> %L%
 ECHO esscheck: the checks of esssb16 and the chip, saved in %R%
 VER >> %L%
 SET > %R%\SET.TXT
@@ -102,66 +110,82 @@ ECHO sb16test: SB16TEST.TXT >> %L%
 ECHO sb16test on DMA 5: SB16H5.TXT >> %L%
 
 ECHO.
-ECHO 4. The games: each with the game's 16-bit DMA on none, which plays
-ECHO    16-bit sound through the 8-bit DMA, then on 5. After each, Y or N
-ECHO    for how it sounded.
+ECHO 4. The games, with the game's 16-bit DMA on 5. After each, Y or N for
+ECHO    how it sounded.
+%ESSDIR%\ESSSB16 /H5 >> %L%
 IF NOT "%PW%"=="" GOTO PWSTART
 ECHO    Pinball World isn't in its usual folders: ESSCHECK folder, to play it.
 GOTO DREAMS
 :PWSTART
-SET H=/H0
-SET N=none
-SET D=1
-:PWPASS
-%ESSDIR%\ESSSB16 %H% >> %L%
 ECHO.
-ECHO    SETSND, with the game's 16-bit DMA on %N%: Setup Soundcard, then
-ECHO    Sound Blaster 16 with DMA %D%, which SETSND may not find by itself,
-ECHO    then Test Sound; listen to the tune, then quit.
+ECHO    Pinball World's SETSND: Setup Soundcard, then Sound Blaster 16 with
+ECHO    DMA 5, which SETSND may not find by itself, then Test Sound; listen
+ECHO    to the tune, then quit.
 PAUSE
 CD %PW%
 SETSND
 CD %ESSDIR%
 %ESSDIR%\ESSSB16 >> %L%
-SET Q=SETSND tune with DMA %N%
+SET Q=SETSND tune with DMA 5
 SET RET=PWGAME
 GOTO ASK
 :PWGAME
 ECHO.
-ECHO    Pinball World, with the game's 16-bit DMA on %N%: play a ball,
-ECHO    listen, then quit.
+ECHO    Pinball World: play a ball, listen, then quit.
 PAUSE
 CD %PW%
 IF EXIST RUN.BAT CALL RUN.BAT
 IF NOT EXIST RUN.BAT PWORLD
 CD %ESSDIR%
 %ESSDIR%\ESSSB16 >> %L%
-SET Q=Pinball World with DMA %N%
-SET RET=PWNEXT
+SET Q=Pinball World with DMA 5
+SET RET=DREAMS
 GOTO ASK
-:PWNEXT
-IF "%N%"=="5" GOTO DREAMS
-SET H=/H5
-SET N=5
-SET D=5
-GOTO PWPASS
 
 :DREAMS
-IF "%PD%"=="" GOTO END
-%ESSDIR%\ESSSB16 /H0 >> %L%
+IF "%PD%"=="" GOTO ABSOLUTE
+IF EXIST %PD%\SOUND.CFG GOTO PDGAME
 ECHO.
-ECHO    Pinball Dreams' SETSOUND restarted the machine before, with esssb16
-ECHO    in; the results so far are saved first. This time the game's 16-bit
-ECHO    DMA is on none. In it, choose the Sound Blaster 16 and its test.
-CHOICE /C:YN Run it
-IF ERRORLEVEL 2 GOTO END
-ECHO setsound: started with DMA none >> %L%
-MEM /C | FIND "SMARTDRV" > NUL
-IF NOT ERRORLEVEL 1 SMARTDRV /C
+ECHO    Pinball Dreams has no SOUND.CFG, and its SETSOUND stops the machine
+ECHO    under EMM386 with this much memory: Pinball Dreams left out.
+ECHO Pinball Dreams: no SOUND.CFG >> %L%
+GOTO ABSOLUTE
+:PDGAME
+ECHO.
+ECHO    Pinball Dreams, with the Sound Blaster 16 of its SOUND.CFG, whose
+ECHO    driver unmasks the DMA after its command: play a ball, listen, then
+ECHO    quit.
+PAUSE
 CD %PD%
-SETSOUND
+PD
 CD %ESSDIR%
-SET Q=SETSOUND with DMA none
+%ESSDIR%\ESSSB16 >> %L%
+SET Q=Pinball Dreams with DMA 5
+SET RET=ABSOLUTE
+GOTO ASK
+
+:ABSOLUTE
+IF "%AP%"=="" GOTO END
+ECHO.
+ECHO    Absolute Pinball's SETUP: Sound Blaster 16 at 220, IRQ 5 and DMA 5,
+ECHO    then its test sound; listen, then save and quit.
+PAUSE
+CD %AP%
+SETUP
+CD %ESSDIR%
+%ESSDIR%\ESSSB16 >> %L%
+SET Q=Absolute Pinball's test sound with DMA 5
+SET RET=APGAME
+GOTO ASK
+:APGAME
+ECHO.
+ECHO    Absolute Pinball: play a ball, listen, then quit.
+PAUSE
+CD %AP%
+ABS
+CD %ESSDIR%
+%ESSDIR%\ESSSB16 >> %L%
+SET Q=Absolute Pinball with DMA 5
 SET RET=END
 GOTO ASK
 

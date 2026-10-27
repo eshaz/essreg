@@ -22,16 +22,19 @@ A 16-bit block of more than 32768 samples runs in halves of the chip's
 counter, so the game's handler also runs at each first half's end, where
 82h names neither kind (spurious).
 Under EMM386 the TSR doesn't trap the DMA controller, so a game's 16-bit
-channel keeps the position it was programmed with, its programming has to
-reach the 8237 before the transfer's command, and each command carries it
-over anew, from the buffer's start, but for a single-cycle block of the
-buffer it carried over last, which goes on from the block before. A game
-that mixes up to that channel's count (mix16, dsmi) plays its first fill
-over and over there, unless Audio 2's channel is the game's, where Audio 2
-paces it (EMM386Audio1Test). EMM386 gives the 8237 the game's programming
-when the game unmasks the channel (emm386dma), so one that unmasks it
-after the command (resiplay, Pinball Fantasies' driver) plays what the
-channel held before; EMM386PinballTest shows both.
+channel keeps the position it was programmed with, and each command
+carries it over anew, from the buffer's start, but for a single-cycle
+block of the buffer it carried over last, which goes on from the block
+before. A game that mixes up to that channel's count (mix16, dsmi,
+abs_game) plays its first fill over and over there, and one that waits for
+it (abs_setup) waits for good, unless Audio 2's channel is the game's,
+where Audio 2 paces it (EMM386Audio1Test). EMM386 gives the 8237 the
+game's programming when the game unmasks the channel (emm386dma), so where
+the channel reads masked at the command, as for a game that programs it
+after the command (play16_dma_after) or unmasks it after (resiplay,
+Pinball Fantasies' driver), the TSR waits until it reads unmasked, at the
+next trapped access or the timer's tick, and carries it over then;
+EMM386PinballTest shows it.
 
 The chip model also has to see no undefined use (esschip's violations),
 every DMA cycle has to move data (dma8237's bad), and the VxD has to ask
@@ -169,15 +172,27 @@ class HDPMITest(Conformance, unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class HDPMIAudio1Test(Conformance, unittest.TestCase):
+    """the same with Audio 2 on the 16-bit channel 5, the card of the
+    reports with a protected-mode game such as Absolute Pinball: every
+    transfer on Audio 1"""
+
+    audio2 = False
+
+    def card(self):
+        return TSRCard("pm", dma2=5)
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
 class EMM386Test(Conformance, unittest.TestCase):
     """esssb16.com through EMM386's handler at ring 0: a real-mode game,
     without the DMA controller's traps"""
 
     known = {**Conformance.known, "position16": {"moving"},
              "mix16": {"back", "mixed"}, "mix16_again": {"back", "mixed"},
-             "dsmi": {"back", "mixed"},
-             "resiplay": {"back", "mixed", "start"},
-             "play16_dma_after": {"data", "ok", "per_block", "seen"}}
+             "dsmi": {"back", "mixed"}, "abs_setup": {"hung"},
+             "abs_game": {"back", "runaway"},
+             "resiplay": {"back", "mixed"}}
 
     def card(self):
         return TSRCard("emm", dma2=3)
@@ -189,9 +204,6 @@ class EMM386Audio1Test(Conformance, unittest.TestCase):
     reports: every transfer on Audio 1, one at a time, and Audio 2 paces
     the game's channel, so that its count moves"""
 
-    known = {**Conformance.known,
-             "resiplay": {"back", "mixed", "start"},
-             "play16_dma_after": {"data", "ok", "per_block", "seen"}}
     audio2 = False
 
     def card(self):
@@ -214,15 +226,34 @@ class EMM386H0Test(Conformance, unittest.TestCase):
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
 class EMM386PinballTest(unittest.TestCase):
     """Pinball Fantasies' Sound Blaster 16 driver under EMM386 (resiplay):
-    it unmasks its channel after B6h, and the TSR reads the channel back at
-    B6h"""
+    it unmasks its channel after B6h, and EMM386 gives the 8237 the game's
+    programming only then, so the TSR waits for the unmask"""
 
     def test_at_the_unmask(self):
-        """EMM386 gives the 8237 the game's programming at the unmask, so
-        the TSR carries over what the channel held before, here its state
-        after the reset, and the game's count never moves"""
-        got = SCENES["resiplay"](TSRCard("emm", dma2=3))
-        self.assertEqual(set(got["start"]), {0})
+        """the channel reads masked at B6h: Audio 1 waits, masked, and the
+        timer's tick finds the unmask and carries the game's buffer over
+        from its start; without Audio 2 on the game's channel its count
+        stands still"""
+        c = TSRCard("emm", dma2=3)
+        got = SCENES["resiplay"](c)
+        self.assertEqual(got["start"], list(range(32)))
+        self.assertFalse(got["mixed"])
+        self.assertGreater(c.m.ticks, 0)
+
+    def test_paced(self):
+        """the card of the reports, where Audio 2 paces the game's channel
+        once the carry-over is done: the game's sound in order"""
+        got = SCENES["resiplay"](TSRCard("emm", dma2=5))
+        self.assertEqual(got["start"], list(range(32)))
+        self.assertEqual(got["back"], 0)
+        self.assertTrue(got["mixed"])
+
+    def test_no_timer(self):
+        """a game whose own timer handler never calls the one before: the
+        transfer waits for the next access of the card's ports"""
+        c = TSRCard("emm", dma2=5, timer=False)
+        got = SCENES["resiplay"](c)
+        self.assertEqual(c.chip.played, [])
         self.assertFalse(got["mixed"])
 
     def test_at_once(self):
@@ -234,6 +265,30 @@ class EMM386PinballTest(unittest.TestCase):
         self.assertEqual(got["start"], list(range(32)))
         self.assertGreater(got["back"], 0)
         self.assertFalse(got["mixed"])
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class AbsolutePinballTest(unittest.TestCase):
+    """Absolute Pinball's Sound Blaster 16 driver (abs_setup, abs_game), a
+    protected-mode game: set up for DMA 5, it needs a card with that
+    16-bit channel, which esssb16 gives through HDPMI32i's traps"""
+
+    def test_dma5(self):
+        """the card of the reports with HDPMI32i and DMA 5: SETUP's test
+        sound and the game play in order"""
+        setup = SCENES["abs_setup"](TSRCard("pm", dma2=5))
+        game = SCENES["abs_game"](TSRCard("pm", dma2=5))
+        self.assertEqual((setup["hung"], setup["back"]), (False, 0))
+        self.assertEqual((game["runaway"], game["back"]), (False, 0))
+
+    def test_no_16bit_channel(self):
+        """without a 16-bit channel, as with BLASTER's H1 or /H0, channel 5
+        never moves: SETUP's test sound waits for good, and the game mixes
+        on past the DAC, on a Sound Blaster 16 as on esssb16"""
+        for card in (ModelCard(dma16=0), TSRCard("pm", dma2=5, tail="/H0")):
+            self.assertTrue(SCENES["abs_setup"](card)["hung"])
+        for card in (ModelCard(dma16=0), TSRCard("pm", dma2=5, tail="/H0")):
+            self.assertTrue(SCENES["abs_game"](card)["runaway"])
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")

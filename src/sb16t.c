@@ -234,7 +234,7 @@ static const u8 page_port[8] = {0x87, 0x83, 0x81, 0x82, 0x8F, 0x8B, 0x89, 0x8A};
 
 // channel ch for bytes at addr, in Creative's order: mask, mode, flip-flop,
 // address, page, count, unmask; a 16-bit channel's in words
-static void dma_set(u8 ch, u32 addr, u16 bytes, u8 mode) {
+static void dma_prog(u8 ch, u32 addr, u16 bytes, u8 mode, int unmask) {
   u16 mask, mp, ff, ap, cp, a, n;
   u8 page;
 
@@ -262,8 +262,13 @@ static void dma_set(u8 ch, u32 addr, u16 bytes, u8 mode) {
   H->outb(page_port[ch], page);
   H->outb(cp, (u8)n);
   H->outb(cp, (u8)(n >> 8));
-  H->outb(mask, (u8)(ch & 3));
+  if (unmask)
+    H->outb(mask, (u8)(ch & 3));
   H->unlock();
+}
+
+static void dma_set(u8 ch, u32 addr, u16 bytes, u8 mode) {
+  dma_prog(ch, addr, bytes, mode, 1);
 }
 
 // the channel's count, as games read it: the bytes (or words) left, less one
@@ -424,6 +429,7 @@ struct xfer {
   u8 nb;      // the blocks in the buffer, which loops
   u8 rec;     // a recording
   u8 dmode;   // the 8237's mode, else DMA_PLAY or DMA_REC
+  u8 late;    // the channel programmed masked, unmasked after the command
   u32 addr;   // the buffer
 };
 
@@ -443,22 +449,29 @@ static u8 kind_of(const struct xfer *x) {
 
 static int generic(u8 c) { return (c & 0xF0) == 0xB0 || (c & 0xF0) == 0xC0; }
 
-// the buffer and the DMA, then the command; 0 if the DSP took it
+// the buffer and the DMA, then the command, and the unmask after it for a
+// late one; 0 if the DSP took it
 static int x_start(const struct xfer *x) {
   u16 chans = (x->fmt & FST) ? 2 : 1;
   u16 len = (u16)(x->frames * chans - 1);
   u16 bytes = (u16)(x->frames * frame_bytes(x->fmt) * x->nb);
   u16 blen = (u16)(x->frames * frame_bytes(x->fmt) - 1);
+  int r;
 
-  dma_set(x->ch, x->addr, bytes,
-          x->dmode ? x->dmode
-          : x->rec ? DMA_REC
-                   : DMA_PLAY);
+  dma_prog(x->ch, x->addr, bytes,
+           x->dmode ? x->dmode
+           : x->rec ? DMA_REC
+                    : DMA_PLAY,
+           !x->late);
   if (generic(x->cmd))
-    return cmd(4, x->cmd, x->mode, len & 0xFF, len >> 8);
-  if (x->cmd == 0x14 || x->cmd == 0x24)
-    return cmd(3, x->cmd, blen & 0xFF, blen >> 8);
-  return cmd(1, x->cmd); // 1Ch, 2Ch, 90h, 91h, 98h, 99h: 48h's length
+    r = cmd(4, x->cmd, x->mode, len & 0xFF, len >> 8);
+  else if (x->cmd == 0x14 || x->cmd == 0x24)
+    r = cmd(3, x->cmd, blen & 0xFF, blen >> 8);
+  else
+    r = cmd(1, x->cmd); // 1Ch, 2Ch, 90h, 91h, 98h, 99h: 48h's length
+  if (x->late)
+    H->outb(x->ch >= 4 ? 0xD4 : 0x0A, (u8)(x->ch & 3));
+  return r;
 }
 
 // the interrupts' rate of the transfer's kind, from the second on
@@ -1068,6 +1081,25 @@ static void check_play(void) {
   play8("p16.b6h_stereo", 0xB6, 0x30, F16 | FST | FSG, 44100, 0);
   play8("p16.b6h_unsigned", 0xB6, 0x00, F16, 22050, 0);
   play8("p16.b6h_stunsign", 0xB6, 0x20, F16 | FST, 22050, 0);
+}
+
+// the 16-bit channel programmed while it is masked and unmasked only after
+// B6h, as Pinball Fantasies' driver has it: the DSP waits for its first
+// word. Under EMM386 the 8237 gets the programming only at the unmask, and
+// esssb16 waits for it (SB16_FRONT.md)
+static void check_play_late(void) {
+  struct xfer x;
+  double rate;
+
+  if (!C->dma16)
+    return;
+  dsp_reset(NULL);
+  rate41(44100);
+  rate = sbt_v_hz(cur_v);
+  x_init(&x, 0xB6, 0x30, F16 | FST | FSG, rate);
+  x.late = 1;
+  x_tone(&x, rate);
+  x_check("p16.unmask_after", &x, blocks());
 }
 
 // 16-bit sound through the 8-bit channel, as mixer 81h allows without a
@@ -2591,6 +2623,7 @@ int sbt_run(const struct sbt_hal *hal, const struct sbt_card *card,
     check_mixer();
     check_irq();
     check_play();
+    check_play_late();
     check_play_on8();
     check_routing();
     check_rates();

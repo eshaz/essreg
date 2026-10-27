@@ -23,7 +23,7 @@
 
 #include "esstypes.h"
 
-#define SBT_VERSION "1.2"
+#define SBT_VERSION "1.3"
 
 // sbt_run's options
 #define SBT_O_AUTO 0x0001   // no listening checks
