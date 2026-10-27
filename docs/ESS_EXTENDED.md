@@ -525,7 +525,10 @@ which right after a start can be most of its 256 bytes, and a program that
 pauses and programs its channel anew would lose the next transfer's first
 bytes to it. The fronts therefore pause through B7h bit 7 and then B2h bit
 6, and continue through B2h bit 6 and then B7h bit 7, which `fix.pb72a` to
-`fix.pb72r22` measure.
+`fix.pb72r22` measure. Under EMM386, 5 of those 6 resumed in step, and
+`fix.pb72a`, in 16-bit stereo, resumed a sample off, with the sides swapped.
+Version 1.5 of the probe repeats each pause, and has one that turns the DMA
+requests off only once the FIFO is full (`fix.pb7wa` to `fix.pb7wf`).
 
 ### Commands while the DMA runs
 

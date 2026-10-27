@@ -47,13 +47,15 @@ such as `t2=0` for Audio 2's single transfers.
   clocks or slaved, in mixed formats and transfer types, and with Audio 2
   muted, as `esssb16`'s pace runs it.
 * **h1**: the DMA controllers behind the memory manager. When the 8237 gets
-  what a program programmed while the channel is masked, what a program
-  reads of a channel that moves, whose flip-flop a program's reads and
-  writes toggle, whether a buffer across a page goes through EMM386's own
-  buffer, and the case of Pinball Fantasies' driver: a channel carried over
-  before its unmask. Under EMM386 the buffer across a page is single-cycle,
-  because EMM386 stops the machine ("DMA mode not supported") at an
-  auto-initialized transfer that it would have to buffer.
+  what a program programmed while the channel is masked, and when its mask
+  gets the program's mask and unmask (`h1.mask1`, `h1.mask5`, read where the
+  chipset gives the mask back), what a program reads of a channel that
+  moves, whose flip-flop a program's reads and writes toggle, whether a
+  buffer across a page goes through EMM386's own buffer, and the case of
+  Pinball Fantasies' driver: a channel carried over before its unmask. Under
+  EMM386 the buffer across a page is single-cycle, because EMM386 stops the
+  machine ("DMA mode not supported") at an auto-initialized transfer that it
+  would have to buffer.
 * **h4**: what the engines do to the machine. A busy loop's speed, the VGA's
   vertical retrace, the VGA DAC's entries, guard bytes around the DMA
   buffers, and a channel programmed the wrong way round, writing into memory
@@ -86,7 +88,10 @@ such as `t2=0` for Audio 2's single transfers.
   frames (`pause=b7`, `fix.pb7a` to `fix.pb7r22`), which kept it every time.
   Version 1.4 pauses as the fronts now do, B7h bit 7 and then B2h bit 6 off,
   and back on the other way round (`pause=b72`, `fix.pb72a` to
-  `fix.pb72r22`).
+  `fix.pb72r22`). Its first run came back with the sides swapped once in
+  six, so version 1.5 has three more of each pause in 16-bit stereo, and one
+  that turns the DMA requests off only once +Ch bit 5 says the FIFO is full,
+  so that no request is cut short (`pause=b7w`, `fix.pb7wa` to `fix.pb7wf`).
 
 Every case uses the DMA channels that the card is configured for, Audio 1's
 (PnP 74h) and Audio 2's (75h), since other devices may own the others. An h1
@@ -121,7 +126,7 @@ first. `/N` runs without the window.
    `esssb16`. Set `BLASTER` with the card's base, such as
    `SET BLASTER=A220 I5 D1 H5 P330 T6`.
 2. Run `ESSPROBE /S` for the short run, about a minute, then `ESSPROBE` for
-   all 153 cases, about five minutes. Each writes `ESSPROBE.TXT`; `/O:file`
+   all 179 cases, about five minutes. Each writes `ESSPROBE.TXT`; `/O:file`
    names another, such as `/O:FULL.TXT`. Esc stops at any time. The report
    is on the disk after every line, so a run that stops the machine keeps
    what it measured until then.
@@ -157,8 +162,10 @@ report's file, and 6 when cases failed.
 
 For the fix group alone, record `ESSPROBE /R /C:fix /O:FIX.TXT` the same
 way, with EMM386 as usual, and once more without it as `/O:FIXREAL.TXT`.
-`/C:fix.pb72` runs only the fronts' pause, about 15 seconds, and
-`/C:fix.pb7` both kinds through B7h bit 7.
+`/C:fix.pb72` runs only the fronts' pause, about 25 seconds, and
+`/C:fix.pb7` all three kinds through B7h bit 7, about a minute.
+`ESSPROBE /C:h1.mask /O:MASK.TXT` runs the two cases of the 8237's mask in a
+second, without a sound or a recording.
 
 `python3 tools/essprec.py ESSPROBE.TXT run.wav` analyzes a recording: it
 finds the markers, fits the report's clock to the recording's, and measures

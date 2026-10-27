@@ -724,14 +724,15 @@ enum {
   RUN_STALE,   // a channel carried over before or after its unmask
   RUN_LOAD,    // what the engines do to the CPU, the VGA, memory
   RUN_STREAM,  // a game's refills behind the count
-  RUN_MIRROR   // the same through a channel carried over, as esssb16 does
+  RUN_MIRROR,  // the same through a channel carried over, as esssb16 does
+  RUN_MASK     // when a program's mask and unmask reach the 8237's mask
 };
 
 #define E1 0x01 // Audio 1
 #define E2 0x02 // Audio 2
 
 // the pauses
-enum { P_NONE, P_B2, P_B8, P_B7, P_B72, P_78F, P_78D, P_78FD, P_D0 };
+enum { P_NONE, P_B2, P_B8, P_B7, P_B72, P_B7W, P_78F, P_78D, P_78FD, P_D0 };
 
 // a case's spec, parsed
 struct pc {
@@ -864,6 +865,8 @@ static const struct ecase cases[] = {
     // the DMA controllers behind the memory manager
     {"h1.reach1", "run=reach ch=1 S", "-"},
     {"h1.reach5", "run=reach ch=5 S", "-"},
+    {"h1.mask1", "run=mask ch=1 S", "-"},
+    {"h1.mask5", "run=mask ch=5 S", "-"},
     {"h1.read1", "run=read ch=1", "-"},
     {"h1.read5", "run=read ch=5", "-"},
     {"h1.ff1", "run=ff ch=1", "-"},
@@ -943,6 +946,18 @@ static const struct ecase cases[] = {
     {"fix.pb72m", "f=16m late=100 pause=b72 ms=1500", "pause"},
     {"fix.pb72s8", "f=8s late=100 pause=b72 ms=1500", "lpause"},
     {"fix.pb72r22", "r=22050 late=200 pause=b72 ms=1500", "lpause"},
+    {"fix.pb7d", "late=100 pause=b7 ms=1500", "lpause"},
+    {"fix.pb7e", "late=100 pause=b7 ms=1500", "lpause"},
+    {"fix.pb7f", "late=100 pause=b7 ms=1500", "lpause"},
+    {"fix.pb72d", "late=100 pause=b72 ms=1500", "lpause"},
+    {"fix.pb72e", "late=100 pause=b72 ms=1500", "lpause"},
+    {"fix.pb72f", "late=100 pause=b72 ms=1500", "lpause"},
+    {"fix.pb7wa", "late=100 pause=b7w S ms=1500", "lpause"},
+    {"fix.pb7wb", "late=100 pause=b7w ms=1500", "lpause"},
+    {"fix.pb7wc", "late=100 pause=b7w ms=1500", "lpause"},
+    {"fix.pb7wd", "late=100 pause=b7w ms=1500", "lpause"},
+    {"fix.pb7we", "late=100 pause=b7w ms=1500", "lpause"},
+    {"fix.pb7wf", "late=100 pause=b7w ms=1500", "lpause"},
     {"fix.a2base1", "e=2 S", "left"},
     {"fix.a2base2", "e=2", "left"},
     {"fix.a2pf1", "e=2 pause=f ms=1500", "lpause"},
@@ -1013,9 +1028,10 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
   if (IS("S"))
     p->sh = 1;
   else if (IS("run") && v != NULL) {
-    static const char *const runs[] = {
-        "play", "machine", "card",  "mixer", "dma",  "rst",    "reach",
-        "read", "ff",      "cross", "stale", "load", "stream", "mirror"};
+    static const char *const runs[] = {"play",   "machine", "card",  "mixer",
+                                       "dma",    "rst",     "reach", "read",
+                                       "ff",     "cross",   "stale", "load",
+                                       "stream", "mirror",  "mask"};
     unsigned i;
     for (i = 0; i < ESS_ARRAY_SIZE(runs); i++)
       if (!strcmp(v, runs[i]))
@@ -1084,6 +1100,8 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
       p->pause = P_B7;
     else if (!strcmp(v, "b72"))
       p->pause = P_B72;
+    else if (!strcmp(v, "b7w"))
+      p->pause = P_B7W;
     else if (!strcmp(v, "f"))
       p->pause = P_78F;
     else if (!strcmp(v, "d"))
@@ -1623,14 +1641,20 @@ static void sound_line(const char *id, const char *syms, u32 tm,
 
 // --- playing -----------------------------------------------------------------
 
+// +Ch reads until bit 5 says the FIFO is full, at most 2000: how many
+// (b7w's pause)
+static u16 full_polls;
+
 // the pause (on) or its end; with hold, the end comes with the engines'
 // channels masked, unmasked late us after it (100 without late); 0 if the
 // pause can't be made. B7h bit 7 takes the FIFO off the DAC, so that it
 // fills and the DMA stops when it is full; b72 then turns the DMA requests
 // off too (B2h bit 6), and on again before the FIFO goes back to the DAC,
-// as the fronts pause
+// as the fronts pause; b7w turns them off only once the FIFO is full (+Ch
+// bit 5), so that no DMA request is cut short
 static int pause_on(const struct pc *p, int on) {
   int ok = 1, r;
+  int b2 = p->pause == P_B72 || p->pause == P_B7W;
 
   if (!on && p->hold)
     eng_masks(1);
@@ -1643,14 +1667,19 @@ static int pause_on(const struct pc *p, int on) {
     break;
   case P_B7:
   case P_B72:
-    if (!on && p->pause == P_B72)
+  case P_B7W:
+    if (!on && b2)
       ok = b2_dma(1);
     r = reg_r(0xB7);
     if (r < 0)
       ok = 0;
     else
       reg_w(0xB7, (u8)(on ? r & ~0x80 : r | 0x80));
-    if (on && p->pause == P_B72)
+    if (on && p->pause == P_B7W)
+      for (full_polls = 0; full_polls < 2000; full_polls++)
+        if (H->inb((u16)(B + 0x0C)) & 0x20)
+          break;
+    if (on && b2)
       ok = b2_dma(0) && ok;
     break;
   case P_78F:
@@ -1733,6 +1762,11 @@ static int eng_text(char *q, const char *name, const struct eng *e, u16 nirq,
   if (p->pause) {
     sprintf(q + strlen(q), ", %lu moved in the pause",
             (unsigned long)e->in_pause);
+    if (p->pause == P_B7W)
+      sprintf(q + strlen(q),
+              full_polls < 2000 ? ", full after %u polls"
+                                : ", never full in %u polls",
+              full_polls);
     if (e->in_pause > 512)
       ok = 0;
   }
@@ -2074,6 +2108,58 @@ static void run_reach(const struct ecase *c, const struct pc *p) {
       "%04X/%04X after the unmask (page %02X): it gets it %s; the program "
       "reads %04X/%04X",
       want_a, want_c, a0, c0, a1, c1, a2, c2, page2, reach_word(w, u), va, vc);
+}
+
+// the 8237's mask of channel ch through the window, where the chipset
+// gives the mask back (DEh bit 0, the cascade, clear): 1 masked, 0 not,
+// -1 unknown
+static int phys_mask(u8 ch) {
+  static struct esp_io io[2];
+  u16 n = 0;
+
+  if (!window)
+    return -1;
+  io_add(io, &n, ESP_IN, 0xDE, 0);
+  io_add(io, &n, ESP_IN, (u16)(ch >= 4 ? 0xDE : 0x0F), 0);
+  if (!H->phys(io, n) || (io[0].value & 0x01))
+    return -1;
+  return (io[1].value >> (ch & 3)) & 1;
+}
+
+static const char *mask_word(int m) {
+  return m < 0 ? "unknown" : m ? "masked" : "unmasked";
+}
+
+// a program unmasks a programmed channel, masks it, programs it anew and
+// unmasks it: the 8237's mask after each, as a front reads it at ring 0
+// while a game programs its channel (esssb16's pace)
+static void run_mask(const struct ecase *c, const struct pc *p) {
+  u8 ch = card_ch(p->ch);
+  u32 addr = C->area + BUF2;
+  int m[4];
+
+  if (no_ch(c, ch))
+    return;
+  dma_mask(ch, 1);
+  if (phys_mask(ch) < 0) {
+    res(c->id, R_SKIP, "no window on the 8237, or no mask that reads back");
+    return;
+  }
+  dma_set(ch, addr, 0x200, DMA_SINGLE | DMA_AUTO | DMA_READ, 1);
+  m[0] = phys_mask(ch);
+  dma_mask(ch, 1);
+  m[1] = phys_mask(ch);
+  dma_set(ch, addr + 0x400, 0x200, DMA_SINGLE | DMA_AUTO | DMA_READ, 0);
+  m[2] = phys_mask(ch);
+  dma_mask(ch, 0);
+  m[3] = phys_mask(ch);
+  dma_mask(ch, 1);
+  res(c->id, R_INFO,
+      "the 8237's mask: %s after the program's unmask, %s after its mask, %s "
+      "after its programming, %s after its unmask: it follows the program %s",
+      mask_word(m[0]), mask_word(m[1]), mask_word(m[2]), mask_word(m[3]),
+      m[0] == 0 && m[1] == 1 && m[2] == 1 && m[3] == 0 ? "at once"
+                                                       : "otherwise");
 }
 
 // a transfer moves the channel: what a program reads, against the 8237
@@ -2647,6 +2733,9 @@ static void run_case(const struct ecase *c) {
   case RUN_STREAM:
   case RUN_MIRROR:
     run_stream(c, &p);
+    break;
+  case RUN_MASK:
+    run_mask(c, &p);
     break;
   }
 }

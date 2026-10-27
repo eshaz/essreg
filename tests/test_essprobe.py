@@ -353,6 +353,8 @@ class ModelTest(unittest.TestCase):
         a program reads it, and the flip-flop is the 8237's"""
         for ch in "15":
             self.assertIn("it gets it at once", self.probe.text("h1.reach" + ch))
+            self.assertIn("it follows the program at once",
+                          self.probe.text("h1.mask" + ch))
             self.assertIn("the program reads the 8237",
                           self.probe.text("h1.read" + ch))
             self.assertIn("a read toggles the 8237's flip-flop, a write "
@@ -398,6 +400,8 @@ class EMM386Test(unittest.TestCase):
         for ch in "15":
             self.assertIn("it gets it at the unmask",
                           run.text("h1.reach" + ch))
+            self.assertIn("it follows the program at once",
+                          run.text("h1.mask" + ch))
         self.assertIn("(stale)", run.text("h1.stale"))
         self.assertIn("(the game's)", run.text("h1.fresh"))
 
@@ -412,7 +416,7 @@ class EMM386Test(unittest.TestCase):
 
     def test_without_window(self):
         card = ChipCard(emm386={})
-        run = Run(card, only="h1.reach,h1.ff", phys=None)
+        run = Run(card, only="h1.reach,h1.ff,h1.mask", phys=None)
         self.assertEqual({r for rs in run.results.values() for r, _d in rs},
                          {"SKIP"})
 
@@ -476,7 +480,7 @@ def synthesize(run, rate=48000):
 RECORDED = ("a1.base,a1.left,a1.right,a1.pause_b2,a1.muted,a2.base,"
             "a2.slaved,both.base,both.muted2,stream.a1,stream.mirror,"
             "a2.wide_packed,fix.late100a,fix.a2pfd1,fix.pb2late,"
-            "fix.b2late1,fix.pb7a,fix.pb72a")
+            "fix.b2late1,fix.pb7a,fix.pb72a,fix.pb7wa")
 # those whose Audio 1 stream plays a byte off, its DMA running when its
 # start's first request came, as on the card (docs/ESS_EXTENDED.md); the
 # names are prefixes, so fix.pb2late runs fix.pb2late2 and 3 too
