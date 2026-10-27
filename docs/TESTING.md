@@ -66,16 +66,17 @@ The Python tests, in `tests/test_*.py`, cover the following:
 * `test_esssb16` runs `esssb16.com` in the CPU emulator (`tests/tsremu.py`),
   where DOS, the memory managers, the DPMI host and HDPMI32i are Python
   behind the interrupt hook and the chip is `vxdemu`'s model. It installs
-  the program under QEMM, QPIEMU, EMM386 and a DPMI host, including the
-  16-bit code after the DPMI switch at ring 3 on HDPMI's first selectors,
-  and checks its refusals, its options and `BLASTER`. Then it calls the
-  resident shims as the memory managers do: QPI's callback with its far
-  frame, EMM386's handler at ring 0 through selectors as long as the size
-  the program gave, found in the program's own dispatch table, and
-  HDPMI32i's handler at ring 3. DOS has reused the memory the TSR gave back
-  by then, and HDPMI its data, so code or data left there fails. It checks
-  what only this front does: its traps of the game's 16-bit channel on each
-  path, its options, the ports it passes on, and its stack.
+  the program under QEMM, QPIEMU, EMM386 and a DPMI host, with its move into
+  upper memory and the 16-bit code after the DPMI switch at ring 3, and
+  checks its refusals, its options and `BLASTER`. It calls the resident
+  shims as the memory managers do: QPI's callback with its far frame,
+  EMM386's handler at ring 0 through selectors as long as the size the
+  program gave, found in the program's dispatch table, and HDPMI32i's
+  handler at ring 3. DOS has reused what the TSR gave back by then, and
+  HDPMI its data, so code or data left there fails. It checks what only this
+  front does: its traps of the game's 16-bit channel on each path, the ports
+  it passes on, its stack and Windows' broadcasts. `test_esscheck` reads
+  `build/ESSCHECK.BAT` as COMMAND.COM does.
 * `test_sb16conf` checks both Sound Blaster 16 fronts against the model of a
   Sound Blaster 16 in `tests/sb16.py` ([SB16.md](SB16.md)). Every scene of
   `tests/sbscenes.py`, what a game does through its sound driver
@@ -337,8 +338,7 @@ and stop at the first surprise. Each step says what you should see.
    again: "already loaded". In a Windows DOS box it refuses with "not for a
    Windows DOS box", and without a memory manager with "no EMM386: no
    EMMXXXX0 or EMMQXXX0 device" and "no port traps". When EMM386 is there
-   and it still says "no port traps", the line before says why: the version
-   it found, or that EMM386 refused the traps.
+   and it still says "no port traps", the line before says why.
 2. Set `BLASTER` as printed. Run a real-mode game that supports the Sound
    Blaster 16, such as one with the Miles Sound System's `SETUP` or
    `SOUNDSET`. Its setup detects a Sound Blaster 16 (DSP version 4.05) and
@@ -421,11 +421,10 @@ so set the speakers to a normal level first.
    difference of the ES1869 that [SB16.md](SB16.md) lists), INFO or SKIP,
    and what it measured. The report also has the chip's registers before and
    after the checks, with the 3-D effect's state in `chip.3d`, and
-   `esssb16`'s variables after each section. Under EMM386 the 16-bit
-   transfers' lines are KNOWN with `dma=still, ch 1 moved`: EMM386 doesn't
-   trap the DMA controllers, so the 16-bit channel's count stands still
-   while the 8-bit channel plays, but for the auto-initialized ones where
-   Audio 2 moves it (`dma=moving`). On a card whose Audio 2 has no 8-bit
+   `esssb16`'s variables after each section. Under EMM386, which doesn't
+   trap the DMA controllers, the 16-bit transfers' lines are KNOWN with
+   `dma=still, ch 1 moved`, but for the auto-initialized ones where Audio 2
+   moves the count (`dma=moving`). On a card whose Audio 2 has no 8-bit
    channel of its own (`route.audio2`), the two transfers at once are KNOWN,
    `one at a time on Audio 1`.
 4. If a tone sounded distorted or looping, restart, load `ESSSB16 /S` and
@@ -454,9 +453,10 @@ so set the speakers to a normal level first.
 
 ### D4. essprobe
 
-`essprobe.exe` measures the chip itself, without `esssb16`. Run it and
-record it as [ESSPROBE.md](ESSPROBE.md#running-it) says, and send the
-reports and recordings back.
+`essprobe.exe` measures the chip itself, without `esssb16`. Run and record
+it as [ESSPROBE.md](ESSPROBE.md#running-it) says, and send the reports and
+recordings back. `build\ESSCHECK.BAT` runs D2 to D4 with the games in one go
+([ESSSB16.md](ESSSB16.md#checking-it-on-the-machine)).
 
 ### E0. Installing with essinst
 

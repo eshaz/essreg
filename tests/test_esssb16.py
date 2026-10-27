@@ -358,23 +358,30 @@ class InstallTest(unittest.TestCase):
         self.assertIn("already loaded, but its port traps are gone", m.output)
         self.assertEqual(m.chip.commands, [(0xE1,)])
 
+    @staticmethod
+    def load_again(m, tail="", traps=True):
+        """the program loaded again on m's machine, where it is resident in
+        upper memory, under EMM386, whose traps the program's own accesses
+        meet in V86 mode, or with them gone"""
+        lo, hi = 0xC800 * 16, 0xD000 * 16
+        saved = m.mem(lo, hi - lo)
+        image, syms = build()
+        again = Machine(image, syms, m.chip, umbs=UMBS, memory=m.memory)
+        again.put(lo, saved)
+        again.emm_traps = m.emm_traps if traps else []
+        again.own_traps = True
+        again.install(tail=tail, emm386=(4, 95), noems=True)
+        return again
+
     def test_loaded_answers(self):
         """loaded again, in DOSSTART.BAT after one in AUTOEXEC.BAT: the copy
-        in upper memory answers through EMM386's traps, which the program's
-        own accesses meet in V86 mode, as a Sound Blaster 16; without them
-        (gone after Windows, if they were) it says so"""
+        in upper memory answers through EMM386's traps as a Sound Blaster
+        16; without them (gone after Windows, if they were) it says so"""
         for traps in (True, False):
             m = machine()
             m.install(emm386=(4, 95), noems=True)
             self.assertEqual(m.exit[0], "tsr")
-            lo, hi = 0xC800 * 16, 0xD000 * 16
-            saved = m.mem(lo, hi - lo)
-            image, syms = build()
-            again = Machine(image, syms, m.chip, umbs=UMBS, memory=m.memory)
-            again.put(lo, saved)
-            again.emm_traps = m.emm_traps if traps else []
-            again.own_traps = True
-            again.install(emm386=(4, 95), noems=True)
+            again = self.load_again(m, traps=traps)
             self.assertEqual(again.exit, ("exit", E_LOADED), traps)
             mute = "already loaded, but its port traps are gone"
             if traps:
@@ -384,6 +391,30 @@ class InstallTest(unittest.TestCase):
             else:
                 self.assertIn(mute, again.output)
                 self.assertIn(("out", BASE + 0x0C, 0xE1), again.ports)
+
+    def test_loaded_select(self):
+        """/H for the copy in memory: its 16-bit channel picked through
+        mixer 81h, as a game picks it, for games tried both ways without a
+        restart; nothing without its traps"""
+        m = machine()
+        m.install(emm386=(4, 95), noems=True)
+        for tail, dma16, said in (
+                ("/H0", 0, "now none: 16-bit sound goes through the 8-bit "
+                           "DMA\r\n"),
+                ("/H6", 6, "now 6\r\n"), ("-h5", 5, "now 5\r\n")):
+            again = self.load_again(m, tail)
+            self.assertEqual(again.exit, ("exit", E_LOADED), tail)
+            self.assertIn("already loaded; the game's 16-bit DMA is " + said,
+                          again.output)
+            self.assertEqual(m.data8("dma16"), dma16, tail)
+            self.assertEqual(again.ports, [])
+        again = self.load_again(m, "/H0", traps=False)
+        self.assertIn("its port traps are gone", again.output)
+        self.assertEqual(m.data8("dma16"), 5)
+        # the BLASTER's H alone changes nothing
+        again = self.load_again(m)
+        self.assertIn("already loaded\r\n", again.output)
+        self.assertEqual(m.data8("dma16"), 5)
 
     def test_no_card(self):
         for chip in (DeadChip(), NoESS()):

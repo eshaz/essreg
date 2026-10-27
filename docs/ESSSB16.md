@@ -82,7 +82,10 @@ has the steps. The options:
 * `/A220`: the card's base, otherwise `BLASTER`'s `A`, or 220h.
 * `/H5`, `/H6` or `/H7`: the game's 16-bit channel, otherwise `BLASTER`'s
   `H`, or 5. `/H0` offers none: the game then plays 16-bit sound through the
-  8-bit channel, as a Sound Blaster 16 does without an `H`.
+  8-bit channel, as a Sound Blaster 16 does without an `H`. With `esssb16`
+  in memory already, `/H` gives that copy the channel instead, as a game
+  picks it through mixer 81h, so that a game can be tried both ways without
+  a restart; the other options take a restart.
 * `/20`, `/21` or `/23`: Audio 2's DMA channel, otherwise the card's, if a
   DMA pin of the card is wired to it. `/2-` plays 16-bit sound on Audio 1.
 * `/S`: single DMA transfers instead of demand transfers of two bytes, ESS's
@@ -189,3 +192,30 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
    memory for its sound. A game's setup program detects a Sound Blaster 16,
    DSP version 4.05, and offers 16-bit sound. To take `esssb16` out again,
    restart without its line.
+
+## Checking it on the machine
+
+`build\ESSCHECK.BAT` runs the checks of a machine in one go and keeps what
+they find in a folder, `RESULTS`, to send back:
+1. Copy `ESSCHECK.BAT`, `esssb16.com`, `essprobe.exe` and `sb16test.exe`
+   from `build`, and `HDPMI32i.EXE` from `third_party\hdpmi32i`, to
+   `C:\ESS`.
+2. Start DOS without `esssb16`, as step 5 above says but without its line,
+   with the recorder on the card's line out if you record.
+3. Run `C:\ESS\ESSCHECK`. It finds Pinball World and Pinball Dreams in
+   `C:\21STCENT`, in `C:\` or in `C:\GAMES`; else give their folders, as in
+   `ESSCHECK C:\PW C:\PD`.
+
+It keeps the memory as `MEM` shows it, `CONFIG.SYS`, `AUTOEXEC.BAT`,
+`DOSSTART.BAT` and the environment, then runs `essprobe` on the chip: the
+8237's mask, then the pauses, recorded, when you press R and then Enter at
+the level tone. It loads HDPMI32i and `esssb16`, keeps the memory again and
+runs `sb16test`'s automatic checks. Then the games: Pinball World's
+`SETSND`, where you choose the Sound Blaster 16 and play its test tune, and
+the game itself, first with the game's 16-bit DMA on none (`ESSSB16 /H0`),
+then on 5 (`ESSSB16 /H5`), each followed by Y or N for how it sounded, and
+last, if you like, Pinball Dreams' `SETSOUND`, which restarted the machine
+before, after the results so far are on the disk. With `esssb16` in memory
+already, as after *Restart in MS-DOS mode* with it in `AUTOEXEC.BAT`, it
+skips the probe and checks that copy instead. Send `C:\ESS\RESULTS` back,
+with the recording.

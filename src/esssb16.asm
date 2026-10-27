@@ -2748,6 +2748,7 @@ parse_options:
         cmp     al,7
         ja      .bad
 .seth:  mov     [dma16],al
+        mov     byte [h_set],1
         jmp     .next
 .a:     call    hex_word                ; the base, 3 hex digits
         jc      .bad
@@ -3038,6 +3039,34 @@ copy_answers:
         je      .yes
 .no:    stc
 .yes:   ret
+
+; /H for the copy in memory: its 16-bit channel picked through mixer 81h,
+; as a game picks it, and the channel 81h gives back said, so that games
+; can try both ways without a restart
+copy_select:
+        mov     dx,[base]
+        add     dx,4
+        mov     al,0x81
+        out     dx,al
+        inc     dx
+        mov     cl,[dma16]              ; bit 5, 6 or 7, or none
+        mov     al,1
+        shl     al,cl
+        out     dx,al
+        dec     dx
+        mov     al,0x81
+        out     dx,al
+        inc     dx
+        in      al,dx
+        mov     dx,msg_now
+        call    print
+        and     ax,0xE0
+        bsf     ax,ax
+        jz      .none
+        call    print_dec
+        ret
+.none:  mov     dx,msg_none
+        jmp     print
 
 ; AL = the DSP's next byte as a Sound Blaster gives it (+Eh bit 7, then
 ; +Ah), 0 if none comes; DX = +Ah
@@ -3398,9 +3427,13 @@ install:
         jmp     short .fail
 .loaded:
         call    copy_answers            ; the copy in memory still traps?
-        mov     dx,msg_loaded
-        jnc     .say
         mov     dx,msg_mute
+        jc      .say
+        mov     dx,msg_loaded
+        cmp     byte [h_set],0
+        je      .say
+        call    copy_select             ; /H: its 16-bit channel
+        mov     dx,msg_crlf
 .say:   mov     al,E_LOADED
         jmp     short .fail
 .nocard:
@@ -4156,6 +4189,7 @@ dma_trapped:
         ret
 want2:          db 0xFF         ; /2's channel for Audio 2, 4 for /2-,
                                 ; FFh for the card's
+h_set:          db 0            ; 1: /H on the command line
 irq:            db 5            ; the card's IRQ, and its bit in mixer 80h
 irq_bit:        db 0xF0, 0xF0, 0xF1, 0xF0, 0xF0, 0xF2, 0xF0, 0xF4
                 db 0xF0, 0xF1, 0xF8, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0
@@ -4196,6 +4230,9 @@ usage:          db "usage: esssb16 [/A220] [/H5|/H6|/H7|/H0] [/20|/21|/23|/2-] [
                 db "protected-mode games HDPMI32i, loaded resident first", 13, 10, "$"
 msg_windows:    db "not for a Windows DOS box: ES1869.VXD does this there", 13, 10, "$"
 msg_loaded:     db "already loaded", 13, 10, "$"
+msg_now:        db "already loaded; the game's 16-bit DMA is now $"
+msg_none:       db "none: 16-bit sound goes through the 8-bit DMA$"
+msg_crlf:       db 13, 10, "$"
 msg_mute:       db "already loaded, but its port traps are gone (after Windows?): load it in", 13, 10
                 db "DOSSTART.BAT, not in AUTOEXEC.BAT, and restart", 13, 10, "$"
 msg_nocard:     db "no ES1869 at the base: set BLASTER or /A", 13, 10, "$"
