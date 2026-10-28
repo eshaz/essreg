@@ -1,0 +1,40 @@
+/*
+ * Resources of essinst (16-bit Windows resource script).
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
+ * Licensed under GPL Version 3.0
+ */
+
+#include <windows.h>
+#include <ver.h>
+
+ESSINST ICON "essctl.ico"
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEFLAGSMASK 0x3F
+FILEFLAGS 0
+FILEOS VOS_DOS_WINDOWS16
+FILETYPE VFT_APP
+FILESUBTYPE 0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4"
+        BEGIN
+            VALUE "FileDescription", "ES1869 driver setup\0"
+            VALUE "FileVersion", "1.0\0"
+            VALUE "InternalName", "ESSINST\0"
+            VALUE "LegalCopyright", "(c) 2026 Ethan Halsall, GPL version 3\0"
+            VALUE "OriginalFilename", "ESSINST.EXE\0"
+            VALUE "ProductName", "essreg\0"
+            VALUE "ProductVersion", "1.0\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1252
+    END
+END

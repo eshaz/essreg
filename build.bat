@@ -7,4 +7,10 @@ wmake
 copy essreg.exe build\essreg.exe /y
 copy 1869opl3.com build\1869opl3.com /y
 copy esfmpat.exe build\esfmpat.exe /y
+copy essctl.exe build\essctl.exe /y
+copy ess3d.exe build\ess3d.exe /y
+copy esfmrec.exe build\esfmrec.exe /y
+copy essinst.exe build\essinst.exe /y
+copy sb16test.exe build\sb16test.exe /y
+copy essprobe.exe build\essprobe.exe /y
 

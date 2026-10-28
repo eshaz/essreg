@@ -1,6 +1,8 @@
 #ifndef ESSREG_H
 #define ESSREG_H
 
+#include "esshw.h"
+
 #define BIN_PAT "%c%c%c%c%c%c%c%c"
 #define BIN(byte)                                                              \
   ((byte)&0x80 ? '1' : '0'), ((byte)&0x40 ? '1' : '0'),                        \
@@ -8,9 +10,10 @@
       ((byte)&0x08 ? '1' : '0'), ((byte)&0x04 ? '1' : '0'),                    \
       ((byte)&0x02 ? '1' : '0'), ((byte)&0x01 ? '1' : '0')
 
-unsigned int read_mixer_reg(unsigned int reg_addr);
+// register access through esshw.h, negative return values are errors
+int read_mixer_reg(unsigned int reg_addr);
 void write_mixer_reg(unsigned int reg_addr, unsigned char reg_value);
-unsigned int read_audio_reg(unsigned int reg_addr);
+int read_audio_reg(unsigned int reg_addr); // PnP register of LDN 1
 int read_controller_reg(unsigned char reg_addr);
 int write_controller_reg(unsigned char reg_addr, unsigned char reg_value);
 
@@ -35,6 +38,9 @@ void set_telegaming_mode(unsigned char on_off);
 unsigned char get_3d_mode();
 void set_3d_mode(unsigned char on_off);
 
+unsigned char get_3d_limit();
+void set_3d_limit(unsigned char on_off);
+
 unsigned char get_3d_level();
 void set_3d_level(unsigned char level);
 void set_3d_level_pct(unsigned char level_pct);
@@ -48,11 +54,11 @@ void set_digital_record(unsigned char on_off);
 unsigned char get_fm_sync_audio_2();
 void set_fm_sync_audio_2(unsigned char on_off);
 
-unsigned int get_audio_1_sample_rate();
-unsigned int get_audio_2_sample_rate();
+unsigned long get_audio_1_sample_rate();
+unsigned long get_audio_2_sample_rate();
 
-unsigned int get_audio_1_filter_rate();
-unsigned int get_audio_2_filter_rate();
+unsigned long get_audio_1_filter_rate();
+unsigned long get_audio_2_filter_rate();
 
 int get_adc_offset_left();
 int set_adc_offset_left(int offset);
@@ -62,11 +68,6 @@ int set_adc_offset_right(int offset);
 
 void calibrate_op_amp();
 
-unsigned int audio_base = 0x220;
-unsigned int config_base = 0x250;
-unsigned int config_logical_device_reg = 0x07;
-unsigned char audio_config_logical_device = 0x01;
-unsigned int controller_wait_timeout = 0xfff;
-unsigned int controller_retry_count = 0xf;
+void set_safe_protocol(unsigned char on_off);
 
 #endif /* ESSREG_H */
