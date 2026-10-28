@@ -44,8 +44,8 @@ IF "%AP%"=="" IF EXIST C:\21STCENT\ABSOLUTE\ABS.EXE SET AP=C:\21STCENT\ABSOLUTE
 IF "%AP%"=="" IF EXIST C:\ABSOLUTE\ABS.EXE SET AP=C:\ABSOLUTE
 IF "%AP%"=="" IF EXIST C:\GAMES\ABSOLUTE\ABS.EXE SET AP=C:\GAMES\ABSOLUTE
 
-ECHO esscheck 5: Pinball World in %PW%, Pinball Dreams in %PD% >> %L%
-ECHO esscheck 5: Absolute Pinball in %AP% >> %L%
+ECHO esscheck 6: Pinball World in %PW%, Pinball Dreams in %PD% >> %L%
+ECHO esscheck 6: Absolute Pinball in %AP% >> %L%
 ECHO esscheck: the checks of esssb16 and the chip, saved in %R%
 VER >> %L%
 SET > %R%\SET.TXT
@@ -168,7 +168,9 @@ GOTO ASK
 IF "%AP%"=="" GOTO END
 ECHO.
 ECHO    Absolute Pinball's SETUP: Sound Blaster 16 at 220, IRQ 5 and DMA 5,
-ECHO    then its test sound; listen, then save and quit.
+ECHO    then its test sound; listen, then save and quit. It needs the
+ECHO    HDPMI32I.EXE of essreg's third_party\hdpmi32i, which has a fix: with
+ECHO    the one of HX's releases, the machine stops at the first sound.
 PAUSE
 CD %AP%
 SETUP

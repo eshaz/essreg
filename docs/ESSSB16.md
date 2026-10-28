@@ -149,7 +149,10 @@ else in the emulator with the games' own code:
   the game's mixing runs past the sound, on a Sound Blaster 16 as on
   `esssb16`. Load HDPMI32i before `esssb16`, so that both programs run under
   it and `esssb16` traps their ports: without it, they take EMM386's VCPI
-  and reach the bare chip, which has no Sound Blaster 16 commands.
+  and reach the bare chip, which has no Sound Blaster 16 commands. Their
+  interrupt handlers end with STI and IRETD, which the HDPMI32i of HX's
+  releases emulates with a fault of its own: the laptop stopped at the first
+  interrupt of `SETUP`'s test sound. The copy in `third_party` has the fix.
 
 It was tested in a CPU emulator, and [`sb16test`](../README.md#sb16testexe)
 checks it on real hardware ([docs/TESTING.md](TESTING.md#d2-esssb16-dos)).
@@ -162,9 +165,14 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
 1. Copy `build\esssb16.com` to a folder on the machine, such as `C:\ESS`.
 2. For protected-mode games, copy `third_party\hdpmi32i\HDPMI32i.EXE` next
    to it. It is the file of `HDPMI32i.zip` from the releases page of
-   [HX](https://github.com/crazii/HX/releases), unchanged, and
+   [HX](https://github.com/crazii/HX/releases) with a fix of four bytes:
+   with the release's own, a game whose interrupt handler ends with STI and
+   IRETD, as Absolute Pinball's do, stops the machine at its first
+   interrupt.
    [third_party/hdpmi32i/README.md](../third_party/hdpmi32i/README.md) says
-   which release and gives its hashes. Real-mode games do without it.
+   which release, what the fix changes and the hashes, and
+   `tools/hdpmifix.py` fixes another copy of that build, such as SBEMU's.
+   Real-mode games do without it.
 3. In `CONFIG.SYS`, load EMM386 after HIMEM.SYS, with upper memory:
    ```
    DEVICE=C:\WINDOWS\HIMEM.SYS

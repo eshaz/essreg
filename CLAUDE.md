@@ -52,8 +52,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   NT 4.0, Windows 95 and OS/2 in `driver/es1869f/`, and `build/` the
   committed binaries, with `ESSCHECK.BAT`, which runs the checks of a
   machine in one go (essprobe, esssb16, sb16test and the games).
-  `third_party/hdpmi32i/` holds `HDPMI32i.EXE` as HX released it, for
-  esssb16's protected-mode games, with its origin and hashes in its README.
+  `third_party/hdpmi32i/` holds `HDPMI32i.EXE` as HX released it but for the
+  fix of `tools/hdpmifix.py` (its emulation of STI before IRETD), for
+  esssb16's protected-mode games, with its origin, the fix and the hashes in
+  its README.
 * `src/esssb16.asm` is `esssb16.com`, the DOS TSR that answers games as a
   Sound Blaster 16 and plays their sound on Audio 1, through the port traps
   of EMM386, QPI (QEMM, JEMM with QPIEMU) and HDPMI32i. It is the VxD's
@@ -63,22 +65,22 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   instead of VDMAD. The chip takes a byte per DMA cycle on any channel, so
   no transfer may go to a 16-bit channel as words.
 * `tools/` holds the builders, the RE tools, `guard.py`, `wineshot.sh`,
-  `dualwav.py`, which makes 4-channel files for dual playback, and
-  `sb16rec.py` and `essprec.py`, which analyze a recording of `SB16TEST /R`
-  and `ESSPROBE /R` against its report, on `recan.py`'s markers, clock and
-  measures. `tests/` holds the Python tests (`esfmemu.py`, `vxdemu.py` and
-  `drvemu.py` run the drivers in a CPU emulator, `tsremu.py` runs
-  `esssb16.com` in one, with DOS, the memory managers and the DPMI host in
-  Python, and `dosrun.py` a DOS program, `sb16test.exe` or `essprobe.exe`,
-  in front of a card), and `tests/host/` the C tests. `sb16.py` is the Sound
-  Blaster 16 that the fronts are tested against, `esschip.py` the chip's
-  audio behind them, `dma8237.py` the DMA controllers, `sbgame.py` and
-  `sbscenes.py` what games do, and `sbfronts.py` the fronts as cards, with a
-  model of VDMAD for the VxD's, and the bare chip with a VGA (`ChipCard`);
-  `emm386dma.py` is EMM386's DMA translation. `sbfsm.py` is the front as a
-  state machine in Python, the reference of
-  [SB16_FRONT.md](docs/SB16_FRONT.md), and `sbops.py` the operations that
-  the chip's model records.
+  `dualwav.py`, which makes 4-channel files for dual playback,
+  `hdpmifix.py`, which fixes HDPMI32i, and `sb16rec.py` and `essprec.py`,
+  which analyze a recording of `SB16TEST /R` and `ESSPROBE /R` against its
+  report, on `recan.py`'s markers, clock and measures. `tests/` holds the
+  Python tests (`esfmemu.py`, `vxdemu.py` and `drvemu.py` run the drivers in
+  a CPU emulator, `tsremu.py` runs `esssb16.com` in one, with DOS, the
+  memory managers and the DPMI host in Python, and `dosrun.py` a DOS
+  program, `sb16test.exe` or `essprobe.exe`, in front of a card), and
+  `tests/host/` the C tests. `sb16.py` is the Sound Blaster 16 that the
+  fronts are tested against, `esschip.py` the chip's audio behind them,
+  `dma8237.py` the DMA controllers, `sbgame.py` and `sbscenes.py` what games
+  do, and `sbfronts.py` the fronts as cards, with a model of VDMAD for the
+  VxD's, and the bare chip with a VGA (`ChipCard`); `emm386dma.py` is
+  EMM386's DMA translation. `sbfsm.py` is the front as a state machine in
+  Python, the reference of [SB16_FRONT.md](docs/SB16_FRONT.md), and
+  `sbops.py` the operations that the chip's model records.
 * `docs/` holds [TESTING.md](docs/TESTING.md),
   [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md),
   [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md),
@@ -136,6 +138,9 @@ python3 tools/essprec.py ESSPROBE.TXT run.wav
 
 # essprobe's window, src/essp0.h, from src/essp0.asm
 python3 tools/build_essp0.py
+
+# HDPMI32i's fix, from the release's file (--check FILE tells them apart)
+python3 tools/hdpmifix.py HDPMI32i.EXE third_party/hdpmi32i/HDPMI32i.EXE
 
 # style
 flake8                                 # Python lint, clean

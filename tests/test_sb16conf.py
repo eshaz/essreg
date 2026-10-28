@@ -53,7 +53,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test_vxdext import HAVE_UNICORN, have_nasm  # noqa: E402
 import sbops  # noqa: E402
-from sbgame import ModelCard  # noqa: E402
+from sbgame import BASE, ModelCard  # noqa: E402
 from sbscenes import DUAL, SCENES  # noqa: E402
 
 if HAVE_UNICORN:
@@ -280,6 +280,21 @@ class AbsolutePinballTest(unittest.TestCase):
         game = SCENES["abs_game"](TSRCard("pm", dma2=5))
         self.assertEqual((setup["hung"], setup["back"]), (False, 0))
         self.assertEqual((game["runaway"], game["back"]), (False, 0))
+
+    def test_dma5_after_install(self):
+        """installed with BLASTER's H1 and switched to DMA 5 through mixer
+        81h, as /H5 does to the loaded copy in ESSCHECK: HDPMI32i traps no
+        port of channel 5, so the games program the controller themselves,
+        the TSR carries the channel over from there, and the pace moves its
+        count. SETUP's test sound and the game play in order"""
+        for name, key in (("abs_setup", "hung"), ("abs_game", "runaway")):
+            card = TSRCard("pm", env="BLASTER=A220 I5 D1 H1 P330 T6",
+                           dma2=5)
+            card.out(BASE + 4, 0x81)
+            card.out(BASE + 5, 0x20)
+            self.assertFalse(card.pm_ports & {0x8B, 0xC4, 0xC6, 0xD4}, name)
+            out = SCENES[name](card)
+            self.assertEqual((out[key], out["back"]), (False, 0), name)
 
     def test_no_16bit_channel(self):
         """without a 16-bit channel, as with BLASTER's H1 or /H0, channel 5
