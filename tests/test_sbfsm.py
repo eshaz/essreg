@@ -152,5 +152,77 @@ class VxDAudio1OperationsTest(Operations, unittest.TestCase):
     dma2 = 5
 
 
+class LevelsTest(unittest.TestCase):
+    """the Sound Blaster 16's levels on the chip's scales (DS p.55, Table
+    21): full volume is the chip's unity, never its gain, each level is the
+    nearest the chip has, and both fronts' tables are the reference's"""
+
+    def test_scales(self):
+        import sbfsm
+        for lvl, db in ((sbfsm.LVL_A1, sbfsm.DB_A1),
+                        (sbfsm.LVL_A2, sbfsm.DB_A2),
+                        (sbfsm.LVL_MUS, sbfsm.DB_MUS),
+                        (sbfsm.LVL_AUX, sbfsm.DB_AUX)):
+            self.assertEqual(db[lvl[31]], 0.0)          # full: unity
+            self.assertEqual(lvl[:2], (0, 0))           # 0 and 1 mute
+            self.assertTrue(all(db[n] <= 0 for n in lvl if n))
+            self.assertEqual(list(lvl), sorted(lvl))
+            for v in range(2, 32):                      # within half a step
+                t = 2 * (v - 31)
+                if t >= db[1]:
+                    self.assertLessEqual(abs(db[lvl[v]] - t), 1.5, v)
+        # the Sound Blaster 16's reset (-14 dB): Audio 1 at -15 dB, the
+        # master at -14.25 dB; Audio 1's 15 is +1.5 dB, which nothing gives
+        self.assertEqual((sbfsm.LVL_A1[24], sbfsm.LVL_MASTER[24]), (6, 44))
+        self.assertEqual((sbfsm.DB_A1[15], sbfsm.DB_A1[14]), (1.5, 0.0))
+        self.assertNotIn(15, sbfsm.LVL_A1)
+        self.assertEqual((sbfsm.LVL_MASTER[31], sbfsm.LVL_MASTER[0]), (63, 0))
+        # back from the chip: each level the nearest, unity at most
+        for view, db in ((sbfsm.VIEW_A1, sbfsm.DB_A1),
+                         (sbfsm.VIEW_MUS, sbfsm.DB_MUS),
+                         (sbfsm.VIEW_AUX, sbfsm.DB_AUX)):
+            self.assertEqual(view[0], 0)
+            for n in range(1, 16):
+                d = min(db[n], 0.0)
+                self.assertLessEqual(abs(2 * (view[n] - 31) - d), 1.0, n)
+        for m in range(64):
+            self.assertLessEqual(abs(2 * (sbfsm.VIEW_MASTER[m] - 31) -
+                                     0.75 * (m - 63)), 1.0, m)
+
+    @unittest.skipUnless(have_nasm(), "needs nasm")
+    def test_tsr_tables(self):
+        import sbfsm
+        from sbfronts import tsr_build
+        image, syms = tsr_build()
+        for name, want in (("lvl_a1", sbfsm.LVL_A1), ("lvl_a2", sbfsm.LVL_A2),
+                           ("lvl_mus", sbfsm.LVL_MUS),
+                           ("lvl_aux", sbfsm.LVL_AUX),
+                           ("lvl_master", sbfsm.LVL_MASTER),
+                           ("view_a1", sbfsm.VIEW_A1),
+                           ("view_mus", sbfsm.VIEW_MUS),
+                           ("view_aux", sbfsm.VIEW_AUX),
+                           ("view_master", sbfsm.VIEW_MASTER)):
+            at = syms[name] - 0x100
+            self.assertEqual(tuple(image[at:at + len(want)]), want, name)
+
+    @unittest.skipUnless(HAVE_UNICORN and have_nasm(),
+                         "needs nasm and unicorn")
+    def test_vxd_tables(self):
+        import sbfsm
+        from sbfronts import VxDCard
+        m = VxDCard(dma2=3).m
+        for name, want in (("Lvl_A1", sbfsm.LVL_A1), ("Lvl_A2", sbfsm.LVL_A2),
+                           ("Lvl_Mus", sbfsm.LVL_MUS),
+                           ("Lvl_Aux", sbfsm.LVL_AUX),
+                           ("Lvl_Master", sbfsm.LVL_MASTER),
+                           ("View_A1", sbfsm.VIEW_A1),
+                           ("View_Mus", sbfsm.VIEW_MUS),
+                           ("View_Aux", sbfsm.VIEW_AUX),
+                           ("View_Master", sbfsm.VIEW_MASTER)):
+            at = m.syms["ESSREG_S16_" + name]
+            got = tuple(m.emu.uc.mem_read(at, len(want)))
+            self.assertEqual(got, want, name)
+
+
 if __name__ == "__main__":
     unittest.main()

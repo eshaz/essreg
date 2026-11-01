@@ -71,10 +71,60 @@ PAGE16 = (0x8B, 0x89, 0x8A)
 PRO_REGS = (0x22, 0x04, 0x26, 0x28, 0x2E, 0x0A)
 MIX_MASK = (0xF8,) * 11 + (0xC0, 0x1F, 0x7F, 0x7F, 0xC0, 0xC0, 0xC0,
                            0xC0, 0x01, 0xF0, 0xF0, 0xF0, 0xF0)
+
+
+def db4(top):
+    """the dB of the chip's 4-bit levels 1-15 (DS p.55, Table 21), 15 at
+    `top`: 3 dB a step up to 8, then 1.5 dB; None for 0, mute"""
+    return [None] + [top - 1.5 * (15 - n) if n >= 8 else
+                     top - 10.5 - 3 * (8 - n) for n in range(1, 16)]
+
+
+# Audio 1 (14h), Audio 2 (7Ch), the mic and the music DAC (1Ah, 36h), and
+# AuxA, AuxB, line and mono in (38h, 3Ah, 3Eh, 6Dh)
+DB_A1, DB_A2, DB_MUS, DB_AUX = db4(1.5), db4(0.0), db4(10.5), db4(3.0)
+
+
+def levels(db):
+    """the chip's 4-bit level for each of the view's 5-bit ones (the Sound
+    Blaster 16's 2 dB steps, 31 = 0 dB): the nearest in dB, never above 0
+    dB, the quieter of two as near; 0 and 1, the Sound Blaster Pro's 0,
+    mute"""
+    return tuple(0 if v <= 1 else
+                 min((n for n in range(1, 16) if db[n] <= 0),
+                     key=lambda n, t=2 * (v - 31): (abs(db[n] - t), n))
+                 for v in range(32))
+
+
+def view_levels(db):
+    """the view's 5-bit level for each of the chip's 4-bit ones: the
+    nearest in dB, at most 31 (0 dB), the louder of two as near; 0 for
+    mute"""
+    return tuple(0 if n == 0 else
+                 max(range(2, 32),
+                     key=lambda v, d=min(db[n], 0.0): (-abs(2 * (v - 31) - d),
+                                                       v))
+                 for n in range(16))
+
+
+def rnd(a, b):
+    """round(a / b) for a, b >= 0, halves up"""
+    return (2 * a + b) // (2 * b)
+
+
+LVL_A1, LVL_A2 = levels(DB_A1), levels(DB_A2)
+LVL_MUS, LVL_AUX = levels(DB_MUS), levels(DB_AUX)
+# the master's 6 bits (60h, 62h, 0.75 dB steps, 63 = 0 dB), and back
+LVL_MASTER = tuple(max(0, 63 - rnd((31 - v) * 8, 3)) for v in range(32))
+VIEW_MASTER = tuple(max(0, 31 - rnd((63 - m) * 3, 8)) for m in range(64))
+VIEW_A1, VIEW_MUS = view_levels(DB_A1), view_levels(DB_MUS)
+VIEW_AUX = view_levels(DB_AUX)
 # the chip's level registers for the view's pairs: the register, the
-# view's offset of the left level, the output switch bits of each side
-PAIRS = ((0x14, 2, 0, 0), (0x36, 4, 0, 0), (0x38, 6, 0x04, 0x02),
-         (0x3E, 8, 0x10, 0x08), (0x1A, 10, 0x01, 0x01), (0x7C, 2, 0, 0))
+# view's offset of the left level, the output switch bits of each side,
+# and the chip's levels for the view's
+PAIRS = ((0x14, 2, 0, 0, LVL_A1), (0x36, 4, 0, 0, LVL_MUS),
+         (0x38, 6, 0x04, 0x02, LVL_AUX), (0x3E, 8, 0x10, 0x08, LVL_AUX),
+         (0x1A, 10, 0x01, 0x01, LVL_MUS), (0x7C, 2, 0, 0, LVL_A2))
 SOURCES = ((0x01, 0), (0x06, 2), (0x18, 6), (0x60, 5))
 MIX_DEFAULT = (0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0x00, 0x00, 0x00, 0x00,
                0x00, 0x00, 0x1F, 0x15, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -1171,7 +1221,7 @@ class Front:
         """the chip's level for the Sound Blaster 16's register reg"""
         i = reg - 0x30
         if i <= 1:
-            self.mix_write(0x60 + 2 * i, self.mix[i] >> 2)
+            self.mix_write(0x60 + 2 * i, LVL_MASTER[self.mix[i] >> 3])
         elif i < 0x0B:
             pair = (i - 2) >> 1
             self.pair_out(pair)
@@ -1191,7 +1241,7 @@ class Front:
             self.mix_write(0x1C, (self.mix_read(0x1C) & 0xF8) | src)
 
     def pair_out(self, pair):
-        reg, at, lsw, rsw = PAIRS[pair]
+        reg, at, lsw, rsw, lvl = PAIRS[pair]
         left, right = self.mix[at], self.mix[at + 1]
         if at == 10:
             right = left
@@ -1200,7 +1250,7 @@ class Front:
                 left = 0
             if not self.mix[0x0C] & rsw:
                 right = 0
-        self.mix_write(reg, (left & 0xF0) | (right >> 4))
+        self.mix_write(reg, (lvl[left >> 3] << 4) | lvl[right >> 3])
 
     def v_ports(self):
         if self.dma16 >= 5:

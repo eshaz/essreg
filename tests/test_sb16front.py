@@ -458,7 +458,9 @@ class FrontChecks:
         m = chip.mixer
         self.assertEqual((m[0x70], m[0x72]), (0x6E, 0xFD))
         self.assertEqual((m[0x74], m[0x76]), (0x00, 0xF0))      # 4096 bytes
-        self.assertEqual((m[0x7A], m[0x7C]), (0x47, 0x88))
+        # the voice: the chip's 14h 88h (-9 dB) as the view's 27 (-8 dB), on
+        # Audio 2's scale -7.5 dB
+        self.assertEqual((m[0x7A], m[0x7C]), (0x47, 0xAA))
         self.assertEqual(m[0x71] & 0x22, 0x02)
         self.assertEqual(chip.dma[3], {"mask": False, "mode": 0x1B,
                                        "addr": 0x4680, "count": 0x1FFF,
@@ -536,7 +538,7 @@ class FrontChecks:
         write(c, 0x10, 0x80)                # the direct DAC: the reset
         self.assertEqual(chip.resets, 2)    # and the one into Extended mode
         self.assertEqual((chip.mixer[0x78], chip.mixer[0x7A],
-                          chip.mixer[0x7C]), (0x93, 0x47, 0x88))
+                          chip.mixer[0x7C]), (0x93, 0x47, 0xAA))
         n = len(chip.played2)
         c.wait(10000)
         self.assertGreater(len(chip.played2), n + 300)
@@ -584,31 +586,32 @@ class FrontChecks:
                          (0xA468, 0x02))
 
     def test_mixer_levels(self):
-        """the Sound Blaster 16's levels become the chip's"""
+        """the Sound Blaster 16's levels become the chip's, the nearest in
+        dB on its scales (sbfsm.LVL_*)"""
         c, chip = self.c, self.chip
 
         def hw(*regs):
             return [chip.mixer[r] for r in regs]
         mixer(c, 0x00, 0x00)
-        mixer(c, 0x30, 0xF0)
+        mixer(c, 0x30, 0xF0)                    # -2 dB, -30 dB
         mixer(c, 0x31, 0x80)
-        self.assertEqual(hw(0x60, 0x62), [0x3C, 0x20])
-        mixer(c, 0x32, 0xA0)
+        self.assertEqual(hw(0x60, 0x62), [60, 23])
+        mixer(c, 0x32, 0xA0)                    # Audio 1: -21 dB, -30 dB
         mixer(c, 0x33, 0x50)
-        self.assertEqual(hw(0x14), [0xA5])
-        mixer(c, 0x34, 0x70)
+        self.assertEqual(hw(0x14), [0x41])
+        mixer(c, 0x34, 0x70)                    # the music DAC's -21 dB
         mixer(c, 0x35, 0x30)
-        self.assertEqual(hw(0x36), [0x73])
+        self.assertEqual(hw(0x36), [0x11])
         mixer(c, 0x36, 0xF0)                    # CD: through the switches
         mixer(c, 0x37, 0xF0)
-        self.assertEqual(hw(0x38), [0xFF])
+        self.assertEqual(hw(0x38), [0xCC])
         mixer(c, 0x3C, 0x1F & ~0x02)            # CD right off
-        self.assertEqual(hw(0x38), [0xF0])
+        self.assertEqual(hw(0x38), [0xC0])
         mixer(c, 0x38, 0x80)                    # line
         mixer(c, 0x39, 0x40)
-        self.assertEqual(hw(0x3E), [0x84])
-        mixer(c, 0x3A, 0xE0)                    # mic
-        self.assertEqual(hw(0x1A), [0xEE])
+        self.assertEqual(hw(0x3E), [0x11])
+        mixer(c, 0x3A, 0xE0)                    # mic, -6 dB
+        self.assertEqual(hw(0x1A), [0x66])
         mixer(c, 0x3C, 0x1F & ~0x01)            # mic off
         self.assertEqual(hw(0x1A), [0x00])
         mixer(c, 0x3B, 0xC0)                    # the PC speaker
@@ -627,13 +630,16 @@ class FrontChecks:
         16's, as on the CT1745; 0Ch and 0Eh aren't there"""
         c, chip = self.c, self.chip
         mixer(c, 0x04, 0x99)                    # voice
-        self.assertEqual(chip.mixer[0x14], 0x99)
+        self.assertEqual(chip.mixer[0x14], 0x33)
         self.assertEqual((mixer(c, 0x32), mixer(c, 0x33)), (0x98, 0x98))
         mixer(c, 0x22, 0xF5)                    # master
-        self.assertEqual((chip.mixer[0x60], chip.mixer[0x62]), (0x3E, 0x16))
+        self.assertEqual((chip.mixer[0x60], chip.mixer[0x62]), (63, 10))
         self.assertEqual(mixer(c, 0x22), 0xF5)
         mixer(c, 0x0A, 0x04)                    # mic
-        self.assertEqual((mixer(c, 0x3A), chip.mixer[0x1A]), (0x98, 0x99))
+        self.assertEqual((mixer(c, 0x3A), chip.mixer[0x1A]), (0x98, 0x11))
+        mixer(c, 0x22, 0x00)                    # the Sound Blaster Pro's 0
+        mixer(c, 0x04, 0x00)                    # mutes, as -60 dB nearly is
+        self.assertEqual((chip.mixer[0x60], chip.mixer[0x14]), (0, 0))
         self.assertEqual(mixer(c, 0x0A), 0x04)
         hw = chip.mixer[0x0E]
         mixer(c, 0x0E, 0x02)
@@ -672,14 +678,14 @@ class FrontChecks:
         self.assertEqual(hw[0x00], 0x77)            # never the chip's reset
         self.assertEqual(mixer(c, 0x30), 0xC0)      # the view's reset
         self.assertEqual(mixer(c, 0x3C), 0x1F)
-        self.assertEqual((hw[0x60], hw[0x62]), (0x30, 0x30))  # C0h, 6 bits
-        self.assertEqual((hw[0x14], hw[0x36]), (0xCC, 0xCC))
+        self.assertEqual((hw[0x60], hw[0x62]), (44, 44))  # C0h: -14.25 dB
+        self.assertEqual((hw[0x14], hw[0x36]), (0x66, 0x33))    # -15 dB
         self.assertEqual((hw[0x38], hw[0x3E], hw[0x1A], hw[0x3C]),
                          (0, 0, 0, 0))
         self.assertEqual(hw[0x1C], 0x15)    # mic, CD and line: the record mix
         self.assertEqual(hw[0x0E], 0x20)    # the Sound Blaster Pro's stereo off
         if c.audio2:
-            keep[0x7C] = 0xCC
+            keep[0x7C] = 0x77                       # Audio 2's -13.5 dB
         for reg in (0x50, 0x52, 0x7C):
             self.assertEqual(hw[reg], keep[reg], hex(reg))
         three_d = DOS_MIXER[0x50]
@@ -688,26 +694,28 @@ class FrontChecks:
         self.assertEqual((hw[0x50], hw[0x52]), (three_d, DOS_MIXER[0x52]))
 
     def test_the_mixer_a_game_finds(self):
-        """the view at the start shows the levels the chip has"""
+        """the view at the start shows the levels the chip has, each the
+        nearest in dB (sbfsm.VIEW_*)"""
         c = self.card(mixer=DOS_MIXER)
         view = [mixer(c, r) for r in range(0x30, 0x48)]
         self.assertEqual(view, [
             0xE8, 0x00,                 # master, the right muted
-            0xA0, 0xB0, 0xC0, 0xD0,     # voice, MIDI
-            0x10, 0x20, 0x30, 0x40,     # CD, line
-            0x50, 0xC0,                 # mic, PC speaker
+            0xE0, 0xE8, 0xF8, 0xF8,     # voice, MIDI (above unity: 0 dB)
+            0x88, 0x90, 0xA0, 0xA8,     # CD, line
+            0xD8, 0xC0,                 # mic, PC speaker
             0x1F, 0x10, 0x08,           # the switches: line records
             0, 0, 0, 0, 0, 0x80, 0x80, 0x80, 0x80])
-        # writing back what it read changes nothing
+        # writing back what it read changes nothing but the music DAC's
+        # levels, which were above unity and come back at 0 dB
         before = list(c.chip.mixer)
         for r, v in zip(range(0x30, 0x48), view):
             if r != 0x31:               # the muted master can't come back
                 mixer(c, r, v)          # muted
         self.assertEqual([(r, v) for r, v in enumerate(c.chip.mixer)
-                          if v != before[r]], [])
-        # the master's 6 bits in the 5 of the CT1745
+                          if v != before[r]], [(0x36, 0x88)])
+        # the master's 6 bits to the nearest of the CT1745's 5
         c = self.card(mixer={0x60: 0x2D, 0x62: 0x13})
-        self.assertEqual((mixer(c, 0x30), mixer(c, 0x31)), (0xB0, 0x48))
+        self.assertEqual((mixer(c, 0x30), mixer(c, 0x31)), (0xC0, 0x70))
 
 
 @unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")

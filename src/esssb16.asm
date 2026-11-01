@@ -2596,21 +2596,48 @@ mix_mask:       times 11 db 0xF8        ; 30h-3Ah
 
 ; the chip's level registers for the view's pairs: the register, the
 ; view's offset of the left level, the output switch bits that gate the
-; left and the right (none for voice and MIDI); the mic's is mono. The
-; voice is both DACs': Audio 2's comes last, apart from the levels the
-; view takes from the chip (mix_fresh)
+; left and the right (none for voice and MIDI), and the chip's levels for
+; the view's (lvl_*); the mic's is mono. The voice is both DACs': Audio
+; 2's comes last, apart from the levels the view takes from the chip
+; (mix_fresh)
+PAIR_LEN        equ 6
 pairs:          db 0x14, 2, 0, 0        ; voice (Audio 1)
+                dw lvl_a1
                 db 0x36, 4, 0, 0        ; MIDI (FM)
+                dw lvl_mus
                 db 0x38, 6, 0x04, 0x02  ; CD (AuxA)
+                dw lvl_aux
                 db 0x3E, 8, 0x10, 0x08  ; line
+                dw lvl_aux
                 db 0x1A, 10, 0x01, 0x01 ; mic
+                dw lvl_mus
                 db 0x7C, 2, 0, 0        ; voice (Audio 2)
+                dw lvl_a2
 
-; the chip's level for the Sound Blaster 16's register CL, from the view:
-; master left and right to 60h and 62h (6 bits), the pairs, the voice to
-; both DACs' (14h, and 7Ch when Audio 2 plays the game's sound), the PC
-; speaker to 3Ch (3 bits); the output switches gate CD, line and the mic,
-; the input switches pick the record source of 1Ch
+; the chip's 4-bit levels for the view's 5-bit ones (the Sound Blaster
+; 16's 2 dB steps, 31 at 0 dB): the nearest in dB on the chip's scales (DS
+; p.55, Table 21), never above 0 dB, so that full volume is the chip's
+; unity and not its gain; 0 and 1, the Sound Blaster Pro's 0, mute. Audio
+; 1 (14h), Audio 2 (7Ch), the music DAC and the mic (36h, 1Ah), AuxA and
+; line (38h, 3Eh); and the master's 6 bits (60h, 62h, 0.75 dB steps, 63 at
+; 0 dB). tests/sbfsm.py computes them
+lvl_a1:         db 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+                db 1, 2, 2, 3, 4, 4, 5, 6, 6, 7, 8, 9, 10, 11, 13, 14
+lvl_a2:         db 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+                db 1, 2, 3, 3, 4, 5, 5, 6, 7, 7, 8, 10, 11, 12, 14, 15
+lvl_mus:        db 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+                db 1, 1, 1, 1, 1, 1, 2, 3, 3, 4, 5, 5, 6, 7, 7, 8
+lvl_aux:        db 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+                db 1, 1, 2, 2, 3, 4, 4, 5, 6, 6, 7, 8, 9, 10, 12, 13
+lvl_master:     db 0, 0, 0, 0, 0, 0, 0, 0, 2, 4, 7, 10, 12, 15, 18, 20
+                db 23, 26, 28, 31, 34, 36, 39, 42, 44, 47, 50, 52, 55, 58, 60, 63
+
+; the chip's level for the Sound Blaster 16's register CL, from the view,
+; as near in dB as the chip goes (lvl_*): master left and right to 60h and
+; 62h, the pairs, the voice to both DACs' (14h, and 7Ch when Audio 2 plays
+; the game's sound), the PC speaker to 3Ch (3 bits); the output switches
+; gate CD, line and the mic, the input switches pick the record source of
+; 1Ch
 mix_apply:
         pusha
         mov     al,cl
@@ -2627,12 +2654,14 @@ mix_apply:
 .out:   popa
         ret
 .master:
-        movzx   bx,al                   ; 8 bits to the 6 of 60h and 62h
-        mov     ah,0x60
+        movzx   bx,al                   ; the view's 5 bits to the 6 of 60h
+        mov     ah,0x60                 ; and 62h
         add     ah,bl
         add     ah,bl
         mov     al,[bx+V(mix)]
-        shr     al,2
+        shr     al,3
+        mov     bx,lvl_master
+        xlat
         call    mix_write
         jmp     short .out
 .pair:  sub     al,2                    ; 32h-3Ah: the pair
@@ -2685,13 +2714,13 @@ mix_apply:
 sources:        db 0x01, 0, 0x06, 2, 0x18, 6, 0x60, 5
 sources_end:
 
-; the chip's register of pair AL (pairs): the view's left and right
-; levels' high nibbles (the mono mic's its own twice), each 0 while its
-; output switch is off; clobbers AX, BX, DX, SI
+; the chip's register of pair AL (pairs): the chip's levels for the view's
+; left and right ones (the mono mic's its own twice), each 0 while its
+; output switch is off; clobbers BX, DX, SI
 pair_out:
         push    ax
         movzx   si,al
-        shl     si,2
+        imul    si,si,PAIR_LEN
         add     si,pairs
         movzx   bx,byte [si+1]
         mov     ax,[bx+V(mix)]             ; AL left, AH right
@@ -2700,16 +2729,22 @@ pair_out:
         mov     ah,al
 .gate:  mov     dx,[si+2]               ; DL, DH: the switch bits
         or      dl,dl
-        jz      .nib
+        jz      .lvl
         test    [V(mix)+0x0C],dl
         jnz     .right
         mov     al,0
 .right: test    [V(mix)+0x0C],dh
-        jnz     .nib
+        jnz     .lvl
         mov     ah,0
-.nib:   and     al,0xF0
-        shr     ah,4
-        or      al,ah
+.lvl:   mov     bx,[si+4]               ; each side's 5 bits to the chip's 4
+        shr     al,3
+        xlat
+        mov     dl,al
+        mov     al,ah
+        shr     al,3
+        xlat
+        shl     dl,4
+        or      al,dl
         mov     ah,[si]
         call    mix_write
         pop     ax
@@ -3248,53 +3283,64 @@ find_byte:
         clc
         ret
 
-; the view's levels from the chip, at the start: the master from 60h and
-; 62h (0 when muted), the pairs' nibbles where their switches are on, the
-; PC speaker, and the record source as the input switches that pick it:
-; the mic, CD or line alone, the record mixer as the reset's several, else
-; none, so that writing them back keeps it. Once the TSR is in, the view
-; is the game's: the chip's own registers that a program writes don't
-; change it
+; the view's levels from the chip, at the start, each the nearest in dB
+; (view_*): the master from 60h and 62h (0 when muted), the pairs' where
+; their switches are on, the PC speaker, and the record source as the
+; input switches that pick it: the mic, CD or line alone, the record mixer
+; as the reset's several, else none, so that writing them back keeps it.
+; Once the TSR is in, the view is the game's: the chip's own registers
+; that a program writes don't change it
 mix_fresh:
         pusha
         mov     ax,0x6000               ; AH = 60h, then 62h
-        mov     bx,mix
+        mov     si,mix
 .master:
         call    mix_read
+        mov     bx,view_master
         test    al,0x40
         jz      .on
-        mov     al,0
-.on:    and     al,0x3E                 ; 6 bits to the 5 of 30h and 31h
-        shl     al,2
-        mov     [bx],al
-        inc     bx
+        xor     al,al                   ; muted: 0
+        jmp     short .put
+.on:    and     al,0x3F                 ; 6 bits to the view's 5
+        xlat
+        shl     al,3
+.put:   mov     [si],al
+        inc     si
         add     ah,2
         cmp     ah,0x62
         jbe     .master
         mov     si,pairs
-.pair:  lodsw                           ; AL = the register, AH = the offset
-        movzx   bx,ah
-        mov     ah,al
+        mov     bp,view_pairs
+.pair:  mov     ah,[si]                 ; the chip's register
         call    mix_read
-        mov     dl,al                   ; the chip's nibbles
-        lodsw                           ; AL, AH: the switch bits
-        mov     cl,[V(mix)+0x0C]
-        or      al,al
+        mov     bx,[ds:bp]              ; its nibbles to the view's 5 bits:
+        mov     dh,al                   ; DH left, DL right
+        shr     al,4
+        xlat
+        shl     al,3
+        xchg    al,dh
+        and     al,0x0F
+        xlat
+        shl     al,3
+        mov     dl,al
+        movzx   bx,byte [si+1]          ; the view's offset of the left level
+        mov     cx,[si+2]               ; CL, CH: the switch bits
+        mov     al,[V(mix)+0x0C]
+        or      cl,cl
         jz      .left
-        test    cl,al
+        test    al,cl
         jz      .right                  ; switched off: the view's level kept
-.left:  mov     dh,dl
-        and     dh,0xF0
-        mov     [bx+V(mix)],dh
+.left:  mov     [bx+V(mix)],dh
 .right: cmp     bl,10
         je      .next                   ; the mono mic: the left only
-        or      ah,ah
+        or      ch,ch
         jz      .r
-        test    cl,ah
+        test    al,ch
         jz      .next
-.r:     shl     dl,4
-        mov     [bx+V(mix)+1],dl
-.next:  cmp     si,pairs + 20
+.r:     mov     [bx+V(mix)+1],dl
+.next:  add     si,PAIR_LEN
+        add     bp,2
+        cmp     si,pairs + 5 * PAIR_LEN
         jb      .pair
         mov     ah,0x3C                 ; the PC speaker, the 2 bits of
         call    mix_read                ; 3Bh
@@ -3321,6 +3367,18 @@ mix_fresh:
         mov     [V(mix)+0x0E],cl
         popa
         ret
+
+; the view's 5-bit levels for the chip's 4-bit ones of the first five
+; pairs, and for the master's 6 bits: the nearest in dB, at most 31 (0 dB),
+; 0 for mute. tests/sbfsm.py computes them
+view_pairs:     dw view_a1, view_mus, view_aux, view_aux, view_mus
+view_a1:        db 0, 16, 18, 19, 21, 22, 24, 25, 27, 27, 28, 29, 30, 30, 31, 31
+view_mus:       db 0, 21, 22, 24, 25, 27, 28, 30, 31, 31, 31, 31, 31, 31, 31, 31
+view_aux:       db 0, 17, 18, 20, 21, 23, 24, 26, 27, 28, 29, 30, 30, 31, 31, 31
+view_master:    db 7, 8, 8, 8, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12, 13, 13
+                db 13, 14, 14, 14, 15, 15, 16, 16, 16, 17, 17, 17, 18, 18, 19, 19
+                db 19, 20, 20, 20, 21, 21, 22, 22, 22, 23, 23, 23, 24, 24, 25, 25
+                db 25, 26, 26, 26, 27, 27, 28, 28, 28, 29, 29, 29, 30, 30, 31, 31
 
 ; AL = PnP register BL of logical device 1 (pnp_read), and the register =
 ; AL (pnp_write), through the config port; DX = its data port
@@ -4418,7 +4476,7 @@ emm_device:     db "EMMXXXX0", 0
 emm_device2:    db "EMMQXXX0", 0
 blaster_name:   db "BLASTER=", 0
 
-banner:         db "esssb16 1.1: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
+banner:         db "esssb16 1.2: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
 usage:          db "usage: esssb16 [/A220] [/H5|/H6|/H7|/H0] [/20|/21|/23|/2-] [/S] [/F0|/F1]", 13, 10
                 db "       [/O0|/O1] [/3]", 13, 10
                 db "  /A  the card's base, else BLASTER's A (220)", 13, 10

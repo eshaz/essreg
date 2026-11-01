@@ -1171,26 +1171,27 @@ class SoundBlaster16Test(VxDBuilds, unittest.TestCase):
                      0x7C: 0x99, 0x0E: 0x22, 0x00: 0x77}
 
     def test_the_mixer_a_program_finds(self):
-        """a Sound Blaster 16 shows the levels it has: the chip's, in the
-        bits the CT1745 has (the PC speaker's two of the chip's three)"""
+        """a Sound Blaster 16 shows the levels it has: the chip's, each the
+        nearest in dB of the CT1745's (unity at most), in the bits it has
+        (the PC speaker's two of the chip's three)"""
         m = self.game(mixer=self.WINDOWS_MIXER)
         view = [self.mixer(m, r) for r in range(0x30, 0x48)]
         self.assertEqual(view, [
             0xE8, 0x00,                 # master, the right muted
-            0xA0, 0xB0, 0xC0, 0xD0,     # voice, MIDI
-            0x10, 0x20, 0x30, 0x40,     # CD, line
-            0x50, 0x80,                 # mic, PC speaker
+            0xE0, 0xE8, 0xF8, 0xF8,     # voice, MIDI (+6 dB: unity)
+            0x88, 0x90, 0xA0, 0xA8,     # CD, line
+            0xD8, 0x80,                 # mic, PC speaker
             0x1F, 0x10, 0x08,           # the switches: line records
             0, 0, 0, 0, 0, 0x80, 0x80, 0x80, 0x80])
-        # writing back what it read changes nothing but the speaker's lost
-        # bit; each register goes to its own, so the muted right master
-        # stays muted
+        # writing back what it read changes nothing but MIDI, which comes
+        # back at unity, and the speaker's lost bit; each register goes to
+        # its own, so the muted right master stays muted
         before = list(m.hw.mixer)
         for r, v in zip(range(0x30, 0x48), view):
             if r != 0x31:               # the muted master can't come back
                 self.mixer(m, r, v)     # muted
         self.assertEqual([(r, v) for r, v in enumerate(m.hw.mixer)
-                          if v != before[r]], [(0x3C, 0x04)])
+                          if v != before[r]], [(0x36, 0x88), (0x3C, 0x04)])
 
     def test_a_mixer_reset_is_the_sound_blaster_16s(self):
         """a program's mixer reset gives the chip the Sound Blaster 16's
@@ -1203,8 +1204,9 @@ class SoundBlaster16Test(VxDBuilds, unittest.TestCase):
         self.assertEqual(hw[0x00], 0x77)                # never the chip's reset
         self.assertEqual(self.mixer(m, 0x30), 0xC0)     # the view's reset
         self.assertEqual(self.mixer(m, 0x3C), 0x1F)
-        self.assertEqual((hw[0x60], hw[0x62]), (0x30, 0x30))  # C0h, 6 bits
-        self.assertEqual((hw[0x14], hw[0x36]), (0xCC, 0xCC))
+        # -14 dB: the master's -14.25 dB, Audio 1's and the music DAC's -15
+        self.assertEqual((hw[0x60], hw[0x62]), (44, 44))
+        self.assertEqual((hw[0x14], hw[0x36]), (0x66, 0x33))
         self.assertEqual((hw[0x38], hw[0x3E], hw[0x1A], hw[0x3C]),
                          (0, 0, 0, 0))
         self.assertEqual(hw[0x1C], 0x15)    # mic, CD and line: the record mix
@@ -1216,14 +1218,14 @@ class SoundBlaster16Test(VxDBuilds, unittest.TestCase):
         """a recording takes the DSP: the view keeps the program's levels,
         and they go back to the chip when the program has the DSP again"""
         m = self.game(mixer=self.WINDOWS_MIXER)
-        self.mixer(m, 0x26, 0x33)                       # MIDI
-        self.assertEqual(m.hw.mixer[0x36], 0x33)
+        self.mixer(m, 0x26, 0x33)                       # MIDI, -48 dB
+        self.assertEqual(m.hw.mixer[0x36], 0x11)        # the least, -21
         m.api(VM_SYS, 0x040D)
         m.api(VM_SYS, 0x0002, EBX=1, EAX=WIN_AUDIO)
         self.assertEqual(m.hw.mixer[0x36], 0xCD)        # Windows' level
         m.api(VM_SYS, 0x0003, EBX=1, EAX=WIN_AUDIO)
         self.assertEqual(self.front(m), VM_DOS)
-        self.assertEqual(m.hw.mixer[0x36], 0x33)        # its level again
+        self.assertEqual(m.hw.mixer[0x36], 0x11)        # its level again
         self.assertEqual(self.mixer(m, 0x26), 0x33)
 
     def test_the_chips_own_volumes(self):
@@ -1236,9 +1238,11 @@ class SoundBlaster16Test(VxDBuilds, unittest.TestCase):
             self.mixer(m, reg, v)
             self.assertEqual(m.hw.mixer[reg], v)
         self.assertEqual([e for e in m.hw.log[n:] if e[0] == "in"], [])
+        # the master's -23.25 dB as -24, Audio 1's -18 and -6 dB as they
+        # are, the mic's +1.5 dB as unity
         self.assertEqual([self.mixer(m, r) for r in
                           (0x30, 0x31, 0x32, 0x33, 0x3A, 0x3D, 0x3E)],
-                         [0x80, 0x00, 0x50, 0xA0, 0x90, 0x04, 0x02])
+                         [0x98, 0x00, 0xB0, 0xE0, 0xF8, 0x04, 0x02])
         # a recording takes the DSP: the view keeps the program's levels
         self.mixer(m, 0x14, 0x33)
         m.api(VM_SYS, 0x040D)
@@ -1260,16 +1264,16 @@ class SoundBlaster16Test(VxDBuilds, unittest.TestCase):
         m.api(VM_SYS, 0x0003, EBX=1, EAX=WIN_AUDIO)
         self.assertEqual(self.front(m), VM_DOS)
         self.assertEqual(self.mixer(m, 0x30), 0xF8)     # 5 bits
-        self.assertEqual(m.hw.mixer[0x60], 0x3E)        # its level again
+        self.assertEqual(m.hw.mixer[0x60], 0x3F)        # its level again
         self.cmd(m, 0xB6, 0x30, 0xFF, 0x0F)
         self.assertEqual(m.hw.ctrl[0xA1], clocks(248)[0])  # 44100 Hz
         # a new program in the VM starts over, from Windows' levels and the
         # DSP's cold boot
         m.program_end(VM_DOS)
-        m.hw.mixer[0x60] = 0x2D
+        m.hw.mixer[0x60] = 0x2D                         # -13.5 dB
         m.outb(VM_DOS, 0x226, 1)
         m.outb(VM_DOS, 0x226, 0)
-        self.assertEqual(self.mixer(m, 0x30), 0xB0)
+        self.assertEqual(self.mixer(m, 0x30), 0xC0)     # -14 dB
         self.cmd(m, 0xB6, 0x30, 0xFF, 0x0F)
         self.assertEqual(m.hw.ctrl[0xA1], clocks(0x38)[0])  # 9958 Hz
 

@@ -85,7 +85,7 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0123
+ESSREG_VERSION          equ 0x0124
 ESSREG_FEATURES         equ 0xFFFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
@@ -4776,7 +4776,10 @@ ESSREG_S16_A2_Xfer:
         movzx   edx,word [edi+ADI_AudioBase]
         mov     al,[edi+EX_S16_Mix+2]   ; the voice's volume
         mov     ah,[edi+EX_S16_Mix+3]
-        call    ESSREG_S16_Nibbles
+        push    ecx
+        mov     ecx,ESSREG_S16_Lvl_A2
+        call    ESSREG_S16_Levels
+        pop     ecx
         mov     ah,0x7C
         call    ESSREG_Mix_Write
         mov     al,0x41                 ; 7Ah: the interrupt on, 16-bit,
@@ -5371,22 +5374,41 @@ ESSREG_S16_Aliases:
         db 0x04, 0x14, 2, 0x26, 0x36, 4, 0x28, 0x38, 6, 0x2E, 0x3E, 8
         db 0x0A, 0x1A, 10, 0
 
-; the view's L and R at EX_S16_Mix+ECX from the nibbles of the chip's
-; register AH (EX_S16_Mix+10, the mono mic, from 1Ah's left only), EDX =
-; Audio_Base, EDI = ADI; clobbers EAX
+; the view's L and R at EX_S16_Mix+ECX from the chip's register AH, each
+; nibble the level nearest in dB (ESSREG_S16_View_*) (EX_S16_Mix+10, the
+; mono mic, from 1Ah's left only), EDX = Audio_Base, EDI = ADI; clobbers
+; EAX
 ESSREG_S16_Mix_Pair:
-        call    ESSREG_Mix_Read
-        mov     ah,al
-        and     al,0xF0
-        mov     [edi+EX_S16_Mix+ecx],al
+        push    ebx
+        push    esi
+        mov     esi,ESSREG_S16_View_A1
+        cmp     ah,0x14
+        je      .read
+        mov     esi,ESSREG_S16_View_Mus
+        cmp     ah,0x36
+        je      .read
+        cmp     ah,0x1A
+        je      .read
+        mov     esi,ESSREG_S16_View_Aux
+.read:  call    ESSREG_Mix_Read
+        movzx   ebx,al
+        shr     ebx,4
+        mov     bl,[esi+ebx]
+        shl     bl,3
+        mov     [edi+EX_S16_Mix+ecx],bl
         cmp     ecx,byte 10
         je      .out
-        shl     ah,4
-        mov     [edi+EX_S16_Mix+ecx+1],ah
-.out:   ret
+        and     eax,0x0F
+        mov     al,[esi+eax]
+        shl     al,3
+        mov     [edi+EX_S16_Mix+ecx+1],al
+.out:   pop     esi
+        pop     ebx
+        ret
 
-; the view's master from the chip's 60h and 62h, their 6 bits to the 5 of
-; 30h and 31h, 0 when muted; EDX = Audio_Base, EDI = ADI; clobbers EAX
+; the view's master from the chip's 60h and 62h, their 6 bits to the
+; nearest of the 5 of 30h and 31h (ESSREG_S16_View_Master), 0 when muted;
+; EDX = Audio_Base, EDI = ADI; clobbers EAX
 ESSREG_S16_Mix_Master:
         mov     ah,0x60
         call    .one
@@ -5399,9 +5421,26 @@ ESSREG_S16_Mix_Master:
         test    al,0x40
         jz      .on
         xor     al,al
-.on:    and     al,0x3E
-        shl     al,2
         ret
+.on:    and     eax,0x3F
+        mov     al,[ESSREG_S16_View_Master+eax]
+        shl     al,3
+        ret
+
+; the view's 5-bit levels for the chip's 4-bit ones and for the master's
+; 6 bits: the nearest in dB, at most 31 (0 dB), 0 for mute; Audio 1, the
+; music DAC and the mic, AuxA and line. tests/sbfsm.py computes them
+ESSREG_S16_View_A1:
+        db 0, 16, 18, 19, 21, 22, 24, 25, 27, 27, 28, 29, 30, 30, 31, 31
+ESSREG_S16_View_Mus:
+        db 0, 21, 22, 24, 25, 27, 28, 30, 31, 31, 31, 31, 31, 31, 31, 31
+ESSREG_S16_View_Aux:
+        db 0, 17, 18, 20, 21, 23, 24, 26, 27, 28, 29, 30, 30, 31, 31, 31
+ESSREG_S16_View_Master:
+        db 7, 8, 8, 8, 9, 9, 10, 10, 10, 11, 11, 11, 12, 12, 13, 13
+        db 13, 14, 14, 14, 15, 15, 16, 16, 16, 17, 17, 17, 18, 18, 19, 19
+        db 19, 20, 20, 20, 21, 21, 22, 22, 22, 23, 23, 23, 24, 24, 25, 25
+        db 25, 26, 26, 26, 27, 27, 28, 28, 28, 29, 29, 29, 30, 30, 31, 31
 
 ; the view as a Sound Blaster 16 shows the levels it has, for a program
 ; that starts: master, voice, MIDI, CD, line, mic and the PC speaker from
@@ -5564,11 +5603,12 @@ ESSREG_S16_MPU_Bit:
 .out:   ret
 
 ; the chip's volume for the Sound Blaster 16's register CH, from the
-; program's view, EDI = ADI, EDX = Audio_Base; keeps ECX. Each register
-; goes to its own: master left and right to 60h and 62h, voice to 14h,
-; MIDI to 36h, CD to 38h, line to 3Eh, the mic to 1Ah, the PC speaker to
-; 3Ch; the output switches gate CD, line and the mic, and the input
-; switches pick the record source of 1Ch
+; program's view, as near in dB as the chip goes (ESSREG_S16_Lvl_*), EDI =
+; ADI, EDX = Audio_Base; keeps ECX. Each register goes to its own: master
+; left and right to 60h and 62h, voice to 14h, MIDI to 36h, CD to 38h,
+; line to 3Eh, the mic to 1Ah, the PC speaker to 3Ch; the output switches
+; gate CD, line and the mic, and the input switches pick the record source
+; of 1Ch
 ESSREG_S16_Mix_Apply:
         push    eax
         push    ecx
@@ -5599,22 +5639,30 @@ ESSREG_S16_Mix_Apply:
 .right: mov     al,[edi+EX_S16_Mix+1]
         mov     ah,0x62
 .master:
-        shr     al,2
+        shr     al,3                    ; the view's 5 bits to the 6 of 60h
+        movzx   ecx,al                  ; and 62h
+        mov     al,[ESSREG_S16_Lvl_Master+ecx]
         call    ESSREG_Mix_Write
         jmp     .out
 .voice: mov     al,[edi+EX_S16_Mix+2]   ; the Audio 1 (wave) volume 14h
         mov     ah,[edi+EX_S16_Mix+3]
-        call    ESSREG_S16_Nibbles
+        mov     ecx,ESSREG_S16_Lvl_A1
+        call    ESSREG_S16_Levels
         mov     ah,0x14
         call    ESSREG_Mix_Write
         cmp     byte [edi+EX_S16_A2],4  ; and Audio 2's, 7Ch, when it plays
         jae     .out                    ; the program's sound
+        mov     al,[edi+EX_S16_Mix+2]
+        mov     ah,[edi+EX_S16_Mix+3]
+        mov     ecx,ESSREG_S16_Lvl_A2
+        call    ESSREG_S16_Levels
         mov     ah,0x7C
         call    ESSREG_Mix_Write
         jmp     .out
 .fm:    mov     al,[edi+EX_S16_Mix+4]   ; the music DAC (FM) volume 36h
         mov     ah,[edi+EX_S16_Mix+5]
-        call    ESSREG_S16_Nibbles
+        mov     ecx,ESSREG_S16_Lvl_Mus
+        call    ESSREG_S16_Levels
         mov     ah,0x36
         call    ESSREG_Mix_Write
         jmp     .out
@@ -5675,7 +5723,8 @@ ESSREG_S16_Mix_Apply:
 .cdl:   test    byte [edi+EX_S16_Mix+0x0C],0x02
         jnz     .cdr
         xor     ah,ah
-.cdr:   call    ESSREG_S16_Nibbles
+.cdr:   mov     ecx,ESSREG_S16_Lvl_Aux
+        call    ESSREG_S16_Levels
         mov     ah,0x38
         jmp     ESSREG_Mix_Write
 .line_: mov     al,[edi+EX_S16_Mix+8]   ; line 3Eh, through bits 4 and 3
@@ -5686,7 +5735,8 @@ ESSREG_S16_Mix_Apply:
 .linel: test    byte [edi+EX_S16_Mix+0x0C],0x08
         jnz     .liner
         xor     ah,ah
-.liner: call    ESSREG_S16_Nibbles
+.liner: mov     ecx,ESSREG_S16_Lvl_Aux
+        call    ESSREG_S16_Levels
         mov     ah,0x3E
         jmp     ESSREG_Mix_Write
 .mic_:  mov     al,[edi+EX_S16_Mix+0x0A] ; the mono mic 1Ah, through bit 0
@@ -5694,16 +5744,50 @@ ESSREG_S16_Mix_Apply:
         jnz     .micon
         xor     al,al
 .micon: mov     ah,al
-        call    ESSREG_S16_Nibbles
+        mov     ecx,ESSREG_S16_Lvl_Mus
+        call    ESSREG_S16_Levels
         mov     ah,0x1A
         jmp     ESSREG_Mix_Write
 
 ; AL = the chip's two 4-bit volumes for the 8-bit left AL and right AH
-ESSREG_S16_Nibbles:
-        and     al,0xF0
-        shr     ah,4
-        or      al,ah
+; AL = the chip's 4-bit levels, left in the high nibble, for the view's
+; left (AL) and right (AH) 5-bit levels, from the table at ECX
+; (ESSREG_S16_Lvl_*); clobbers AH
+ESSREG_S16_Levels:
+        push    ebx
+        movzx   ebx,al
+        shr     ebx,3
+        mov     bl,[ecx+ebx]
+        shl     bl,4
+        shr     ah,3
+        movzx   eax,ah
+        or      bl,[ecx+eax]
+        mov     al,bl
+        pop     ebx
         ret
+
+; the chip's 4-bit levels for the view's 5-bit ones (the Sound Blaster
+; 16's 2 dB steps, 31 at 0 dB): the nearest in dB on the chip's scales (DS
+; p.55, Table 21), never above 0 dB, so that full volume is the chip's
+; unity and not its gain; 0 and 1, the Sound Blaster Pro's 0, mute. Audio
+; 1 (14h), Audio 2 (7Ch), the music DAC and the mic (36h, 1Ah), AuxA and
+; line (38h, 3Eh); and the master's 6 bits (60h, 62h, 0.75 dB steps, 63 at
+; 0 dB). tests/sbfsm.py computes them
+ESSREG_S16_Lvl_A1:
+        db 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+        db 1, 2, 2, 3, 4, 4, 5, 6, 6, 7, 8, 9, 10, 11, 13, 14
+ESSREG_S16_Lvl_A2:
+        db 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+        db 1, 2, 3, 3, 4, 5, 5, 6, 7, 7, 8, 10, 11, 12, 14, 15
+ESSREG_S16_Lvl_Mus:
+        db 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+        db 1, 1, 1, 1, 1, 1, 2, 3, 3, 4, 5, 5, 6, 7, 7, 8
+ESSREG_S16_Lvl_Aux:
+        db 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+        db 1, 1, 2, 2, 3, 4, 4, 5, 6, 6, 7, 8, 9, 10, 12, 13
+ESSREG_S16_Lvl_Master:
+        db 0, 0, 0, 0, 0, 0, 0, 0, 2, 4, 7, 10, 12, 15, 18, 20
+        db 23, 26, 28, 31, 34, 36, 39, 42, 44, 47, 50, 52, 55, 58, 60, 63
 
 ; --- the program's 16-bit channel ------------------------------------------------
 

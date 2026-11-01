@@ -40,11 +40,14 @@ Blaster 16 does, DSP version 4.05 with the CT1745 mixer, command for command
   lacks, go to the chip in its Compatibility mode.
 * The Sound Blaster 16's mixer registers, 30h to 47h, show the levels the
   chip has when `esssb16` loads, also those a mixer program set, and set the
-  chip's levels and record source. The Sound Blaster Pro's registers are
-  views of them, as on the CT1745, which has no 0Ch or 0Eh. A mixer reset
-  sets the Sound Blaster 16's levels and leaves the chip's other settings,
-  such as the 3-D effect. Registers 80h to 82h give the card's IRQ, its
-  channels and which transfer's interrupt is pending.
+  chip's levels and record source. Each level becomes the chip's nearest in
+  dB, so full volume is the chip's 0 dB and never the gain that its top
+  steps add (+1.5 dB for the wave, +10.5 dB for the music DAC). The Sound
+  Blaster Pro's registers are views of them, as on the CT1745, which has no
+  0Ch or 0Eh. A mixer reset sets the Sound Blaster 16's levels and leaves
+  the chip's other settings, such as the 3-D effect. Registers 80h to 82h
+  give the card's IRQ, its channels and which transfer's interrupt is
+  pending.
 * A program that uses the chip's Extended mode itself, such as `essreg`,
   gets the chip as it is, with ESS's own commands and mixer, until its next
   reset. One that asks for the chip's identification with E7h finds a Sound

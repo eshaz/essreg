@@ -558,8 +558,10 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(m.chip.pnp[(1, 0x72)], 5)
         self.assertEqual(m.chip.cfg_ports[7], 0xFF)
         mix = m.chip.mixer
+        # the voice's 14h 9Ah (-7.5 and -6 dB) as the view's 27 and 28 (-8
+        # and -6 dB), on Audio 2's scale ABh (-7.5 and -6 dB)
         self.assertEqual((mix[0x71] & 0x22, mix[0x78], mix[0x7A], mix[0x7C]),
-                         (0x02, 0x00, 0x00, 0x9A))
+                         (0x02, 0x00, 0x00, 0xAB))
         self.assertIn("ES1869 at 220h, IRQ 5, DMA 1, the game's DMA 5 on "
                       "Audio 2's DMA 3\r\n", m.output)
         self.assertIn("set BLASTER=A220 I5 D1 H5 P330 T6", m.output)

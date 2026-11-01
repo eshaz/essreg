@@ -321,10 +321,19 @@ its unmask, waits until it does.
 The Sound Blaster 16's registers 30h-47h and the Sound Blaster Pro's 04h,
 0Ah, 22h, 26h, 28h and 2Eh, views of them, keep the game's values in the
 bits that the CT1745 keeps, and give the chip the levels that they stand
-for. 0Ch and 0Eh read 0 and ignore writes. 80h and 81h answer the card's
-interrupt and channels, a write of 81h selects the 16-bit channel, and 82h
-answers the interrupts. A write of 00h resets the view to the card's
-defaults and gives them to the chip. Every other register is the chip's.
+for. A level is the CT1745's 5 bits, 2 dB a step with 31 at 0 dB, and the
+chip's is the one nearest in dB on its own scale (DS p.55, Table 21), never
+above 0 dB: Audio 1's 14 for full volume, not its 15, which is +1.5 dB, the
+music DAC's and the mic's 8, not 15 (+10.5 dB), and AuxA's and line's 13,
+not 15 (+3 dB). Levels 0 and 1, the Sound Blaster Pro's 0, mute, and below
+the chip's lowest step (-30 dB for Audio 1) a level takes that step. The
+master's 6 bits (60h, 62h) have 0.75 dB steps, 63 at 0 dB. The levels the
+chip has at the start come back the same way, the nearest of the CT1745's,
+at most 0 dB (`tests/sbfsm.py`, `LVL_*` and `VIEW_*`). 0Ch and 0Eh read 0
+and ignore writes. 80h and 81h answer the card's interrupt and channels, a
+write of 81h selects the 16-bit channel, and 82h answers the interrupts. A
+write of 00h resets the view to the card's defaults and gives them to the
+chip. Every other register is the chip's.
 
 ## Invariants
 
