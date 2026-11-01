@@ -481,10 +481,11 @@ class Machine(Cpu):
             self._mux()
         elif intno == INT_QPI:
             self._qpi()
-        elif intno == INT_OLD:
+        elif intno == INT_OLD:              # another program's callback:
             self.chained.append((self.r16("edx"), self.r8("ecx"),
                                  self.r8("eax")))
-            self.w8("eax", 0x5A)
+            if not self.r8("ecx"):          # 5Ah read, a write left as is
+                self.w8("eax", 0x5A)
         elif intno == INT_SENTINEL:
             self.stop("sentinel")
         elif intno == INT_MUX:

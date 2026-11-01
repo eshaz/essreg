@@ -539,22 +539,27 @@ bytes. A program that uses the 16-bit channel (`SoundBlaster16DMA`, 5 by
 default, the `H5` of `BLASTER`) programs it as ever. When that channel is
 Audio 2's, ESS's handler for it gets the programming (`ESSREG_DMA2`); else
 the VxD takes the channel from VDMAD once (`VDMAD_Virtualize_Channel`), and
-its callback gets it. Either way the programming, region, length and mode,
-goes to the channel of the DAC that plays the transfer, Audio 2's or Audio
-1's (`VDMAD_Set_Virt_State`, with the length in bytes and the mode changed
-to demand transfers), and ESS's handler for that channel programs the chip's
-channel from it, as if the program had (`ESSREG_S16_DMA_State`). A transfer
-command takes the channel's state from VDMAD as well, so a program that
-programmed the channel before the front had it plays too, and while the
-channel is masked, the DAC's waits masked. Masking the 16-bit channel masks
-the DAC's. VDMAD tells the front when the program reads the channel's count
-(`VDMAD_Set_Channel_Callbacks`), and the front answers with the DAC
-channel's count in words (`VDMAD_Get_Phys_Count` and `VDMAD_Set_Virt_Count`,
-`ESSREG_S16_Position`), also at the end of each block, so a program that
-polls the position sees it move. Mixer 81h picks the 16-bit channel: the one
-`SoundBlaster16DMA` names, or none, when the program plays 16-bit sound
-through the 8-bit channel, which it programs itself. Another channel only
-reads back, because the VxD has just the one from VDMAD.
+its callback gets it. Either way, while a 16-bit transfer runs, the
+programming, region, length and auto-initialize, goes to the channel of the
+DAC that plays the transfer, Audio 2's or Audio 1's (`VDMAD_Set_Virt_State`,
+with the length in bytes, the transfer's direction and demand transfers),
+and ESS's handler for that channel programs the chip's channel from it, as
+if the program had (`ESSREG_S16_DMA_Follow`, `ESSREG_S16_DMA_State`). A
+transfer command takes the channel's state from VDMAD as well, so a program
+that programmed the channel before the command plays too, and while the
+channel is masked, the DAC's waits masked. Before the command nothing
+follows, so that a DAC channel that the transfer doesn't take never runs the
+16-bit buffer, and when the program programs Audio 1's channel itself, the
+next command carries the 16-bit channel over again (`ESSREG_DMA1`). Masking
+the 16-bit channel masks the DAC's. VDMAD tells the front when the program
+reads the channel's count (`VDMAD_Set_Channel_Callbacks`), and the front
+answers with the DAC channel's count in words (`VDMAD_Get_Phys_Count` and
+`VDMAD_Set_Virt_Count`, `ESSREG_S16_Position`), also at the end of each
+block, so a program that polls the position sees it move. Mixer 81h picks
+the 16-bit channel: the one `SoundBlaster16DMA` names, or none, when the
+program plays 16-bit sound through the 8-bit channel, which it programs
+itself. Another channel only reads back, because the VxD has just the one
+from VDMAD.
 
 ESS's hardware interrupt procedure requests the owner VM's interrupt without
 acknowledging the chip. The program's handler reads 82h, which the front
@@ -789,7 +794,7 @@ it by hand:
    `ES1869VX.ORG` in the same directory, the name essinst uses too.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
 3. Restart Windows. essctl's *Device information* page now shows "Register
-   API: version 1.24".
+   API: version 1.25".
 
 If sound stops working, run `essinst /restore`. If Windows doesn't start,
 restart, press F8 at "Starting Windows 95", choose *Command prompt only*,

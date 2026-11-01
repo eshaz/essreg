@@ -85,7 +85,7 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0124
+ESSREG_VERSION          equ 0x0125
 ESSREG_FEATURES         equ 0xFFFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
@@ -905,14 +905,20 @@ ESSREG_A2_Mode:
 ; starts a transfer on Audio 1's channel, in either direction, the CODEC's
 ; filter is bypassed again (71h bit 2), in case the program reset the
 ; mixer after it took the DSP. Then VDMAD's handler, as ESS's code calls it.
-; A program with a virtual Sound Blaster doesn't get the channel
+; A program with a virtual Sound Blaster doesn't get the channel. The
+; channel no longer runs a 16-bit channel carried over to it, so the next
+; command carries that over anew (ESSREG_S16_DMA_State sets EX_S16_DMA
+; after this)
 ESSREG_DMA1:
         or      edi,edi
         jz      .dos
         cmp     [edi+EX_VSB_VM],ebx
-        jne     .dos
+        jne     .front
         ret                             ; a virtual Sound Blaster's: the
                                         ; channel stays the recording's
+.front: cmp     byte [edi+EX_S16_To],0
+        jne     .dos
+        mov     byte [edi+EX_S16_DMA],0
 .dos:   test    byte [ESSREG_Opts+1],OPT_A1_FILTER >> 8
         jnz     .default
         pushad
@@ -5812,20 +5818,44 @@ ESSREG_S16_DMA:
 ; address; EDI = ADI
 ESSREG_S16_Notify:
         or      edx,edx
-        jz      ESSREG_S16_DMA_State
+        jz      ESSREG_S16_DMA_Follow
         cmp     edx,byte 3
-        ja      ESSREG_S16_DMA_State
+        ja      ESSREG_S16_DMA_Follow
         cmp     edx,byte 1
         je      ESSREG_S16_Position
         ret
 
+; the VM programmed, masked or unmasked its 16-bit channel, EAX = the
+; channel's VDMAD handle, EBX = the VM, EDI = ADI: the channel it goes to
+; follows while a 16-bit transfer runs there (ESSREG_S16_DMA_State); else
+; the next command carries it over anew (ESSREG_S16_Carry), or holds it
+; masked, so that a channel that the transfer doesn't take never plays the
+; 16-bit buffer, and a transfer never plays a buffer the VM left
+ESSREG_S16_DMA_Follow:
+        push    eax
+        cmp     byte [edi+EX_S16_To],0
+        jne     .a2
+        mov     al,[edi+EX_S16_Flags]
+        and     al,S16_RUN | S16_16
+        cmp     al,S16_RUN | S16_16
+        jmp     short .test
+.a2:    mov     al,[edi+EX_S16_Flags2]
+        and     al,S16_RUN
+        cmp     al,S16_RUN
+.test:  pop     eax
+        je      ESSREG_S16_DMA_State
+        mov     byte [edi+EX_S16_DMA],0
+        ret
+
 ; the VM's programming of its 16-bit channel, EAX = the channel's VDMAD
 ; handle, EBX = the VM, EDI = ADI: unmasked, the channel it goes to
-; (EX_S16_To, Audio 1's or Audio 2's) gets the same region, bytes and mode,
-; in demand transfers unless ESS's "Single Mode DMA" (ADI flag 10000h
-; clear) keeps the VM's, and ESS's handler for that channel and VDMAD's
-; program the chip's channel from them, as if the VM had; masked, that
-; channel is masked too
+; (EX_S16_To, Audio 1's or Audio 2's) gets the same region, bytes and
+; auto-initialize, in the transfer's direction (read for a playback, write
+; for a recording, whatever the VM's mode says, as the reference carries
+; it over), in demand transfers unless ESS's "Single Mode DMA" (ADI flag
+; 10000h clear) keeps the VM's, and ESS's handler for that channel and
+; VDMAD's program the chip's channel from them, as if the VM had; masked,
+; that channel is masked too
 ESSREG_S16_DMA_State:
         pushad
         push    eax
@@ -5844,18 +5874,25 @@ ESSREG_S16_DMA_State:
         VxDCall VDMAD_Mask_Channel
         jmp     .out
 .go:    and     dh,~DMA_16BIT & 0xFF    ; a byte channel's count
-        test    byte [edi+ADI_CfgFlags+2],0x01
+        and     dl,~0x2C & 0xFF         ; addresses up, and the transfer's
+        or      dl,0x08                 ; direction
+        test    byte [edi+EX_S16_Xbits],0x08
+        jz      .dmd
+        xor     dl,0x0C
+.dmd:   test    byte [edi+ADI_CfgFlags+2],0x01
         jz      .mode
         and     dl,0x3F                 ; demand mode
 .mode:  mov     eax,ebp
         VxDCall VDMAD_Set_Virt_State
-        mov     byte [edi+EX_S16_DMA],1
+        push    edi
         cmp     byte [edi+EX_S16_To],0
         jne     .a2
         call    L1_0518                 ; ESS's handler of Audio 1's channel
-        jmp     short .out
+        jmp     short .done
 .a2:    xor     edx,edx                 ; of Audio 2's: the VM programmed it
         call    L1_0870
+.done:  pop     edi                     ; carried over, after the handler
+        mov     byte [edi+EX_S16_DMA],1
 .out:   popad
         ret
 

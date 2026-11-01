@@ -102,6 +102,34 @@ class FrontChecks:
         self.assertEqual(self.chip.resets, 0)
         self.assertClean()
 
+    def test_carrying_channel_programmed_again(self):
+        """a 16-bit transfer carried over to Audio 1's channel, a reset,
+        the game's own programming of that channel, its 8-bit one, then a
+        16-bit command on the 16-bit channel as it was: that channel is
+        carried over again, so the 8-bit buffer never plays as 16-bit
+        sound"""
+        c, chip = self.c, self.chip
+        play16(c)                               # the buffer at 24680h
+        self.assertEqual(chip.dma[1]["page"], 0x02)
+        c.wait(5000)
+        self.assertTrue(reset(c))
+        program_dma(c, 1, 0x60000, 1024)
+        self.assertEqual(chip.dma[1]["page"], 0x06)
+        write(c, 0xB6, 0x30, 0xFF, 0x07)
+        self.assertEqual(chip.dma[1]["page"], 0x02)
+        self.assertClean()
+
+    def test_a_recording_on_a_playback_channel(self):
+        """a 16-bit recording on a channel the game programmed for
+        playback: the channel that carries it over writes memory, as the
+        transfer goes, so that no cycle runs against the chip's"""
+        c, chip = self.c, self.chip
+        program_dma(c, 5, 0x24680, 8192)        # read: a playback's
+        write(c, 0x42, 0xAC, 0x44)
+        write(c, 0xBE, 0x30, 0xFF, 0x07)        # auto-initialized input
+        self.assertEqual(chip.dma[1]["mode"] & 0x1C, 0x14)
+        self.assertEqual(chip.dma[1]["page"], 0x02)
+
     def test_16bit_stereo(self):
         """B6h, 44100 Hz: Extended mode once, the FIFO emptied for the first
         transfer, and the data sheet's order with only what changes; the
@@ -520,6 +548,23 @@ class FrontChecks:
         c.inp(BASE + 0x0F)
         self.assertEqual(chip.mixer[0x7A], 0x47)
         self.assertEqual(mixer(c, 0x82), 0x20)
+        self.assertClean()
+
+    def test_channel_before_the_command(self):
+        """the game's 16-bit channel programmed and unmasked before a
+        command that Audio 2 plays: Audio 2's channel takes it at the
+        command, and Audio 1's stays as it was, so that a later 8-bit
+        transfer never plays the 16-bit buffer"""
+        c = self.a2()
+        chip = c.chip
+        before = dict(chip.dma[1])
+        program_dma(c, 5, 0x24680, 8192)
+        self.assertEqual(chip.dma[1], before)
+        write(c, 0x41, 0xAC, 0x44)
+        write(c, 0xB6, 0x30, 0xFF, 0x07)
+        self.assertEqual(chip.dma[1], before)
+        self.assertEqual((chip.dma[3]["page"], chip.dma[3]["mask"]),
+                         (0x02, False))
         self.assertClean()
 
     def test_audio2_through_a_chip_reset(self):

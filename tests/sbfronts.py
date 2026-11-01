@@ -207,11 +207,16 @@ class TSRCard(Card):
         return self.m.flags()
 
     def trapped(self, port):
+        """a port the front answers: under EMM386 one of its dispatch
+        table's but those it passes (emm_pass), which EMM386 then does
+        itself, as for a port it doesn't trap"""
         if self.path == "pm":
             return port in self.pm_ports
         if self.path == "qpi":
             return port in self.m.qpi_trapped
+        passed = self.m.syms["emm_pass"]
         return any(not t.get("failed") and t["first"] <= port <= t["last"]
+                   and any(p == port and h != passed for p, h in t["table"])
                    for t in self.m.emm_traps)
 
     def port_in(self, port):

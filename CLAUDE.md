@@ -80,7 +80,9 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   VxD's, and the bare chip with a VGA (`ChipCard`); `emm386dma.py` is
   EMM386's DMA translation. `sbfsm.py` is the front as a state machine in
   Python, the reference of [SB16_FRONT.md](docs/SB16_FRONT.md), and
-  `sbops.py` the operations that the chip's model records.
+  `sbops.py` the operations that the chip's model records. `sbfuzz.py` makes
+  random games, which `tests/test_sbfsm.py` plays on the fronts and the
+  reference alike.
 * `docs/` holds [TESTING.md](docs/TESTING.md),
   [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md),
   [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md),

@@ -1888,8 +1888,10 @@ xfer_dma:
         and     al,V_NEW | V_LIVE
         cmp     al,V_LIVE
         jne     .mirror
-        test    byte [V(vbits)],V_HOLD  ; carried over already: masked for
-        jz      .none                   ; the start
+        call    ch8_carries             ; carried over already, if the
+        jc      .mirror                 ; channel still holds it
+        test    byte [V(vbits)],V_HOLD  ; masked for the start
+        jz      .none
         call    ch8_mask
         jmp     short .held
 .free:  call    vmasked
@@ -2068,7 +2070,9 @@ mirror:
         jne     .have
         cmp     dl,[V(vpage)]
         jne     .have
-.on:    test    byte [V(vbits)],V_HOLD
+.held:  call    ch8_carries             ; if the channel still holds it
+        jc      .have
+        test    byte [V(vbits)],V_HOLD
         jnz     ch8_mask
 .ret:   ret
 .auto:  cmp     dl,[V(vpage)]           ; an auto-initialized one on the
@@ -2083,7 +2087,7 @@ mirror:
         mov     [V(vcount)],cx
         cmp     si,64
         jb      .have
-        jmp     short .on
+        jmp     short .held
 .have:  mov     ah,[V(vmode)]
         and     ah,0x10                 ; auto-initialize
         or      ah,0x08                 ; from memory
@@ -2146,6 +2150,45 @@ ch8_set:
         mov     dx,0x0A
         call    chip_out
         pop     dx
+        ret
+
+; CF clear if the channel that carries the game's 16-bit one (mchan) still
+; holds what mirror wrote there: its page, and its address and count on
+; that line, at its end too, so that a game that programmed it itself
+; since gets the carry-over anew; clobbers AX, CX, DX
+ch8_carries:
+        push    bx
+        push    si
+        movzx   si,byte [V(mchan)]
+        movzx   dx,byte [page8+si]
+        call    chip_in
+        cmp     al,[V(mpage)]
+        jne     .no
+        mov     dx,0x0C                 ; the flip-flop cleared, before and
+        call    chip_out                ; after
+        mov     dx,si
+        shl     dx,1                    ; CX = the address
+        call    chip_in
+        mov     cl,al
+        call    chip_in
+        mov     ch,al
+        inc     dx                      ; BX = the count
+        call    chip_in
+        mov     bl,al
+        call    chip_in
+        mov     bh,al
+        mov     dx,0x0C
+        call    chip_out
+        sub     cx,[V(maddr)]           ; the bytes the address moved, and
+        mov     ax,[V(mwords)]          ; those the count did: the same
+        shl     ax,1
+        or      al,1
+        sub     ax,bx
+        cmp     ax,cx
+        je      .out                    ; (CF clear)
+.no:    stc
+.out:   pop     si
+        pop     bx
         ret
 
 ; AX to a DMA controller's register DX, low byte first; and a register's
@@ -4476,7 +4519,7 @@ emm_device:     db "EMMXXXX0", 0
 emm_device2:    db "EMMQXXX0", 0
 blaster_name:   db "BLASTER=", 0
 
-banner:         db "esssb16 1.2: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
+banner:         db "esssb16 1.3: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
 usage:          db "usage: esssb16 [/A220] [/H5|/H6|/H7|/H0] [/20|/21|/23|/2-] [/S] [/F0|/F1]", 13, 10
                 db "       [/O0|/O1] [/3]", 13, 10
                 db "  /A  the card's base, else BLASTER's A (220)", 13, 10

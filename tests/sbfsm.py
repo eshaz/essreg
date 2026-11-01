@@ -52,8 +52,9 @@ OPTABLE = bytes((0x10, 0x09, 0x40, 0x61, 0x55, 0xAA, 0x00, 0x00,
                  0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
                  0x11, 0x01, 0x00, 0x00, 0x00, 0x00, 0x24, 0x00))
 COPYRIGHT = b"COPYRIGHT (C) CREATIVE TECHNOLOGY LTD, 1992.\0"
-# the commands that answer bytes that never change
-ANSWERS = {0x03: b"\xFF", 0x08: b"\xFF", 0x09: b"\0\0", 0x0A: b"\0",
+# the commands that answer bytes that never change: 0Ah the CSP's lock
+# and FFh, as DSP 4.05 answers it (tests/sb16.py)
+ANSWERS = {0x03: b"\xFF", 0x08: b"\xFF", 0x09: b"\0\0", 0x0A: b"\0\xFF",
            0x4D: b"\0", 0xF9: b"\0", 0xFB: b"\0", 0xFC: b"\0",
            0xE1: bytes(VERSION), 0xE3: COPYRIGHT, 0xF4: b"\x7D\x1B"}
 # Dxh: 1 the speaker on, 2 off, 0 nothing; for the engines 80h, F_RUN and
@@ -921,7 +922,8 @@ class Front:
             self.vbits |= V_PEND
             self.ch8_set(4)
             return None
-        if not self.vtrapped() or self.vbits & (V_NEW | V_LIVE) != V_LIVE:
+        if not self.vtrapped() or self.vbits & (V_NEW | V_LIVE) != V_LIVE \
+                or not self.carries():
             self.mirror(bl, go)
         elif not go:
             self.ch8_set(4)
@@ -942,7 +944,8 @@ class Front:
             self.vcount = self.word_in(self.vport + 2)
             self.chip_out(0xD8, 0)
             self.vmode = 0x10
-            if self.vbits & V_LIVE and self.goes_on(bl, last):
+            if self.vbits & V_LIVE and self.goes_on(bl, last) and \
+                    self.carries():
                 if not go:
                     self.ch8_set(4)
                 return
@@ -958,6 +961,7 @@ class Front:
         addr = self.vaddr << 1
         page = (self.vpage & 0xFE) + (addr >> 16)
         self.mpage = page & 0xFF
+        self.maddr, self.mwords = addr & 0xFFFF, self.vcount
         self.word_out(ch << 1, addr & 0xFFFF)
         self.word_out((ch << 1) + 1, ((self.vcount << 1) | 1) & 0xFFFF)
         self.chip_out(PAGE8[ch], page)
@@ -968,6 +972,21 @@ class Front:
             self.ch8_set(4)
         else:
             self.ch8_set(0)
+
+    def carries(self):
+        """the channel that carries the game's 16-bit one still holds what
+        mirror wrote there: its page, and its address and count on that
+        line (at its end too), so that a game that programmed it itself
+        since gets the carry-over anew"""
+        ch = self.mchan
+        if self.chip_in(PAGE8[ch]) != self.mpage:
+            return False
+        self.chip_out(0x0C, 0)
+        addr = self.word_in(ch << 1)
+        count = self.word_in((ch << 1) + 1)
+        self.chip_out(0x0C, 0)
+        written = ((self.mwords << 1) | 1) & 0xFFFF
+        return (written - count) & 0xFFFF == (addr - self.maddr) & 0xFFFF
 
     def goes_on(self, bl, last):
         """the channel read back is the one carried over last (page,
@@ -1311,7 +1330,8 @@ class FSMCard(TSRCard):
         super().__init__(path, **kw)
         m = self.m
         s = {name: m.data8(name) for name in SETTINGS}
-        for name in ("base", "cfg", "block8", "vaddr", "vcount"):
+        for name in ("base", "cfg", "block8", "vaddr", "vcount", "maddr",
+                     "mwords"):
             s[name] = m.data16(name)
         s["vchan"] = list(m.mem(m.addr("vchan"), 4))
         s["vpage"] = m.data8("vpage")

@@ -18,6 +18,13 @@ carried over. A difference shows the first operation where the two part.
 Where test_sb16conf ran the scene on the front first, its run
 (sbops.RUNS) serves here; the reference runs once for each configuration.
 
+Random games (tests/sbfuzz.py) go where no scene goes: the TSR and the
+reference play each alike, access for access, and the game reads the same
+from both; the VxD sends the chip the reference's operations that set the
+transfers up, without the DMA cycles and the interrupts' acknowledges,
+whose times the DOS box moves (vxd_ops). ESSREG_FUZZ sets how many games
+each configuration plays (6).
+
 usage: python3 -m unittest tests.test_sbfsm   (needs nasm and unicorn)
 """
 
@@ -27,15 +34,18 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import sbfuzz  # noqa: E402
 import sbops  # noqa: E402
 from sbscenes import DUAL, SCENES  # noqa: E402
 from test_vxdext import HAVE_UNICORN, have_nasm  # noqa: E402
 import test_sb16conf as conf  # noqa: E402
 
 if HAVE_UNICORN:
+    from sbfronts import TSRCard, VxDCard  # noqa: E402
     from sbfsm import FSMCard  # noqa: E402
 
 _REF = {}
+FUZZ = int(os.environ.get("ESSREG_FUZZ", "6"))
 
 
 def front(cls, name):
@@ -150,6 +160,97 @@ class VxDAudio1OperationsTest(Operations, unittest.TestCase):
 
     vxd = conf.VxDAudio1Test
     dma2 = 5
+
+
+def vxd_ops(trace):
+    """the operations that set the transfers up, without the DMA cycles
+    and the interrupts' acknowledges (ACK, and 7Ah written again as it
+    was), whose times the DOS box moves"""
+    out, a2 = [], None
+    for op in sbops.transfers(trace):
+        if op[0] in ("DMA", "ACK"):
+            continue
+        if op[:2] == ("M", 0x7A):
+            if op[2] == a2:
+                continue
+            a2 = op[2]
+        out.append(op)
+    return out
+
+
+class Fuzz:
+    """random games on the front of the configuration and on the
+    reference: the TSR's accesses of the chip and what the game read are
+    the reference's, the VxD's operations are"""
+
+    path, dma2, first = "qpi", 3, 0
+
+    def test_random_games(self):
+        for seed in range(self.first, self.first + FUZZ):
+            with self.subTest(seed=seed):
+                self.check(seed)
+
+    def check(self, seed):
+        game = sbfuzz.steps(seed)
+        runs = []
+        for card in self.cards():
+            k = len(card.chip.log)
+            trace = sbops.record(card)
+            seen = sbfuzz.play(card, game)
+            if self.path == "vxd":
+                runs.append((vxd_ops(trace), None))
+            else:
+                runs.append((sbops.ports(card.chip.log[k:]), seen))
+        diff = sbops.divergence(runs[1][0], runs[0][0])
+        if diff:
+            self.fail("random game %d: the reference's, then the front's\n"
+                      "%s\nthe game:\n%s" % (seed, diff, sbfuzz.text(game)))
+        self.assertEqual(runs[0][1], runs[1][1], "random game %d" % seed)
+
+    def cards(self):
+        """the front's card and the reference's; no QPI callback before
+        the TSR's, which the reference doesn't chain to"""
+        if self.path == "vxd":
+            return VxDCard(dma2=self.dma2), \
+                FSMCard("qpi", dma2=self.dma2, old_callback=False)
+        return TSRCard(self.path, dma2=self.dma2, old_callback=False), \
+            FSMCard(self.path, dma2=self.dma2, old_callback=False)
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class QPIFuzzTest(Fuzz, unittest.TestCase):
+    """random games, trapped, Audio 2 on channel 3"""
+
+    first = 10000
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class EMM386FuzzTest(Fuzz, unittest.TestCase):
+    """random games, read back, every transfer on Audio 1: the card of the
+    reports"""
+
+    path, dma2, first = "emm", 5, 20000
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class ProtectedFuzzTest(Fuzz, unittest.TestCase):
+    """random games through HDPMI32i, every transfer on Audio 1"""
+
+    path, dma2, first = "pm", 5, 30000
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class VxDFuzzTest(Fuzz, unittest.TestCase):
+    """random games in a DOS box, Audio 2 on channel 3"""
+
+    path, first = "vxd", 40000
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class VxDAudio1FuzzTest(Fuzz, unittest.TestCase):
+    """random games in a DOS box, every transfer on Audio 1"""
+
+    path, dma2, first = "vxd", 5, 50000
 
 
 class LevelsTest(unittest.TestCase):

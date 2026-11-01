@@ -273,7 +273,11 @@ and the page as a byte address and page, the word count as a byte count, the
 transfer type that the engine's B9h or 78h asks for, the direction, and
 auto-initialize as the game's channel has it. An 8-bit transfer on Audio 1
 runs on the game's own programming of Audio 1's channel, so what was carried
-over there is gone (LIVE clear).
+over there is gone (LIVE clear). A carry-over that is LIVE stays only while
+the engine's channel still holds it (`ch8_carries`): its page as written,
+and its address and count on the line written, at its end too. A game that
+programmed that channel itself since, its 8-bit one, gets the carry-over
+anew at the next 16-bit command.
 
 With TRAPPED, the front follows the game's writes: a 16-bit transfer carries
 the channel over when it is NEW or not LIVE, and waits masked while the
