@@ -28,7 +28,7 @@
 
 #include "esstypes.h"
 
-#define ESP_VERSION "1.7"
+#define ESP_VERSION "1.8"
 
 // esp_run's options
 #define ESP_O_RECORD 0x0001 // a recorded run: the level tone, then markers
@@ -46,7 +46,8 @@
 #define ESP_G_H4 0x0040     // what the engines do to the machine
 #define ESP_G_STREAM 0x0080 // refills behind the DMA, as games do
 #define ESP_G_FIX 0x0100    // which start keeps a 16-bit stream in step
-#define ESP_G_ALL 0x01FF
+#define ESP_G_LVL 0x0200    // full scale at the top levels: where it clips
+#define ESP_G_ALL 0x03FF
 
 // esp_card.flags
 #define ESP_F_EMM386 0x01 // a V86 memory manager traps the DMA controllers

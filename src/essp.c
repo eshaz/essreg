@@ -752,6 +752,8 @@ struct pc {
   u8 x4;            // 71h bit 4
   u8 fb;            // 71h bits 3:2, 0xFF as they are
   u8 vol1, vol2;    // 14h and 7Ch
+  u8 master;        // 60h and 62h, 0xFF as they are; back after the case
+  u16 amp;          // the tones' amplitude
   u8 fifo;          // 0 a reset first, 1 kept, 2 filled before the DAC
   u8 pause;         // P_*
   u8 irq1, irq2;    // the engines' interrupts on
@@ -778,8 +780,8 @@ struct ecase {
 // Each line: the id (its group, a dot, its name), the spec over the
 // group's base (spec_base) and what the recording should hold: tone, left,
 // right, dual (294 Hz and 882 Hz), low (294 Hz alone), none, pause, glide,
-// loop, any (what the chip does there is to be found), or - (no sound).
-// S marks the short run's cases.
+// loop, clean (the tone with no clipping), any (what the chip does there
+// is to be found), or - (no sound). S marks the short run's cases.
 static const struct ecase cases[] = {
     // the machine and the card
     {"env.machine", "run=machine S", "-"},
@@ -976,6 +978,16 @@ static const struct ecase cases[] = {
     {"fix.a2pdhold1", "e=2 pause=d hold S ms=1500", "lpause"},
     {"fix.a2pdhold2", "e=2 pause=d hold ms=1500", "lpause"},
     {"fix.a2pfdhold", "e=2 pause=fd hold ms=1500", "lpause"},
+    // a full-scale tone on Audio 1 at the levels a game's full volume gives
+    // the chip: the probe's own (CCh, -3 dB, and the master's 54, -6.75
+    // dB), Audio 1 at unity (EEh) with the master's 5.25 dB pad before the
+    // 3-D stage (56) and without it (63, a top level, DS p.59), and Audio
+    // 1's +1.5 dB (FFh), which esssb16 1.1 gave a game's full volume
+    {"lvl.base", "m=54 S", "clean"},
+    {"lvl.pad", "v1=238 m=56 S", "clean"},
+    {"lvl.unity", "v1=238 m=63 S", "clean"},
+    {"lvl.a1top", "v1=255 m=63 S", "clean"},
+    {"lvl.a1gain", "v1=255 m=56 S", "clean"},
 };
 
 u16 esp_cases(void) { return (u16)ESS_ARRAY_SIZE(cases); }
@@ -1006,6 +1018,8 @@ static void spec_base(struct pc *p, const char *id) {
   p->t2 = 2;
   p->fb = 0xFF;
   p->vol1 = p->vol2 = 0xCC;
+  p->master = 0xFF;
+  p->amp = 12000;
   p->irq1 = p->irq2 = 1;
   p->ms = 1500;
   p->hz1 = p->hz2 = (u16)SND_HZ;
@@ -1022,6 +1036,11 @@ static void spec_base(struct pc *p, const char *id) {
     p->eng = E1;
     p->ms = 800;
     p->side = 'l';
+  } else if (!strncmp(id, "lvl.", 4)) { // full scale, a start in step
+    p->eng = E1;
+    p->amp = 32767;
+    p->after = 1;
+    p->late = 100;
   }
 }
 
@@ -1093,6 +1112,10 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
     p->vol1 = (u8)n;
   else if (IS("v2"))
     p->vol2 = (u8)n;
+  else if (IS("m") && v != NULL && n <= 63)
+    p->master = (u8)n;
+  else if (IS("amp") && v != NULL && n >= 1 && n <= 32767)
+    p->amp = (u16)n;
   else if (IS("fifo") && v != NULL &&
            (!strcmp(v, "keep") || !strcmp(v, "prime")))
     p->fifo = (u8)(!strcmp(v, "keep") ? 1 : 2);
@@ -1577,10 +1600,27 @@ static u32 marker(const char *syms) {
 
 static u32 rec_us(u32 t) { return us_of((t - rec_t0) & 0xFFFFFFFFUL); }
 
+// the master, 60h and 62h, at m (to the restore list), its levels before
+// in old
+static void master_set(u8 m, u8 *old) {
+  old[0] = mix_r(0x60);
+  old[1] = mix_r(0x62);
+  mix_w(0x60, m);
+  mix_w(0x62, m);
+}
+
+static void master_back(const u8 *old) {
+  mix_w(0x60, old[0]);
+  mix_w(0x62, old[1]);
+}
+
 // the recorded run's start: a full-scale tone until the person, who sets
-// the recorder's level by it, presses Enter; then the start marker
-static void record_start(void) {
+// the recorder's level by it, presses Enter; then the start marker. With
+// loud, the run's loudest levels play it (14h FFh, the master at 63), so
+// that the recorder takes the lvl cases without clipping
+static void record_start(int loud) {
   struct pc p;
+  u8 old[2];
   int a;
 
   section("record", "a recorded run: set the recorder's level");
@@ -1589,11 +1629,15 @@ static void record_start(void) {
   p.rate1 = 22050;
   p.b9 = 2;
   p.irq1 = 0;
+  if (loud)
+    p.vol1 = 0xFF;
   chip_reset(3);
   ext_on();
   plan(&p);
   fill_tone(&en[0], (u16)SND_HZ, 0, 32767);
   set_71(&p);
+  if (loud)
+    master_set(63, old);
   a1_program(&p, &en[0]);
   eng_dma(&p, &en[0], 1);
   eng_start(&p);
@@ -1602,6 +1646,8 @@ static void record_start(void) {
              "clipping, start recording, and press Enter",
              "\r");
   eng_stop();
+  if (loud)
+    master_back(old);
   if (a != '\r') {
     stop_now = 1;
     res("rec.level", R_SKIP, "stopped");
@@ -1610,8 +1656,9 @@ static void record_start(void) {
   rec_t0 = marker("ABCD");
   res("rec.start", R_INFO,
       "marker ABCD at 0 us; the level tone was %u Hz, 8-bit mono at "
-      "22050 Hz, full scale",
-      (unsigned)SND_HZ);
+      "22050 Hz, full scale, at 14h %02Xh and %s",
+      (unsigned)SND_HZ, (unsigned)p.vol1,
+      loud ? "the master at 63" : "the master as it was");
 }
 
 static void record_end(void) {
@@ -1785,6 +1832,7 @@ static void run_play(const struct ecase *c, const struct pc *spec) {
   struct pc q = *spec, *p = &q;
   u32 parts[6], tm;
   u16 np;
+  u8 old[2];
   int ok = 1, any = !strcmp(c->expect, "any");
   double t;
 
@@ -1805,9 +1853,9 @@ static void run_play(const struct ecase *c, const struct pc *spec) {
   ext_on();
   plan(p);
   if (en[0].on)
-    fill_tone(&en[0], p->hz1, p->side, 12000);
+    fill_tone(&en[0], p->hz1, p->side, p->amp);
   if (en[1].on)
-    fill_tone(&en[1], p->hz2, p->side, 12000);
+    fill_tone(&en[1], p->hz2, p->side, p->amp);
   if (p->once) { // one block: as long as the longer of the buffers
     t = 0;
     if (en[0].on)
@@ -1831,8 +1879,12 @@ static void run_play(const struct ecase *c, const struct pc *spec) {
     a2_program(p, &en[1]);
     eng_dma(p, &en[1], !p->after);
   }
+  if (p->master != 0xFF)
+    master_set(p->master, old);
   np = eng_run(p, parts);
   eng_stop();
+  if (p->master != 0xFF)
+    master_back(old);
   line[0] = 0;
   if (en[0].on)
     ok &= eng_text(line, "a1", &en[0], n1, t1a, t1b, p);
@@ -2708,8 +2760,8 @@ static void run_stream(const struct ecase *c, const struct pc *p) {
 // --- the run -----------------------------------------------------------------
 
 static unsigned group_of(const char *id) {
-  static const char *const names[] = {"env", "rst", "a1",     "a2", "both",
-                                      "h1",  "h4",  "stream", "fix"};
+  static const char *const names[] = {"env", "rst", "a1",     "a2",  "both",
+                                      "h1",  "h4",  "stream", "fix", "lvl"};
   unsigned i, n;
 
   for (i = 0; i < ESS_ARRAY_SIZE(names); i++) {
@@ -2739,6 +2791,19 @@ static int wanted(const char *id, const char *only) {
 }
 
 static int has_sound(const struct ecase *c) { return strcmp(c->expect, "-"); }
+
+// whether the run takes case c: its group, the names asked for, the short
+// and the silent runs
+static int in_run(const struct ecase *c, unsigned groups, const char *only) {
+  struct pc p;
+
+  if (!(group_of(c->id) & groups) || !wanted(c->id, only))
+    return 0;
+  if ((O & ESP_O_SILENT) && has_sound(c))
+    return 0;
+  spec_base(&p, c->id);
+  return spec_parse(&p, c->spec) || !(O & ESP_O_SHORT) || p.sh;
+}
 
 static void run_case(const struct ecase *c) {
   struct pc p;
@@ -2827,8 +2892,8 @@ static void summary(void) {
 
 int esp_run(const struct esp_hal *hal, const struct esp_card *card,
             unsigned opts, unsigned groups, const char *only) {
-  static const char *const gname[] = {"env", "rst", "a1",     "a2", "both",
-                                      "h1",  "h4",  "stream", "fix"};
+  static const char *const gname[] = {"env", "rst", "a1",     "a2",  "both",
+                                      "h1",  "h4",  "stream", "fix", "lvl"};
   static const char *const gwhat[] = {
       "the machine and the card",
       "what each reset clears",
@@ -2838,10 +2903,11 @@ int esp_run(const struct esp_hal *hal, const struct esp_card *card,
       "the DMA controllers behind the memory manager",
       "what the engines do to the machine",
       "a game's refills behind the count",
-      "which start keeps a 16-bit stream in step"};
+      "which start keeps a 16-bit stream in step",
+      "full scale at the top levels: where the chip clips"};
   u16 i;
   unsigned g, last_g = 0;
-  int v;
+  int v, loud = 0;
 
   H = hal;
   C = card;
@@ -2879,19 +2945,16 @@ int esp_run(const struct esp_hal *hal, const struct esp_card *card,
   if (H->hook != NULL)
     H->hook(irq);
   irq_ready = 1;
+  for (i = 0; i < ESS_ARRAY_SIZE(cases); i++)
+    if (group_of(cases[i].id) == ESP_G_LVL && in_run(&cases[i], groups, only))
+      loud = 1;
   if (O & ESP_O_RECORD)
-    record_start();
+    record_start(loud);
   for (i = 0; i < ESS_ARRAY_SIZE(cases) && !stop_now; i++) {
     const struct ecase *c = &cases[i];
-    struct pc p;
+    if (!in_run(c, groups, only))
+      continue;
     g = group_of(c->id);
-    if (!(g & groups) || !wanted(c->id, only))
-      continue;
-    if ((O & ESP_O_SILENT) && has_sound(c))
-      continue;
-    spec_base(&p, c->id);
-    if (!spec_parse(&p, c->spec) && (O & ESP_O_SHORT) && !p.sh)
-      continue;
     if (g != last_g) {
       unsigned k = 0;
       while ((1U << k) != g)

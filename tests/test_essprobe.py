@@ -51,6 +51,7 @@ except ImportError:             # the analysis needs numpy
     np = essprec = None
 
 if HAVE_UNICORN:
+    import sbfsm  # noqa: E402
     from sbfronts import ChipCard, TSRCard  # noqa: E402
     from tsremu import EmmCpu, EmuError  # noqa: E402
 
@@ -59,11 +60,12 @@ SRC = os.path.join(ROOT, "src")
 EXE = os.path.join(ROOT, "build", "essprobe.exe")
 AREA = 0x40000              # the DMA area, 64 KB in one page
 O_RECORD, O_SHORT, O_SILENT, O_TINY = 0x01, 0x02, 0x04, 0x08
-G_ALL = 0x1FF
+G_ALL = 0x3FF
 IDLE_US = 25                # the time an idle() of the cases takes
-GROUPS = ("env", "rst", "a1", "a2", "both", "h1", "h4", "stream", "fix")
+GROUPS = ("env", "rst", "a1", "a2", "both", "h1", "h4", "stream", "fix",
+          "lvl")
 EXPECTS = {"tone", "left", "right", "dual", "low", "none", "pause", "lpause",
-           "glide", "loop", "any", "-"}
+           "glide", "loop", "clean", "any", "-"}
 # the cases that look for what the data sheet doesn't define
 WIDE = {"a2.wide", "a2.wide_packed", "stream.a2w"}
 WRONG = {"h4.wrong1", "h4.wrong2"}
@@ -276,7 +278,8 @@ class CasesTest(unittest.TestCase):
         for cid, spec, _e in cases():
             self.assertEqual(lib.esp_parse_check(spec.encode()), 0, cid)
         for bad in ("f=9x", "clk=mid", "fifo=more", "side=c", "zz",
-                    "run=nothing", "pause=x", "order=dos", "b7=twice"):
+                    "run=nothing", "pause=x", "order=dos", "b7=twice",
+                    "m=64", "m", "amp=0", "amp=40000"):
             self.assertGreater(lib.esp_parse_check(bad.encode()), 0, bad)
 
     def test_ids(self):
@@ -441,26 +444,40 @@ class EMM386Test(unittest.TestCase):
                          {"SKIP"})
 
 
+def written(run, tau, reg, first):
+    """mixer register reg at each time, as the run wrote it, `first`
+    before its first write"""
+    out = np.full(len(tau), first, dtype=int)
+    for us, r, v in run.mix_log:
+        if r == reg:
+            out[tau >= us] = v
+    return out
+
+
 def gains(run, tau, reg):
-    """a DAC's level (14h or 7Ch, four bits a side) at each time, as the run
-    wrote it: 0 mutes, 0Ch is the tones' level, 2 dB a step"""
-    out = np.ones((len(tau), 2))
-    level, t_from = None, -float("inf")
-    log = [(us, v) for us, r, v in run.mix_log if r == reg] + \
-        [(float("inf"), None)]
-    for us, v in log:
-        if level is not None:
-            sel = (tau >= t_from) & (tau < us)
-            for c, n in enumerate((level >> 4, level & 0x0F)):
-                out[sel, c] = 0.0 if n == 0 else 10 ** ((n - 12) / 10)
-        level, t_from = v, us
+    """a DAC's gain at each time, as the run wrote its level (14h or 7Ch,
+    four bits a side, 0 mutes) and the master (60h and 62h), on the chip's
+    scales (DS p.55, Table 21), over the tones' level (0Ch) at the master
+    the run found, which it puts back at the end"""
+    db = sbfsm.DB_A1 if reg == 0x14 else sbfsm.DB_A2
+    scale = np.array([db[n] if n else -np.inf for n in range(16)])
+    level = written(run, tau, reg, 0xCC)
+    out = np.zeros((len(tau), 2))
+    for c, mreg in enumerate((0x60, 0x62)):
+        found = run.card.chip.mixer[mreg] & 0x3F
+        m = written(run, tau, mreg, found)
+        g = scale[level >> 4 if c == 0 else level & 0x0F] - db[12] + \
+            0.75 * ((m & 0x3F) - found)
+        g[(m & 0x40) != 0] = -np.inf
+        out[:, c] = 10 ** (g / 20)
     return out
 
 
 def synthesize(run, rate=48000):
     """the recording of what the chip's DACs played, stereo at rate: each
     stretch of playing, where the timeline saw the counts rise less than 1
-    ms apart, at even times, through the DAC's level"""
+    ms apart, at even times, through the DAC's level and the master, with
+    the recorder's level set by the loudest, as the level tone has it"""
     chip = run.card.chip
     tl = run.timeline
     times = np.array([t for t, _ in tl], dtype=float)
@@ -493,7 +510,7 @@ def synthesize(run, rate=48000):
             frac = (pos - np.floor(pos))[:, None]
             dac[a:b] += arr[k] * (1 - frac) + arr[k2] * frac
         out += dac * gains(run, tau, reg)
-    return out, base
+    return out * 0.9 / max(float(np.max(np.abs(out))), 1e-9), base
 
 
 # the recorded cases: one of each kind the recording should hold
@@ -508,16 +525,18 @@ BYTE_OFF = {"a1.base", "a1.left", "a1.right", "a1.pause_b2", "both.base",
             "both.muted2", "stream.a1", "fix.b2late1"}
 
 
-@unittest.skipUnless(HAVE_UNICORN and np is not None,
-                     "needs unicorn and numpy")
-class RecordedTest(unittest.TestCase):
-    """a recorded run of the cases of each kind, on the chip model"""
+class Recorded:
+    """a recorded run of the cases `ONLY` on the chip model, its master at
+    the power-on 54 (DS p.54), and essprec's verdicts on its recording"""
 
     RATE = 48000
+    ONLY = None
 
     @classmethod
     def setUpClass(cls):
-        cls.probe = Run(ChipCard(), opts=O_TINY | O_RECORD, only=RECORDED,
+        card = ChipCard()
+        card.chip.mixer[0x60] = card.chip.mixer[0x62] = 54
+        cls.probe = Run(card, opts=O_TINY | O_RECORD, only=cls.ONLY,
                         timeline=True)
         cls.tmp = tempfile.TemporaryDirectory()
         cls.report = os.path.join(cls.tmp.name, "ESSPROBE.TXT")
@@ -562,6 +581,20 @@ class RecordedTest(unittest.TestCase):
         return (int((a * on / 1e6 + b) * self.RATE),
                 int((a * off / 1e6 + b) * self.RATE))
 
+    def broken(self, case, fn):
+        x = self.frames.copy()
+        a, b = self.window(case)
+        fn(x, a, b)
+        return self.analyze(x)[case]
+
+
+@unittest.skipUnless(HAVE_UNICORN and np is not None,
+                     "needs unicorn and numpy")
+class RecordedTest(Recorded, unittest.TestCase):
+    """a recorded run of the cases of each kind, on the chip model"""
+
+    ONLY = RECORDED
+
     def test_every_sound(self):
         v = self.verdicts
         self.assertEqual(self.probe.errors, [])
@@ -575,11 +608,13 @@ class RecordedTest(unittest.TestCase):
         self.assertIn("plays at 220", v["a2.slaved"][1])
         self.assertIn("by spec key", v["_text"])
 
-    def broken(self, case, fn):
-        x = self.frames.copy()
-        a, b = self.window(case)
-        fn(x, a, b)
-        return self.analyze(x)[case]
+    def test_level_tone(self):
+        """without the lvl cases, the level tone plays at the sounds' 14h,
+        and nothing writes the master"""
+        self.assertIn("at 14h CCh and the master as it was",
+                      self.probe.text("rec.start"))
+        self.assertEqual([w for w in self.probe.mix_log
+                          if w[1] in (0x60, 0x62)], [])
 
     def test_a_flat_tone(self):
         def flat(x, a, b):
@@ -641,6 +676,58 @@ class RecordedTest(unittest.TestCase):
         self.assertEqual(res, "FAIL", text)
         self.assertEqual(self.verdicts["fix.a2pfd1"][0], "PASS")
         self.assertIn("left", self.verdicts["fix.late100a"][1])
+
+
+@unittest.skipUnless(HAVE_UNICORN and np is not None,
+                     "needs unicorn and numpy")
+class LevelRecordedTest(Recorded, unittest.TestCase):
+    """a recorded run of the lvl cases: the level tone at their loudest
+    levels, each case's master put back after it, and essprec's clean
+    check and levels"""
+
+    ONLY = "lvl"
+    # each case's gain over lvl.base's, its 14h and master (DS p.55, p.56)
+    GAINS = {"lvl.base": 0.0, "lvl.pad": 4.5, "lvl.unity": 9.75,
+             "lvl.a1top": 11.25, "lvl.a1gain": 6.0}
+    MASTERS = (54, 56, 63, 63, 56)
+
+    def test_masters(self):
+        """the level tone at 14h FFh and the master at 63, then each case's
+        master, each put back to the power-on 54, as the end does again"""
+        log = self.probe.mix_log
+        self.assertEqual(self.probe.errors, [])
+        self.assertIn("at 14h FFh and the master at 63",
+                      self.probe.text("rec.start"))
+        self.assertEqual(next(v for _t, r, v in log if r == 0x14), 0xFF)
+        want = [63, 54] + [v for m in self.MASTERS for v in (m, 54)] + [54]
+        for reg in (0x60, 0x62):
+            self.assertEqual([v for _t, r, v in log if r == reg], want)
+
+    def test_clean(self):
+        """every case clean on the model, which doesn't clip, each at the
+        gain its spec sets over lvl.base's"""
+        v = self.verdicts
+        text = v["_text"]
+        for case in self.GAINS:
+            self.assertEqual(v[case][0], "PASS", text)
+        self.assertIn("the levels over lvl.base's, measured and set:", text)
+        for case, gain in self.GAINS.items():
+            m = re.search(r"^  %s +-?[\d.]+ dBFS +([+-][\d.]+) dB +"
+                          r"([+-][\d.]+) dB$" % re.escape(case), text, re.M)
+            self.assertIsNotNone(m, case)
+            self.assertAlmostEqual(float(m.group(2)), gain, places=2)
+            self.assertLess(abs(float(m.group(1)) - gain), 0.3, case)
+
+    def test_clipped(self):
+        """the loudest case clipped by half a dB: still a tone as the other
+        cases want it (25 dB), but not clean"""
+        def clip(x, a, b):
+            top = 0.95 * float(np.max(np.abs(x[a:b])))
+            np.clip(x[a:b], -top, top, out=x[a:b])
+        res, text = self.broken("lvl.a1top", clip)
+        self.assertEqual(res, "FAIL", text)
+        clean = float(re.search(r"clean (-?\d+) dB", text).group(1))
+        self.assertTrue(25 < clean < 40, text)
 
 
 class _Machine:

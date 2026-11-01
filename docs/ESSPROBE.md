@@ -99,6 +99,18 @@ such as `t2=0` for Audio 2's single transfers.
   six, so version 1.5 has three more of each pause in 16-bit stereo, and one
   that turns the DMA requests off only once +Ch bit 5 says the FIFO is full,
   so that no request is cut short (`pause=b7w`, `fix.pb7wa` to `fix.pb7wf`).
+* **lvl**: where the chip clips. Each case plays a full-scale tone on Audio
+  1, 16-bit stereo with its DMA unmasked 100 us after the start so that it
+  plays in step, at the levels a game's full volume can give the chip: the
+  probe's own, 14h at CCh (-3 dB) and the master at 54 (`lvl.base`), Audio 1
+  at unity (EEh) with the master at 56 (`lvl.pad`) and at 63 (`lvl.unity`),
+  and Audio 1's +1.5 dB (FFh) at 63 and 56 (`lvl.a1top`, `lvl.a1gain`). At
+  the master's top 7 levels, 57 to 63, the chip drops the 5.25 dB it
+  otherwise has between the playback mixer and the 3-D stage (DS p.59), so a
+  full-scale tone above unity may clip there. `esssb16` 1.1 gave a game's
+  full volume FFh and the master's 62, and 1.2 gives EEh and 63
+  ([SB16_FRONT.md](SB16_FRONT.md)). `m=` sets the master for the case alone,
+  and `amp=` the tone's amplitude. Version 1.8 adds the group.
 
 Every case uses the DMA channels that the card is configured for, Audio 1's
 (PnP 74h) and Audio 2's (75h), since other devices may own the others. An h1
@@ -125,7 +137,8 @@ restart`, and so does the screen. `/N` runs without the window.
   end; after a run that didn't end, the next start puts them back first.
 * Every case starts and ends with the chip's reset, its DMA channels masked.
   The sounds are quiet tones, about 9 dB under full scale, but the level
-  tone of a recorded run is at full scale: turn the speakers down for it.
+  tone of a recorded run and the lvl cases play at full scale, the lvl cases
+  at the chip's top levels: turn the speakers down for them.
 * `esssb16` can load right after a run, since it sets the chip up from the
   power-on state that the probe leaves. Only when EMM386 kept the window's
   trap, restart first, because `esssb16` traps that port too.
@@ -136,7 +149,7 @@ restart`, and so does the screen. `/N` runs without the window.
    `esssb16`. Set `BLASTER` with the card's base, such as
    `SET BLASTER=A220 I5 D1 H5 P330 T6`.
 2. Run `ESSPROBE /S` for the short run, about a minute, then `ESSPROBE` for
-   all 182 cases, about five minutes. Each writes `ESSPROBE.TXT`; `/O:file`
+   all 187 cases, about five minutes. Each writes `ESSPROBE.TXT`; `/O:file`
    names another, such as `/O:FULL.TXT`. Esc stops at any time. The report
    is on the disk after every line, so a run that stops the machine keeps
    what it measured until then.
@@ -175,7 +188,11 @@ way, with EMM386 as usual, and once more without it as `/O:FIXREAL.TXT`.
 `/C:fix.pb72` runs only the fronts' pause, about 25 seconds, and
 `/C:fix.pb7` all three kinds through B7h bit 7, about a minute.
 `ESSPROBE /C:h1.mask /O:MASK.TXT` runs the two cases of the 8237's mask in a
-second, without a sound or a recording.
+second, without a sound or a recording. `ESSPROBE /R /C:lvl /O:LVL.TXT`
+records the levels alone, about 15 seconds. With the lvl cases in a run, the
+level tone plays at the loudest of their levels, 14h at FFh and the master
+at 63, so that the recorder takes them without clipping; the other sounds
+then come about 20 dB under full scale.
 
 `python3 tools/essprec.py ESSPROBE.TXT run.wav` analyzes a recording: it
 finds the markers, fits the report's clock to the recording's, and measures
@@ -183,9 +200,12 @@ each case's sound by what it should hold. A steady tone gets its pitch, how
 clean it is and the rate it played at; a side, how much louder it is than
 the other; both engines, each tone's share of the sound; a muted case, its
 level; a pause, the quiet in it; a glide, its steps back, where a loop or
-stale data plays, and where it stands. The cases that look for what nobody
-knows yet get what was heard. At the end, each spec key gets how many of its
-cases passed and failed, which shows what a fault depends on.
+stale data plays, and where it stands; a clean tone (the lvl cases), how
+clean it is against 40 dB, which a quarter of a dB of clipping takes away,
+and its level over the first's against the gain its spec sets, which a
+clipped tone falls short of. The cases that look for what nobody knows yet
+get what was heard. At the end, each spec key gets how many of its cases
+passed and failed, which shows what a fault depends on.
 
 ## The tests
 

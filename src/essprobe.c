@@ -617,7 +617,7 @@ static void usage(void) {
        "  /S  the short run: a case of each kind\n"
        "  /A  the cases without a sound only\n"
        "  /C  only the cases whose names start so: groups (env rst a1 a2 both\n"
-       "      h1 h4 stream) or cases, comma-separated\n"
+       "      h1 h4 stream fix lvl) or cases, comma-separated\n"
        "  /N  no window on the DMA controllers under EMM386\n"
        "  /O  the report's file, else ESSPROBE.TXT\n"
        "Run it in real DOS without esssb16, BLASTER set (A). Esc stops.");

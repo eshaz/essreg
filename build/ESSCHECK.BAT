@@ -1,7 +1,8 @@
 @ECHO OFF
 REM ESSCHECK.BAT: the checks of esssb16 and of the chip in one run, with
 REM the games after them. essprobe plays a game's DMA 5 on the chip as
-REM esssb16 does, before esssb16 is in, HDPMI32i and esssb16 load,
+REM esssb16 does, and a full-scale tone at the chip's top levels, where it
+REM may clip, before esssb16 is in, HDPMI32i and esssb16 load,
 REM sb16test checks esssb16 with the game's 16-bit DMA as BLASTER has it
 REM and on 5, and the games play with it on 5, which esssb16 switches
 REM without a restart: Pinball World, Pinball Dreams, whose driver unmasks
@@ -44,8 +45,8 @@ IF "%AP%"=="" IF EXIST C:\21STCENT\ABSOLUTE\ABS.EXE SET AP=C:\21STCENT\ABSOLUTE
 IF "%AP%"=="" IF EXIST C:\ABSOLUTE\ABS.EXE SET AP=C:\ABSOLUTE
 IF "%AP%"=="" IF EXIST C:\GAMES\ABSOLUTE\ABS.EXE SET AP=C:\GAMES\ABSOLUTE
 
-ECHO esscheck 6: Pinball World in %PW%, Pinball Dreams in %PD% >> %L%
-ECHO esscheck 6: Absolute Pinball in %AP% >> %L%
+ECHO esscheck 7: Pinball World in %PW%, Pinball Dreams in %PD% >> %L%
+ECHO esscheck 7: Absolute Pinball in %AP% >> %L%
 ECHO esscheck: the checks of esssb16 and the chip, saved in %R%
 VER >> %L%
 SET > %R%\SET.TXT
@@ -56,28 +57,28 @@ MEM /C > %R%\MEM1.TXT
 MEM /D > %R%\MEMD1.TXT
 
 ECHO.
-ECHO 1. essprobe: a game's DMA 5 on the chip as esssb16 plays it, before
-ECHO    esssb16 is in
-IF NOT EXIST %R%\STREAM.TXT GOTO PROBE
+ECHO 1. essprobe: a game's DMA 5 on the chip as esssb16 plays it, and a
+ECHO    full-scale tone at the chip's top levels, before esssb16 is in
+IF NOT EXIST %R%\PROBE.TXT GOTO PROBE
 ECHO    Its report is there from a run before.
 CHOICE /C:SR /N Press S to go on to esssb16 or R to run it again
 IF ERRORLEVEL 2 GOTO PROBE
 GOTO TSRLOAD
 :PROBE
-ECHO    Its sounds, about half a minute, can be recorded: start the
-ECHO    recorder, then press Enter at the level tone.
+ECHO    Its sounds, about 40 seconds, can be recorded: start the recorder,
+ECHO    then press Enter at the level tone, which is loud.
 CHOICE /C:RS /N Press R to record them or S to play them unrecorded
 IF ERRORLEVEL 2 GOTO PRBQUIET
-%ESSDIR%\ESSPROBE /R /N /C:stream /O:%R%\STREAM.TXT
+%ESSDIR%\ESSPROBE /R /N /C:stream,lvl /O:%R%\PROBE.TXT
 GOTO PRBEND
 :PRBQUIET
-%ESSDIR%\ESSPROBE /N /C:stream /O:%R%\STREAM.TXT
+%ESSDIR%\ESSPROBE /N /C:stream,lvl /O:%R%\PROBE.TXT
 :PRBEND
 IF ERRORLEVEL 5 GOTO PRBDONE
 IF ERRORLEVEL 4 GOTO TSRIN
 IF ERRORLEVEL 2 GOTO STOPPED
 :PRBDONE
-ECHO essprobe: STREAM.TXT >> %L%
+ECHO essprobe: PROBE.TXT >> %L%
 
 :TSRLOAD
 ECHO.

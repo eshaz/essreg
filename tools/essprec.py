@@ -27,9 +27,13 @@ measures each sound by what it should hold:
 * glide: a rise of 400 Hz a second that never steps back, which a loop
   or stale data does, and never stands, which a stall does;
 * loop: steps back, as the glide does when the game's count stands still;
+* clean: the tone 40 dB over the rest (30 in the worst 20 ms), which a
+  quarter of a dB of clipping takes away;
 * any: what was heard, for the record.
-Then a summary of each spec key: how many cases with it passed and
-failed, which shows what a fault depends on.
+Then the clean cases' levels, each over the first's, against the gains
+their specs set (14h's v1, the master's m), which a clipped tone falls
+short of; and a summary of each spec key: how many cases with it passed
+and failed, which shows what a fault depends on.
 
 The recording can be mono or stereo, at any rate (tools/recan.py). Needs
 numpy.
@@ -55,6 +59,11 @@ from recan import (CENTS, CLEAN_DB, HZ, RATE, SIDE_DB, WORST_DB,  # noqa: E402
 
 LOW_HZ, HIGH_HZ = 294.0, 882.0      # both engines' tones (src/essp.c)
 GLIDE_HZ, GLIDE_RISE = 300.0, 400.0  # the stream's glide: Hz, Hz a second
+CLIP_DB, CLIP_WORST_DB = 40, 30     # clean: no clipping
+# Audio 1's levels 1-15 (14h) in dB (DS p.55, Table 21): 3 dB a step up
+# to 8, then 1.5 dB, 15 at +1.5 dB
+A1_DB = (None,) + tuple(1.5 - 1.5 * (15 - n) if n >= 8 else -9.0 - 3 * (8 - n)
+                        for n in range(1, 16))
 SPEC_RE = re.compile(r"^(\S+)\s+spec\s+(.*)$")
 RATE_RE = re.compile(r"\b(a[12]) ch \d+ (\d+) Hz set")
 
@@ -75,13 +84,14 @@ def read_specs(path):
     return specs, rates
 
 
-def tone_measure(x, rate_set=None):
+def tone_measure(x, rate_set=None, need=(CLEAN_DB, WORST_DB)):
     """a tone near 441 Hz, looked for from 100 to 1000 Hz, so that one at
-    another rate shows: (ok, text)"""
+    another rate shows, and clean as `need` says (median, worst): (ok,
+    text)"""
     f = pitch(x, 550, 0.82)
     c = cents(f, HZ)
     med, worst = cleanness(x, f) if f > 0 else (0.0, 0.0)
-    ok = abs(c) <= CENTS and med >= CLEAN_DB and worst >= WORST_DB
+    ok = abs(c) <= CENTS and med >= need[0] and worst >= need[1]
     text = "%.2f Hz (%+.1f cents), clean %.0f dB, worst %.0f dB, %.1f dBFS" \
         % (f, c, med, worst, level_db(x))
     if rate_set and f > 0:
@@ -93,10 +103,15 @@ def check_tone(rec, spans, case, rates):
     return tone_measure(rec.part(*spans[0]), rate_of(case, rates))
 
 
+def check_clean(rec, spans, case, rates):
+    return tone_measure(rec.part(*spans[0]), rate_of(case, rates),
+                        (CLIP_DB, CLIP_WORST_DB))
+
+
 def rate_of(case, rates):
     r = rates.get(case, {})
-    return r.get("a1") if case.startswith("a1.") else r.get("a2") \
-        if case.startswith("a2.") else None
+    return r.get("a1") if case.startswith(("a1.", "lvl.")) else \
+        r.get("a2") if case.startswith("a2.") else None
 
 
 def check_side(rec, spans, case, rates, want):
@@ -226,6 +241,8 @@ def judge(rec, case, sound, rates):
         ok, text = check_pause(rec, spans, case, rates, "left")
     elif want in ("glide", "loop"):
         ok, text = check_glide(rec, spans, want)
+    elif want == "clean":
+        ok, text = check_clean(rec, spans, case, rates)
     else:
         x = rec.part(*spans[0])
         _ok, text = tone_measure(x, rate_of(case, rates))
@@ -237,6 +254,35 @@ def judge(rec, case, sound, rates):
     if ok is None:
         return "INFO", text
     return ("PASS" if ok else "FAIL"), text
+
+
+def set_gain(keys):
+    """the gain in dB that a spec's v1 (14h, CCh unless given) and m (the
+    master, 0.75 dB a step) set Audio 1's left side to, or None"""
+    kv = dict(k.split("=", 1) for k in keys if "=" in k)
+    n = int(kv.get("v1", "204")) >> 4
+    if "m" not in kv or not n:
+        return None
+    return A1_DB[n] - 0.75 * (63 - int(kv["m"]))
+
+
+def levels(rec, sounds, specs, out):
+    """the clean cases' levels, each over the first's, against the gains
+    their specs set: a clipped tone comes out short of its gain"""
+    rows = []
+    for name, (_m, _us, spans, want) in sounds.items():
+        if want == "clean" and spans:
+            rows.append((name, level_db(rec.part(*spans[0])),
+                         set_gain(specs.get(name, []))))
+    if not rows:
+        return
+    first, lv0, g0 = rows[0]
+    print("the levels over %s's, measured and set:" % first, file=out)
+    for name, lv, g in rows:
+        set_text = "%+6.2f dB" % (g - g0) if g is not None and \
+            g0 is not None else "?"
+        print("  %-20s %6.1f dBFS %+6.2f dB %s" % (name, lv, lv - lv0,
+                                                   set_text), file=out)
 
 
 def summary(verdicts, specs, out):
@@ -300,6 +346,7 @@ def analyze(report, wav, out=sys.stdout):
         failed += res == "FAIL"
         print("%-20s %-5s %s" % (name, res, text), file=out)
     print("%d of %d recorded sounds failed" % (failed, len(sounds)), file=out)
+    levels(rec, sounds, specs, out)
     summary(verdicts, specs, out)
     return failed
 
