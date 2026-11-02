@@ -41,6 +41,7 @@ H_ALL = H_ON | H_SECOND | H_ONCE
 # the game's 16-bit channel
 V_MASK, V_FF, V_NEW, V_LIVE, V_PACE = 0x01, 0x02, 0x04, 0x08, 0x20
 V_PEND = 0x40               # PENDING: the carry-over waits for the unmask
+V_ANY = 0xFE                # vchan: the path traps every 16-bit channel
 
 # the operands each DSP command takes, as DSP 4.05's firmware takes them
 OPTABLE = bytes((0x10, 0x09, 0x40, 0x61, 0x55, 0xAA, 0x00, 0x00,
@@ -882,7 +883,29 @@ class Front:
 
     # --- the 16-bit channel ------------------------------------------------
     def vtrapped(self):
-        return self.vchan[self.how_io] == self.dma16
+        """QPI and HDPMI32i trap all three 16-bit channels, so the one
+        mixer 81h picks after the start too"""
+        return self.vchan[self.how_io] == V_ANY and self.dma16 >= 5
+
+    def vread(self):
+        """the game's 16-bit channel read back, the flip-flop cleared
+        before and after, auto-initialize for its mode"""
+        self.chip_out(0xD8, 0)
+        self.vpage = self.chip_in(self.vpagep)
+        self.vaddr = self.word_in(self.vport)
+        self.vcount = self.word_in(self.vport + 2)
+        self.chip_out(0xD8, 0)
+        self.vmode = 0x10
+
+    def v_seed(self):
+        """a new 16-bit channel from mixer 81h: as the 8237 has it, NEW,
+        masked if DEh gives its mask back set, nothing carried over or
+        waiting, the pace kept for the transfer it runs"""
+        self.vbits = (self.vbits & V_PACE) | V_NEW
+        if self.dma16 >= 5:
+            self.vread()
+            if self.vmasked():
+                self.vbits |= V_MASK
 
     def vmasked(self):
         """the game's 16-bit channel reads masked in the 8237, where the
@@ -938,12 +961,7 @@ class Front:
         (go False)"""
         if not self.vtrapped():
             last = (self.vpage, self.vcount, self.vaddr)
-            self.chip_out(0xD8, 0)
-            self.vpage = self.chip_in(self.vpagep)
-            self.vaddr = self.word_in(self.vport)
-            self.vcount = self.word_in(self.vport + 2)
-            self.chip_out(0xD8, 0)
-            self.vmode = 0x10
+            self.vread()
             if self.vbits & V_LIVE and self.goes_on(bl, last) and \
                     self.carries():
                 if not go:
@@ -1194,8 +1212,11 @@ class Front:
             self.chip_out(port, v)
         elif reg == 0x81:
             bits = v & 0xE0
-            self.dma16 = (bits & -bits).bit_length() - 1 if bits else 0
-            self.v_ports()
+            ch = (bits & -bits).bit_length() - 1 if bits else 0
+            if ch != self.dma16:
+                self.dma16 = ch
+                self.v_ports()
+                self.v_seed()
 
     def mix_in(self, port):
         reg = self.index

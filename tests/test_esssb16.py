@@ -41,7 +41,13 @@ E_USAGE, E_NOCARD, E_NOTRAP, E_WINDOWS, E_LOADED = 1, 2, 3, 4, 5
 IO_DIRECT, IO_HDPMI, IO_QPI, IO_CHAIN = 0, 1, 2, 3
 BASE = 0x220
 SB_PORTS = {BASE + o for o in (4, 5, 6, 0xA, 0xC, 0xE, 0xF)}
-DMA5_PORTS = {0xC4, 0xC6, 0x8B, 0xD4, 0xD6, 0xD8, 0xDA, 0xDC, 0xDE}
+# the 16-bit channels' ports, which QPI traps for the front: the addresses
+# and counts of channels 5 to 7, their pages, and the controller's
+DMA16_PORTS = [0xC4, 0xC6, 0xC8, 0xCA, 0xCC, 0xCE, 0x89, 0x8A, 0x8B,
+               0xD4, 0xD6, 0xD8, 0xDA, 0xDC, 0xDE]
+# and HDPMI32i's ranges of them
+DMA16_RANGES = ((0xC4, 12), (0x89, 3), (0xD4, 11))
+V_ANY = 0xFE                # vchan: the path traps every 16-bit channel
 # the 8237's mode register: demand or single transfers, auto-initialize,
 # from memory (playback) or into it (recording)
 DEMAND, SINGLE, AUTO, PLAY, RECORD = 0x00, 0x40, 0x10, 0x08, 0x04
@@ -133,7 +139,7 @@ def stack_depth(m):
 
 
 def vchan(m):
-    """the game's 16-bit channel as each path traps it, FFh for none"""
+    """the 16-bit channels each path traps: V_ANY all three, FFh none"""
     return list(m.mem(m.addr("vchan"), 4))
 
 
@@ -217,10 +223,10 @@ class InstallTest(unittest.TestCase):
                       "play 8-bit without HDPMI32i\r\nresident in upper "
                       "memory\r\n", m.output)
         fns = [c[0] for c in m.qpi_calls]
-        self.assertEqual(fns, [0x1A06, 0x1A07] + [0x1A09] * 16)
+        self.assertEqual(fns, [0x1A06, 0x1A07] + [0x1A09] * 22)
         self.assertEqual(m.qpi_callback, (m.seg, m.sym("qpi_shim")))
-        self.assertEqual(m.qpi_trapped, SB_PORTS | DMA5_PORTS)
-        self.assertEqual(vchan(m), [0xFF, 0xFF, 5, 5])
+        self.assertEqual(m.qpi_trapped, SB_PORTS | set(DMA16_PORTS))
+        self.assertEqual(vchan(m), [0xFF, 0xFF, V_ANY, V_ANY])
         # a callback before ours: the ports that aren't the front's go there
         self.assertEqual(m.mem(m.addr("qpi_old"), 4),
                          bytes([OLD_OFF, 0, STUB_PARA & 0xFF, STUB_PARA >> 8]))
@@ -256,7 +262,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(m.data8("qpi_how"), IO_QPI)
 
     def test_qpi_dma_traps_all_or_none(self):
-        """QPI refuses one of the 16-bit channel's ports: the others are
+        """QPI refuses one of the 16-bit channels' ports: the others are
         given back, and its transfers read the channel back instead"""
         m = machine()
         m.qpi_fail_after = {0x1A09: 9}
@@ -264,8 +270,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(m.exit[0], "tsr")
         self.assertEqual(m.qpi_trapped, SB_PORTS)
         self.assertEqual([c[1] for c in m.qpi_calls if c[0] == 0x1A0A],
-                         [0xC4, 0xC6, 0x8B, 0xD4, 0xD6, 0xD8, 0xDA, 0xDC,
-                          0xDE])
+                         DMA16_PORTS)
         self.assertEqual(vchan(m), [0xFF] * 4)
         self.assertIn("traps: QPI for real-mode games", m.output)
 
@@ -459,8 +464,8 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(m.data8("b9"), 0)          # single transfers
         self.assertEqual(m.qpi_trapped, {0x240 + o for o in
                                          (4, 5, 6, 0xA, 0xC, 0xE, 0xF)}
-                         | {0xC8, 0xCA, 0x89} | (DMA5_PORTS - {0xC4, 0xC6,
-                                                               0x8B}))
+                         | set(DMA16_PORTS))
+        self.assertEqual((m.data8("vport"), m.data8("vpagep")), (0xC8, 0x89))
 
     def test_dac_options(self):
         """/F and /O: mixer 71h's filters (bits 3 and 2 set bypass them)
@@ -604,7 +609,9 @@ class InstallTest(unittest.TestCase):
 
     def test_no_16bit_channel(self):
         """/H0, or BLASTER's H equal to its D: 16-bit sound on the 8-bit
-        channel, as a Sound Blaster 16 plays it then, and no DMA traps"""
+        channel, as a Sound Blaster 16 plays it then, with the 16-bit
+        channels' ports trapped all the same, for one that mixer 81h picks
+        later"""
         for tail, env in (("/H0", "BLASTER=A220 I5 D1 H5"),
                           ("", "BLASTER=A220 I5 D1 H1 T6")):
             m = machine(env=env)
@@ -613,8 +620,8 @@ class InstallTest(unittest.TestCase):
             self.assertEqual(m.data8("dma16"), 0)
             self.assertIn("IRQ 5, DMA 1\r\n", m.output)
             self.assertIn("set BLASTER=A220 I5 D1 H1 P330 T6", m.output)
-            self.assertEqual(m.qpi_trapped, SB_PORTS)
-            self.assertEqual(vchan(m), [0xFF] * 4)
+            self.assertEqual(m.qpi_trapped, SB_PORTS | set(DMA16_PORTS))
+            self.assertEqual(vchan(m), [0xFF, 0xFF, V_ANY, V_ANY])
 
     def test_dpmi(self):
         """HDPMI with the resident part in upper memory: the block's PSP
@@ -648,8 +655,8 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(traps, [(p, n, code, m.sym("hdpmi_shim"), data)
                                  for p, n in ((BASE + 4, 3), (BASE + 0xA, 1),
                                               (BASE + 0xC, 1),
-                                              (BASE + 0xE, 2), (0xC4, 3),
-                                              (0x8B, 1), (0xD4, 11))])
+                                              (BASE + 0xE, 2))
+                                 + DMA16_RANGES])
         self.assertIn("HDPMI32i for protected-mode games\r\nresident in "
                       "upper memory\r\n", pm.output)
         self.assertEqual(m.seg, u)
@@ -657,7 +664,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(pm.mem(pm.addr("vendor"), 6),
                          (STUB32 + VENDOR_OFF).to_bytes(4, "little") +
                          SEL_CODE32.to_bytes(2, "little"))
-        self.assertEqual(vchan(m), [0xFF, 5, 5, 5])
+        self.assertEqual(vchan(m), [0xFF] + [V_ANY] * 3)
         eax = int.from_bytes(rmcs[0x1C:0x20], "little")
         edx = int.from_bytes(rmcs[0x14:0x18], "little")
         self.assertEqual((eax, edx), (0x3100, paras + HOST))
@@ -687,7 +694,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(int.from_bytes(rmcs[0x14:0x18], "little"),
                          paragraphs(m.syms) + HOST)
         self.assertEqual(m.freed, [ENV_PARA, PSP_PARA])
-        self.assertEqual(vchan(m), [0xFF, 0xFF, 5, 5])
+        self.assertEqual(vchan(m), [0xFF, 0xFF, V_ANY, V_ANY])
         m.dsp(0xE1)
         self.assertEqual((m.dsp_read(), m.dsp_read()), (4, 5))
 
@@ -712,14 +719,14 @@ class InstallTest(unittest.TestCase):
                                   SEL_DATA)
                                  for p, n in ((BASE + 4, 3), (BASE + 0xA, 1),
                                               (BASE + 0xC, 1),
-                                              (BASE + 0xE, 2), (0xC4, 3),
-                                              (0x8B, 1), (0xD4, 11))])
+                                              (BASE + 0xE, 2))
+                                 + DMA16_RANGES])
         self.assertIn("HDPMI32i for protected-mode games", pm.output)
         self.assertEqual(pm.data16("pm_data"), SEL_DATA)
         self.assertEqual(pm.mem(pm.addr("vendor"), 6),
                          (STUB32 + VENDOR_OFF).to_bytes(4, "little") +
                          SEL_CODE32.to_bytes(2, "little"))
-        self.assertEqual(vchan(m), [0xFF, 5, 5, 5])
+        self.assertEqual(vchan(m), [0xFF] + [V_ANY] * 3)
         eax = int.from_bytes(rmcs[0x1C:0x20], "little")
         edx = int.from_bytes(rmcs[0x14:0x18], "little")
         self.assertEqual((eax, edx), (0x3100, paragraphs(m.syms) + HOST))
@@ -806,7 +813,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("play 8-bit without HDPMI32i", pm.output)
 
     def test_hdpmi_dma_traps_all_or_none(self):
-        """the 16-bit channel's ranges too, without the Sound Blaster's"""
+        """the 16-bit channels' ranges too, without the Sound Blaster's"""
         m = machine()
         m.install(qpiemu=True, dpmi=True)
         pm = PMMachine(m)
@@ -816,7 +823,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual([fn for fn, _edx in calls], [6] * 6 + [7])
         self.assertEqual(calls[-1], (7, 0x1040))
         self.assertIn("HDPMI32i for protected-mode games", pm.output)
-        self.assertEqual(vchan(m), [0xFF, 0xFF, 5, 5])
+        self.assertEqual(vchan(m), [0xFF, 0xFF, V_ANY, V_ANY])
 
 
 class LowDOS(Machine):
@@ -1057,15 +1064,16 @@ class FrontTest(unittest.TestCase):
         self.assertEqual(c.chip.mixer[0x71], 0x1E)
 
     def test_dma_select(self):
-        """mixer 81h picks the 16-bit channel; one the front doesn't trap
-        is read back at the command, and the channel that plays it
-        auto-initializes, also for a single-cycle block"""
+        """mixer 81h picks the 16-bit channel, which the front traps as it
+        traps all three: the game's programming of channel 6 followed, so
+        a single-cycle block stays single-cycle on the channel that plays
+        it"""
         c, chip = self.c, self.chip
         mixer(c, 0x81, 0x42)                    # channel 6
         self.assertEqual(mixer(c, 0x81), 0x42)
         self.assertEqual(c.m.data8("dma16"), 6)
         play16(c, cmd=0xB2, ch=6, addr=0x51000, auto=False)
-        self.assertEqual(chip.dma[1], {"mask": False, "mode": 0x19,
+        self.assertEqual(chip.dma[1], {"mask": False, "mode": 0x09,
                                        "addr": 0x1000, "count": 0x1FFF,
                                        "page": 0x05})
         mixer(c, 0x81, 0x02)                    # none: on the 8-bit channel

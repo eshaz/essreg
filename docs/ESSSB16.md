@@ -88,10 +88,13 @@ has the steps. The options:
   8-bit channel, as a Sound Blaster 16 does without an `H`. With `esssb16`
   in memory already, `/H` gives that copy the channel instead, as a game
   picks it through mixer 81h, so that a game can be tried both ways without
-  a restart; the other options take a restart. Run again, with or without
-  `/H`, the copy also says the last buffer that it carried over from the
-  game's 16-bit channel to an 8-bit one since it last said one, and whether
-  the buffer crosses a 64 KB page.
+  a restart; the other options take a restart. Under QPI and HDPMI32i the
+  copy traps all three 16-bit channels from the start, so it follows the
+  game's programming of the channel that `/H` gave it as it follows the
+  channel it started with. Run again, with or without `/H`, the copy also
+  says the last buffer that it carried over from the game's 16-bit channel
+  to an 8-bit one since it last said one, and whether the buffer crosses a
+  64 KB page.
 * `/20`, `/21` or `/23`: Audio 2's DMA channel, otherwise the card's, if a
   DMA pin of the card is wired to it. `/2-` plays 16-bit sound on Audio 1.
 * `/S`: single DMA transfers instead of demand transfers of two bytes, ESS's
@@ -156,6 +159,20 @@ else in the emulator with the games' own code:
   interrupt handlers end with STI and IRETD, which the HDPMI32i of HX's
   releases emulates with a fault of its own: the laptop stopped at the first
   interrupt of `SETUP`'s test sound. The copy in `third_party` has the fix.
+  With it, `SETUP`'s test sound played on the laptop through `esssb16` 1.3,
+  loaded with `H1` and given DMA 5 by `/H`, but the game started on
+  `SETUP`'s buffer again, a loop of its 5280 bytes, 1320 frames at 44.1 kHz
+  with both sides alike as `SETUP` writes them, and the log ends there.
+  HDPMI32i trapped no port of a channel given by `/H`, so the copy read
+  channel 5 back at the game's command, and in the emulator a channel 5 that
+  reads back as `SETUP` left it gives that loop
+  (`AbsolutePinballTest.test_setup_then_game`). Since 1.4 the copy traps all
+  three 16-bit channels whatever the channel at the start, and follows the
+  game's programming as the game writes it. The game takes DPMI before VCPI,
+  and all the memory the host reports (256 MB with HDPMI32i's `-x`); it
+  times the VGA's retrace with the PIT, and takes IRQ 0 at 50 Hz without
+  calling the handler before it; it mixes only as far as the count of
+  channel 5 moved.
 
 It was tested in a CPU emulator, and [`sb16test`](../README.md#sb16testexe)
 checks it on real hardware ([docs/TESTING.md](TESTING.md#d2-esssb16-dos)).

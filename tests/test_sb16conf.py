@@ -283,18 +283,53 @@ class AbsolutePinballTest(unittest.TestCase):
 
     def test_dma5_after_install(self):
         """installed with BLASTER's H1 and switched to DMA 5 through mixer
-        81h, as /H5 does to the loaded copy in ESSCHECK: HDPMI32i traps no
-        port of channel 5, so the games program the controller themselves,
-        the TSR carries the channel over from there, and the pace moves its
-        count. SETUP's test sound and the game play in order"""
+        81h, as /H5 does to the loaded copy in ESSCHECK: HDPMI32i traps the
+        ports of all three 16-bit channels from the start, so the TSR
+        follows the games' programming of channel 5 as they write it.
+        SETUP's test sound and the game play in order"""
         for name, key in (("abs_setup", "hung"), ("abs_game", "runaway")):
             card = TSRCard("pm", env="BLASTER=A220 I5 D1 H1 P330 T6",
                            dma2=5)
             card.out(BASE + 4, 0x81)
             card.out(BASE + 5, 0x20)
-            self.assertFalse(card.pm_ports & {0x8B, 0xC4, 0xC6, 0xD4}, name)
+            self.assertTrue(card.pm_ports >= {0x8B, 0xC4, 0xC6, 0xD4}, name)
             out = SCENES[name](card)
             self.assertEqual((out[key], out["back"]), (False, 0), name)
+
+    def test_setup_then_game(self):
+        """SETUP's test sound and then the game on one copy, installed with
+        BLASTER's H1 and switched to DMA 5 as ESSCHECK runs them, with an
+        8237 that keeps channel 5 as SETUP left it when the game programs
+        it. On the laptop of the reports, esssb16 1.3 played SETUP's buffer
+        again from the game's start: a loop of SETUP's 5280 bytes, 1320
+        frames at 44.1 kHz, both sides alike as SETUP writes them
+        (ZOOM0040.WAV from 169 s). A front that reads channel 5 back does
+        the same here; with the channel's ports trapped, as HDPMI32i has
+        them whatever the channel at the start, it follows the game's
+        writes, and the game plays its own buffer"""
+        for traps in (True, False):
+            card = TSRCard("pm", env="BLASTER=A220 I5 D1 H1 P330 T6",
+                           dma2=5)
+            if not traps:                   # as before: channel 5 read back
+                card.m.put(card.m.addr("vchan") + 1, b"\xff")
+            card.out(BASE + 4, 0x81)
+            card.out(BASE + 5, 0x20)
+            setup = SCENES["abs_setup"](card)
+            self.assertEqual((setup["hung"], setup["back"]), (False, 0))
+            outb = card.chip.outb
+            card.chip.outb = lambda port, v: \
+                None if port in (0xC4, 0xC6, 0x8B) else outb(port, v)
+            d0 = len(card.dac(16))
+            SCENES["abs_game"](card)
+            got = [f[0] for f in card.dac(16)[d0:]]
+            back = sum(1 for a, b in zip(got, got[1:]) if b < a)
+            self.assertGreater(len(got), 10000)
+            if traps:                       # the game's frames, counting up
+                self.assertEqual(back, 0)
+                self.assertGreater(max(got), 0x1880)
+            else:                           # SETUP's chunks, 1880h at most
+                self.assertGreater(back, 5)
+                self.assertLessEqual(max(got), 0x1880)
 
     def test_no_16bit_channel(self):
         """without a 16-bit channel, as with BLASTER's H1 or /H0, channel 5

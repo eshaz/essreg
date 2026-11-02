@@ -137,6 +137,8 @@ V_PACE          equ 0x20        ; Audio 2 takes its words (pace)
 V_PACE_BIT      equ 5
 V_PEND          equ 0x40        ; masked in the 8237 at the command: the
                                 ; carry-over waits for its unmask
+V_ANY           equ 0xFE        ; vchan: the path traps every 16-bit
+                                ; channel, so whichever mixer 81h picks
 
 ; their bit numbers, for bt, bts and btr
 F_EXT_BIT       equ 1
@@ -220,8 +222,9 @@ mchan:          db 1            ; the channel the game's 16-bit one is
 b9:             db 2            ; B9h: 2 demand transfers, 0 single (/S)
 keep71:         db 0xDF         ; mixer 71h at a transfer: the bits kept
 set71:          db 0            ; and the ones set (/F, /O)
-vchan:          db 0xFF, 0xFF, 0xFF, 0xFF       ; the game's 16-bit channel
-                                ; that each path (IO_*) traps, FFh for none
+vchan:          db 0xFF, 0xFF, 0xFF, 0xFF       ; the 16-bit channels that
+                                ; each path (IO_*) traps: V_ANY all three,
+                                ; FFh none
 vbits:          db V_MASK       ; V_*
 vport:          db 0xC4         ; that channel's address port (its count's
 vpagep:         db 0x8B         ; is 2 on) and page port
@@ -2012,17 +2015,18 @@ pend_check:
 .out:   popf
         ret
 
-; CF clear if this trap path traps the game's 16-bit channel (the one the
-; TSR was installed for, which mixer 81h may have changed)
+; CF clear if this trap path traps the game's 16-bit channel: QPI and
+; HDPMI32i trap all three, so the one mixer 81h picks after the start too
 vtrapped:
         push    bx
         movzx   bx,byte [V(how_io)]
-        mov     bl,[bx+V(vchan)]
-        cmp     bl,[V(dma16)]
+        cmp     byte [bx+V(vchan)],V_ANY
         pop     bx
-        je      .ret
-        stc
-.ret:   ret
+        jne     .no
+        cmp     byte [V(dma16)],5       ; CF set below channel 5
+        ret
+.no:    stc
+        ret
 
 ; the game's 16-bit channel carried over to the 8-bit one that plays it
 ; (mchan): the word address and the page's bits 7:1 as a byte address and
@@ -2044,19 +2048,7 @@ mirror:
         push    word [V(vpage)]         ; the last read, the page in the
         push    word [V(vcount)]        ; low byte
         push    word [V(vaddr)]
-        mov     dx,0xD8                 ; read back, the flip-flop cleared
-        call    chip_out                ; before and after
-        mov     dl,[V(vpagep)]
-        call    chip_in
-        mov     [V(vpage)],al
-        mov     dl,[V(vport)]
-        mov     si,vaddr
-        call    word_in
-        mov     si,vcount
-        call    word_in
-        mov     dl,0xD8
-        call    chip_out
-        mov     byte [V(vmode)],0x10
+        call    vread
         pop     ax
         pop     cx
         pop     dx
@@ -2151,6 +2143,46 @@ ch8_set:
         call    chip_out
         pop     dx
         ret
+
+; the game's 16-bit channel read back: its page, address and count as the
+; 8237 has them, with the controller's flip-flop cleared before and after,
+; and auto-initialize for its mode, which doesn't read back; clobbers AX,
+; DX and SI
+vread:
+        mov     dx,0xD8
+        call    chip_out
+        mov     dl,[V(vpagep)]
+        call    chip_in
+        mov     [V(vpage)],al
+        mov     dl,[V(vport)]
+        mov     si,vaddr
+        call    word_in
+        mov     si,vcount
+        call    word_in
+        mov     dl,0xD8
+        call    chip_out
+        mov     byte [V(vmode)],0x10
+        ret
+
+; a new 16-bit channel from mixer 81h: as the 8237 has it (vread), as
+; programmed since it was carried over (NEW), and masked if DEh gives its
+; mask back set (vmasked); nothing carried over from it yet, no carry-over
+; waiting, the game's flip-flop clear, and the pace kept for the transfer
+; it runs. A game that programs the channel after it picks it is followed
+; from its writes where the path traps the channel, and one that
+; programmed it before is seen as it left it
+v_seed:
+        mov     al,[V(vbits)]
+        and     al,V_PACE
+        or      al,V_NEW
+        mov     [V(vbits)],al
+        cmp     byte [V(dma16)],5
+        jb      .ret
+        call    vread
+        call    vmasked
+        jz      .ret
+        or      byte [V(vbits)],V_MASK
+.ret:   ret
 
 ; CF clear if the channel that carries the game's 16-bit one (mchan) still
 ; holds what mirror wrote there: its page, and its address and count on
@@ -2540,8 +2572,11 @@ mix_out:
         bsf     ax,ax                   ; the first that is set, as the
         jnz     .ch                     ; DSP picks it; none 0
         xor     ax,ax
-.ch:    mov     [V(dma16)],al
+.ch:    cmp     al,[V(dma16)]
+        je      .done
+        mov     [V(dma16)],al
         call    v_ports
+        call    v_seed                  ; a new one: as the 8237 has it
         jmp     short .done
 .reset: call    mix_defaults
         mov     cl,0x30
@@ -3910,9 +3945,8 @@ qpi_install:
         call    far [qpi]
         jc      .fail
         loop    .port
-        call    dma_list_fill           ; the game's 16-bit channel's ports:
-        jc      .done                   ; all of them or none
-        mov     si,dma_list
+        mov     si,dma_list             ; the 16-bit channels' ports: all
+                                        ; of them or none
         mov     cx,DMA_PORTS
 .dport: movzx   dx,byte [si]
         inc     si
@@ -4296,9 +4330,8 @@ trap_dpmi:
         add     bx,6
         cmp     bx,hdpmi_ranges_end
         jb      .trap
-        call    dma_list_fill           ; the game's 16-bit channel's ports:
-        jc      .said                   ; all of them or none
-        mov     bx,dma_ranges
+        mov     bx,dma_ranges           ; the 16-bit channels' ports: all
+                                        ; of them or none
 .dtrap: push    bx
         movzx   esi,byte [bx]
         movzx   edi,byte [bx+1]
@@ -4453,40 +4486,24 @@ hdpmi_ranges:   db 0x04, 3
                 db 0x0E, 2
                 dd 0
 hdpmi_ranges_end:
-; and of the game's 16-bit channel's ports: its address and count, its page,
-; its controller's D4h-DEh (filled in by dma_list_fill)
-dma_ranges:     db 0, 3
+; and of the 16-bit channels' ports, all three's, so that the one mixer 81h
+; picks later (/H for the copy in memory) is trapped too: the addresses and
+; counts of channels 5 to 7, their pages, and the controller's D4h-DEh
+dma_ranges:     db 0xC4, 12
                 dd 0
-                db 0, 1
+                db 0x89, 3
                 dd 0
                 db 0xD4, 11
                 dd 0
 dma_ranges_end:
 ; the same for QPI, port by port
-DMA_PORTS       equ 9
-dma_list:       db 0, 0, 0, 0xD4, 0xD6, 0xD8, 0xDA, 0xDC, 0xDE
+DMA_PORTS       equ 15
+dma_list:       db 0xC4, 0xC6, 0xC8, 0xCA, 0xCC, 0xCE, 0x89, 0x8A, 0x8B
+                db 0xD4, 0xD6, 0xD8, 0xDA, 0xDC, 0xDE
 
-; the lists of the game's 16-bit channel's ports; CF set without one
-dma_list_fill:
-        cmp     byte [dma16],5
-        jb      .none
-        mov     al,[vport]
-        mov     [dma_list],al
-        mov     [dma_ranges],al
-        add     al,2
-        mov     [dma_list+1],al
-        mov     al,[vpagep]
-        mov     [dma_list+2],al
-        mov     [dma_ranges+6],al
-        clc
-        ret
-.none:  stc
-        ret
-
-; the path BX (IO_*) traps the game's 16-bit channel, which is dma16
+; the path BX (IO_*) traps the 16-bit channels' ports
 dma_trapped:
-        mov     al,[dma16]
-        mov     [vchan+bx],al
+        mov     byte [vchan+bx],V_ANY
         ret
 want2:          db 0xFF         ; /2's channel for Audio 2, 4 for /2-,
                                 ; FFh for the card's
@@ -4519,7 +4536,7 @@ emm_device:     db "EMMXXXX0", 0
 emm_device2:    db "EMMQXXX0", 0
 blaster_name:   db "BLASTER=", 0
 
-banner:         db "esssb16 1.3: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
+banner:         db "esssb16 1.4: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
 usage:          db "usage: esssb16 [/A220] [/H5|/H6|/H7|/H0] [/20|/21|/23|/2-] [/S] [/F0|/F1]", 13, 10
                 db "       [/O0|/O1] [/3]", 13, 10
                 db "  /A  the card's base, else BLASTER's A (220)", 13, 10

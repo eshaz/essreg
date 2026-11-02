@@ -336,7 +336,12 @@ chip has at the start come back the same way, the nearest of the CT1745's,
 at most 0 dB (`tests/sbfsm.py`, `LVL_*` and `VIEW_*`). 0Ch and 0Eh read 0
 and ignore writes. 80h and 81h answer the card's interrupt and channels, a
 write of 81h selects the 16-bit channel, and 82h answers the interrupts. A
-write of 00h resets the view to the card's defaults and gives them to the
+write of 81h that picks another 16-bit channel starts the front from that
+channel as the 8237 has it (`v_seed`): read back, NEW, MASKED if DEh gives
+its mask back set, not LIVE or PENDING, PACED kept. A game that programs the
+channel after it picks it is then followed from its writes where the front
+traps the channel, and one that programmed it before is seen as it left it.
+A write of 00h resets the view to the card's defaults and gives them to the
 chip. Every other register is the chip's.
 
 ## Invariants
@@ -369,8 +374,12 @@ programming and the chip's interrupts:
 | TSR   | EMM386           | READBACK, PENDING, PACE | the game's handler |
 | VxD   | Windows (VDMAD)  | VDMAD                   | the hardware's     |
 
-In a DOS box, VDMAD has the game's channel virtualized for the front, and
-the front's carrying over goes through VDMAD's state of the engine's channel
+QPI and HDPMI32i trap the ports of all three 16-bit channels, whatever the
+channel at the start, so the channel that mixer 81h picks later, as `/H`
+gives it to the copy in memory, is TRAPPED as well; the ports of the
+channels that aren't the game's go to the controller as they are. In a DOS
+box, VDMAD has the game's channel virtualized for the front, and the front's
+carrying over goes through VDMAD's state of the engine's channel
 ([VXD_INTERNALS.md](VXD_INTERNALS.md)).
 
 A TSR loaded before Windows finds the chip as Windows' driver left it, so it
