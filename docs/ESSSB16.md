@@ -158,21 +158,19 @@ else in the emulator with the games' own code:
   and reach the bare chip, which has no Sound Blaster 16 commands. Their
   interrupt handlers end with STI and IRETD, which the HDPMI32i of HX's
   releases emulates with a fault of its own: the laptop stopped at the first
-  interrupt of `SETUP`'s test sound. The copy in `third_party` has the fix.
-  With it, `SETUP`'s test sound played on the laptop through `esssb16` 1.3,
-  loaded with `H1` and given DMA 5 by `/H`, but the game started on
-  `SETUP`'s buffer again, a loop of its 5280 bytes, 1320 frames at 44.1 kHz
-  with both sides alike as `SETUP` writes them, and the log ends there.
-  HDPMI32i trapped no port of a channel given by `/H`, so the copy read
-  channel 5 back at the game's command, and in the emulator a channel 5 that
-  reads back as `SETUP` left it gives that loop
-  (`AbsolutePinballTest.test_setup_then_game`). Since 1.4 the copy traps all
-  three 16-bit channels whatever the channel at the start, and follows the
-  game's programming as the game writes it. The game takes DPMI before VCPI,
-  and all the memory the host reports (256 MB with HDPMI32i's `-x`); it
-  times the VGA's retrace with the PIT, and takes IRQ 0 at 50 Hz without
-  calling the handler before it; it mixes only as far as the count of
-  channel 5 moved.
+  interrupt of `SETUP`'s test sound, with `SETUP`'s first buffer playing
+  over and over. The copy in `third_party` has the fix. With it, `SETUP`'s
+  test sound played on the laptop through `esssb16` 1.3, but the game never
+  started: the machine stopped while it loaded, with the disk's light on and
+  no answer to Ctrl+Alt+Del, before the game's first command to the card,
+  since not even the start of a transfer is in the recording. The game takes
+  DPMI before VCPI, and every free page the host reports in one block (256
+  MB with HDPMI32i's `-x`); HDPMI's notes give `-n` for clients that take
+  all of it, and `-i` for those that don't run, as the first thing to try.
+  Its extender writes the real-mode vectors of the interrupts it takes
+  itself. The game times the VGA's retrace with the PIT and takes IRQ 0 at
+  50 Hz without calling the handler before it, and mixes only as far as the
+  count of channel 5 moved; nothing in it measures the card's clock.
 
 It was tested in a CPU emulator, and [`sb16test`](../README.md#sb16testexe)
 checks it on real hardware ([docs/TESTING.md](TESTING.md#d2-esssb16-dos)).

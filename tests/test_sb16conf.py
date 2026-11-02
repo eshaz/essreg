@@ -300,13 +300,11 @@ class AbsolutePinballTest(unittest.TestCase):
         """SETUP's test sound and then the game on one copy, installed with
         BLASTER's H1 and switched to DMA 5 as ESSCHECK runs them, with an
         8237 that keeps channel 5 as SETUP left it when the game programs
-        it. On the laptop of the reports, esssb16 1.3 played SETUP's buffer
-        again from the game's start: a loop of SETUP's 5280 bytes, 1320
-        frames at 44.1 kHz, both sides alike as SETUP writes them
-        (ZOOM0040.WAV from 169 s). A front that reads channel 5 back does
-        the same here; with the channel's ports trapped, as HDPMI32i has
-        them whatever the channel at the start, it follows the game's
-        writes, and the game plays its own buffer"""
+        it. A front that reads channel 5 back carries SETUP's buffer over
+        again and loops it; with the channel's ports trapped, as HDPMI32i
+        has them whatever the channel at the start, the front follows the
+        game's writes, and the game plays its own buffer whatever the 8237
+        gives back"""
         for traps in (True, False):
             card = TSRCard("pm", env="BLASTER=A220 I5 D1 H1 P330 T6",
                            dma2=5)
