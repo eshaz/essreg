@@ -286,12 +286,13 @@ enum et_result c_dig_long(struct et_ctx *c, const struct et_case *k)
 	return dig_run(c, &f, 30 * 49716, 0, 0, 0, 31, NULL, NULL, 0, 0);
 }
 
-// dig.drain.full: a buffer of 8192 frames in periods of 1000, which the
-// buffer doesn't hold a whole number of, so that the interrupts move
-// against the buffer at each wrap as with alsa-lib's default periods, and
-// 14092 frames, whose last write of 900 leaves 100 frames free as the drain
-// begins, while the DMA plays 908 past the end before its interrupt: only
-// idle frames after the pattern, none of what the ring held before
+// dig.drain.full: periods of 1000 frames asked for in a buffer of 8192 and
+// 14092 frames, whose last write leaves the buffer nearly full as the drain
+// begins, with the end in the middle of a period: only idle frames after
+// the pattern, none of what the ring held before. A driver that took the
+// buffer as asked, not a whole number of periods, had its interrupts move
+// against the buffer at each wrap, and the drain played the ring's old
+// frames up to the next interrupt
 enum et_result c_dig_drain(struct et_ctx *c, const struct et_case *k)
 {
 	static const struct et_fmt f = { ET_S16, 2, 44100 };

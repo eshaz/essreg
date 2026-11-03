@@ -48,6 +48,11 @@ The driver also follows the other measurements in
   silences a period and two FIFOs past the last frame itself, as far as the
   buffer is free, and goes on as the DMA frees more: a drain that began with
   the buffer full, as after a resume, played up to a period of old data.
+* Every device takes a whole number of periods in its buffer, two at least.
+  Without that the interrupts moved against the buffer at each wrap, and
+  speaker-test, which wants two periods, took one of 12000 frames, more than
+  half of the 16384 frames that Audio 2's buffer holds at most, and stopped
+  with "Setting of hwparams failed".
 * Both engines use demand-mode DMA, with which they kept their rates while
   both ran.
 * The rates are the measured clocks, 793.8, 396.9 and 768 kHz, not the data

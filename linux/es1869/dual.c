@@ -44,7 +44,7 @@ static const struct snd_pcm_hardware dual_hw = {
 	.buffer_bytes_max = 2 * ES1869_A1_BUF,
 	.period_bytes_min = 128,
 	.period_bytes_max = 2 * ES1869_A1_BUF,
-	.periods_min = 1,
+	.periods_min = 2,
 	.periods_max = 1024,
 };
 
@@ -218,6 +218,9 @@ static int dual_open(struct snd_pcm_substream *ss)
 	if (err)
 		return err;
 	rt->hw = dual_hw;
+	err = es1869_whole_periods(rt);
+	if (err < 0)
+		return err;
 	err = snd_pcm_hw_constraint_ratnums(rt, 0, SNDRV_PCM_HW_PARAM_RATE,
 					    &es1869_a1_rates);
 	if (err < 0)

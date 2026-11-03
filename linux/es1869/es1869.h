@@ -196,6 +196,7 @@ void es1869_hwvol_notify(struct es1869 *chip);
 struct es1869_limit;
 extern const struct es1869_limit es1869_limit_a2;
 int es1869_pcm_new(struct es1869 *chip);
+int es1869_whole_periods(struct snd_pcm_runtime *runtime);
 int es1869_pcm_limits(struct snd_pcm_runtime *runtime,
 		      const struct es1869_limit *lim);
 void es1869_stream_rate(struct snd_pcm_runtime *runtime, bool a1, u32 *num,

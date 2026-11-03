@@ -57,7 +57,7 @@ static const struct snd_pcm_hardware a1_play_hw = {
 	.buffer_bytes_max = ES1869_A1_BUF,
 	.period_bytes_min = 64,
 	.period_bytes_max = ES1869_A1_BUF,
-	.periods_min = 1,
+	.periods_min = 2,
 	.periods_max = 1024,
 };
 
@@ -73,7 +73,7 @@ static const struct snd_pcm_hardware fm_capture_hw = {
 	.buffer_bytes_max = ES1869_A1_BUF,
 	.period_bytes_min = 64,
 	.period_bytes_max = ES1869_A1_BUF,
-	.periods_min = 1,
+	.periods_min = 2,
 	.periods_max = 1024,
 };
 
@@ -133,11 +133,23 @@ static int rule_frame(struct snd_pcm_hw_params *params,
 	return snd_interval_refine(fb, &t);
 }
 
+// a whole number of periods in the buffer, two at least (periods_min):
+// without them the interrupts moved against the buffer at each wrap, and
+// speaker-test, which wants two periods, took one of 12000 frames, more
+// than half of the most Audio 2's buffer holds, 16384 frames, and stopped
+int es1869_whole_periods(struct snd_pcm_runtime *runtime)
+{
+	return snd_pcm_hw_constraint_integer(runtime, SNDRV_PCM_HW_PARAM_PERIODS);
+}
+
 int es1869_pcm_limits(struct snd_pcm_runtime *runtime,
 		      const struct es1869_limit *lim)
 {
 	int err;
 
+	err = es1869_whole_periods(runtime);
+	if (err < 0)
+		return err;
 	err = snd_pcm_hw_rule_add(runtime, 0, SNDRV_PCM_HW_PARAM_RATE,
 				  rule_rate, (void *)lim,
 				  SNDRV_PCM_HW_PARAM_FRAME_BITS,
@@ -270,7 +282,7 @@ static int a1_open(struct snd_pcm_substream *substream, enum es1869_owner who)
 
 	if (who == ES_OWN_FMC) {
 		runtime->hw = fm_capture_hw;
-		return 0;
+		return es1869_whole_periods(runtime);
 	}
 	runtime->hw = a1_play_hw;
 	if (who == ES_OWN_A1C)

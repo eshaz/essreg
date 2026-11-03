@@ -86,7 +86,7 @@ static const struct snd_pcm_hardware a2_hw = {
 	.buffer_bytes_max = ES1869_A2_BUF,
 	.period_bytes_min = 64,
 	.period_bytes_max = ES1869_A2_BUF,
-	.periods_min = 1,
+	.periods_min = 2,
 	.periods_max = 1024,
 };
 
