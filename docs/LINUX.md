@@ -80,6 +80,12 @@ the driver is removed, since that is the safe setting for whichever driver
 uses the chip next. `piix4_type_f=1` keeps the BIOS's setting. Audio 2's
 channel keeps Type F, because Audio 2 only plays.
 
+The BIOS sets both registers where it builds the ES1869's PnP node: at every
+POST, and whenever the PnP BIOS is asked for the boot configuration, which
+Linux never does with PnP ACPI. Its SMM keeps both across a suspend to RAM.
+The driver writes its setting again at every resume, after whatever the BIOS
+or ACPI put back (celeronix-6a's BIOS notes, chapter 03).
+
 ## Devices
 
 The card keeps snd-es18xx's id, ES1869, its PCM layout and its control
@@ -195,6 +201,20 @@ Measured with es1869test, frame by frame where the music DAC records Audio 2
   its start (8 ms on the Armada). A smaller `a2_lead_ms` shortens it, for
   more of the ring's timer.
 
+The Armada's BIOS reaches the chip at run time in one place: the Fn-key
+volume popup, an SMI even in ACPI mode, reads the PC speaker's volume, mixer
+3Ch, and writes it while the popup is up, from Computer Setup's speaker
+volume (CMOS 47h, 0 to 100, as 0 to 7). It saves and restores the mixer's
+index register around that, and sends the DSP nothing, so the driver's index
+and data accesses and its DSP commands are safe. The BIOS's only DSP
+commands outside S3 and POST, C6h and then B4h at 22h, sit in an SMI that
+nothing calls, and its other writes of 3Ch come only from Computer Setup's
+int 15h call, which Linux never makes (celeronix-6a's BIOS notes, chapters
+05 and 09). The driver keeps its own copy of 3Ch, so "Beep Playback Volume"
+goes on showing the driver's value after the popup writes 3Ch, and a resume
+puts that value back. On the Armada CMOS 47h is 0, the same as the control's
+default and its saved state.
+
 ## Power
 
 With `pwr_save` set to a number of seconds, the chip powers down when
@@ -279,6 +299,13 @@ Without `isapnp=0` the driver takes the ESS1869 device that the BIOS
 describes through ACPI or the PnP BIOS. In legacy mode the resources the
 parameters leave out come from the chip's own PnP registers. snd-es18xx
 claims the same devices, so blacklist it.
+
+The Armada's BIOS keeps the chip's resources in CMOS, as Computer Setup's
+Audio page sets them, and programs them into the chip at POST. Either DMA
+channel can be 0, 1, 5 or none (DMA 3 belongs to the ECP port), and Audio 2
+has DMA 5 by default. With Audio 2 on DMA 0, an 8-bit channel, and `dma2=0`,
+Audio 2 plays straight from its buffer, without the ring of words and its
+copy.
 
 `linux/config/` holds the Armada's configuration, which its deployment uses:
 
