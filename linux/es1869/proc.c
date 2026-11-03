@@ -54,7 +54,7 @@ static void es1869_proc_read(struct snd_info_entry *entry,
 		    st.dsp_busy, st.dsp_desync, st.pos_retries, st.settles);
 	snd_iprintf(buf, "stuck sources %u, taken off the line %02x%s\n",
 		    st.irq_stuck, st.irq_dropped,
-		    chip->irq_storm ? "; a storm took them all off" : "");
+		    chip->hw.storm ? "; a storm took them all off" : "");
 	snd_iprintf(buf, "Audio 2 ring: late refills %u, largest %u bytes\n",
 		    chip->mirror.late, chip->mirror.max_chunk);
 	// what the driver costs: TSC cycles a call, and the 8237's readings

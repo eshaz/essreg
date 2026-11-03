@@ -171,11 +171,6 @@ static u32 io_dma_residue(void *ctx, unsigned int ch)
 
 // --- the interrupt ------------------------------------------------------------------
 
-// more than this many interrupts in a second is a storm: the line can't
-// carry a real one (Audio 1's and Audio 2's shortest periods give about
-// 1500 each)
-#define ES_IRQ_STORM 20000
-
 static irqreturn_t es1869_interrupt(int irq_no, void *dev_id)
 {
 	struct es1869 *chip = dev_id;
@@ -184,6 +179,7 @@ static irqreturn_t es1869_interrupt(int irq_no, void *dev_id)
 	cycles_t c0 = get_cycles();
 	struct snd_pcm_substream *s1, *s2;
 	unsigned int pass;
+	bool storm = false;
 	u8 st, any = 0, dropped;
 
 	// polled, as ESS's drivers do it, until a pass finds nothing, since a
@@ -192,16 +188,8 @@ static irqreturn_t es1869_interrupt(int irq_no, void *dev_id)
 	for (pass = 0; pass < 4; pass++) {
 		s1 = s2 = NULL;
 		spin_lock(&chip->reg_lock);
-		if (!pass) {
-			if (time_after(jiffies, chip->irq_window)) {
-				chip->irq_window = jiffies + HZ;
-				chip->irq_count = 0;
-			}
-			if (++chip->irq_count > ES_IRQ_STORM && !chip->irq_storm) {
-				chip->irq_storm = true;
-				hw->imr = 0;
-			}
-		}
+		if (!pass)
+			storm = es1869_irq_storm(hw, jiffies, HZ);
 		dropped = hw->stats.irq_dropped;
 		// polled: the sources Config_Base+6 shows, and every one where it
 		// lives when a first pass finds none there
@@ -247,7 +235,7 @@ static irqreturn_t es1869_interrupt(int irq_no, void *dev_id)
 		hw->stats.irq_none++;
 	chip->isr_calls++;
 	chip->isr_cycles += get_cycles() - c0;
-	if (chip->irq_storm && chip->irq_count == ES_IRQ_STORM + 1)
+	if (storm)
 		dev_err(chip->dev, "interrupt storm: every source off the line\n");
 	return any ? IRQ_HANDLED : IRQ_NONE;
 }
@@ -274,7 +262,7 @@ void es1869_irq_sources_locked(struct es1869 *chip)
 		  (chip->rmidi ? ES_IRQ_MPU : 0);
 
 	want &= es1869_val(ES_S_irq_sources);
-	if (chip->irq_storm)
+	if (hw->storm)
 		want = 0;
 	hw->imr = want & ~hw->stats.irq_dropped;
 	es1869_mix_update(hw, 0x64, 0x42, (want & ES_IRQ_HWV ? 0x02 : 0) |

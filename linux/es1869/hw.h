@@ -46,6 +46,11 @@
 #define ES_IRQ_HWV 0x04
 #define ES_IRQ_MPU 0x08
 
+// more than this many calls of the handler in a second is a storm: the
+// line can't carry a real one (Audio 1's and Audio 2's shortest periods
+// give about 1500 each)
+#define ES_IRQ_STORM 20000
+
 // 8237 modes, without the channel: memory to the chip (play) and back
 #define ES_DMA_PLAY 0x18 // demand, auto-initialize, read
 #define ES_DMA_REC 0x14 // demand, auto-initialize, write
@@ -91,6 +96,9 @@ struct es1869_hw {
 	u8 imr; // Config_Base+7: the sources in use
 	u8 fm_delay; // status reads after an FM address or data write
 	u8 stuck_run; // handler calls in a row that left a source asserted
+	unsigned long storm_start; // the storm guard's second: its start
+	unsigned int storm_count; // and the handler's calls in it
+	bool storm; // a storm took every source off the line
 	bool desync; // a DSP command was left half sent
 	struct es1869_stats stats;
 };
@@ -174,6 +182,8 @@ u8 es1869_irq_take(struct es1869_hw *hw);
 u8 es1869_irq_poll(struct es1869_hw *hw);
 u8 es1869_irq_enter(struct es1869_hw *hw);
 void es1869_irq_exit(struct es1869_hw *hw);
+bool es1869_irq_storm(struct es1869_hw *hw, unsigned long now,
+		      unsigned long hz);
 u32 es1869_dma_pos(struct es1869_hw *hw, u8 ch, u32 bytes);
 
 // each byte of src in the low byte of a word of dst, as a 16-bit channel

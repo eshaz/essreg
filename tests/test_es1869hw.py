@@ -102,6 +102,7 @@ def library():
             "lx_mix": ([P, u8], u8),
             "lx_ctrl": ([P, u8], u8),
             "lx_set_imr": ([P, u8], None),
+            "lx_imr": ([P], u8),
             "lx_set_port7": ([P, u8], None),
             "lx_set_mpu": ([P, u16], None),
             "lx_desync": ([P], ctypes.c_int),
@@ -143,6 +144,8 @@ def library():
             "es1869_irq_poll": ([P], u8),
             "es1869_irq_take": ([P], u8),
             "es1869_irq_exit": ([P], None),
+            "es1869_irq_storm": ([P, ctypes.c_ulong, ctypes.c_ulong],
+                                 ctypes.c_bool),
             "es1869_dma_pos": ([P, u8, u32], u32),
             "es1869_spread": ([ctypes.c_char_p, ctypes.c_char_p, u32],
                               None),
@@ -830,6 +833,61 @@ class ProtocolTest(unittest.TestCase):
         self.assertEqual(len(d.chip.log), before)
         d.mix_update(0x71, 0x20, 0x20)
         self.assertEqual(d.chip.mixer[0x71], 0x32)
+
+
+class StormTest(unittest.TestCase):
+    """the storm guard's second, on a clock of 250 ticks a second, from a
+    start of 0 as at load"""
+
+    HZ = 250
+    LIMIT = 20000                   # ES_IRQ_STORM
+    WRAP = 2 ** (8 * ctypes.sizeof(ctypes.c_ulong))
+
+    def setUp(self):
+        self.lib = library()
+        self.hw = self.lib.lx_new(None, 0x220, 0x250, 0x388)
+        self.addCleanup(self.lib.lx_free, self.hw)
+        self.lib.lx_set_imr(self.hw, IRQ_A1 | IRQ_A2)
+
+    def calls(self, now, n):
+        """n calls of the handler at one tick: how many said storm"""
+        fn = self.lib.es1869_irq_storm
+        return sum(fn(self.hw, now % self.WRAP, self.HZ) for _ in range(n))
+
+    def test_boot_clock(self):
+        """a clock short of its wrap, as 32-bit jiffies are for a boot's
+        first five minutes (INITIAL_JIFFIES): 1500 calls a second for 40 s
+        across the wrap are no storm, where time_after() against the start
+        of 0 took them all for one second's"""
+        base = self.WRAP - 20 * self.HZ
+        storms = sum(self.calls(base + t, 6) for t in range(40 * self.HZ))
+        self.assertEqual(storms, 0)
+        self.assertEqual(self.lib.lx_imr(self.hw), IRQ_A1 | IRQ_A2)
+
+    def test_storm(self):
+        """the call past the limit in one second is the storm, said once,
+        and the mask stays clear in the seconds after"""
+        self.assertEqual(self.calls(1000, self.LIMIT), 0)
+        self.assertEqual(self.lib.lx_imr(self.hw), IRQ_A1 | IRQ_A2)
+        self.assertEqual(self.calls(1000 + self.HZ - 1, 1), 1)
+        self.assertEqual(self.lib.lx_imr(self.hw), 0)
+        self.assertEqual(self.calls(1000 + self.HZ - 1, 5), 0)
+        self.assertEqual(self.calls(1000 + 3 * self.HZ, self.LIMIT + 5), 0)
+        self.assertEqual(self.lib.lx_imr(self.hw), 0)
+
+    def test_second_ends(self):
+        """the count starts again a second after the second's start"""
+        self.assertEqual(self.calls(1000, self.LIMIT), 0)
+        self.assertEqual(self.calls(1000 + self.HZ, self.LIMIT), 0)
+        self.assertEqual(self.lib.lx_imr(self.hw), IRQ_A1 | IRQ_A2)
+
+    def test_start_long_past(self):
+        """a second that started more than half the clock's range ago, as
+        after 99 days without an interrupt on 32-bit jiffies, is over"""
+        self.assertEqual(self.calls(1000, self.LIMIT - 100), 0)
+        later = 1000 + self.WRAP // 2 + 2 * self.HZ
+        self.assertEqual(self.calls(later, self.LIMIT - 100), 0)
+        self.assertEqual(self.lib.lx_imr(self.hw), IRQ_A1 | IRQ_A2)
 
 
 if __name__ == "__main__":

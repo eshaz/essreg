@@ -45,6 +45,11 @@ void lx_set_imr(struct es1869_hw *hw, u8 imr)
 	hw->imr = imr;
 }
 
+u8 lx_imr(const struct es1869_hw *hw)
+{
+	return hw->imr;
+}
+
 void lx_set_mpu(struct es1869_hw *hw, u16 port)
 {
 	hw->mpu = port;

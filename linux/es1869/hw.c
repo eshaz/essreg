@@ -698,6 +698,27 @@ void es1869_irq_exit(struct es1869_hw *hw)
 	out(hw, hw->cfg + 7, hw->imr);
 }
 
+// the storm guard, at each call of the handler, on the caller's clock of hz
+// ticks a second: true for the call that makes its second a storm, which
+// takes every source off the line until the driver loads again. The second
+// is its start and an unsigned difference, so that a start of 0 at load,
+// or one long past, opens a new one: time_after() against 0 sees none in a
+// 32-bit boot's first five minutes (INITIAL_JIFFIES is -300 s), and the
+// calls since the boot added up to a storm
+bool es1869_irq_storm(struct es1869_hw *hw, unsigned long now,
+		      unsigned long hz)
+{
+	if (now - hw->storm_start >= hz) {
+		hw->storm_start = now;
+		hw->storm_count = 0;
+	}
+	if (hw->storm || ++hw->storm_count <= ES_IRQ_STORM)
+		return false;
+	hw->storm = true;
+	hw->imr = 0;
+	return true;
+}
+
 // what the DMA has moved of a buffer of bytes: the 8237's count read until
 // two reads agree within a cycle, the earlier one kept; never masked, which
 // would stall a demand transfer in front of a FIFO of a third of a ms

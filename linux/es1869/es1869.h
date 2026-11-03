@@ -144,9 +144,6 @@ struct es1869 {
 	struct snd_hwdep *esfm_hwdep; // hwdep 1
 	struct snd_seq_device *esfm_seq; // for snd-es1869-esfm
 	struct snd_hwdep *regs_hwdep;
-	unsigned long irq_window; // the storm guard's second, in jiffies
-	unsigned int irq_count; // and the interrupts in it
-	bool irq_storm; // it took every source off the line
 };
 
 // main.c

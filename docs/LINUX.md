@@ -62,7 +62,9 @@ The driver also follows the other measurements in
   sources onto the edge-triggered line, so that no other one holds it high.
   `irq_mode=1` uses the data sheet's way instead: Config_Base+7 cleared on
   entry and restored on exit, so that a source still pending raises a new
-  edge.
+  edge. In either mode, more than 20000 calls of the handler in one second
+  are taken for a storm, which takes every source off the line until the
+  driver loads again, and /proc/asound/card0/es1869 says so.
 
 ## The PIIX4's Type F timing
 
