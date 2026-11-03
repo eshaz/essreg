@@ -78,10 +78,13 @@ def c_tests(tmp):
              ("t_wavestat", src("wavestat.c"),
               [os.path.join(ROOT, "driver", "ES1869.DRV"),
                os.path.join(ROOT, "build", "ES1869.DRV")]),
-             ("t_drvinst", src("drvinst.c"), [ROOT, inst_work])]
-    for name, sources, args in tests:
+             ("t_drvinst", src("drvinst.c"), [ROOT, inst_work]),
+             ("t_etan", [os.path.join(ROOT, "linux", "test", "an.c")], [],
+              ["-I" + os.path.join(ROOT, "linux", "test")])]
+    for name, sources, args, *extra in tests:
         exe = os.path.join(tmp, name)
-        cc(exe, [os.path.join(HOST, name + ".c")] + sources, libs=["-lm"])
+        cc(exe, [os.path.join(HOST, name + ".c")] + sources,
+           extra[0] if extra else (), libs=["-lm"])
         code, out, err = run([exe] + args)
         sys.stdout.write(out + err)
         failures += code != 0

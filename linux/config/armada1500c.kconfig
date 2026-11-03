@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# The lines for the Armada 1500c's kernel configuration: snd-es1869 and its
+# ESFM synth (snd-es1869-esfm) as modules, with the DAC stages off by
+# default. snd-es18xx stays a module too, blacklisted in
+# armada1500c-modprobe.conf.
+#
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+
+CONFIG_SND_ES1869=m
+CONFIG_SND_ES1869_ESFM=m
+CONFIG_SND_ES18XX=m
+CONFIG_SND_ES1869_DEFAULT_AUDIO2_OVERSAMPLING=0
+CONFIG_SND_ES1869_DEFAULT_AUDIO2_FILTER=0
+CONFIG_SND_ES1869_DEFAULT_AUDIO1_FILTER=0
+CONFIG_SND_ES1869_DEFAULT_PIIX4_TYPE_F=0
+
+# The rate limits' defaults are es1869test's rate.max on the laptop: Audio 2
+# clean to 99225 Hz while Audio 1 records (132300 Hz alone), so 96000 Hz;
+# Audio 1 recording to 52920 Hz, nothing from 56700 Hz; Audio 1 playback
+# kept at 48000 Hz, which the second card's microphone input can't judge
+# above.

@@ -51,3 +51,15 @@ __pycache__/
 
 # Claude Code worktrees of parallel agents
 /.claude/worktrees/
+# Linux kernel module builds (linux/)
+/linux/**/*.mod
+/linux/**/*.mod.c
+/linux/**/.*.cmd
+/linux/**/modules.order
+/linux/**/Module.symvers
+/linux/**/.module-common.o
+/linux/**/.tmp_versions/
+/linux/es1869-driver.patch
+/linux/tools/essreg/essreg
+/linux/test/es1869test
+/linux/es1869test-*.tar.gz

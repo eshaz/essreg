@@ -40,7 +40,7 @@
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
- * Licensed under GPL Version 3.0
+ * Licensed under GPL Version 3.0 or later
  */
 
 #ifndef S3DSIM_H

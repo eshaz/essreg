@@ -1,0 +1,719 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# The Armada 1500c's mixer under snd-es1869, as alsactl stores it: the
+# laptop's saved state of snd-es18xx restored onto the driver's controls,
+# Audio 2's volume (PCM, index 0) at 0 dB, and the new controls at their
+# defaults, the DAC stages off among them. It takes the place of the
+# state.ES1869 block in /var/lib/alsa/asound.state.
+#
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+
+state.ES1869 {
+	control.1 {
+		iface MIXER
+		name 'Master Playback Volume'
+		value.0 63
+		value.1 63
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 63'
+			dbmin -4725
+			dbmax 0
+			dbvalue.0 0
+			dbvalue.1 0
+		}
+	}
+	control.2 {
+		iface MIXER
+		name 'Master Playback Switch'
+		value.0 true
+		value.1 true
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 2
+		}
+	}
+	control.3 {
+		iface MIXER
+		name 'PCM Playback Volume'
+		value.0 15
+		value.1 15
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 0
+			dbvalue.0 0
+			dbvalue.1 0
+		}
+	}
+	control.4 {
+		iface MIXER
+		name 'PCM Playback Volume'
+		index 1
+		value.0 15
+		value.1 15
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 150
+			dbvalue.0 150
+			dbvalue.1 150
+		}
+	}
+	control.5 {
+		iface MIXER
+		name 'FM Playback Volume'
+		value.0 5
+		value.1 5
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 1050
+			dbvalue.0 -900
+			dbvalue.1 -900
+		}
+	}
+	control.6 {
+		iface MIXER
+		name 'Line Playback Volume'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 300
+			dbvalue.0 -9999999
+			dbvalue.1 -9999999
+		}
+	}
+	control.7 {
+		iface MIXER
+		name 'CD Playback Volume'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 300
+			dbvalue.0 -9999999
+			dbvalue.1 -9999999
+		}
+	}
+	control.8 {
+		iface MIXER
+		name 'Aux Playback Volume'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 300
+			dbvalue.0 -9999999
+			dbvalue.1 -9999999
+		}
+	}
+	control.9 {
+		iface MIXER
+		name 'Mic Playback Volume'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 1050
+			dbvalue.0 -9999999
+			dbvalue.1 -9999999
+		}
+	}
+	control.10 {
+		iface MIXER
+		name 'Mono Playback Volume'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 300
+			dbvalue.0 -9999999
+			dbvalue.1 -9999999
+		}
+	}
+	control.11 {
+		iface MIXER
+		name 'Beep Playback Volume'
+		value 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 7'
+			dbmin -9999999
+			dbmax -600
+			dbvalue.0 -9999999
+		}
+	}
+	control.12 {
+		iface MIXER
+		name 'Capture Volume'
+		value.0 3
+		value.1 3
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin 0
+			dbmax 2250
+			dbvalue.0 450
+			dbvalue.1 450
+		}
+	}
+	control.13 {
+		iface MIXER
+		name 'Capture Source'
+		value Mic
+		comment {
+			access 'read write'
+			type ENUMERATED
+			count 1
+			item.0 Mic
+			item.1 'Mic Master'
+			item.2 CD
+			item.3 AOUT
+			item.4 Mic1
+			item.5 Mix
+			item.6 Line
+			item.7 Master
+		}
+	}
+	control.14 {
+		iface MIXER
+		name 'Capture Switch'
+		value true
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.15 {
+		iface MIXER
+		name 'Record Monitor'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.16 {
+		iface MIXER
+		name 'PCM Capture Volume'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 0
+			dbvalue.0 -9999999
+			dbvalue.1 -9999999
+		}
+	}
+	control.17 {
+		iface MIXER
+		name 'Mic Capture Volume'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 1050
+			dbvalue.0 -9999999
+			dbvalue.1 -9999999
+		}
+	}
+	control.18 {
+		iface MIXER
+		name 'Line Capture Volume'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 300
+			dbvalue.0 -9999999
+			dbvalue.1 -9999999
+		}
+	}
+	control.19 {
+		iface MIXER
+		name 'FM Capture Volume'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 1050
+			dbvalue.0 -9999999
+			dbvalue.1 -9999999
+		}
+	}
+	control.20 {
+		iface MIXER
+		name 'CD Capture Volume'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 300
+			dbvalue.0 -9999999
+			dbvalue.1 -9999999
+		}
+	}
+	control.21 {
+		iface MIXER
+		name 'Aux Capture Volume'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 300
+			dbvalue.0 -9999999
+			dbvalue.1 -9999999
+		}
+	}
+	control.22 {
+		iface MIXER
+		name 'Mono Capture Volume'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '0 - 15'
+			dbmin -9999999
+			dbmax 300
+			dbvalue.0 -9999999
+			dbvalue.1 -9999999
+		}
+	}
+	control.23 {
+		iface MIXER
+		name 'Mic Boost (+26dB)'
+		value true
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.24 {
+		iface MIXER
+		name 'Capture DC Offset'
+		value.0 0
+		value.1 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 2
+			range '-16 - 15'
+		}
+	}
+	control.25 {
+		iface MIXER
+		name 'Analog Wake No Mute Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.26 {
+		iface MIXER
+		name 'Audio 2 Oversampling Playback Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.27 {
+		iface MIXER
+		name 'Audio 2 Filter Playback Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.28 {
+		iface MIXER
+		name 'Audio 1 Filter Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.29 {
+		iface MIXER
+		name 'Audio 2 Own Clock Switch'
+		value true
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.30 {
+		iface MIXER
+		name 'Audio 2 To FM Playback Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.31 {
+		iface MIXER
+		name 'Video Playback Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.32 {
+		iface MIXER
+		name 'ES689 Input Switch'
+		value true
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.33 {
+		iface MIXER
+		name 'Mono Output Source'
+		value 'Record Mix'
+		comment {
+			access 'read write'
+			type ENUMERATED
+			count 1
+			item.0 Mute
+			item.1 CIN_R
+			item.2 'Audio 2 Right'
+			item.3 'Record Mix'
+		}
+	}
+	control.34 {
+		iface MIXER
+		name 'Mono Input Direct Playback Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.35 {
+		iface MIXER
+		name '3D Control - Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.36 {
+		iface MIXER
+		name '3D Control - Level'
+		value 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 63'
+			dbmin -3045
+			dbmax 1680
+			dbvalue.0 -3045
+		}
+	}
+	control.37 {
+		iface MIXER
+		name '3D Control - Mono Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.38 {
+		iface MIXER
+		name '3D Control - Limit Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.39 {
+		iface MIXER
+		name '3D Control - Limit Rise Level'
+		value 143
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 255'
+		}
+	}
+	control.40 {
+		iface MIXER
+		name '3D Control - Limit Fall Level'
+		value 149
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 255'
+		}
+	}
+	control.41 {
+		iface MIXER
+		name '3D Control - Limit Rise Speed'
+		value 9
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 15'
+		}
+	}
+	control.42 {
+		iface MIXER
+		name '3D Control - Limit Fall Speed'
+		value 4
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 15'
+		}
+	}
+	control.43 {
+		iface MIXER
+		name '3D Control - Limit Fixed Level'
+		value 128
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 255'
+		}
+	}
+	control.44 {
+		iface MIXER
+		name 'Hardware Master Volume Split'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.45 {
+		iface MIXER
+		name 'Hardware Volume Mode'
+		value Two-wire
+		comment {
+			access 'read write'
+			type ENUMERATED
+			count 1
+			item.0 Three-wire
+			item.1 Two-wire
+			item.2 'Two-wire Fast'
+			item.3 Disabled
+		}
+	}
+	control.46 {
+		iface MIXER
+		name 'Hardware Volume Count By 3 Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.47 {
+		iface MIXER
+		name 'GPO0 Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.48 {
+		iface MIXER
+		name 'GPO1 Switch'
+		value true
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.49 {
+		iface MIXER
+		name 'Self-Timed Power Down'
+		value 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 255'
+		}
+	}
+	control.50 {
+		iface MIXER
+		name 'GPO Power Down'
+		value 0
+		comment {
+			access 'read write'
+			type INTEGER
+			count 1
+			range '0 - 255'
+		}
+	}
+	control.51 {
+		iface MIXER
+		name 'Single Mode DMA Switch'
+		value false
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.52 {
+		iface MIXER
+		name 'Audio 1 DMA Burst'
+		value 'Type 2'
+		comment {
+			access 'read write'
+			type ENUMERATED
+			count 1
+			item.0 'Type 0'
+			item.1 'Type 1'
+			item.2 'Type 2'
+		}
+	}
+	control.53 {
+		iface MIXER
+		name 'Audio 2 DMA Burst'
+		value 'Demand 4'
+		comment {
+			access 'read write'
+			type ENUMERATED
+			count 1
+			item.0 Single
+			item.1 'Demand 2'
+			item.2 'Demand 4'
+			item.3 'Demand 8'
+		}
+	}
+	control.54 {
+		iface MIXER
+		name 'DRQ Latch Switch'
+		value true
+		comment {
+			access 'read write'
+			type BOOLEAN
+			count 1
+		}
+	}
+	control.55 {
+		iface MIXER
+		name 'Hardware Master Playback Volume'
+		value.0 63
+		value.1 63
+		comment {
+			access 'read volatile'
+			type INTEGER
+			count 2
+			range '0 - 63'
+		}
+	}
+	control.56 {
+		iface MIXER
+		name 'Hardware Master Playback Switch'
+		value.0 true
+		value.1 true
+		comment {
+			access 'read volatile'
+			type BOOLEAN
+			count 2
+		}
+	}
+}

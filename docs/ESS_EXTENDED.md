@@ -389,7 +389,13 @@ bit 0 first.
   256 minus 7.16 MHz times 20 over 8 times 82 times the rate, a roll-off at
   80 percent, NetBSD 256 minus 200279 over the rate, at 87 percent
   (`ess_srtofc`), OSS and Allegro about 90 percent, and Impulse Tracker
-  always FEh.
+  always FEh. Measured on the Armada through Audio 2's filter (72h, whose
+  clock and ratio are the same), with snd-es1869's 256 minus 199582 over the
+  rate: the -3 dB point at 0.439 of the rate at 11025 and 22050 Hz, and at
+  0.454 at 32000 Hz, where the value rounds to 250 and the clock over 82 is
+  14553 Hz, within 0.3 percent of the 14514 Hz measured. The response rises
+  about 1 dB just under the corner, at 0.38 to 0.42 of the rate, and falls 7
+  dB by 0.46 (es1869test's `dac.corner`).
 * **A4h and A5h, the count** (DS p.68). They reload a 16-bit counter, which
   counts up once for each byte that the DMA moves, so a block is at most
   65536 bytes. At its overflow the counter reloads; in auto-initialize mode
@@ -614,8 +620,11 @@ p.64-65):
 * **71h, the mode.** Bit 5 makes A1h work as 70h does, bit 4 turns on 4x
   oversampling, bit 3 bypasses Audio 2's filter and bit 2 Audio 1's, and bit
   0 slaves Audio 2's DMA to the FM synthesizer, which mixes it in digitally.
-  Bit 1 lets Audio 2 run at its own rate; with it clear, Audio 2 runs at
-  Audio 1's rate and filter.
+  On the Armada, the music DAC recorded on Audio 1 (7Fh bit 4) then held
+  Audio 2's samples exactly, one a frame at 49716 Hz whatever 70h held, with
+  left and right swapped and the FM's idle level of +128 added. Bit 1 lets
+  Audio 2 run at its own rate; with it clear, Audio 2 runs at Audio 1's rate
+  and filter.
 * **72h, the filter**, as A2h for Audio 1, used only when Audio 2 runs at
   its own rate.
 * **74h and 76h, the count**, minus the block's length in bytes.

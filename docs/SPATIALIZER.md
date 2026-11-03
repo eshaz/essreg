@@ -861,6 +861,19 @@ for the glide's timing to be checked, so ess3d now leaves a glide out of the
 check where its path is more than 14 dB under the same path with the effect
 off.
 
+### A second chip, under Linux
+
+The Compaq Armada 1500c's ES1869 ran the quick plan under Linux, through
+es1869test's `3d.quick` ([ES1869TEST.md](ES1869TEST.md)), which plays and
+records through snd-es1869 and sets each run's registers with its controls.
+It agrees with the card: with ESS's setting S>S is +17.9 dB at 400 Hz and
+M>M within 0.01 dB of 0 dB; the boost falls by 0.75 dB a step of 52h, within
+0.05 dB from 3Fh to 20h, and S>S is +0.2 dB at 00h; the model gives M>S
++13.9 dB and S>S -24.1 dB at 400 Hz; the limit holds S>S at 1 kHz 15.3 dB
+down at S/M +6 dB and leaves it at -24 dB; 54h-5Ah at their ends move no
+path by more than 0.01 dB with the limit off; and the path at the end is
+within 0.01 dB of the start.
+
 ## Sources
 
 * The ES1869 data sheet, SAM0023-122898, in [docs/datasheet](datasheet).

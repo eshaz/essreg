@@ -23,3 +23,7 @@
 *.dll binary
 *.DLL binary
 driver/es1869f/** binary
+
+# the Linux driver and its tools are LF, as the kernel has them
+linux/** text eol=lf
+linux/**/*.ko binary

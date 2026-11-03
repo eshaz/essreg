@@ -1,0 +1,408 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+/*
+ * The a1rec and a1play groups. Audio 1 records Audio 2's tones through the
+ * record mixer (source 5, 69h) with the master muted; Audio 1's playback
+ * is heard by the second card through the cable, which carries the left
+ * output, with 441 Hz on the left and 661.5 Hz on the right.
+ *
+ * Notes:
+ *
+ * The start race shows in both: a 16-bit stream a byte off is noise, and
+ * an 8-bit stereo stream a byte off has its sides swapped. The Armada's
+ * second card, a USB microphone input, sets its own gain through the first
+ * second of a tone and runs its clock thousands of ppm off, so the cable's
+ * cases measure late in each tone and allow its pitch 6000 ppm.
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ */
+
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "cases.h"
+#include "hal.h"
+
+#define AMP 6000.0 // -14.7 dBFS: the output stays below -20 dB
+
+static const struct et_fmt fmts[] = {
+	{ ET_S16, 2, 44100 }, { ET_S16, 1, 44100 }, { ET_U8, 2, 22050 },
+	{ ET_U8, 1, 22050 },  { ET_S8, 2, 22050 },  { ET_U16, 2, 44100 },
+};
+
+static const unsigned int rates[] = { 8000,  11025, 16000, 22050,
+				      32000, 44100, 48000 };
+
+static int eight(const struct et_fmt *f)
+{
+	return f->format == ET_U8 || f->format == ET_S8;
+}
+
+// the tones of a recording at rate: 441 Hz and 661.5 Hz on a channel, its
+// THD+N against 441 Hz, its pitch and its glitches
+struct tones {
+	double a441, a661, thdn, hz;
+	int glitches;
+};
+
+// THD+N over lo Hz, to the band's top
+static void measure(const double *x, long n, double rate, double lo,
+		    struct tones *t)
+{
+	struct an_fit fit;
+
+	t->a441 = an_dbfs(an_tone(x, n, rate, ET_HZ, NULL) / M_SQRT2);
+	t->a661 = an_dbfs(an_tone(x, n, rate, ET_HZ_R, NULL) / M_SQRT2);
+	t->thdn = an_thdn(x, n, rate, ET_HZ, lo, rate / 2 < 20000 ? rate / 2 :
+								 20000);
+	t->hz = an_fit_sine(x, n, rate, ET_HZ, 1, &fit) ? 0 : fit.f;
+	t->glitches = an_glitches(x, n, rate, ET_HZ, (long)(rate / 100), 20,
+				  NULL, 0);
+}
+
+// --- a1rec -------------------------------------------------------------------
+
+static enum et_result a1rec_run(struct et_ctx *c, const struct et_fmt *cf,
+				double skip, double secs, struct tones *t)
+{
+	static const struct et_fmt pf = { ET_S16, 2, 44100 };
+	unsigned long pn = (unsigned long)((secs + skip + 0.6) * 44100);
+	unsigned long cn = (unsigned long)((secs + skip) * cf->rate);
+	struct et_stream s[2];
+	unsigned int ch;
+	double *x;
+
+	et_mix_quiet(c);
+	et_mix_dig(c, 0);
+	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
+	if (et_mix_rec_a2(c, 13) < 0) {
+		et_fail(c, "the record mixer refused its setup");
+		return ET_ERROR;
+	}
+	// a mono recording sums the sides, so both carry 441 Hz then
+	s[0] = et_play(ET_A2, &pf,
+		       et_tone(&pf, pn, ET_HZ, cf->channels > 1 ? ET_HZ_R : ET_HZ,
+			       AMP),
+		       pn, 0);
+	s[1] = et_rec(ET_A1C, cf, cn, 0.3);
+	if (et_run(c, s, 2)) {
+		et_fail(c, "the streams failed");
+		free(s[0].data);
+		free(s[1].data);
+		return ET_ERROR;
+	}
+	for (ch = 0; ch < cf->channels; ch++) {
+		long from = (long)(skip * cf->rate);
+
+		x = et_chan(cf, s[1].data, s[1].done, ch);
+		measure(x + from, (long)s[1].done - from, cf->rate, 100, &t[ch]);
+		free(x);
+	}
+	if (c->fails)
+		et_dump(c, "a1c", cf, s[1].data, s[1].done);
+	free(s[0].data);
+	free(s[1].data);
+	return ET_PASS;
+}
+
+static void a1rec_check(struct et_ctx *c, const struct et_fmt *f,
+			const struct tones *t, double ppm)
+{
+	et_measure(c, "441 Hz", t[0].a441, "dBFS", -40, -1);
+	if (f->channels == 2) {
+		et_measure(c, "661.5 Hz on the left", t[0].a661 - t[0].a441,
+			   "dB", -200, -20);
+		et_measure(c, "441 Hz on the right", t[1].a441 - t[1].a661,
+			   "dB", -200, -20);
+	}
+	et_measure(c, "THD+N, left", t[0].thdn, "dB", -200,
+		   eight(f) ? -25 : -30);
+	et_measure(c, "pitch", (t[0].hz / ET_HZ - 1) * 1e6, "ppm", -ppm, ppm);
+	et_measure(c, "glitches", t[0].glitches, "", 0, 0);
+}
+
+// a1rec.fmt.*: each format at 44.1 or 22.05 kHz
+enum et_result c_a1rec_fmt(struct et_ctx *c, const struct et_case *k)
+{
+	struct tones t[2];
+	enum et_result r = a1rec_run(c, &fmts[k->arg], 0.2, 1.5, t);
+
+	if (r == ET_PASS)
+		a1rec_check(c, &fmts[k->arg], t, 100);
+	return r;
+}
+
+// a1rec.rate.*: 16-bit stereo at each rate; 48 kHz runs from the other
+// clock, measured 250 ppm from the 793.8 kHz one
+enum et_result c_a1rec_rate(struct et_ctx *c, const struct et_case *k)
+{
+	struct et_fmt f = { ET_S16, 2, rates[k->arg] };
+	struct tones t[2];
+	enum et_result r = a1rec_run(c, &f, 0.2, 1.5, t);
+
+	if (r == ET_PASS)
+		a1rec_check(c, &f, t, f.rate % 8000 ? 100 : 600);
+	return r;
+}
+
+// a recording's start against its tone, fitted over 50-250 ms: the
+// frames at the start more than 5 % of the tone off it, and the offset
+// over the first 5 ms, which the ADC's input carries while it settles
+static long stale(const struct et_fmt *f, const void *buf, unsigned long n,
+		  double *first, double *offset)
+{
+	long a = f->rate / 20, len = f->rate / 5, i, m = f->rate / 200;
+	double *x = et_chan(f, buf, n, 0);
+	struct an_fit fit;
+	double sum = 0;
+
+	if ((long)n < a + len || an_fit_sine(x + a, len, f->rate, ET_HZ, 1, &fit)) {
+		free(x);
+		return -1;
+	}
+	*first = x[0];
+	for (i = 0; i < m; i++) {
+		double t = (double)(i - a) / f->rate;
+
+		sum += x[i] - (fit.dc + fit.amp * sin(2 * M_PI * fit.f * t +
+						     fit.phase));
+	}
+	*offset = sum / m;
+	for (i = 0; i < a; i++) {
+		double t = (double)(i - a) / f->rate;
+		double v = fit.dc + fit.amp * sin(2 * M_PI * fit.f * t + fit.phase);
+
+		if (fabs(x[i] - v) < 0.05 * fit.amp)
+			break;
+	}
+	free(x);
+	return i;
+}
+
+// ten short recordings, each after a pause long enough for the ADC's input
+// to move away (as between two programs' recordings); the worst start
+static enum et_result starts(struct et_ctx *c, const struct et_fmt *f,
+			     long *most, double *worst)
+{
+	static const struct et_fmt pf = { ET_S16, 2, 44100 };
+	unsigned long pn = 44100, cn = f->rate * 3 / 10;
+	double first = 0, offset = 0;
+	long n;
+	int i;
+
+	*most = 0;
+	*worst = 0;
+	et_mix_quiet(c);
+	et_mix_dig(c, 0);
+	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
+	if (et_mix_rec_a2(c, 13) < 0)
+		return ET_ERROR;
+	for (i = 0; i < 10; i++) {
+		struct et_stream s[2];
+
+		// a mono recording sums the sides: the same tone on both
+		s[0] = et_play(ET_A2, &pf,
+			       et_tone(&pf, pn, ET_HZ,
+				       f->channels > 1 ? ET_HZ_R : ET_HZ, AMP),
+			       pn, 0);
+		s[1] = et_rec(ET_A1C, f, cn, 0.3);
+		if (et_run(c, s, 2)) {
+			free(s[0].data);
+			free(s[1].data);
+			return ET_ERROR;
+		}
+		n = stale(f, s[1].data, s[1].done, &first, &offset);
+		if (n > *most || fabs(offset) > fabs(*worst)) {
+			et_note(c, "run %d: %ld frames off the tone, the first %.0f, an offset of %.0f",
+				i, n, first, offset);
+			et_dump(c, "a1c", f, s[1].data, s[1].done);
+		}
+		*most = n > *most ? n : *most;
+		if (fabs(offset) > fabs(*worst))
+			*worst = offset;
+		free(s[0].data);
+		free(s[1].data);
+		c->hal->sleep(c->hal->ctx, 0.6);
+	}
+	return ET_PASS;
+}
+
+// a1rec.start.*: each recording the tone from its first frame
+enum et_result c_a1rec_start(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt fmts_start[] = {
+		{ ET_S16, 2, 44100 }, { ET_S16, 1, 44100 }, { ET_U8, 2, 22050 },
+		{ ET_S16, 2, 8000 },  { ET_S16, 2, 48000 },
+	};
+	double worst;
+	long most;
+	enum et_result r = starts(c, &fmts_start[k->arg], &most, &worst);
+
+	if (r != ET_PASS)
+		return r;
+	et_measure(c, "frames at the start off the tone", most, "", 0, 0);
+	et_measure(c, "offset over the first 5 ms", worst, "", -330, 330);
+	return ET_PASS;
+}
+
+// a1rec.settle0: the same without the settle, as ESS's drivers start: the
+// input's offset decaying through the first 100 ms is KNOWN
+enum et_result c_a1rec_settle0(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	double worst;
+	long most;
+	enum et_result r;
+
+	(void)k;
+	if (et_param_set(c, "a1c_settle_ms", 0) < 0)
+		return ET_ERROR;
+	r = starts(c, &f, &most, &worst);
+	if (r != ET_PASS)
+		return r;
+	et_measure(c, "frames at the start off the tone", most, "", 1, 0);
+	et_measure(c, "offset over the first 5 ms", worst, "", 1, 0);
+	if (most || fabs(worst) > 330) {
+		snprintf(c->why, sizeof(c->why),
+			 "without the settle a recording starts %.0f off, as with ESS's drivers",
+			 worst);
+		return ET_KNOWN;
+	}
+	return ET_PASS;
+}
+
+// --- a1play ------------------------------------------------------------------
+
+static enum et_result a1play_run(struct et_ctx *c, const struct et_fmt *f,
+				 struct tones *t)
+{
+	// the second card's own gain control settles through the first second
+	// of a tone, so the tone lasts 2.5 s and the last 1.2 s are measured
+	unsigned long pn = (unsigned long)(2.5 * f->rate);
+	unsigned long rn = (unsigned long)(3.6 * 48000);
+	struct et_stream s[2];
+	double *x, noise;
+	long on;
+
+	et_mix_quiet(c);
+	et_mix_dig(c, 0);
+	et_mix_out(c, 14, 0);
+	s[0] = et_rec(ET_REC2, &et_rec2_fmt, rn, 0);
+	s[1] = et_play(ET_A1P, f,
+		       et_tone(f, pn, ET_HZ, f->channels > 1 ? ET_HZ_R : 0,
+			       AMP),
+		       pn, 0.4);
+	if (et_run(c, s, 2)) {
+		et_fail(c, "the streams failed");
+		free(s[0].data);
+		free(s[1].data);
+		return ET_ERROR;
+	}
+	x = et_chan(&et_rec2_fmt, s[0].data, s[0].done, 0);
+	// the second card's capture can start late enough that its first
+	// samples hold the tone's start, and the onset then came late
+	noise = et_noise_floor(x, s[0].done);
+	on = an_onset(x, s[0].done, 8 * noise + 30);
+	if (on < 0 || on + 115200 > (long)s[0].done) {
+		et_fail(c, "the second card heard nothing");
+		et_dump(c, "rec2", &et_rec2_fmt, s[0].data, s[0].done);
+		free(x);
+		free(s[0].data);
+		free(s[1].data);
+		return ET_PASS;
+	}
+	// THD+N over 600 Hz: the second card's clock wanders while it
+	// records, which leaves sidebands within 20 Hz of the tone, and a
+	// stream a byte off is broadband
+	measure(x + on + 52800, 57600, 48000, 600, t);
+	if (c->fails || t->thdn > (eight(f) ? -12 : -15))
+		et_dump(c, "rec2", &et_rec2_fmt, s[0].data, s[0].done);
+	free(x);
+	free(s[0].data);
+	free(s[1].data);
+	return ET_PASS;
+}
+
+static void a1play_check(struct et_ctx *c, const struct et_fmt *f,
+			 const struct tones *t)
+{
+	et_measure(c, "441 Hz", t->a441, "dBFS", -60, -1);
+	if (f->channels == 2)
+		et_measure(c, "661.5 Hz, the right side", t->a661 - t->a441,
+			   "dB", -200, -20);
+	// the cable ends in a USB microphone input: a byte-off 16-bit
+	// stream reads near 0 dB there, an in-step one -18 to -25 dB
+	et_measure(c, "THD+N", t->thdn, "dB", -200, eight(f) ? -12 : -15);
+	et_measure(c, "pitch, against the second card",
+		   (t->hz / ET_HZ - 1) * 1e6, "ppm", -6000, 6000);
+}
+
+// a run, and up to two more while one hears more noise than the cable
+// allows, as the second card's gain control settles
+static enum et_result a1play_settled(struct et_ctx *c, const struct et_fmt *f,
+				     struct tones *t)
+{
+	enum et_result r = a1play_run(c, f, t);
+	int tries;
+
+	for (tries = 0; tries < 2 && r == ET_PASS && !c->fails &&
+			t->thdn > (eight(f) ? -12 : -15);
+	     tries++) {
+		et_note(c, "THD+N %.1f dB: again, the second card settled",
+			t->thdn);
+		r = a1play_run(c, f, t);
+	}
+	return r;
+}
+
+// a1play.fmt.*: each format through the cable
+enum et_result c_a1play_fmt(struct et_ctx *c, const struct et_case *k)
+{
+	struct tones t;
+	enum et_result r = a1play_settled(c, &fmts[k->arg], &t);
+
+	if (r == ET_PASS && !c->fails)
+		a1play_check(c, &fmts[k->arg], &t);
+	return r;
+}
+
+// a1play.rate.*: 16-bit stereo at each rate
+enum et_result c_a1play_rate(struct et_ctx *c, const struct et_case *k)
+{
+	struct et_fmt f = { ET_S16, 2, rates[k->arg] };
+	struct tones t;
+	enum et_result r = a1play_settled(c, &f, &t);
+
+	if (r == ET_PASS && !c->fails)
+		a1play_check(c, &f, &t);
+	return r;
+}
+
+// a1play.start: ten starts each of 16-bit and 8-bit stereo, in step: the
+// 16-bit ones clean, the 8-bit ones with the sides where they belong
+enum et_result c_a1play_start(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f16 = { ET_S16, 2, 44100 };
+	static const struct et_fmt f8 = { ET_U8, 2, 22050 };
+	int i, ok16 = 0, ok8 = 0;
+	struct tones t;
+
+	(void)k;
+	for (i = 0; i < 20; i++) {
+		const struct et_fmt *f = i & 1 ? &f8 : &f16;
+		int before = c->fails;
+
+		if (a1play_run(c, f, &t) != ET_PASS)
+			return ET_ERROR;
+		if (c->fails != before)
+			continue;
+		if (i & 1)
+			ok8 += t.a661 < t.a441 - 20;
+		else
+			ok16 += t.thdn < -15;
+	}
+	et_measure(c, "16-bit starts in step", ok16, "of 10", 10, 10);
+	et_measure(c, "8-bit starts with their sides", ok8, "of 10", 10, 10);
+	return ET_PASS;
+}
