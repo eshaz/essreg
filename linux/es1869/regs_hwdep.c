@@ -40,7 +40,9 @@ static int reg_read(struct es1869 *chip, struct es1869_reg *r)
 	unsigned long flags;
 	int v = 0;
 
-	if (read_changes_state(r->bank, r->reg) && !(r->flags & ES1869_REG_FORCE))
+	// such a read takes an acknowledge or moves a sequence from the driver
+	if (read_changes_state(r->bank, r->reg) &&
+	    (!(r->flags & ES1869_REG_FORCE) || !capable(CAP_SYS_RAWIO)))
 		return -EPERM;
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	switch (r->bank) {
@@ -166,7 +168,7 @@ static void fill_info(struct es1869 *chip, struct es1869_regs_info *info)
 	info->dsp_desync = hw->stats.dsp_desync;
 	info->pos_retries = hw->stats.pos_retries;
 	info->settles = hw->stats.settles;
-	info->mirror_late = chip->mirror.late;
+	info->mirror_late = chip->mirror.fill.late;
 	info->mirror_max = chip->mirror.max_chunk;
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 }

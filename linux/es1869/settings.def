@@ -17,8 +17,9 @@
  *          B_NONE (the driver's own)
  *   flags  F_CTL a control, F_PARAM a parameter, F_INIT written at probe
  *          and resume, F_INV a bit that is on when clear, F_SWAP right in
- *          bits 7:4, F_HOOK applied by its own code, F_RO a read-only
- *          control, F_IDLE refused while Audio 2 is open, F_IDLE_A1 while
+ *          bits 7:4, F_HOOK applied by its own code, F_FOUND the chip's
+ *          value at load unless a parameter gives one, F_IDLE refused
+ *          while Audio 2 is open, F_IDLE_A1 while
  *          Audio 1 is open, F_NEXT applied at the next prepare
  *   items  an enum's texts, separated by |, or a string's default
  *
@@ -61,13 +62,16 @@ ES1869_SET(beep_volume, BEEP_VOLUME, S_INT, B_MIX, 0x3C, 0, 3, 0, 7, 0,
 	   "the PC speaker (3Ch bits 2:0), 7 = -6 dB, 0 mutes it")
 
 /* recording */
-ES1869_SET(capture_volume, CAPTURE_VOLUME, S_STEREO, B_CTRL, 0xB4, 0, 4, 0, 15, 4,
-	   T_REC, F_CTL | F_PARAM | F_INIT | F_SWAP, 0, "Capture Volume", "",
-	   "the record level (B4h, right in bits 7:4), 1.5 dB a step")
+/* the source first: alsactl restores in this order, and the level's dB
+ * scale follows the source, so a level restored under another source's
+ * scale would be converted to keep its dB, and would climb at each store */
 ES1869_SET(capture_source, CAPTURE_SOURCE, S_ENUM, B_MIX, 0x1C, 0, 3, 0, 7, 5,
 	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "Capture Source",
 	   "Mic|Mic Master|CD|AOUT|Mic1|Mix|Line|Master",
 	   "the record source (1Ch bits 2:0): 5 the record mixer, 7 the 3-D output before the master")
+ES1869_SET(capture_volume, CAPTURE_VOLUME, S_STEREO, B_CTRL, 0xB4, 0, 4, 0, 15, 4,
+	   T_REC, F_CTL | F_PARAM | F_INIT | F_SWAP, 0, "Capture Volume", "",
+	   "the record level (B4h, right in bits 7:4), 1.5 dB a step")
 ES1869_SET(capture_switch, CAPTURE_SWITCH, S_BOOL, B_MIX, 0x1C, 4, 1, 0, 1, 1,
 	   T_NONE, F_CTL | F_PARAM | F_INIT | F_INV, 0, "Capture Switch", "",
 	   "the record source on (1Ch bit 4 clear)")
@@ -189,14 +193,14 @@ ES1869_SET(hwvol_count3, HWVOL_COUNT3, S_BOOL, B_MIX, 0x64, 5, 1, 0, 1, 0,
 
 /* general-purpose outputs and power (Audio_Base+7, BDh, CEh/CFh) */
 ES1869_SET(gpo0, GPO0, S_BOOL, B_PORT7, 0x07, 0, 1, 0, 1, 0,
-	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "GPO0 Switch", "",
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_FOUND, 0, "GPO0 Switch", "",
 	   "the GPO0 pin (Audio_Base+7 bit 0), low after a hardware reset")
 ES1869_SET(gpo1, GPO1, S_BOOL, B_PORT7, 0x07, 1, 1, 0, 1, 1,
-	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "GPO1 Switch", "",
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_FOUND, 0, "GPO1 Switch", "",
 	   "the GPO1 pin (Audio_Base+7 bit 1), high after a hardware reset")
 ES1869_SET(self_power_down, SELF_POWER_DOWN, S_INT, B_CTRL, 0xBD, 0, 8, 0, 255, 0,
-	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "Self-Timed Power Down", "",
-	   "power down after this many 8 s of no access (BDh), 0 never")
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_HOOK, 0, "Self-Timed Power Down", "",
+	   "partly power down after this many 8 s of no access (BDh), 0 never")
 ES1869_SET(gpo_power_down, GPO_POWER_DOWN, S_INT, B_NONE, 0, 0, 8, 0, 255, 0,
 	   T_NONE, F_CTL | F_PARAM | F_INIT | F_HOOK, 0, "GPO Power Down", "",
 	   "the GPOs at power-down (DSP CFh, read with CEh)")
@@ -242,7 +246,7 @@ ES1869_SET(a2_lead_ms, A2_LEAD_MS, S_INT, B_NONE, 0, 0, 0, 4, 500, 40,
 	   "how far ahead Audio 2's ring is filled on DMA 5 (ms)")
 ES1869_SET(a2_tick_us, A2_TICK_US, S_INT, B_NONE, 0, 0, 0, 500, 20000, 2000,
 	   T_NONE, F_PARAM, 0, "", "",
-	   "the ring's refill period on DMA 5 while a copy is behind (us); otherwise a quarter of a2_lead_ms under dmix, half of it for other clients")
+	   "the ring's refill period on DMA 5 while a copy is behind (us); under dmix a quarter of a2_lead_ms, if that is longer")
 ES1869_SET(a2_pause, A2_PAUSE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
 	   T_NONE, F_PARAM | F_NEXT, 0, "", "",
 	   "pause on an 8-bit Audio 2 channel through 78h, which may resume off step")
@@ -308,7 +312,7 @@ ES1869_SET(esfm_square, ESFM_SQUARE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
 	   "the bank with the better square wave (es1869/esfm-gm-square.bin)")
 ES1869_SET(esfm_silence_on_close, ESFM_SILENCE_ON_CLOSE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
 	   T_NONE, F_PARAM, 0, "", "",
-	   "every voice off when the synth's last user goes")
+	   "every voice off when the synth's last user goes, the pedal's too; 0 is ESS's all notes off, though the FM's return to the OPL3 mode stops them right after")
 ES1869_SET(esfm_pedal_release, ESFM_PEDAL_RELEASE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
 	   T_NONE, F_PARAM, 0, "", "",
 	   "a program change releases the sustain pedal")

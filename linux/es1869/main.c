@@ -12,9 +12,12 @@
  * microseconds: no answer to the DSP reset, or no ESS answer to E7h.
  *
  * One edge-triggered line carries Audio 1, Audio 2, the hardware volume
- * buttons and the MPU-401. The handler clears Config_Base+7, reads the
- * sources from +6, acknowledges each, and restores +7, so that a source
- * still pending raises a new edge (DS p.18).
+ * buttons and the MPU-401. The handler takes each source back where it
+ * lives until a pass finds none, as ESS's drivers do, since a source that
+ * comes while another holds the line high raises no edge of its own. With
+ * irq_mode=1 it clears Config_Base+7, reads the sources from +6,
+ * acknowledges each, and restores +7, so that a source still pending
+ * raises a new edge (DS p.18).
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
@@ -158,15 +161,15 @@ static void io_dma_mask(void *ctx, unsigned int ch, bool masked)
 	release_dma_lock(flags);
 }
 
-static u32 io_dma_residue(void *ctx, unsigned int ch)
+// two readings: each leaves the flip-flop at the low byte for the next
+static void io_dma_residue(void *ctx, unsigned int ch, u32 *r)
 {
 	unsigned long flags = claim_dma_lock();
-	u32 r;
 
 	clear_dma_ff(ch);
-	r = get_dma_residue(ch);
+	r[0] = get_dma_residue(ch);
+	r[1] = get_dma_residue(ch);
 	release_dma_lock(flags);
-	return r;
 }
 
 // --- the interrupt ------------------------------------------------------------------
@@ -188,8 +191,10 @@ static irqreturn_t es1869_interrupt(int irq_no, void *dev_id)
 	for (pass = 0; pass < 4; pass++) {
 		s1 = s2 = NULL;
 		spin_lock(&chip->reg_lock);
-		if (!pass)
-			storm = es1869_irq_storm(hw, jiffies, HZ);
+		if (!pass && es1869_irq_storm(hw, jiffies, HZ)) {
+			storm = true;
+			es1869_irq_sources_locked(chip);
+		}
 		dropped = hw->stats.irq_dropped;
 		// polled: the sources Config_Base+6 shows, and every one where it
 		// lives when a first pass finds none there
@@ -231,6 +236,14 @@ static irqreturn_t es1869_interrupt(int irq_no, void *dev_id)
 		if (!st)
 			break;
 	}
+	// four busy passes: what is left holds the line, which then shows no
+	// other source, and the last pass saw it go on
+	if (pass == 4) {
+		spin_lock(&chip->reg_lock);
+		hw->stats.irq_stuck++;
+		es1869_irq_edge(hw);
+		spin_unlock(&chip->reg_lock);
+	}
 	if (!any && !dance)
 		hw->stats.irq_none++;
 	chip->isr_calls++;
@@ -245,9 +258,9 @@ static irqreturn_t es1869_interrupt(int irq_no, void *dev_id)
 // the mixer registers a resume writes back
 static const u8 mixer_kept[] = {
 	0x14, 0x1A, 0x1C, 0x36, 0x38, 0x3A, 0x3C, 0x3E, 0x48, 0x50, 0x52,
-	0x54, 0x56, 0x58, 0x5A, 0x60, 0x62, 0x64, 0x68, 0x69, 0x6A, 0x6B,
-	0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71, 0x72, 0x74, 0x76, 0x7C, 0x7D,
-	0x7F,
+	0x54, 0x56, 0x58, 0x5A, 0x60, 0x61, 0x62, 0x63, 0x64, 0x68, 0x69,
+	0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71, 0x72, 0x74, 0x76,
+	0x7C, 0x7D, 0x7F,
 };
 
 static const u8 ctrl_kept[] = { 0xB4, 0xBA, 0xBB };
@@ -270,8 +283,9 @@ void es1869_irq_sources_locked(struct es1869 *chip)
 	// Config_Base+7 carries only the sources the handler takes back: one
 	// left out, or the CD-ROM, modem and GP pins, which nothing here
 	// serves, would hold the edge-triggered line high and silence the
-	// others. The mask dance also writes it at each interrupt
-	es1869_irq_exit(hw);
+	// others. The mask dance also writes it at each interrupt. A source
+	// left pending from before, as across a reload, gets its edge
+	es1869_irq_edge(hw);
 }
 
 // --- the chipset ---------------------------------------------------------------
@@ -335,9 +349,13 @@ static void es1869_irq_sources(struct es1869 *chip)
 // nothing has the chip: no engine open, and no user of the FM
 static bool es1869_idle(struct es1869 *chip)
 {
+	struct snd_mpu401 *mpu = chip->rmidi ? chip->rmidi->private_data : NULL;
+
 	return chip->a1_owner == ES_OWN_NONE &&
 	       chip->a2_owner == ES_OWN_NONE &&
-	       !(chip->opl3 && chip->opl3->hwdep && chip->opl3->hwdep->used);
+	       !(mpu && (mpu->mode & (MPU401_MODE_INPUT | MPU401_MODE_OUTPUT))) &&
+	       !(chip->opl3 && chip->opl3->hwdep &&
+		 chip->opl3->hwdep->used > chip->opl3_off);
 }
 
 static int es1869_chip_init(struct es1869 *chip, bool resume);
@@ -365,37 +383,123 @@ void es1869_power_idle(struct es1869 *chip)
 {
 	int secs = es1869_val(ES_S_pwr_save);
 
-	if (secs > 0)
+	if (secs <= 0)
+		return;
+	mutex_lock(&chip->state_mutex);
+	if (!chip->pwr_stopped)
 		mod_delayed_work(system_wq, &chip->pwr_work, secs * HZ);
+	mutex_unlock(&chip->state_mutex);
+}
+
+// pwr_save written: 0 stops what is waiting, any other value counts again
+void es1869_power_save_changed(struct es1869 *chip)
+{
+	if (es1869_val(ES_S_pwr_save) <= 0)
+		cancel_delayed_work(&chip->pwr_work);
+	else if (!chip->pwr_stopped)
+		mod_delayed_work(system_wq, &chip->pwr_work,
+				 es1869_val(ES_S_pwr_save) * HZ);
+}
+
+static void es1869_wake(struct es1869 *chip, u8 was)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&chip->reg_lock, flags);
+	es1869_power_wake(&chip->hw, was == 2);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	if (was != 2)
+		return;
+	msleep(100);
+	spin_lock_irqsave(&chip->reg_lock, flags);
+	es1869_power_woken(&chip->hw);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
 }
 
 // from every open, under state_mutex: the chip up again before use; after
-// a full power-down the outputs come back 48 to 64 ms later (DS p.76), and
-// the shadows go back as at a resume
+// a full power-down the shadows go back as at a resume. It stays down for
+// the next open to try if that fails
 int es1869_power_up(struct es1869 *chip)
 {
-	unsigned long flags;
 	u8 was = chip->pwr_down;
+	int err = 0;
 
 	cancel_delayed_work(&chip->pwr_work);
 	if (!was)
 		return 0;
-	spin_lock_irqsave(&chip->reg_lock, flags);
-	es1869_power_wake(&chip->hw);
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
-	chip->pwr_down = 0;
-	if (was == 2) {
-		msleep(64);
-		return es1869_chip_init(chip, true);
-	}
-	return 0;
+	es1869_wake(chip, was);
+	if (was == 2)
+		err = es1869_chip_init(chip, true);
+	if (!err)
+		chip->pwr_down = 0;
+	return err;
 }
 
+// what the OPL3 asks for from where state_mutex would come after the
+// hwdep's own mutex, or under spinlocks: the wake, and its waiters
+static void es1869_wake_work(struct work_struct *work)
+{
+	struct es1869 *chip = container_of(work, struct es1869, wake_work);
+
+	mutex_lock(&chip->state_mutex);
+	if (!chip->pwr_stopped && es1869_power_up(chip) < 0)
+		dev_err(chip->dev, "the chip didn't wake for the FM\n");
+	mutex_unlock(&chip->state_mutex);
+	if (chip->opl3 && chip->opl3->hwdep)
+		wake_up(&chip->opl3->hwdep->open_wait);
+}
+
+// the MIDI port's users count as the chip's, and a full power-down stops it
+static int es1869_mpu_open(struct snd_mpu401 *mpu)
+{
+	struct es1869 *chip = mpu->private_data;
+	int err;
+
+	mutex_lock(&chip->state_mutex);
+	err = chip->dead ? -ENODEV : es1869_power_up(chip);
+	mutex_unlock(&chip->state_mutex);
+	return err;
+}
+
+static void es1869_mpu_close(struct snd_mpu401 *mpu)
+{
+	es1869_power_idle(mpu->private_data);
+}
+
+// before the card's disconnect, while what the work items read is there:
+// from here on nothing arms them, a close that outlives the disconnect above
+// all, and the next driver finds a chip that answers
 static void es1869_pwr_cancel(void *data)
 {
 	struct es1869 *chip = data;
 
+	mutex_lock(&chip->state_mutex);
+	WRITE_ONCE(chip->pwr_stopped, true);
+	mutex_unlock(&chip->state_mutex);
 	cancel_delayed_work_sync(&chip->pwr_work);
+	cancel_work_sync(&chip->wake_work);
+	if (chip->pwr_down) {
+		es1869_wake(chip, chip->pwr_down);
+		chip->pwr_down = 0;
+	}
+}
+
+// no source on the line, the next driver's edge its own
+static void es1869_quiet_locked(struct es1869 *chip)
+{
+	chip->hw.imr = 0;
+	es1869_irq_exit(&chip->hw);
+	es1869_mix_update(&chip->hw, 0x64, 0x42, 0);
+}
+
+static void es1869_quiet(void *data)
+{
+	struct es1869 *chip = data;
+	unsigned long flags;
+
+	spin_lock_irqsave(&chip->reg_lock, flags);
+	es1869_quiet_locked(chip);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
 }
 
 // the routing, a reset, the shadows and the settings; at a resume the chip
@@ -409,8 +513,10 @@ static int es1869_chip_init(struct es1869 *chip, bool resume)
 
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	es1869_route(hw, chip->irq, chip->mpu_port);
-	// the reset turns the codec back to the DAC
+	// the reset turns the codec back to the DAC, and takes Audio 1 off the
+	// mixer (DS p.43, p.49)
 	chip->adc_on = false;
+	chip->a1_dac = false;
 	err = es1869_reset(hw);
 	if (err)
 		goto out;
@@ -443,6 +549,8 @@ out:
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	if (err)
 		return err;
+	if (!resume)
+		es1869_settings_found(chip);
 	es1869_settings_apply_init(chip);
 	return 0;
 }
@@ -452,26 +560,51 @@ static void es1869_unlist(void *data)
 	es1869_settings_card_del(data);
 }
 
-// the resources the parameters leave out, from the chip's PnP registers
-static void es1869_chip_resources(struct es1869 *chip, int dev)
+// a resource in an 8-bit PnP register of the audio device: the chip's unless
+// a parameter gives it, and then the parameter's, which the chip otherwise
+// wouldn't follow, without a word: an IRQ or a DMA channel that nothing
+// answers on
+static void es1869_resource8(struct es1869 *chip, int *val, int automatic,
+			     u8 reg, u8 mask, const char *name)
+{
+	u8 v = es1869_pnp_read(&chip->hw, 1, reg) & mask;
+
+	if (*val == automatic) {
+		*val = v;
+	} else if (*val >= 0 && *val != v) {
+		dev_info(chip->dev, "%s %d, where the chip had %d\n", name, *val,
+			 v);
+		es1869_pnp_write(&chip->hw, 1, reg, *val);
+	}
+}
+
+// and a port in two of them, high byte first
+static void es1869_resource16(struct es1869 *chip, long *val, u8 reg,
+			      const char *name)
 {
 	struct es1869_hw *hw = &chip->hw;
-	u16 v;
+	u16 v = es1869_pnp_read(hw, 1, reg) << 8 |
+		es1869_pnp_read(hw, 1, reg + 1);
 
-	if (irq[dev] == SNDRV_AUTO_IRQ)
-		irq[dev] = es1869_pnp_read(hw, 1, 0x70) & 0x0F;
-	if (dma1[dev] == SNDRV_AUTO_DMA)
-		dma1[dev] = es1869_pnp_read(hw, 1, 0x74) & 0x07;
-	if (dma2[dev] == SNDRV_AUTO_DMA)
-		dma2[dev] = es1869_pnp_read(hw, 1, 0x75) & 0x07;
-	if (fm_port[dev] == SNDRV_AUTO_PORT) {
-		v = es1869_pnp_read(hw, 1, 0x62) << 8 | es1869_pnp_read(hw, 1, 0x63);
-		fm_port[dev] = v ? v : -1;
+	if (*val == SNDRV_AUTO_PORT) {
+		*val = v ? v : -1;
+	} else if (*val > 0 && *val != v) {
+		dev_info(chip->dev, "%s 0x%lx, where the chip had 0x%x\n", name,
+			 *val, v);
+		es1869_pnp_write(hw, 1, reg, *val >> 8);
+		es1869_pnp_write(hw, 1, reg + 1, *val & 0xFF);
 	}
-	if (mpu_port[dev] == SNDRV_AUTO_PORT) {
-		v = es1869_pnp_read(hw, 1, 0x64) << 8 | es1869_pnp_read(hw, 1, 0x65);
-		mpu_port[dev] = v ? v : -1;
-	}
+}
+
+static void es1869_chip_resources(struct es1869 *chip, int dev)
+{
+	es1869_resource8(chip, &irq[dev], SNDRV_AUTO_IRQ, 0x70, 0x0F, "IRQ");
+	es1869_resource8(chip, &dma1[dev], SNDRV_AUTO_DMA, 0x74, 0x07,
+			 "Audio 1's DMA");
+	es1869_resource8(chip, &dma2[dev], SNDRV_AUTO_DMA, 0x75, 0x07,
+			 "Audio 2's DMA");
+	es1869_resource16(chip, &fm_port[dev], 0x62, "the FM's port");
+	es1869_resource16(chip, &mpu_port[dev], 0x64, "the MPU-401's port");
 }
 
 static int es1869_probe(struct snd_card *card, int dev)
@@ -487,6 +620,7 @@ static int es1869_probe(struct snd_card *card, int dev)
 	spin_lock_init(&chip->reg_lock);
 	spin_lock_init(&chip->fm_lock);
 	INIT_DELAYED_WORK(&chip->pwr_work, es1869_pwr_work);
+	INIT_WORK(&chip->wake_work, es1869_wake_work);
 	mutex_init(&chip->state_mutex);
 	INIT_LIST_HEAD(&chip->list);
 	chip->io = (struct es1869_io){
@@ -520,7 +654,8 @@ static int es1869_probe(struct snd_card *card, int dev)
 	es1869_chip_resources(chip, dev);
 	chip->irq = irq[dev];
 	chip->dma1 = dma1[dev];
-	chip->dma2 = dma2[dev];
+	// 4 is the chip's "none" (DS p.31): Audio 1 runs alone
+	chip->dma2 = dma2[dev] == 4 ? -1 : dma2[dev];
 	chip->fm_port = fm_port[dev] > 0 ? fm_port[dev] : 0;
 	chip->mpu_port = mpu_port[dev] > 0 ? mpu_port[dev] : 0;
 	hw->fm = chip->fm_port ? chip->fm_port : chip->port;
@@ -530,12 +665,13 @@ static int es1869_probe(struct snd_card *card, int dev)
 			chip->dma1);
 		return -EINVAL;
 	}
-	if (chip->dma2 < 0 || chip->dma2 > 7 || chip->dma2 == 4 ||
-	    chip->dma2 == chip->dma1) {
+	if (chip->dma2 > 7 || chip->dma2 == chip->dma1) {
 		dev_err(d, "Audio 2 needs a DMA channel of its own, not %d\n",
 			chip->dma2);
 		return -EINVAL;
 	}
+	if (chip->dma2 < 0)
+		dev_info(d, "no DMA channel for Audio 2: it stays closed\n");
 	if (chip->irq <= 0) {
 		dev_err(d, "no IRQ\n");
 		return -EINVAL;
@@ -558,9 +694,11 @@ static int es1869_probe(struct snd_card *card, int dev)
 	err = snd_devm_request_dma(d, chip->dma1, "ES1869 Audio 1");
 	if (err)
 		return err;
-	err = snd_devm_request_dma(d, chip->dma2, "ES1869 Audio 2");
-	if (err)
-		return err;
+	if (chip->dma2 >= 0) {
+		err = snd_devm_request_dma(d, chip->dma2, "ES1869 Audio 2");
+		if (err)
+			return err;
+	}
 	err = devm_request_irq(d, chip->irq, es1869_interrupt, 0, "ES1869",
 			       chip);
 	if (err) {
@@ -568,11 +706,15 @@ static int es1869_probe(struct snd_card *card, int dev)
 		return err;
 	}
 	card->sync_irq = chip->irq;
+	err = devm_add_action_or_reset(d, es1869_quiet, chip);
+	if (err)
+		return err;
 
 	// the card id comes from the shortname's last word: ES1869, as with
 	// snd-es18xx, so that alsactl's saved state and hw:ES1869 still fit
 	strscpy(card->driver, "ES1869");
 	strscpy(card->shortname, "ESS AudioDrive ES1869");
+	strscpy(card->mixername, card->shortname);
 	scnprintf(card->longname, sizeof(card->longname),
 		  "%s at 0x%lx, irq %d, dma1 %d, dma2 %d", card->shortname,
 		  chip->port, chip->irq, chip->dma1, chip->dma2);
@@ -592,12 +734,22 @@ static int es1869_probe(struct snd_card *card, int dev)
 	err = es1869_esfm_new(chip);
 	if (err < 0)
 		return err;
+	es1869_opl3_gate(chip);
 	if (chip->mpu_port) {
 		err = snd_mpu401_uart_new(card, 0, MPU401_HW_ES18XX,
 					  chip->mpu_port, MPU401_INFO_IRQ_HOOK,
 					  -1, &chip->rmidi);
-		if (err < 0)
+		if (err < 0) {
 			dev_warn(d, "no MPU-401 at 0x%lx\n", chip->mpu_port);
+		} else {
+			struct snd_mpu401 *mpu = chip->rmidi->private_data;
+
+			mpu->private_data = chip;
+			mpu->open_input = es1869_mpu_open;
+			mpu->open_output = es1869_mpu_open;
+			mpu->close_input = es1869_mpu_close;
+			mpu->close_output = es1869_mpu_close;
+		}
 	}
 	err = es1869_regs_hwdep_new(chip);
 	if (err < 0)
@@ -608,12 +760,15 @@ static int es1869_probe(struct snd_card *card, int dev)
 	err = snd_card_register(card);
 	if (err < 0)
 		return err;
-	es1869_settings_card_add(chip);
 	err = devm_add_action_or_reset(d, es1869_pwr_cancel, chip);
 	if (err)
 		return err;
+	err = devm_add_action_or_reset(d, es1869_unlist, chip);
+	if (err)
+		return err;
+	es1869_settings_card_add(chip);
 	es1869_power_idle(chip);
-	return devm_add_action_or_reset(d, es1869_unlist, chip);
+	return 0;
 }
 
 static int es1869_card_new(struct device *d, int dev, struct snd_card **cardp)
@@ -631,18 +786,32 @@ static int es1869_suspend(struct snd_card *card)
 
 	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
 	cancel_delayed_work_sync(&chip->pwr_work);
+	cancel_work_sync(&chip->wake_work);
 	hrtimer_cancel(&chip->a1_settle);
 	hrtimer_cancel(&chip->mirror.tick);
+	hrtimer_cancel(&chip->dual.tick);
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	// a software reset wouldn't stop Audio 2: both engines stopped, and
-	// no source left on the line
+	// no source left on the line; a chip fully down hears no command
 	es1869_mix_write(&chip->hw, 0x78, 0x00);
-	es1869_ctrl_write(&chip->hw, 0xB8, 0x00);
-	chip->hw.imr = 0;
-	es1869_irq_exit(&chip->hw);
-	es1869_mix_update(&chip->hw, 0x64, 0x42, 0);
+	if (chip->pwr_down != 2)
+		es1869_ctrl_write(&chip->hw, 0xB8, 0x00);
+	es1869_quiet_locked(chip);
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	return 0;
+}
+
+// an open MIDI port, out of its UART mode with the chip's reset
+static void es1869_mpu_resume(struct es1869 *chip)
+{
+	struct snd_mpu401 *mpu = chip->rmidi ? chip->rmidi->private_data : NULL;
+	unsigned long flags;
+
+	if (!mpu || !(mpu->mode & (MPU401_MODE_INPUT | MPU401_MODE_OUTPUT)))
+		return;
+	spin_lock_irqsave(&chip->reg_lock, flags);
+	es1869_mpu_uart(&chip->hw);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
 }
 
 static int es1869_resume(struct snd_card *card)
@@ -652,6 +821,9 @@ static int es1869_resume(struct snd_card *card)
 	unsigned long flags;
 	int err;
 
+	// a chip that kept its power stays powered down without this
+	if (chip->pwr_down)
+		es1869_wake(chip, chip->pwr_down);
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	err = es1869_identify(&chip->hw, &ident);
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
@@ -662,10 +834,15 @@ static int es1869_resume(struct snd_card *card)
 	if (err) {
 		dev_err(chip->dev, "the ES1869 didn't come back (%d)\n", err);
 		chip->dead = true;
+		// D0 all the same: every client sleeps until the card is there,
+		// in close() too, and nothing could end it
+		snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 		return 0;
 	}
+	chip->dead = false;
 	chip->pwr_down = 0;
 	es1869_fm_resume(chip);
+	es1869_mpu_resume(chip);
 	es1869_irq_sources(chip);
 	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
 	es1869_power_idle(chip);
@@ -682,24 +859,34 @@ static int es1869_isa_match(struct device *pdev, unsigned int dev)
 static int es1869_isa_probe(struct device *pdev, unsigned int dev)
 {
 	static const long ports[] = { 0x220, 0x240, 0x260, 0x280 };
+	bool scan = port[dev] == SNDRV_AUTO_PORT;
 	struct snd_card *card;
 	unsigned int i;
 	int err = -ENODEV;
 
 	for (i = 0; i < ARRAY_SIZE(ports); i++) {
-		if (port[dev] != SNDRV_AUTO_PORT && i)
-			break;
-		if (port[dev] == SNDRV_AUTO_PORT)
+		void *try;
+
+		if (scan)
 			port[dev] = ports[i];
+		else if (i)
+			break;
+		// a failed try gives back its card, with its index, and ports
+		try = devres_open_group(pdev, NULL, GFP_KERNEL);
+		if (!try)
+			return -ENOMEM;
 		err = es1869_card_new(pdev, dev, &card);
-		if (err < 0)
-			return err;
-		err = es1869_probe(card, dev);
+		if (!err)
+			err = es1869_probe(card, dev);
 		if (!err) {
+			devres_close_group(pdev, try);
 			dev_set_drvdata(pdev, card);
 			return 0;
 		}
+		devres_release_group(pdev, try);
 	}
+	if (scan)
+		port[dev] = SNDRV_AUTO_PORT;
 	return err;
 }
 
@@ -812,6 +999,7 @@ static int es1869_pnpc_probe(struct pnp_card_link *pcard,
 	static int dev;
 	struct pnp_dev *audio, *ctrl;
 	struct snd_card *card;
+	struct es1869 *chip;
 	int err;
 
 	for (; dev < SNDRV_CARDS; dev++)
@@ -828,12 +1016,17 @@ static int es1869_pnpc_probe(struct pnp_card_link *pcard,
 		return -EBUSY;
 	}
 	es1869_pnp_resources(dev, audio);
-	err = es1869_card_new(&pcard->card->dev, dev, &card);
+	// the audio device, which unbinds when the driver goes, where the card
+	// device has no bus and would keep the card and its interrupt
+	err = es1869_card_new(&audio->dev, dev, &card);
 	if (err < 0)
 		return err;
 	err = es1869_probe(card, dev);
 	if (err < 0)
 		return err;
+	chip = card->private_data;
+	chip->pnp_audio = audio;
+	chip->pnp_ctrl = ctrl;
 	pnp_set_card_drvdata(pcard, card);
 	dev++;
 	return 0;
@@ -845,9 +1038,18 @@ static int es1869_pnpc_suspend(struct pnp_card_link *pcard,
 	return es1869_suspend(pnp_get_card_drvdata(pcard));
 }
 
+// isapnp disables both devices at a suspend, and the card's resume comes
+// with the first one's, before the other's
 static int es1869_pnpc_resume(struct pnp_card_link *pcard)
 {
-	return es1869_resume(pnp_get_card_drvdata(pcard));
+	struct snd_card *card = pnp_get_card_drvdata(pcard);
+	struct es1869 *chip = card->private_data;
+
+	if (!chip->pnp_ctrl->active)
+		pnp_start_dev(chip->pnp_ctrl);
+	if (!chip->pnp_audio->active)
+		pnp_start_dev(chip->pnp_audio);
+	return es1869_resume(card);
 }
 
 static struct pnp_card_driver es1869_pnpc_driver = {

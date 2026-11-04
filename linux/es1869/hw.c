@@ -31,17 +31,24 @@ static u64 now(struct es1869_hw *hw)
 
 // --- port protocols ---------------------------------------------------------
 
-// poll Audio_Base+Ch until (status & mask) == want, at most us
+// poll Audio_Base+Ch until (status & mask) == want, at most us. The clock is
+// read before the status, so that a stall between the two, an SMI's, still
+// gets a reading; the reads are counted too, about a microsecond each,
+// because a PIT clock stands still with interrupts off
 static int dsp_poll(struct es1869_hw *hw, u8 mask, u8 want, unsigned int us)
 {
 	u64 end = now(hw) + (u64)us * 1000;
+	unsigned int reads;
 
-	for (;;) {
+	for (reads = 4 * us; reads; reads--) {
+		bool late = now(hw) > end;
+
 		if ((in(hw, hw->port + DSP_STATUS) & mask) == want)
 			return 0;
-		if (now(hw) > end)
-			return -ETIMEDOUT;
+		if (late)
+			break;
 	}
+	return -ETIMEDOUT;
 }
 
 int es1869_dsp_read(struct es1869_hw *hw, unsigned int us)
@@ -431,10 +438,13 @@ int es1869_a1_prepare(struct es1869_hw *hw, const struct es1869_stream *s,
 	// A8h bits 1:0, 01 stereo and 10 mono; bit 3 the record monitor,
 	// which puts the record source on AOUT in place of the playback mix
 	// while the ADC records (DS p.49; without it the playback mix goes
-	// on); the others from the stream: ESS's recording writes F5h or F6h
+	// on), and which waits for the start while the ADC's input settles
+	// (DS p.50, steps 7 and 8); the others from the stream: ESS's
+	// recording writes F5h or F6h
+	hw->a1_monitor = monitor && s->adc;
 	regs[n][0] = 0xA8;
 	regs[n++][1] = (s->a8 & 0xF4) | (s->stereo ? 1 : 2) |
-		       (monitor ? 0x08 : 0);
+		       (monitor && !s->adc ? 0x08 : 0);
 	// B9h: demand transfers of 2 bytes, as ESS's drivers use them; 11b
 	// runs the DMA at twice the rate (a1.b9_3)
 	regs[n][0] = 0xB9;
@@ -447,8 +457,9 @@ int es1869_a1_prepare(struct es1869_hw *hw, const struct es1869_stream *s,
 	regs[n++][1] = count & 0xFF;
 	regs[n][0] = 0xA5;
 	regs[n++][1] = count >> 8;
-	// the format: B6h and B7h twice for playback (DS p.49 Table 16), B7h
-	// once for a recording (Table 17); bit 6 is the opposite of bit 3
+	// the format: B6h for playback, and B7h twice, the first of which
+	// initializes the DAC and prevents pops (DS p.49 Table 16, p.50
+	// Table 17); bit 6 is the opposite of bit 3
 	b7 = 0xD0;
 	if (s->is_signed)
 		b7 ^= 0x20;
@@ -459,9 +470,9 @@ int es1869_a1_prepare(struct es1869_hw *hw, const struct es1869_stream *s,
 	if (!capture) {
 		regs[n][0] = 0xB6;
 		regs[n++][1] = s->is_signed ? 0x00 : 0x80;
-		regs[n][0] = 0xB7;
-		regs[n++][1] = s->is_signed ? 0x71 : 0x51;
 	}
+	regs[n][0] = 0xB7;
+	regs[n++][1] = s->is_signed ? 0x71 : 0x51;
 	regs[n][0] = 0xB7;
 	regs[n++][1] = b7;
 	for (i = 0; i < n; i++) {
@@ -490,8 +501,15 @@ int es1869_a1_prepare(struct es1869_hw *hw, const struct es1869_stream *s,
 // (fix.late0 to fix.late20 in docs/ESS_EXTENDED.md)
 int es1869_a1_go(struct es1869_hw *hw, bool capture)
 {
+	int err;
+
 	if (!capture)
 		hw->stats.settles++;
+	else if (hw->a1_monitor) {
+		err = es1869_ctrl_update(hw, 0xA8, 0x08, 0x08);
+		if (err)
+			return err;
+	}
 	return es1869_ctrl_write(hw, 0xB8, (hw->ctrl[0x18] & 0x30) |
 					  (capture ? 0x0F : 0x05));
 }
@@ -698,6 +716,15 @@ void es1869_irq_exit(struct es1869_hw *hw)
 	out(hw, hw->cfg + 7, hw->imr);
 }
 
+// the line dropped and raised: a source pending from before, or left by the
+// polled handler's last pass, holds it high, where no other source's edge
+// can show, so it gets one of its own
+void es1869_irq_edge(struct es1869_hw *hw)
+{
+	out(hw, hw->cfg + 7, 0);
+	out(hw, hw->cfg + 7, hw->imr);
+}
+
 // the storm guard, at each call of the handler, on the caller's clock of hz
 // ticks a second: true for the call that makes its second a storm, which
 // takes every source off the line until the driver loads again. The second
@@ -728,22 +755,95 @@ u32 es1869_dma_pos(struct es1869_hw *hw, u8 ch, u32 bytes)
 	// the count moves every 2.5 us, about as long as a reading takes,
 	// while a reading the low byte's wrap tore is 256 transfers off
 	u32 tol = 32 * (ch >= 4 ? 2 : 1);
-	u32 r1 = 0, r2;
+	u32 r[2] = { 0, 0 };
 	unsigned int i;
 
 	for (i = 0; i < 4; i++) {
-		r1 = hw->io->dma_residue(hw->io->ctx, ch);
-		r2 = hw->io->dma_residue(hw->io->ctx, ch);
+		hw->io->dma_residue(hw->io->ctx, ch, r);
 		hw->stats.pos_reads += 2;
-		if ((r1 > r2 ? r1 - r2 : r2 - r1) <= tol) {
-			r1 = max(r1, r2);
+		if ((r[0] > r[1] ? r[0] - r[1] : r[1] - r[0]) <= tol) {
+			r[0] = max(r[0], r[1]);
 			break;
 		}
 		hw->stats.pos_retries++;
 	}
-	if (!r1 || r1 > bytes)
+	if (!r[0] || r[0] > bytes)
 		return 0;
-	return bytes - r1;
+	return bytes - r[0];
+}
+
+// a DMA offset in frames that never steps back: a reading behind the last
+// one by at most window frames was read late, or follows a release or a
+// drain's start, and ALSA would take the step back for a wrap and add a
+// buffer. Anything further back is a step forward past the wrap, which
+// between two interrupts of a two-period stream is over half the buffer
+unsigned long es1869_forward(unsigned long *last, unsigned long off,
+			     unsigned long size, unsigned long window)
+{
+	if (off != *last &&
+	    (*last + size - off) % size <= min(window, size / 4))
+		return *last;
+	*last = off;
+	return off;
+}
+
+// what to copy next of an application's buffer into what the DMA reads, in
+// absolute frames, to appl from hw; *start and the frames, 0 for nothing.
+//
+// An application that moves its pointer gets what it wrote, once: the DMA
+// past the copy is a late fill, and a rewind takes the copy back with the
+// pointer. Right after a release the DMA may be up to slack frames behind
+// the pointer, and the newest buffer of what was written wins.
+//
+// A pointer that stands, as under dmix, which mixes straight into the
+// buffer and never moves it (it is 0 while hw runs to the boundary), gets
+// the frames from just ahead of the DMA to the lead, again each time. What
+// tells the two apart is whether the pointer moved, not how far it is
+// from the DMA: a standing one comes near hw as hw nears the boundary.
+// When a standing pointer moves, the writes begin where it stood.
+unsigned long es1869_fill_plan(struct es1869_fill *f, unsigned long appl,
+			       unsigned long hw, unsigned long budget,
+			       unsigned long *start)
+{
+	unsigned long b = f->buffer, bound = f->boundary, end, frames;
+	unsigned long ahead = (appl + bound - hw) % bound;
+
+	f->backlog = false;
+	if (appl != f->seen) {
+		if (f->standing)
+			f->filled = f->seen;
+		f->standing = false;
+	} else if (!f->standing && (!ahead || ahead > b + f->slack)) {
+		f->standing = true;
+	}
+	f->seen = appl;
+	if (f->standing) {
+		*start = (hw + f->guard) % bound;
+		end = (hw + f->lead) % bound;
+	} else {
+		if ((f->filled + bound - hw) % bound > b) {
+			f->late++;
+			f->filled = hw;
+		}
+		if ((f->filled + bound - hw) % bound > ahead)
+			f->filled = appl;
+		*start = f->filled;
+		end = appl;
+		if ((end + bound - *start) % bound > b)
+			*start = (end + bound - b) % bound;
+	}
+	frames = (end + bound - *start) % bound;
+	if (frames > b)
+		return 0;
+	if (frames > budget) {
+		frames = budget;
+		// a standing pointer's window starts again at each fill, so
+		// that nothing is left behind
+		f->backlog = !f->standing;
+	}
+	if (frames)
+		f->filled = (*start + frames) % bound;
+	return frames;
 }
 
 // two stream bytes to a 32-bit store, in the low bytes of their words (the
@@ -762,6 +862,22 @@ void es1869_spread(u8 *dst, const u8 *src, u32 n)
 	}
 }
 
+// n frames of two halves of half bytes: the first half to a, the second in
+// the low bytes of the words at w
+void es1869_split(u8 *a, u8 *w, const u8 *src, u32 n, u32 half)
+{
+	u32 j;
+
+	for (; n; n--) {
+		for (j = 0; j < half; j++)
+			*a++ = *src++;
+		for (j = 0; j < half; j++) {
+			*w++ = *src++;
+			*w++ = 0;
+		}
+	}
+}
+
 // --- power ------------------------------------------------------------------
 
 // a power-down request (DS p.75): Audio_Base+7 bit 3 set for a partial one,
@@ -777,35 +893,82 @@ void es1869_power_down(struct es1869_hw *hw, bool full)
 	out(hw, hw->port + 7, hw->port7);
 }
 
-// any audio access but Audio_Base+4h to +7h wakes the chip: the DSP's status
-void es1869_power_wake(struct es1869_hw *hw)
+// out of a power-down. From a partial one, any audio access but
+// Audio_Base+4h to +7h: the DSP's status. From a full one, which a crystal
+// doesn't leave by itself (DS p.74), Audio_Base+7 bit 3 high starts the
+// oscillator, for 25 ms (DS p.76), and the reset is held as ESS's VxD holds
+// it for 100 ms, until es1869_power_woken; AOUT comes back in that time
+void es1869_power_wake(struct es1869_hw *hw, bool full)
 {
-	in(hw, hw->port + DSP_STATUS);
+	if (!full) {
+		in(hw, hw->port + DSP_STATUS);
+		return;
+	}
+	hw->port7 |= 0x08;
+	out(hw, hw->port + 7, hw->port7);
+	out(hw, hw->port + 6, 1);
+}
+
+void es1869_power_woken(struct es1869_hw *hw)
+{
+	out(hw, hw->port + 6, 0);
+}
+
+// --- the MPU-401 ------------------------------------------------------------
+
+// an MPU-401 that a power loss took out of its UART mode: its reset, then
+// the mode, with the answer of each read, as ESSMPU.DRV does at a resume
+void es1869_mpu_uart(struct es1869_hw *hw)
+{
+	static const u8 cmd[2] = { 0xFF, 0x3F };
+	unsigned int i, n;
+
+	if (!hw->mpu)
+		return;
+	for (i = 0; i < 2; i++) {
+		for (n = 0; n < 200 && (in(hw, hw->mpu + 1) & 0x40); n++)
+			hw->io->udelay(hw->io->ctx, 5);
+		out(hw, hw->mpu + 1, cmd[i]);
+		for (n = 0; n < 200; n++) {
+			if (!(in(hw, hw->mpu + 1) & 0x80)) {
+				in(hw, hw->mpu);
+				break;
+			}
+			hw->io->udelay(hw->io->ctx, 5);
+		}
+	}
 }
 
 // --- FM ---------------------------------------------------------------------
 
 // the synthesizer held in reset by Audio_Base+7 bit 5, which also brings it
-// back to the OPL3 emulation mode
+// back to the OPL3 emulation mode, with its level at 0 meanwhile, as ESS's
+// VxD does it, so that the reset makes no click
 void es1869_fm_reset(struct es1869_hw *hw)
 {
+	out(hw, hw->port + 4, 0x36);
+	out(hw, hw->port + 5, 0);
 	out(hw, hw->port + 7, hw->port7 | 0x20);
 	hw->io->udelay(hw->io->ctx, 25);
 	out(hw, hw->port + 7, hw->port7 & ~0x20);
-}
-
-// the native mode: register 105h bit 7, written in the emulation mode as
-// the high bank's register 05h
-void es1869_fm_native(struct es1869_hw *hw)
-{
-	out(hw, hw->fm + 2, 0x05);
-	out(hw, hw->fm + 3, 0x80);
+	out(hw, hw->port + 5, hw->mix[0x36]);
 }
 
 static void fm_wait(struct es1869_hw *hw, unsigned int reads)
 {
 	while (reads--)
 		in(hw, hw->fm);
+}
+
+// the native mode: register 105h bit 7, written in the emulation mode as
+// the high bank's register 05h, paced as ESFM.DRV paces its writes
+void es1869_fm_native(struct es1869_hw *hw)
+{
+	fm_wait(hw, 6);
+	out(hw, hw->fm + 2, 0x05);
+	fm_wait(hw, 2);
+	out(hw, hw->fm + 3, 0x80);
+	fm_wait(hw, 6);
 }
 
 // a native register: +2 its bits 7:0, +3 its bits 15:8, +1 the data, with

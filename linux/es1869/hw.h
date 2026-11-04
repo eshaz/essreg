@@ -64,11 +64,11 @@ struct es1869_io {
 	u64 (*now_ns)(void *ctx);
 	// the 8237, with asm/dma.h's port order: program a channel and leave
 	// it masked, mask or unmask it, and read what it still has to move,
-	// in bytes, as get_dma_residue() counts them
+	// in bytes, as get_dma_residue() counts them, twice over at once
 	void (*dma_program)(void *ctx, unsigned int ch, u32 phys, u32 bytes,
 			    u8 mode);
 	void (*dma_mask)(void *ctx, unsigned int ch, bool masked);
-	u32 (*dma_residue)(void *ctx, unsigned int ch);
+	void (*dma_residue)(void *ctx, unsigned int ch, u32 *r);
 };
 
 struct es1869_stats {
@@ -100,6 +100,7 @@ struct es1869_hw {
 	unsigned int storm_count; // and the handler's calls in it
 	bool storm; // a storm took every source off the line
 	bool desync; // a DSP command was left half sent
+	bool a1_monitor; // the record monitor goes on at the recording's start
 	struct es1869_stats stats;
 };
 
@@ -122,6 +123,17 @@ struct es1869_stream {
 	u16 corner; // the filter's corner, in thousandths of half the rate
 	u8 a8; // A8h's bits beside its monitor (3) and channels (1:0)
 	bool adc; // a recording: the codec turned to the ADC at prepare
+};
+
+// a copy of an application's buffer that the DMA reads, for es1869_fill_plan;
+// frames, absolute but for the first line, which the stream sets
+struct es1869_fill {
+	unsigned long buffer, boundary, guard, lead, slack;
+	unsigned long filled; // how far the copy has come
+	unsigned long seen; // the application's pointer at the last plan
+	bool standing; // that pointer stands, as under dmix
+	bool backlog; // the budget left some of what was written
+	u32 late; // the DMA got past the copy
 };
 
 // --- port protocols ---------------------------------------------------------
@@ -177,18 +189,27 @@ void es1869_fifo_reset(struct es1869_hw *hw);
 // --- the interrupt and the position -----------------------------------------
 
 void es1869_power_down(struct es1869_hw *hw, bool full);
-void es1869_power_wake(struct es1869_hw *hw);
+void es1869_power_wake(struct es1869_hw *hw, bool full);
+void es1869_power_woken(struct es1869_hw *hw);
+void es1869_mpu_uart(struct es1869_hw *hw);
 u8 es1869_irq_take(struct es1869_hw *hw);
 u8 es1869_irq_poll(struct es1869_hw *hw);
 u8 es1869_irq_enter(struct es1869_hw *hw);
 void es1869_irq_exit(struct es1869_hw *hw);
+void es1869_irq_edge(struct es1869_hw *hw);
 bool es1869_irq_storm(struct es1869_hw *hw, unsigned long now,
 		      unsigned long hz);
 u32 es1869_dma_pos(struct es1869_hw *hw, u8 ch, u32 bytes);
+unsigned long es1869_forward(unsigned long *last, unsigned long off,
+			     unsigned long size, unsigned long window);
+unsigned long es1869_fill_plan(struct es1869_fill *f, unsigned long appl,
+			       unsigned long hw, unsigned long budget,
+			       unsigned long *start);
 
 // each byte of src in the low byte of a word of dst, as a 16-bit channel
 // gives the chip one byte a cycle
 void es1869_spread(u8 *dst, const u8 *src, u32 n);
+void es1869_split(u8 *a, u8 *w, const u8 *src, u32 n, u32 half);
 
 // --- FM ---------------------------------------------------------------------
 

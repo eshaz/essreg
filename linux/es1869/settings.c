@@ -7,12 +7,15 @@
  * Notes:
  *
  * A parameter written at load only sets the value, which each card then
- * applies as it starts. Written later, it goes to every card at once,
+ * applies as it starts. The GPO pins stay as the chip has them unless a
+ * parameter sets them. Written later, it goes to every card at once,
  * under the card list's lock and each card's state mutex, and the card's
  * control announces it. A control's put sets the module-wide value too,
  * so a parameter reads what the controls last set: on a laptop with one
  * card the two are the same thing. The master's value also follows the
- * hardware volume buttons, which the interrupt reads back.
+ * hardware volume buttons, which the interrupt reads back, and which its
+ * control reads from the chip, since the buttons move the master with
+ * their interrupt off the line too.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
@@ -54,6 +57,9 @@ int es1869_vals[ES_S_COUNT][2] = {
 #undef ES1869_SET
 };
 EXPORT_SYMBOL_GPL(es1869_vals);
+
+// the settings a parameter set at load
+static bool es1869_given[ES_S_COUNT];
 
 static char es1869_bank[64] = CONFIG_SND_ES1869_DEFAULT_ESFM_BANK;
 
@@ -135,6 +141,14 @@ static void apply_hook(struct es1869 *chip, int id)
 	u8 low;
 
 	switch (id) {
+	case ES_S_self_power_down:
+		// never through the shadow: BDh can't be read back, and goes
+		// with the power. A partial power-down only, which any access
+		// leaves: a full one would need a wake nothing here sees
+		if (es1869_val(id))
+			es1869_port7_write(hw, hw->port7 | 0x08);
+		es1869_ctrl_write(hw, 0xBD, es1869_val(id));
+		break;
 	case ES_S_spatial_switch:
 		// 50h bit 2 holds the effect in reset (active low): on, it goes
 		// enabled in reset, then out of it; off, as Linux has written
@@ -231,13 +245,32 @@ void es1869_setting_apply(struct es1869 *chip, int id)
 {
 	unsigned long flags;
 
+	// a DSP left out of step refuses what follows until it is reset
+	if (chip->hw.desync && !chip->recovering && !es1869_a1_busy(chip) &&
+	    es1869_settings[id].bank == B_CTRL && es1869_dsp_recover(chip))
+		return;
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	apply_locked(chip, id);
+	if (id == ES_S_esfm_delay)
+		chip->hw.fm_delay = es1869_val(id);
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
-	// the record level's dB scale follows the source
-	if (id == ES_S_capture_source && chip->kctl[ES_S_capture_volume])
-		snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_TLV,
-			       &chip->kctl[ES_S_capture_volume]->id);
+	switch (id) {
+	case ES_S_capture_source:
+		// the record level's dB scale follows the source
+		if (chip->kctl[ES_S_capture_volume])
+			snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_TLV,
+				       &chip->kctl[ES_S_capture_volume]->id);
+		break;
+	case ES_S_pwr_save:
+		es1869_power_save_changed(chip);
+		break;
+	case ES_S_opl3:
+		es1869_opl3_gate(chip);
+		break;
+	case ES_S_esfm_square:
+		es1869_esfm_bank_changed(chip);
+		break;
+	}
 }
 
 void es1869_settings_apply_init(struct es1869 *chip)
@@ -246,6 +279,17 @@ void es1869_settings_apply_init(struct es1869 *chip)
 
 	for (id = 0; id < ES_S_COUNT; id++)
 		if (es1869_settings[id].flags & F_INIT)
+			es1869_setting_apply(chip, id);
+}
+
+// those on controller registers, after a reset the driver had to make
+void es1869_settings_apply_ctrl(struct es1869 *chip)
+{
+	int id;
+
+	for (id = 0; id < ES_S_COUNT; id++)
+		if ((es1869_settings[id].flags & F_INIT) &&
+		    es1869_settings[id].bank == B_CTRL)
 			es1869_setting_apply(chip, id);
 }
 
@@ -301,6 +345,34 @@ static void setting_from_shadow(struct es1869 *chip, int id)
 	}
 }
 
+// at load, before the settings are applied: what the chip holds, for those
+// that keep it unless a parameter gave another value
+void es1869_settings_found(struct es1869 *chip)
+{
+	int id;
+
+	for (id = 0; id < ES_S_COUNT; id++)
+		if ((es1869_settings[id].flags & F_FOUND) && !es1869_given[id])
+			setting_from_shadow(chip, id);
+}
+
+// the master as the chip has it: the buttons move it by themselves, and their
+// interrupt, which reads it back, may be off the line
+static void master_sync(struct es1869 *chip)
+{
+	struct es1869_hw *hw = &chip->hw;
+	unsigned long flags;
+
+	if (chip->dead || chip->pwr_down == 2)
+		return;
+	spin_lock_irqsave(&chip->reg_lock, flags);
+	hw->mix[0x60] = es1869_mix_read(hw, 0x60);
+	hw->mix[0x62] = es1869_mix_read(hw, 0x62);
+	setting_from_shadow(chip, ES_S_master_volume);
+	setting_from_shadow(chip, ES_S_master_switch);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
+}
+
 // after the register hwdep wrote a register: the settings on it follow
 void es1869_settings_notify_reg(struct es1869 *chip, u8 bank, u8 reg)
 {
@@ -322,6 +394,9 @@ void es1869_settings_notify_reg(struct es1869 *chip, u8 bank, u8 reg)
 		if (chip->kctl[id])
 			snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE,
 				       &chip->kctl[id]->id);
+		if (id == ES_S_capture_source && chip->kctl[ES_S_capture_volume])
+			snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_TLV,
+				       &chip->kctl[ES_S_capture_volume]->id);
 	}
 }
 
@@ -342,13 +417,6 @@ void es1869_settings_card_del(struct es1869 *chip)
 		list_del(&chip->list);
 	chip->listed = false;
 	mutex_unlock(&es1869_cards_lock);
-}
-
-int es1869_settings_card_init(struct es1869 *chip)
-{
-	es1869_split_items();
-	es1869_settings_apply_init(chip);
-	return 0;
 }
 
 // a value for every card: refused if one is busy with it, else set, applied
@@ -440,13 +508,25 @@ static int es1869_param_set(const char *val, const struct kernel_param *kp)
 	int v[2], err;
 
 	if (s->kind == S_STR) {
+		struct es1869 *chip;
+
 		if (strscpy(es1869_bank, val, sizeof(es1869_bank)) < 0)
 			return -ENAMETOOLONG;
 		strim(es1869_bank);
+		mutex_lock(&es1869_cards_lock);
+		list_for_each_entry(chip, &es1869_cards, list) {
+			mutex_lock(&chip->state_mutex);
+			es1869_esfm_bank_changed(chip);
+			mutex_unlock(&chip->state_mutex);
+		}
+		mutex_unlock(&es1869_cards_lock);
 		return 0;
 	}
 	err = es1869_parse(id, val, v);
-	return err ? err : es1869_set_all(id, v);
+	if (err)
+		return err;
+	es1869_given[id] = true;
+	return es1869_set_all(id, v);
 }
 
 int es1869_setting_format(int id, char *buf, size_t size)
@@ -515,6 +595,8 @@ static int es1869_ctl_get(struct snd_kcontrol *kctl,
 	const struct es1869_setting *s = &es1869_settings[id];
 	int i;
 
+	if (s->kind == S_MASTER || s->kind == S_MASTERSW)
+		master_sync(snd_kcontrol_chip(kctl));
 	if (s->kind == S_ENUM) {
 		uv->value.enumerated.item[0] = es1869_val(id);
 		return 0;
@@ -543,6 +625,8 @@ static int es1869_ctl_put(struct snd_kcontrol *kctl,
 	for (i = 0; i < 2; i++)
 		if (v[i] < s->min || v[i] > s->max)
 			return -EINVAL;
+	if (s->kind == S_MASTER || s->kind == S_MASTERSW)
+		master_sync(chip);
 	if (v[0] == es1869_val2(id, 0) && v[1] == es1869_val2(id, 1))
 		return 0;
 	mutex_lock(&chip->state_mutex);

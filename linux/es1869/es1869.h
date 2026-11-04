@@ -39,6 +39,10 @@ struct pci_dev;
 #define ES1869_A2_BUF (64 * 1024) // Audio 2's, as the application sees it
 #define ES1869_RING (2 * ES1869_A2_BUF) // its words on a 16-bit channel
 
+struct file;
+struct pnp_dev;
+struct snd_hwdep;
+
 enum es1869_owner {
 	ES_OWN_NONE,
 	ES_OWN_A1P, // Audio 1 playback: device 0, playback subdevice 1
@@ -53,9 +57,9 @@ enum es1869_owner {
 struct es1869_dual {
 	struct snd_pcm *pcm; // device 2
 	struct hrtimer tick;
-	snd_pcm_uframes_t filled; // the absolute frame both halves hold up to
-	snd_pcm_uframes_t last; // the last offset the pointer gave
-	bool running, backlog, standing;
+	struct es1869_fill fill; // what both halves hold
+	unsigned long last; // the last offset the pointer gave
+	bool running;
 	bool draining; // as the mirror's
 	snd_pcm_uframes_t silent_to;
 	struct es1869_stream s2; // Audio 2's half, for its start
@@ -74,18 +78,17 @@ struct es1869_mirror {
 	struct snd_dma_buffer ring; // the words the 8237 moves
 	struct hrtimer tick;
 	snd_pcm_uframes_t rot; // the application's frame at the ring's start
-	snd_pcm_uframes_t filled; // up to where the ring holds current data
 	snd_pcm_uframes_t pos; // the paused position
-	snd_pcm_uframes_t last; // the last offset the DMA was read at
+	unsigned long last; // the last offset the DMA was read at
+	struct es1869_fill fill; // what the ring holds, and what comes next
 	struct es1869_stream stream; // as prepared, for a pause's restart
 	bool spread; // a 16-bit channel: bytes in words, a mirrored buffer
 	bool running;
-	u32 late; // refills of frames the DMA had already taken
 	u32 max_chunk; // the largest refill, in bytes
 	u32 ticks; // timer ticks, and the TSC cycles they took
 	u64 tick_cycles;
-	bool backlog; // the last fill left frames to copy
-	bool standing; // the pointer stands, as under dmix
+	u32 acks; // copies at the application's writes, and theirs
+	u64 ack_cycles;
 	bool draining; // a drain's silence goes on past the last frame
 	snd_pcm_uframes_t silent_to; // the absolute frame it has reached
 };
@@ -102,8 +105,12 @@ struct es1869 {
 	struct list_head list;
 	bool listed;
 	bool dead; // the chip didn't come back from a resume
+	bool recovering; // es1869_dsp_recover puts the settings back
 	struct delayed_work pwr_work; // the power-down after pwr_save seconds
+	struct work_struct wake_work; // a wake the FM asked for
 	u8 pwr_down; // 1 partly powered down, 2 fully
+	bool pwr_stopped; // the card is going: no more power-downs
+	struct pnp_dev *pnp_audio, *pnp_ctrl; // an ISA PnP card's two devices
 
 	unsigned long port, fm_port, mpu_port;
 	int irq, dma1, dma2;
@@ -121,8 +128,10 @@ struct es1869 {
 	bool adc_on; // the codec on the ADC between recordings (a1c_settle_ms)
 	ktime_t adc_since; // since when
 	enum es1869_a1_state a1_state;
-	snd_pcm_uframes_t a1_last; // the last offset Audio 1's DMA was read at
+	unsigned long a1_last; // the last offset Audio 1's DMA was read at
 	bool a1_dac; // D1h sent: Audio 1 into the mixer
+	bool a1_draining; // a drain's silence goes on past the last frame
+	snd_pcm_uframes_t a1_silent_to; // the absolute frame it has reached
 
 	// Audio 2
 	enum es1869_owner a2_owner;
@@ -140,6 +149,11 @@ struct es1869 {
 	struct snd_opl3 *opl3;
 	void (*opl3_command)(struct snd_opl3 *opl3, unsigned short cmd,
 			     unsigned char val); // the library's own
+	int (*opl3_open)(struct snd_hwdep *hw, struct file *file); // and hwdep's
+	unsigned int opl3_off; // 1 while opl3=0 holds a count of the FM token
+	bool esfm_held; // the native side has the FM
+	const struct es1869_esfm_ops *esfm_ops; // the synth's, while it's there
+	void *esfm_data;
 	spinlock_t fm_lock; // a native register's address and data writes
 	struct snd_hwdep *esfm_hwdep; // hwdep 1
 	struct snd_seq_device *esfm_seq; // for snd-es1869-esfm
@@ -151,34 +165,42 @@ extern const char *const es1869_owner_names[];
 void es1869_irq_sources_locked(struct es1869 *chip);
 void es1869_type_f_locked(struct es1869 *chip);
 
-// a DMA offset in frames that never steps back: a reading behind the last
-// one by less than half the buffer was read late, or torn, and ALSA would
-// take the step back for a wrap and skip a buffer
-static inline snd_pcm_uframes_t es1869_forward(snd_pcm_uframes_t *last,
-					       snd_pcm_uframes_t off,
-					       snd_pcm_uframes_t size)
-{
-	if (off != *last && (*last + size - off) % size < size / 2)
-		return *last;
-	*last = off;
-	return off;
-}
-
 // a stream's silence filler, as snd_pcm_ops.fill_silence
 typedef int (*es1869_silence_fn)(struct snd_pcm_substream *ss, int channel,
 				 unsigned long pos, unsigned long bytes);
+
+// a DMA offset in the buffer as an absolute frame: the last hw_ptr and how
+// far the DMA went on from it
+static inline snd_pcm_uframes_t es1869_abs_frame(struct snd_pcm_runtime *rt,
+						 snd_pcm_uframes_t off)
+{
+	snd_pcm_uframes_t b = rt->buffer_size, known = rt->status->hw_ptr;
+
+	return (known + (off + b - known % b) % b) % rt->boundary;
+}
+
+void es1869_fill_init(struct es1869_fill *f, struct snd_pcm_runtime *rt,
+		      unsigned int guard, unsigned long slack);
+u32 es1869_standing_us(struct snd_pcm_runtime *rt, u32 budget);
+
+// a playback stream's pointer from the DMA's offset, in frames, and fifo
+// bytes of FIFO in front of the DAC
+snd_pcm_uframes_t es1869_play_pointer(struct snd_pcm_runtime *rt,
+				      unsigned long off, unsigned int fifo,
+				      bool draining, unsigned long *last);
 
 void es1869_drain_silence(struct snd_pcm_substream *ss, snd_pcm_uframes_t hw,
 			  unsigned int fifo, snd_pcm_uframes_t *to,
 			  es1869_silence_fn fill);
 
 // settings.c
-int es1869_settings_card_init(struct es1869 *chip);
+void es1869_settings_found(struct es1869 *chip);
 void es1869_settings_card_add(struct es1869 *chip);
 void es1869_settings_card_del(struct es1869 *chip);
 int es1869_settings_controls(struct es1869 *chip);
 void es1869_setting_apply(struct es1869 *chip, int id);
 void es1869_settings_apply_init(struct es1869 *chip);
+void es1869_settings_apply_ctrl(struct es1869 *chip);
 void es1869_settings_notify_reg(struct es1869 *chip, u8 bank, u8 reg);
 int es1869_setting_format(int id, char *buf, size_t size);
 
@@ -200,11 +222,13 @@ void es1869_stream_rate(struct snd_pcm_runtime *runtime, bool a1, u32 *num,
 			u32 *den);
 void es1869_a1_irq(struct es1869 *chip, struct snd_pcm_substream **sub);
 bool es1869_a1_busy(struct es1869 *chip);
+int es1869_dsp_recover(struct es1869 *chip);
 
 // mirror.c
 extern const struct snd_pcm_ops es1869_a2_ops;
 int es1869_mirror_init(struct es1869 *chip);
 void es1869_a2_irq(struct es1869 *chip, struct snd_pcm_substream **sub);
+unsigned int es1869_a2_tied_rate(struct es1869 *chip);
 
 // regs_hwdep.c
 int es1869_regs_hwdep_new(struct es1869 *chip);
@@ -219,6 +243,7 @@ void es1869_a1_start_settle(struct es1869 *chip,
 // main.c: power save
 int es1869_power_up(struct es1869 *chip);
 void es1869_power_idle(struct es1869 *chip);
+void es1869_power_save_changed(struct es1869 *chip);
 
 // dual.c
 int es1869_dual_new(struct es1869 *chip);
@@ -226,8 +251,19 @@ void es1869_dual_settled(struct es1869 *chip);
 
 // esfm.c
 #define ES1869_ESFM_SEQ_ID "es1869-esfm"
+
+// what snd-es1869-esfm wants to hear, with its private pointer
+struct es1869_esfm_ops {
+	void (*resume)(void *data); // the chip lost what the synth wrote
+	void (*bank)(void *data); // esfm_bank or esfm_square was written
+};
+
 int es1869_fm_new(struct es1869 *chip);
 void es1869_fm_resume(struct es1869 *chip);
+void es1869_esfm_set_ops(struct es1869 *chip,
+			 const struct es1869_esfm_ops *ops, void *data);
+void es1869_esfm_bank_changed(struct es1869 *chip);
+void es1869_opl3_gate(struct es1869 *chip);
 int es1869_esfm_new(struct es1869 *chip);
 int es1869_esfm_claim(struct es1869 *chip);
 void es1869_esfm_release(struct es1869 *chip);

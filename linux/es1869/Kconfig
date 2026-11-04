@@ -148,16 +148,6 @@ config SND_ES1869_DEFAULT_BEEP_VOLUME
 	  beep_volume sets it at load and at runtime, through
 	  /sys/module/snd_es1869/parameters/beep_volume.
 
-config SND_ES1869_DEFAULT_CAPTURE_VOLUME
-	int "capture_volume"
-	range 0 15
-	default 4
-	help
-	  The record level (B4h, right in bits 7:4), 1.5 dB a step. The
-	  ALSA control "Capture Volume". The module parameter
-	  capture_volume sets it at load and at runtime, through
-	  /sys/module/snd_es1869/parameters/capture_volume.
-
 config SND_ES1869_DEFAULT_CAPTURE_SOURCE
 	int "capture_source"
 	range 0 7
@@ -168,6 +158,16 @@ config SND_ES1869_DEFAULT_CAPTURE_SOURCE
 	  Source". The module parameter capture_source sets it at load
 	  and at runtime, through
 	  /sys/module/snd_es1869/parameters/capture_source.
+
+config SND_ES1869_DEFAULT_CAPTURE_VOLUME
+	int "capture_volume"
+	range 0 15
+	default 4
+	help
+	  The record level (B4h, right in bits 7:4), 1.5 dB a step. The
+	  ALSA control "Capture Volume". The module parameter
+	  capture_volume sets it at load and at runtime, through
+	  /sys/module/snd_es1869/parameters/capture_volume.
 
 config SND_ES1869_DEFAULT_CAPTURE_SWITCH
 	int "capture_switch"
@@ -558,10 +558,10 @@ config SND_ES1869_DEFAULT_SELF_POWER_DOWN
 	range 0 255
 	default 0
 	help
-	  Power down after this many 8 s of no access (BDh), 0 never.
-	  The ALSA control "Self-Timed Power Down". The module parameter
-	  self_power_down sets it at load and at runtime, through
-	  /sys/module/snd_es1869/parameters/self_power_down.
+	  Partly power down after this many 8 s of no access (BDh), 0
+	  never. The ALSA control "Self-Timed Power Down". The module
+	  parameter self_power_down sets it at load and at runtime,
+	  through /sys/module/snd_es1869/parameters/self_power_down.
 
 config SND_ES1869_DEFAULT_GPO_POWER_DOWN
 	int "gpo_power_down"
@@ -697,10 +697,9 @@ config SND_ES1869_DEFAULT_A2_TICK_US
 	default 2000
 	help
 	  The ring's refill period on DMA 5 while a copy is behind (us);
-	  otherwise a quarter of a2_lead_ms under dmix, half of it for
-	  other clients. The module parameter a2_tick_us sets it at load
-	  and at runtime, through
-	  /sys/module/snd_es1869/parameters/a2_tick_us.
+	  under dmix a quarter of a2_lead_ms, if that is longer. The
+	  module parameter a2_tick_us sets it at load and at runtime,
+	  through /sys/module/snd_es1869/parameters/a2_tick_us.
 
 config SND_ES1869_DEFAULT_A2_PAUSE
 	int "a2_pause"
@@ -885,9 +884,10 @@ config SND_ES1869_DEFAULT_ESFM_SILENCE_ON_CLOSE
 	range 0 1
 	default 1
 	help
-	  Every voice off when the synth's last user goes. The module
-	  parameter esfm_silence_on_close sets it at load and at
-	  runtime, through
+	  Every voice off when the synth's last user goes, the pedal's
+	  too; 0 is ESS's all notes off, though the FM's return to the
+	  OPL3 mode stops them right after. The module parameter
+	  esfm_silence_on_close sets it at load and at runtime, through
 	  /sys/module/snd_es1869/parameters/esfm_silence_on_close.
 
 config SND_ES1869_DEFAULT_ESFM_PEDAL_RELEASE

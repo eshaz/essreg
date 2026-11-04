@@ -48,6 +48,16 @@ The driver also follows the other measurements in
   silences a period and two FIFOs past the last frame itself, as far as the
   buffer is free, and goes on as the DMA frees more: a drain that began with
   the buffer full, as after a resume, played up to a period of old data.
+* A drain's position, on every playback device, stays a FIFO behind the DMA,
+  so that the drain ends once the DAC has played the last frame. ESS's
+  drivers wait for the FIFO too (DS p.49). A stop at the DMA's own end cut
+  32 ms off a sound at 8 kHz on Audio 1.
+* A position never steps back, but only a step of a FIFO or so counts as
+  one. Over half the buffer in one step is normal with two periods, where a
+  client that polls, as JACK does, reads the pointer only at the interrupts.
+* What the ring copies depends on whether the application's pointer moved,
+  not on how far it is from the DMA, because dmix's pointer stands at 0 and
+  the DMA comes near it when the position nears the boundary, after 6 hours.
 * Every device takes a whole number of periods in its buffer, two at least.
   Without that the interrupts moved against the buffer at each wrap, and
   speaker-test, which wants two periods, took one of 12000 frames, more than
@@ -104,7 +114,8 @@ programs that set the master still work.
   and 2 on Audio 1 and 3 and 4 on Audio 2, on Audio 1's clock and from one
   start; on the Armada the two DACs began 1 to 4.5 frames apart, not the
   same at every rate or every start (es1869test's dual.align). It opens with
-  `dual_playback=1`, and needs both engines free.
+  `dual_playback=1`, and needs both engines free and Audio 2 on a 16-bit DMA
+  channel.
 * hwdep 0 and the sequencer's "OPL3 FM" synth: the FM in its OPL3 mode.
 * hwdep 1, "ES1869 ESFM": the FM in its native ESFM mode, for programs that
   write its registers themselves (ioctls in `uapi/es1869.h`).
@@ -145,8 +156,9 @@ the chip's own record paths, Audio 2's playback level (7Ch) and record level
 (6Bh) the microphone's, within 0.6 dB, and the record level (B4h) its 1.5 dB
 steps from -6 dB, down to 0 without a mute, within 0.1 dB. The master's and
 Audio 1's levels can be heard only through the cable, and the Play! 3's
-microphone input that it ends in hears a 6 dB step as 7 to 10 dB, so they
-follow the table unmeasured.
+microphone input that it ends in hears a 6 dB step as 7 to 10 dB. The master
+is measured through AOUT, record source 3, within 0.33 dB of the table, and
+Audio 1's level (14h) follows the table unmeasured.
 
 The chip's clocks, measured against each other: the 768 kHz clock runs 252
 ppm fast of the 793.8 kHz one, and the FM's 0.21 % fast of 49716 Hz on it.
@@ -189,12 +201,9 @@ low.
 
 Measured with es1869test, frame by frame where the music DAC records Audio 2
 ([ES1869TEST.md](ES1869TEST.md)):
-* Audio 2's interrupt comes when its DMA has fetched a period's last byte,
-  up to its FIFO of 64 bytes before that byte plays, and a stop clears the
-  FIFO. So a drain loses the last frames still in the FIFO, 1 to 15 frames
-  on the Armada, and a pause's release, which starts the engine afresh from
-  the paused frame less a FIFO, can play a few frames again (4 on the
-  Armada).
+* Audio 2's stop clears its FIFO, so a pause's release, which starts the
+  engine afresh from the paused frame less a FIFO, can play a few frames
+  again (4 on the Armada).
 * Under dmix on a 16-bit channel, the ring of words copies the window ahead
   of the DMA every quarter of `a2_lead_ms`, 10 ms by default, and dmix mixes
   a stream in at the DMA's position, so a stream can lose up to that much of
@@ -221,8 +230,12 @@ With `pwr_save` set to a number of seconds, the chip powers down when
 nothing has used it for that long: partly, with the mixer, the inputs, the
 MPU-401 and the volume buttons still on, or fully with `pwr_full=1`. The
 next program that opens a device wakes it, which after a full power-down
-takes 64 ms and puts every register back. Suspend and resume put the chip
-back as it was.
+takes 100 ms and puts every register back. The OPL3 synth has no open, so
+its first events after a full power-down start the wake and are lost.
+Suspend and resume put the chip back as it was: the streams go on after a
+prepare, the FM stays in the mode its user chose, and an open MIDI port goes
+back to its UART mode. If the chip doesn't come back, its devices fail and
+the programs that had them open can close them.
 
 ## MIDI
 
@@ -297,8 +310,9 @@ On the Armada, the chip's resources are those that DOS and Windows use too:
 
 Without `isapnp=0` the driver takes the ESS1869 device that the BIOS
 describes through ACPI or the PnP BIOS. In legacy mode the resources the
-parameters leave out come from the chip's own PnP registers. snd-es18xx
-claims the same devices, so blacklist it.
+parameters leave out come from the chip's own PnP registers, and those they
+give go into them. With no DMA channel for Audio 2 (75h at 4), Audio 1 runs
+alone. snd-es18xx claims the same devices, so blacklist it.
 
 The Armada's BIOS keeps the chip's resources in CMOS, as Computer Setup's
 Audio page sets them, and programs them into the chip at POST. Either DMA
@@ -326,12 +340,13 @@ copy.
 Each setting below is a module parameter. It can be given to modprobe, on
 the kernel command line as `snd_es1869.<name>=<value>`, and at runtime
 through `/sys/module/snd_es1869/parameters/<name>`. A write at runtime goes
-to the chip at once, and the control of the same setting announces it. A
-stereo value is written as `left,right`, or as one value for both. An enum
-takes its number or its text. Where a setting has a control, alsamixer and
-amixer change it too; alsactl restores the controls at boot, after the
-module has loaded, so a saved state wins over a parameter. The defaults are
-the Kconfig options `CONFIG_SND_ES1869_DEFAULT_<NAME>`.
+to the chip at once, unless the setting says otherwise below, and the
+control of the same setting announces it. A stereo value is written as
+`left,right`, or as one value for both. An enum takes its number or its
+text. Where a setting has a control, alsamixer and amixer change it too;
+alsactl restores the controls at boot, after the module has loaded, so a
+saved state wins over a parameter. The defaults are the Kconfig options
+`CONFIG_SND_ES1869_DEFAULT_<NAME>`.
 
 <!-- settings -->
 
@@ -357,11 +372,11 @@ the Kconfig options `CONFIG_SND_ES1869_DEFAULT_<NAME>`.
   MONO_IN to the output (6Dh), 13 = 0 dB.
 * `beep_volume` ("Beep Playback Volume"): 0 to 7, default 0. The PC speaker
   (3Ch bits 2:0), 7 = -6 dB, 0 mutes it.
-* `capture_volume` ("Capture Volume"): 0 to 15 a channel, default 4. The
-  record level (B4h, right in bits 7:4), 1.5 dB a step.
 * `capture_source` ("Capture Source"): 0 Mic, 1 Mic Master, 2 CD, 3 AOUT, 4
   Mic1, 5 Mix, 6 Line, 7 Master, default Mix. The record source (1Ch bits
   2:0): 5 the record mixer, 7 the 3-D output before the master.
+* `capture_volume` ("Capture Volume"): 0 to 15 a channel, default 4. The
+  record level (B4h, right in bits 7:4), 1.5 dB a step.
 * `capture_switch` ("Capture Switch"): 0 to 1, default 1. The record source
   on (1Ch bit 4 clear).
 * `record_monitor` ("Record Monitor"): 0 to 1, default 0. AOUT carries the
@@ -395,20 +410,24 @@ the Kconfig options `CONFIG_SND_ES1869_DEFAULT_<NAME>`.
 * `audio1_filter` ("Audio 1 Filter Switch"): 0 to 1, default 0. Audio 1's
   filter in use (71h bit 2 clear), also the ADC's anti-alias filter.
 * `audio2_own_clock` ("Audio 2 Own Clock Switch"): 0 to 1, default 1. Audio
-  2 at its own rate (71h bit 1), else slaved to Audio 1's.
+  2 at its own rate (71h bit 1), else slaved to Audio 1's. A write fails
+  with EBUSY while Audio 2 is open.
 * `audio2_to_fm` ("Audio 2 To FM Playback Switch"): 0 to 1, default 0. Audio
   2 slaved to the FM (71h bit 0): mixed into the music DAC at 49716 Hz, its
-  sides swapped.
+  sides swapped. A write fails with EBUSY while Audio 2 is open.
 * `video_switch` ("Video Playback Switch"): 0 to 1, default 0. The music DAC
   driven by I2S (7Fh bit 0), which silences FM.
 * `es689` ("ES689 Input Switch"): 0 to 1, default 1. The ES689 wavetable
   interface (48h bit 4).
 * `a8_play_bits`: 0 to 244, default 0. A8h's bits beside its channels and
-  monitor in playback: ESS's player keeps 00h.
+  monitor in playback: ESS's player keeps 00h. It takes effect at the next
+  prepare.
 * `a8_rec_bits`: 0 to 244, default 244. A8h's bits beside its channels and
-  monitor in a recording: ESS's F4h (F5h/F6h).
+  monitor in a recording: ESS's F4h (F5h/F6h). It takes effect at the next
+  prepare.
 * `filter_corner`: 100 to 1000, default 875. The filters' corner below 44.1
-  kHz, in thousandths of half the rate; ESS's 875.
+  kHz, in thousandths of half the rate; ESS's 875. It takes effect at the
+  next prepare.
 * `mono_out` ("Mono Output Source"): 0 Mute, 1 CIN_R, 2 Audio 2 Right, 3
   Record Mix, default Record Mix. What MONO_OUT carries (7Dh bits 2:1);
   ESS's 3.
@@ -440,11 +459,13 @@ the Kconfig options `CONFIG_SND_ES1869_DEFAULT_<NAME>`.
 * `hwvol_count3` ("Hardware Volume Count By 3 Switch"): 0 to 1, default 0.
   2.25 dB a push instead of 0.75 dB (64h bit 5).
 * `gpo0` ("GPO0 Switch"): 0 to 1, default 0. The GPO0 pin (Audio_Base+7 bit
-  0), low after a hardware reset.
+  0), low after a hardware reset. Without a parameter at load, the chip
+  keeps its level.
 * `gpo1` ("GPO1 Switch"): 0 to 1, default 1. The GPO1 pin (Audio_Base+7 bit
-  1), high after a hardware reset.
-* `self_power_down` ("Self-Timed Power Down"): 0 to 255, default 0. Power
-  down after this many 8 s of no access (BDh), 0 never.
+  1), high after a hardware reset. Without a parameter at load, the chip
+  keeps its level.
+* `self_power_down` ("Self-Timed Power Down"): 0 to 255, default 0. Partly
+  power down after this many 8 s of no access (BDh), 0 never.
 * `gpo_power_down` ("GPO Power Down"): 0 to 255, default 0. The GPOs at
   power-down (DSP CFh, read with CEh).
 * `pwr_save`: 0 to 3600, default 0. Seconds of idleness before a power-down,
@@ -452,15 +473,18 @@ the Kconfig options `CONFIG_SND_ES1869_DEFAULT_<NAME>`.
 * `pwr_full`: 0 to 1, default 0. Power down fully (the inputs go silent)
   instead of partly.
 * `dma_single` ("Single Mode DMA Switch"): 0 to 1, default 0. Single
-  transfers instead of demand transfers (8237, B9h, 78h).
+  transfers instead of demand transfers (8237, B9h, 78h). It takes effect at
+  the next prepare.
 * `a1_burst` ("Audio 1 DMA Burst"): 0 Type 0, 1 Type 1, 2 Type 2, default
-  Type 2. Audio 1's demand transfers (B9h); ESS's 2.
+  Type 2. Audio 1's demand transfers (B9h); ESS's 2. It takes effect at the
+  next prepare.
 * `a2_burst` ("Audio 2 DMA Burst"): 0 Single, 1 Demand 2, 2 Demand 4, 3
   Demand 8, default Demand 4. Audio 2's transfers (78h bits 7:6); ESS's
-  demand 4.
+  demand 4. It takes effect at the next prepare.
 * `piix4_type_f`: 0 to 1, default 0. 1 keeps an Intel PIIX4's Type F DMA
   timing on Audio 1's channel as the BIOS set it; 0 turns it off, since with
-  it a recording's first transfer hung the Armada.
+  it a recording's first transfer hung the Armada. A write fails with EBUSY
+  while Audio 1 is open.
 * `drq_latch` ("DRQ Latch Switch"): 0 to 1, default 1. Each DRQ held until
   its DACK (card register 25h bit 7).
 * `a1_settle_us`: 20 to 2000, default 32. Audio 1's start held masked at
@@ -476,22 +500,24 @@ the Kconfig options `CONFIG_SND_ES1869_DEFAULT_<NAME>`.
 * `a2_lead_ms`: 4 to 500, default 40. How far ahead Audio 2's ring is filled
   on DMA 5 (ms).
 * `a2_tick_us`: 500 to 20000, default 2000. The ring's refill period on DMA
-  5 while a copy is behind (us); otherwise a quarter of a2_lead_ms under
-  dmix, half of it for other clients.
+  5 while a copy is behind (us); under dmix a quarter of a2_lead_ms, if that
+  is longer.
 * `a2_pause`: 0 to 1, default 0. Pause on an 8-bit Audio 2 channel through
-  78h, which may resume off step.
+  78h, which may resume off step. It takes effect at the next prepare.
 * `a1p_max_rate`: 3101 to 793800, default 48000. Audio 1 playback's highest
-  rate (Hz).
+  rate (Hz). It takes effect at the next prepare.
 * `a1c_max_rate`: 3101 to 793800, default 52920. Audio 1 recording's highest
-  rate (Hz): the ADC delivers nothing from 56700.
+  rate (Hz): the ADC delivers nothing from 56700. It takes effect at the
+  next prepare.
 * `a2_max_rate`: 6000 to 793800, default 96000. Audio 2's highest rate (Hz):
-  clean to 99225 with Audio 1 recording, 132300 alone.
+  clean to 99225 with Audio 1 recording, 132300 alone. It takes effect at
+  the next prepare.
 * `a1_max_bps`: 12404 to 3175200, default 211680. Audio 1's highest DMA byte
-  rate.
+  rate. It takes effect at the next prepare.
 * `a2_max_bps`: 12404 to 3175200, default 384000. Audio 2's highest DMA byte
-  rate.
+  rate. It takes effect at the next prepare.
 * `rate_limit`: 0 to 1, default 1. 0 lifts the rate limits above, for
-  es1869test's rate.max.
+  es1869test's rate.max. It takes effect at the next prepare.
 * `fmdig_device`: 0 to 1, default 1. PCM device 1, the music DAC recorded
   digitally, opens.
 * `dual_playback`: 0 to 1, default 0. PCM device 2, both DACs as four
@@ -515,7 +541,8 @@ the Kconfig options `CONFIG_SND_ES1869_DEFAULT_<NAME>`.
 * `esfm_square`: 0 to 1, default 0. The bank with the better square wave
   (es1869/esfm-gm-square.bin).
 * `esfm_silence_on_close`: 0 to 1, default 1. Every voice off when the
-  synth's last user goes.
+  synth's last user goes, the pedal's too; 0 is ESS's all notes off, though
+  the FM's return to the OPL3 mode stops them right after.
 * `esfm_pedal_release`: 0 to 1, default 1. A program change releases the
   sustain pedal.
 * `esfm_vibrato`: 0 to 1, default 1. Vibrato from the modulation wheel and

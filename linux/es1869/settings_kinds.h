@@ -44,7 +44,7 @@
 #define F_INV 0x008
 #define F_SWAP 0x010
 #define F_HOOK 0x020
-#define F_RO 0x040
+#define F_FOUND 0x040
 #define F_IDLE 0x080
 #define F_NEXT 0x100
 #define F_IDLE_A1 0x200

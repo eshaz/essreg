@@ -176,6 +176,61 @@ void es1869_stream_rate(struct snd_pcm_runtime *runtime, bool a1, u32 *num,
 	es1869_best_rate(runtime->rate, a1, num, den);
 }
 
+// the DMA runs up to a FIFO ahead of the DAC, the rest of the stream's
+// delay; a drain counts it in the position instead, so that it ends once
+// the DAC has played the last frame, where the stop would drop what the
+// FIFO holds. A step back like that is a reading es1869_forward holds, so
+// that FIFO is its window with the 32 transfers two readings may differ by
+snd_pcm_uframes_t es1869_play_pointer(struct snd_pcm_runtime *rt,
+				      unsigned long off, unsigned int fifo,
+				      bool draining, unsigned long *last)
+{
+	snd_pcm_uframes_t size = rt->buffer_size;
+	snd_pcm_uframes_t back = min_t(snd_pcm_uframes_t,
+				       bytes_to_frames(rt, fifo), size / 4);
+
+	rt->delay = draining ? 0 : bytes_to_frames(rt, fifo);
+	if (draining) {
+		off = (off + size - back) % size;
+		// short of the period's end at an interrupt, which the core
+		// takes for an interrupt acknowledged twice, and adds a buffer,
+		// if its last reading looks old, as right after a pause's
+		// release: this reading is what it compares with
+		rt->hw_ptr_jiffies = jiffies;
+	}
+	return es1869_forward(last, off, size,
+			      bytes_to_frames(rt, fifo + 32));
+}
+
+// a stream's fill plan: the guard in bytes, the lead from a2_lead_ms, and
+// slack, the frames the DMA may start behind the pointer
+void es1869_fill_init(struct es1869_fill *f, struct snd_pcm_runtime *rt,
+		      unsigned int guard, unsigned long slack)
+{
+	unsigned long g = max_t(unsigned long, bytes_to_frames(rt, guard), 1);
+	unsigned long lead = div_u64((u64)rt->rate *
+				     es1869_val(ES_S_a2_lead_ms), 1000);
+
+	*f = (struct es1869_fill){
+		.buffer = rt->buffer_size,
+		.boundary = rt->boundary,
+		.guard = g,
+		.lead = min(lead, rt->buffer_size - g),
+		.slack = slack,
+	};
+}
+
+// the timer's period while the pointer stands: a quarter of the lead, and
+// at most half of what one tick copies, so that the frames ahead of the
+// DMA are copied again before it gets there, whatever the rate
+u32 es1869_standing_us(struct snd_pcm_runtime *rt, u32 budget)
+{
+	u32 half = div_u64((u64)bytes_to_frames(rt, budget) * 500000, rt->rate);
+	u32 lead = es1869_val(ES_S_a2_lead_ms) * 1000 / 4;
+
+	return max_t(u32, es1869_val(ES_S_a2_tick_us), min(lead, half));
+}
+
 // a drain's silence past the last frame, in the application's buffer and
 // the ring that the DMA reads: as far as the DMA has freed the buffer (hw,
 // the absolute frame it has reached), up to a period and two of the
@@ -193,8 +248,10 @@ void es1869_drain_silence(struct snd_pcm_substream *ss, snd_pcm_uframes_t hw,
 	snd_pcm_uframes_t want = rt->period_size + 2 * bytes_to_frames(rt, fifo);
 	snd_pcm_uframes_t done = (*to + bound - appl) % bound, a, n, part;
 
+	// the DMA past the last frame, which it reaches before the drain ends:
+	// the whole buffer has played
 	if (queued > b)
-		return;
+		queued = 0;
 	want = min(want, b - queued);
 	if (done >= want)
 		return;
@@ -208,6 +265,31 @@ void es1869_drain_silence(struct snd_pcm_substream *ss, snd_pcm_uframes_t hw,
 }
 
 // --- Audio 1 -------------------------------------------------------------------
+
+// a DSP that stayed busy, or that a timeout left out of step, takes a reset,
+// with Audio 1 stopped: Audio 2 and the mixer go on through it (rst.ext in
+// docs/ESS_EXTENDED.md), and the settings on its registers go back
+int es1869_dsp_recover(struct es1869 *chip)
+{
+	unsigned long flags;
+	int err;
+
+	spin_lock_irqsave(&chip->reg_lock, flags);
+	chip->hw.desync = false;
+	chip->adc_on = false;
+	chip->a1_dac = false;
+	err = es1869_reset(&chip->hw);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	if (err) {
+		dev_err(chip->dev, "the DSP doesn't answer (%d)\n", err);
+		return err;
+	}
+	dev_warn(chip->dev, "the DSP was out of step: reset\n");
+	chip->recovering = true;
+	es1869_settings_apply_ctrl(chip);
+	chip->recovering = false;
+	return 0;
+}
 
 static bool a1_capture(struct es1869 *chip)
 {
@@ -230,7 +312,8 @@ static enum hrtimer_restart a1_settle_fn(struct hrtimer *t)
 		if (es1869_val(ES_S_irq_trace))
 			dev_info(chip->dev, "Audio 1's input settled\n");
 		chip->io.dma_mask(chip, chip->dma1, false);
-		es1869_a1_go(&chip->hw, true);
+		if (es1869_a1_go(&chip->hw, true))
+			dev_err(chip->dev, "the DSP refused a recording's start\n");
 		chip->a1_state = ES_A1_RUNNING;
 	} else if (chip->a1_state == ES_A1_SETTLING) {
 		if (es1869_val(ES_S_irq_trace))
@@ -255,10 +338,19 @@ static u64 a1_settle_ns(struct snd_pcm_runtime *runtime)
 	return max(ns, frames);
 }
 
+static void a1_release(struct es1869 *chip)
+{
+	mutex_lock(&chip->state_mutex);
+	chip->a1_owner = ES_OWN_NONE;
+	chip->a1_sub = NULL;
+	mutex_unlock(&chip->state_mutex);
+}
+
 static int a1_open(struct snd_pcm_substream *substream, enum es1869_owner who)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
+	unsigned int tied;
 	int err = 0;
 
 	if (who == ES_OWN_FMC && !es1869_val(ES_S_fmdig_device))
@@ -276,33 +368,42 @@ static int a1_open(struct snd_pcm_substream *substream, enum es1869_owner who)
 		if (err)
 			chip->a1_owner = ES_OWN_NONE;
 	}
+	tied = es1869_a2_tied_rate(chip);
 	mutex_unlock(&chip->state_mutex);
 	if (err)
 		return err;
 
 	if (who == ES_OWN_FMC) {
 		runtime->hw = fm_capture_hw;
-		return es1869_whole_periods(runtime);
+		err = es1869_whole_periods(runtime);
+		goto out;
 	}
 	runtime->hw = a1_play_hw;
 	if (who == ES_OWN_A1C)
 		runtime->hw.info &= ~SNDRV_PCM_INFO_PAUSE;
+	else
+		runtime->hw.info |= SNDRV_PCM_INFO_DRAIN_TRIGGER;
 	err = snd_pcm_hw_constraint_ratnums(runtime, 0, SNDRV_PCM_HW_PARAM_RATE,
 					    &es1869_a1_rates);
+	// a slaved Audio 2 plays at A1h's rate, which is Audio 1's too
+	if (err >= 0 && tied)
+		err = snd_pcm_hw_constraint_single(runtime,
+						   SNDRV_PCM_HW_PARAM_RATE, tied);
+	if (err >= 0)
+		err = es1869_pcm_limits(runtime, who == ES_OWN_A1C ? &limit_a1c :
+								     &limit_a1p);
+out:
+	// the core calls no close for an open that failed
 	if (err < 0)
-		return err;
-	return es1869_pcm_limits(runtime, who == ES_OWN_A1C ? &limit_a1c :
-							      &limit_a1p);
+		a1_release(chip);
+	return err < 0 ? err : 0;
 }
 
 static int a1_close(struct snd_pcm_substream *substream)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(substream);
 
-	mutex_lock(&chip->state_mutex);
-	chip->a1_owner = ES_OWN_NONE;
-	chip->a1_sub = NULL;
-	mutex_unlock(&chip->state_mutex);
+	a1_release(chip);
 	es1869_power_idle(chip);
 	return 0;
 }
@@ -363,9 +464,15 @@ static int a1_prepare(struct snd_pcm_substream *substream)
 		.corner = es1869_val(ES_S_filter_corner),
 		.a8 = es1869_val(capture ? ES_S_a8_rec_bits : ES_S_a8_play_bits),
 	};
+	unsigned int tied;
 	unsigned long flags;
-	int err;
+	int err, tries;
 
+	mutex_lock(&chip->state_mutex);
+	tied = es1869_a2_tied_rate(chip);
+	mutex_unlock(&chip->state_mutex);
+	if (tied && tied != runtime->rate)
+		return -EBUSY;
 	if (es1869_val(ES_S_irq_trace))
 		dev_info(chip->dev, "%s: DMA %d at %#x, %u bytes, period %u\n",
 			 es1869_owner_names[chip->a1_owner], s.ch, s.dma_phys,
@@ -380,27 +487,33 @@ static int a1_prepare(struct snd_pcm_substream *substream)
 	}
 	// a recording turns the codec to the ADC now, unless it is there
 	s.adc = chip->a1_owner == ES_OWN_A1C && es1869_val(ES_S_a1c_settle_ms);
-	spin_lock_irqsave(&chip->reg_lock, flags);
-	chip->a1_state = ES_A1_IDLE;
-	chip->a1_last = 0;
-	err = es1869_a1_prepare(&chip->hw, &s, capture,
-				es1869_val(ES_S_record_monitor));
-	if (!err && s.adc && !chip->adc_on)
-		chip->adc_since = ktime_get();
-	chip->adc_on = !err && s.adc;
 	// a read waits out the settle on top of the core's own timeout, the
 	// buffer's time and a tenth or 100 ms
 	substream->wait_time = s.adc ? es1869_val(ES_S_a1c_settle_ms) +
 				max_t(long, 100, div_u64((u64)runtime->buffer_size *
 							 1100, runtime->rate)) :
 				0;
-	if (!err && chip->a1_owner == ES_OWN_FMC)
-		es1869_mix_update(&chip->hw, 0x7F, 0x11, 0x10);
-	if (!err && !capture && !chip->a1_dac) {
-		err = es1869_a1_dac(&chip->hw, true);
-		chip->a1_dac = !err;
+	for (tries = 0; tries < 2; tries++) {
+		spin_lock_irqsave(&chip->reg_lock, flags);
+		chip->a1_state = ES_A1_IDLE;
+		chip->a1_draining = false;
+		chip->a1_last = 0;
+		err = es1869_a1_prepare(&chip->hw, &s, capture,
+					es1869_val(ES_S_record_monitor));
+		if (!err && s.adc && !chip->adc_on)
+			chip->adc_since = ktime_get();
+		chip->adc_on = !err && s.adc;
+		if (!err && chip->a1_owner == ES_OWN_FMC)
+			es1869_mix_update(&chip->hw, 0x7F, 0x11, 0x10);
+		if (!err && !capture && !chip->a1_dac) {
+			err = es1869_a1_dac(&chip->hw, true);
+			chip->a1_dac = !err;
+		}
+		spin_unlock_irqrestore(&chip->reg_lock, flags);
+		if ((err != -EBUSY && err != -EIO) || tries ||
+		    es1869_dsp_recover(chip))
+			break;
 	}
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	if (es1869_val(ES_S_irq_trace))
 		dev_info(chip->dev, "%s prepared: %d\n",
 			 es1869_owner_names[chip->a1_owner], err);
@@ -415,6 +528,8 @@ void es1869_a1_start_settle(struct es1869 *chip,
 	if (es1869_val(ES_S_a1_settle_mode)) {
 		ndelay(ns);
 		chip->io.dma_mask(chip, chip->dma1, false);
+		if (chip->a1_owner == ES_OWN_DUAL)
+			es1869_dual_settled(chip);
 		chip->a1_state = ES_A1_RUNNING;
 		return;
 	}
@@ -435,6 +550,17 @@ static u64 a1c_settle_left(struct es1869 *chip)
 	left = (s64)es1869_val(ES_S_a1c_settle_ms) * NSEC_PER_MSEC -
 	       ktime_to_ns(ktime_sub(ktime_get(), chip->adc_since));
 	return left > 0 ? left : 0;
+}
+
+// the silence in the buffer that the DMA reads, for a drain and the core
+static int a1_fill_silence(struct snd_pcm_substream *substream, int channel,
+			   unsigned long pos, unsigned long bytes)
+{
+	struct snd_pcm_runtime *runtime = substream->runtime;
+
+	snd_pcm_format_set_silence(runtime->format, runtime->dma_area + pos,
+				   bytes_to_samples(runtime, bytes));
+	return 0;
 }
 
 static int a1_trigger(struct snd_pcm_substream *substream, int cmd)
@@ -467,12 +593,20 @@ static int a1_trigger(struct snd_pcm_substream *substream, int cmd)
 		if (!err)
 			es1869_a1_start_settle(chip, runtime);
 		break;
+	case SNDRV_PCM_TRIGGER_DRAIN:
+		chip->a1_silent_to = runtime->control->appl_ptr;
+		chip->a1_draining = true;
+		es1869_drain_silence(substream, runtime->status->hw_ptr,
+				     ES_FIFO_A1, &chip->a1_silent_to,
+				     a1_fill_silence);
+		break;
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 		hrtimer_try_to_cancel(&chip->a1_settle);
 		err = es1869_a1_stop(&chip->hw, capture, chip->dma1,
 				     chip->adc_on);
 		chip->a1_state = ES_A1_IDLE;
+		chip->a1_draining = false;
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		if (chip->a1_state == ES_A1_SETTLING)
@@ -500,7 +634,7 @@ static snd_pcm_uframes_t a1_pointer(struct snd_pcm_substream *substream)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	unsigned long flags;
+	unsigned long flags, off;
 	u32 pos;
 
 	spin_lock_irqsave(&chip->reg_lock, flags);
@@ -509,11 +643,16 @@ static snd_pcm_uframes_t a1_pointer(struct snd_pcm_substream *substream)
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	if (es1869_val(ES_S_irq_trace) >= 2)
 		dev_info_ratelimited(chip->dev, "Audio 1 at %u\n", pos);
-	// the DMA runs a full FIFO ahead of the DAC
-	if (!a1_capture(chip))
-		runtime->delay = bytes_to_frames(runtime, ES_FIFO_A1);
-	return es1869_forward(&chip->a1_last, bytes_to_frames(runtime, pos),
-			      runtime->buffer_size);
+	off = bytes_to_frames(runtime, pos);
+	if (a1_capture(chip))
+		return es1869_forward(&chip->a1_last, off, runtime->buffer_size,
+				      bytes_to_frames(runtime, 32));
+	if (chip->a1_draining)
+		es1869_drain_silence(substream, es1869_abs_frame(runtime, off),
+				     ES_FIFO_A1, &chip->a1_silent_to,
+				     a1_fill_silence);
+	return es1869_play_pointer(runtime, off, ES_FIFO_A1, chip->a1_draining,
+				   &chip->a1_last);
 }
 
 static int a1_sync_stop(struct snd_pcm_substream *substream)
@@ -624,6 +763,12 @@ static int play_sync_stop(struct snd_pcm_substream *substream)
 	return PLAY(sync_stop, substream);
 }
 
+static int play_fill_silence(struct snd_pcm_substream *substream, int channel,
+			     unsigned long pos, unsigned long bytes)
+{
+	return PLAY(fill_silence, substream, channel, pos, bytes);
+}
+
 static const struct snd_pcm_ops play_ops = {
 	.open = play_open,
 	.close = play_close,
@@ -634,6 +779,7 @@ static const struct snd_pcm_ops play_ops = {
 	.pointer = play_pointer,
 	.ack = play_ack,
 	.sync_stop = play_sync_stop,
+	.fill_silence = play_fill_silence,
 };
 
 int es1869_pcm_new(struct es1869 *chip)

@@ -38,7 +38,7 @@ static int writable(const struct et_setting *s)
 		if (!strcmp(s->id, never_write[i]))
 			return 0;
 	return (s->flags & F_CTL) && (s->flags & F_PARAM) &&
-	       !(s->flags & (F_RO | F_HOOK)) && s->kind != S_STR;
+	       !(s->flags & F_HOOK) && s->kind != S_STR;
 }
 
 // probe.card: the devices, the proc file, the register hwdep, and the

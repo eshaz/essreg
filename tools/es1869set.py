@@ -183,6 +183,13 @@ def wrap(text, width):
     return lines
 
 
+# what the docs add to a setting's description, for what its flags change
+WHEN = (("F_NEXT", " It takes effect at the next prepare."),
+        ("F_IDLE", " A write fails with EBUSY while Audio 2 is open."),
+        ("F_IDLE_A1", " A write fails with EBUSY while Audio 1 is open."),
+        ("F_FOUND", " Without a parameter at load, the chip keeps its level."))
+
+
 def doc_section(rows):
     out = [MARK_BEGIN + "\n\n"]
     for r in rows:
@@ -199,9 +206,10 @@ def doc_section(rows):
         else:
             what = "%d to %d, default %d" % (r["min"], r["max"], r["def"])
         ctl = ' ("%s")' % r["control"] if r["control"] else ""
-        out.append("* `%s`%s: %s. %s.\n" % (r["id"], ctl, what,
-                                            r["desc"][0].upper() +
-                                            r["desc"][1:]))
+        when = "".join(text for flag, text in WHEN if flag in r["flags"])
+        out.append("* `%s`%s: %s. %s.%s\n" % (r["id"], ctl, what,
+                                              r["desc"][0].upper() +
+                                              r["desc"][1:], when))
     out.append("\n" + MARK_END)
     return "".join(out)
 

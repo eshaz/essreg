@@ -29,6 +29,7 @@
 
 #define DUAL_BUDGET 8192 // the stream bytes one copy takes, at most
 #define DUAL_GUARD 16 // the bytes left alone just ahead of the DMA
+#define DUAL_FIFO (2 * ES_FIFO_A1) // Audio 1's, in four-channel bytes
 
 static const struct snd_pcm_hardware dual_hw = {
 	.info = SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_MMAP_VALID |
@@ -63,14 +64,6 @@ static snd_pcm_uframes_t dual_offset(struct es1869 *chip,
 	return (pos / half) % rt->buffer_size;
 }
 
-static snd_pcm_uframes_t dual_hw_abs(struct snd_pcm_runtime *rt,
-				     snd_pcm_uframes_t off)
-{
-	snd_pcm_uframes_t b = rt->buffer_size, known = rt->status->hw_ptr;
-
-	return (known + (off + b - known % b) % b) % rt->boundary;
-}
-
 // frames of the application's buffer, from absolute frame from, into
 // both halves
 static void dual_copy(struct es1869 *chip, struct snd_pcm_runtime *rt,
@@ -80,19 +73,20 @@ static void dual_copy(struct es1869 *chip, struct snd_pcm_runtime *rt,
 	snd_pcm_uframes_t b = rt->buffer_size;
 	u8 *a1 = chip->a1_buf.area, *ring = chip->mirror.ring.area;
 
-	while (frames--) {
-		snd_pcm_uframes_t i = from++ % b;
-		const u8 *src = rt->dma_area + i * fb;
+	while (frames) {
+		snd_pcm_uframes_t a = from % b, n = min(frames, b - a);
 
-		memcpy(a1 + i * half, src, half);
-		es1869_spread(ring + 2 * i * half, src + half, half);
+		es1869_split(a1 + a * half, ring + 2 * a * half,
+			     rt->dma_area + a * fb, n, half);
+		from += n;
+		frames -= n;
 	}
 }
 
-// the core's silence, in the application's buffer and both halves, as
-// mirror.c silences Audio 2's ring
-static int dual_fill_silence(struct snd_pcm_substream *ss, int channel,
-			     unsigned long pos, unsigned long bytes)
+// the silence past a drain's last frame, in the application's buffer and
+// both halves
+static int dual_drain_fill(struct snd_pcm_substream *ss, int channel,
+			   unsigned long pos, unsigned long bytes)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 	struct snd_pcm_runtime *rt = ss->runtime;
@@ -100,6 +94,22 @@ static int dual_fill_silence(struct snd_pcm_substream *ss, int channel,
 	snd_pcm_format_set_silence(rt->format, rt->dma_area + pos,
 				   bytes_to_samples(rt, bytes));
 	dual_copy(chip, rt, bytes_to_frames(rt, pos), bytes_to_frames(rt, bytes));
+	return 0;
+}
+
+// the core's silence: under a standing pointer it stays in the application's
+// buffer for the timer to copy, as mirror.c does for Audio 2's ring
+static int dual_fill_silence(struct snd_pcm_substream *ss, int channel,
+			     unsigned long pos, unsigned long bytes)
+{
+	struct es1869 *chip = snd_pcm_substream_chip(ss);
+	struct es1869_dual *d = &chip->dual;
+	struct snd_pcm_runtime *rt = ss->runtime;
+
+	if (d->running && !d->fill.standing)
+		return dual_drain_fill(ss, channel, pos, bytes);
+	snd_pcm_format_set_silence(rt->format, rt->dma_area + pos,
+				   bytes_to_samples(rt, bytes));
 	return 0;
 }
 
@@ -114,52 +124,22 @@ static void dual_drain(struct snd_pcm_substream *ss)
 
 	d->silent_to = rt->control->appl_ptr;
 	d->draining = true;
-	es1869_drain_silence(ss, rt->status->hw_ptr, ES_FIFO_A1, &d->silent_to,
-			     dual_fill_silence);
+	es1869_drain_silence(ss, rt->status->hw_ptr, DUAL_FIFO, &d->silent_to,
+			     dual_drain_fill);
 }
 
-// both halves brought up to date, under the stream's lock: what the
-// application wrote, or, while its pointer stands, the frames from just
-// ahead of the DMA to a lead
+// both halves brought up to date, under the stream's lock, by at most
+// budget bytes of the stream, with the DMA at hw
 static void dual_fill(struct es1869 *chip, struct snd_pcm_runtime *rt,
-		      u32 budget)
+		      u32 budget, snd_pcm_uframes_t hw)
 {
 	struct es1869_dual *d = &chip->dual;
-	snd_pcm_uframes_t b = rt->buffer_size, bound = rt->boundary;
-	snd_pcm_uframes_t appl = rt->control->appl_ptr, hw, ahead, start, end;
-	snd_pcm_uframes_t frames, guard, lead;
+	unsigned long start, frames;
 
-	d->backlog = false;
-	if (!d->running)
-		return;
-	hw = dual_hw_abs(rt, dual_offset(chip, rt));
-	guard = max(bytes_to_frames(rt, DUAL_GUARD), 1L);
-	lead = min_t(snd_pcm_uframes_t,
-		     div_u64((u64)rt->rate * es1869_val(ES_S_a2_lead_ms), 1000),
-		     b - guard);
-	ahead = (appl + bound - hw) % bound;
-	if (ahead && ahead <= b) {
-		if ((d->filled + bound - hw) % bound > ahead)
-			d->filled = appl;
-		if ((d->filled + bound - hw) % bound > b)
-			d->filled = hw;
-		start = d->filled;
-		end = appl;
-		d->standing = false;
-	} else {
-		start = (hw + guard) % bound;
-		end = (hw + lead) % bound;
-		d->standing = true;
-	}
-	frames = (end + bound - start) % bound;
-	if (frames > b)
-		return;
-	if (frames > bytes_to_frames(rt, budget)) {
-		frames = bytes_to_frames(rt, budget);
-		d->backlog = true;
-	}
-	dual_copy(chip, rt, start, frames);
-	d->filled = (start + frames) % bound;
+	frames = es1869_fill_plan(&d->fill, rt->control->appl_ptr, hw,
+				  bytes_to_frames(rt, budget), &start);
+	if (frames)
+		dual_copy(chip, rt, start, frames);
 }
 
 static enum hrtimer_restart dual_tick(struct hrtimer *t)
@@ -173,12 +153,13 @@ static enum hrtimer_restart dual_tick(struct hrtimer *t)
 	if (!ss || !d->running)
 		return HRTIMER_NORESTART;
 	snd_pcm_stream_lock_irqsave(ss, flags);
-	dual_fill(chip, ss->runtime, DUAL_BUDGET);
+	dual_fill(chip, ss->runtime, DUAL_BUDGET,
+		  es1869_abs_frame(ss->runtime, dual_offset(chip, ss->runtime)));
+	if (d->fill.standing)
+		us = es1869_standing_us(ss->runtime, DUAL_BUDGET);
 	snd_pcm_stream_unlock_irqrestore(ss, flags);
-	if (!d->backlog && !d->standing)
+	if (!d->fill.backlog && !d->fill.standing)
 		return HRTIMER_NORESTART;
-	if (!d->backlog)
-		us = max_t(u32, us, es1869_val(ES_S_a2_lead_ms) * 1000 / 4);
 	hrtimer_forward_now(t, us_to_ktime(us));
 	return HRTIMER_RESTART;
 }
@@ -188,6 +169,14 @@ void es1869_dual_settled(struct es1869 *chip)
 {
 	es1869_a2_go(&chip->hw, chip->dual.s2.burst, chip->dual.s2.single);
 	chip->a2_running = true;
+}
+
+static void dual_release(struct es1869 *chip)
+{
+	mutex_lock(&chip->state_mutex);
+	chip->a1_owner = chip->a2_owner = ES_OWN_NONE;
+	chip->a1_sub = NULL;
+	mutex_unlock(&chip->state_mutex);
 }
 
 static int dual_open(struct snd_pcm_substream *ss)
@@ -219,16 +208,17 @@ static int dual_open(struct snd_pcm_substream *ss)
 		return err;
 	rt->hw = dual_hw;
 	err = es1869_whole_periods(rt);
-	if (err < 0)
-		return err;
-	err = snd_pcm_hw_constraint_ratnums(rt, 0, SNDRV_PCM_HW_PARAM_RATE,
-					    &es1869_a1_rates);
-	if (err < 0)
-		return err;
-	if (es1869_val(ES_S_rate_limit))
+	if (err >= 0)
+		err = snd_pcm_hw_constraint_ratnums(rt, 0,
+						    SNDRV_PCM_HW_PARAM_RATE,
+						    &es1869_a1_rates);
+	if (err >= 0 && es1869_val(ES_S_rate_limit))
 		err = snd_pcm_hw_constraint_minmax(rt, SNDRV_PCM_HW_PARAM_RATE,
 						   3100,
 						   es1869_val(ES_S_a1p_max_rate));
+	// the core calls no close for an open that failed
+	if (err < 0)
+		dual_release(chip);
 	return err < 0 ? err : 0;
 }
 
@@ -236,10 +226,7 @@ static int dual_close(struct snd_pcm_substream *ss)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 
-	mutex_lock(&chip->state_mutex);
-	chip->a1_owner = chip->a2_owner = ES_OWN_NONE;
-	chip->a1_sub = NULL;
-	mutex_unlock(&chip->state_mutex);
+	dual_release(chip);
 	es1869_power_idle(chip);
 	return 0;
 }
@@ -264,16 +251,17 @@ static int dual_prepare(struct snd_pcm_substream *ss)
 		.a8 = es1869_val(ES_S_a8_play_bits),
 	};
 	const u8 *sil = snd_pcm_format_silence_64(rt->format);
+	u8 low = sil ? sil[0] : 0, high = sil ? sil[1] : 0;
 	unsigned long flags;
 	u32 i;
-	int err;
+	int err, tries;
 
 	if (rt->buffer_size * half > ES1869_A1_BUF ||
 	    2 * rt->buffer_size * half > chip->mirror.ring.bytes)
 		return -EINVAL;
 	hrtimer_cancel(&d->tick);
 	d->running = false;
-	d->filled = 0;
+	es1869_fill_init(&d->fill, rt, DUAL_GUARD, 0);
 	d->last = 0;
 	d->draining = false;
 	es1869_stream_rate(rt, true, &s1.rate_num, &s1.rate_den);
@@ -287,25 +275,30 @@ static int dual_prepare(struct snd_pcm_substream *ss)
 	d->s2.rate_den = 18;
 	// both halves silent to start
 	for (i = 0; i < rt->buffer_size * half; i++) {
-		u8 v = sil ? sil[i % max(snd_pcm_format_physical_width(rt->format) / 8, 1)] : 0;
+		u8 v = i & 1 ? high : low;
 
 		chip->a1_buf.area[i] = v;
 		chip->mirror.ring.area[2 * i] = v;
 		chip->mirror.ring.area[2 * i + 1] = 0;
 	}
-	spin_lock_irqsave(&chip->reg_lock, flags);
-	chip->a1_state = ES_A1_IDLE;
-	chip->a1_last = 0;
-	es1869_mix_update(&chip->hw, 0x71, 0x02, 0x00);
-	err = es1869_a1_prepare(&chip->hw, &s1, false,
-				es1869_val(ES_S_record_monitor));
-	if (!err)
-		err = es1869_a2_prepare(&chip->hw, &d->s2, false);
-	if (!err && !chip->a1_dac) {
-		err = es1869_a1_dac(&chip->hw, true);
-		chip->a1_dac = !err;
+	for (tries = 0; tries < 2; tries++) {
+		spin_lock_irqsave(&chip->reg_lock, flags);
+		chip->a1_state = ES_A1_IDLE;
+		chip->a1_last = 0;
+		es1869_mix_update(&chip->hw, 0x71, 0x02, 0x00);
+		err = es1869_a1_prepare(&chip->hw, &s1, false,
+					es1869_val(ES_S_record_monitor));
+		if (!err)
+			err = es1869_a2_prepare(&chip->hw, &d->s2, false);
+		if (!err && !chip->a1_dac) {
+			err = es1869_a1_dac(&chip->hw, true);
+			chip->a1_dac = !err;
+		}
+		spin_unlock_irqrestore(&chip->reg_lock, flags);
+		if ((err != -EBUSY && err != -EIO) || tries ||
+		    es1869_dsp_recover(chip))
+			break;
 	}
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	return err;
 }
 
@@ -335,7 +328,6 @@ static int dual_trigger(struct snd_pcm_substream *ss, int cmd)
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 	struct snd_pcm_runtime *rt = ss->runtime;
 	struct es1869_dual *d = &chip->dual;
-	u64 lead = div_u64((u64)rt->rate * es1869_val(ES_S_a2_lead_ms), 1000);
 	unsigned long flags;
 	int err = 0;
 
@@ -343,7 +335,8 @@ static int dual_trigger(struct snd_pcm_substream *ss, int cmd)
 	case SNDRV_PCM_TRIGGER_START:
 		d->running = true;
 		dual_fill(chip, rt, max_t(u32, DUAL_BUDGET,
-					  frames_to_bytes(rt, lead)));
+					  frames_to_bytes(rt, d->fill.lead)),
+			  es1869_abs_frame(rt, dual_offset(chip, rt)));
 		spin_lock_irqsave(&chip->reg_lock, flags);
 		err = es1869_a1_go(&chip->hw, false);
 		if (!err)
@@ -377,12 +370,12 @@ static snd_pcm_uframes_t dual_pointer(struct snd_pcm_substream *ss)
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 	struct snd_pcm_runtime *rt = ss->runtime;
 	snd_pcm_uframes_t off = dual_offset(chip, rt);
+	struct es1869_dual *d = &chip->dual;
 
-	rt->delay = bytes_to_frames(rt, 2 * ES_FIFO_A1);
-	if (chip->dual.draining)
-		es1869_drain_silence(ss, dual_hw_abs(rt, off), ES_FIFO_A1,
-				     &chip->dual.silent_to, dual_fill_silence);
-	return es1869_forward(&chip->dual.last, off, rt->buffer_size);
+	if (d->draining)
+		es1869_drain_silence(ss, es1869_abs_frame(rt, off), DUAL_FIFO,
+				     &d->silent_to, dual_drain_fill);
+	return es1869_play_pointer(rt, off, DUAL_FIFO, d->draining, &d->last);
 }
 
 static int dual_ack(struct snd_pcm_substream *ss)
@@ -390,8 +383,10 @@ static int dual_ack(struct snd_pcm_substream *ss)
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 	struct es1869_dual *d = &chip->dual;
 
-	dual_fill(chip, ss->runtime, DUAL_BUDGET);
-	if (d->running && d->backlog && !hrtimer_active(&d->tick))
+	if (!d->running)
+		return 0;
+	dual_fill(chip, ss->runtime, DUAL_BUDGET, ss->runtime->status->hw_ptr);
+	if (d->fill.backlog && !hrtimer_active(&d->tick))
 		hrtimer_start(&d->tick, us_to_ktime(es1869_val(ES_S_a2_tick_us)),
 			      HRTIMER_MODE_REL_HARD);
 	return 0;

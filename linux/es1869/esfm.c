@@ -34,6 +34,20 @@
 #include "es1869.h"
 #include "uapi/es1869.h"
 
+// a chip fully down wakes before the hwdep is opened: the open waits in the
+// hwdep's own loop, with its mutex free for the wake to finish under
+static int es1869_opl3_open(struct snd_hwdep *hw, struct file *file)
+{
+	struct snd_opl3 *opl3 = hw->private_data;
+	struct es1869 *chip = opl3->private_data;
+
+	if (READ_ONCE(chip->pwr_down) == 2 && !READ_ONCE(chip->pwr_stopped)) {
+		schedule_work(&chip->wake_work);
+		return -EAGAIN;
+	}
+	return chip->opl3_open(hw, file);
+}
+
 // the OPL3 library's register writes, with C0h-C8h's bits 4 and 5
 // swapped while fm_sides is on
 static void es1869_opl3_command(struct snd_opl3 *opl3, unsigned short cmd,
@@ -42,6 +56,17 @@ static void es1869_opl3_command(struct snd_opl3 *opl3, unsigned short cmd,
 	struct es1869 *chip = opl3->private_data;
 	u8 reg = cmd & 0xFF, side = val & 0x30;
 
+	// the OPL3 synth takes events without a subscriber, and a write to
+	// FM_Base+0 ends the native mode under whoever has it
+	if (READ_ONCE(chip->esfm_held))
+		return;
+	// a chip fully down loses it, and the synth has no open that could
+	// wake it; what it writes from then on counts
+	if (READ_ONCE(chip->pwr_down) == 2) {
+		if (!READ_ONCE(chip->pwr_stopped))
+			schedule_work(&chip->wake_work);
+		return;
+	}
 	if (reg >= 0xC0 && reg <= 0xC8 && (side == 0x10 || side == 0x20) &&
 	    es1869_val(ES_S_fm_sides))
 		val ^= 0x30;
@@ -67,14 +92,44 @@ int es1869_fm_new(struct es1869 *chip)
 	chip->opl3->private_data = chip;
 	chip->opl3_command = chip->opl3->command;
 	chip->opl3->command = es1869_opl3_command;
-	return snd_opl3_hwdep_new(chip->opl3, 0, 1, NULL);
+	err = snd_opl3_hwdep_new(chip->opl3, 0, 1, NULL);
+	if (err < 0)
+		return err;
+	chip->opl3_open = chip->opl3->hwdep->ops.open;
+	chip->opl3->hwdep->ops.open = es1869_opl3_open;
+	return 0;
 }
 
-// the FM back in its OPL3 emulation mode, as the OPL3 library expects it
+// the token's count that opl3=0 keeps, under state_mutex: the OPL3 hwdep
+// and synth find it in use, and the ESFM's claim looks past it
+void es1869_opl3_gate(struct es1869 *chip)
+{
+	struct snd_hwdep *hw = chip->opl3 ? chip->opl3->hwdep : NULL;
+	unsigned int off = !es1869_val(ES_S_opl3);
+
+	if (!hw || off == chip->opl3_off)
+		return;
+	mutex_lock_nested(&hw->open_mutex, SINGLE_DEPTH_NESTING);
+	hw->used += off ? 1 : -1;
+	chip->opl3_off = off;
+	mutex_unlock(&hw->open_mutex);
+	wake_up(&hw->open_wait);
+}
+
+// the FM as its owner left it at a suspend: back in its OPL3 emulation mode,
+// as the OPL3 library expects it, or in the native mode, whose user is told
 void es1869_fm_resume(struct es1869 *chip)
 {
 	unsigned long flags;
 
+	if (READ_ONCE(chip->esfm_held)) {
+		es1869_esfm_reset(chip);
+		mutex_lock(&chip->state_mutex);
+		if (chip->esfm_ops)
+			chip->esfm_ops->resume(chip->esfm_data);
+		mutex_unlock(&chip->state_mutex);
+		return;
+	}
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	es1869_fm_reset(&chip->hw);
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
@@ -107,16 +162,22 @@ int es1869_esfm_claim(struct es1869 *chip)
 
 	if (!hw)
 		return -ENODEV;
+	if (!es1869_val(ES_S_esfm))
+		return -EPERM;
 	scoped_guard(mutex, &chip->state_mutex) {
 		int err = es1869_power_up(chip);
 
 		if (err)
 			return err;
-		scoped_guard(mutex, &hw->open_mutex) {
-			if (hw->used)
-				return -EBUSY;
-			hw->used++;
+		// inside the ESFM hwdep's own open_mutex, of the same class
+		mutex_lock_nested(&hw->open_mutex, SINGLE_DEPTH_NESTING);
+		if (hw->used > chip->opl3_off) {
+			mutex_unlock(&hw->open_mutex);
+			return -EBUSY;
 		}
+		hw->used++;
+		mutex_unlock(&hw->open_mutex);
+		WRITE_ONCE(chip->esfm_held, true);
 	}
 	es1869_esfm_reset(chip);
 	return 0;
@@ -127,15 +188,34 @@ void es1869_esfm_release(struct es1869 *chip)
 {
 	struct snd_hwdep *hw = chip->opl3->hwdep;
 
+	WRITE_ONCE(chip->esfm_held, false);
 	es1869_fm_resume(chip);
-	scoped_guard(mutex, &hw->open_mutex) {
-		if (hw->used > 0)
-			hw->used--;
-	}
+	mutex_lock_nested(&hw->open_mutex, SINGLE_DEPTH_NESTING);
+	if (hw->used > 0)
+		hw->used--;
+	mutex_unlock(&hw->open_mutex);
 	wake_up(&hw->open_wait);
 	es1869_power_idle(chip);
 }
 EXPORT_SYMBOL_GPL(es1869_esfm_release);
+
+// the synth's callbacks, NULL when it goes
+void es1869_esfm_set_ops(struct es1869 *chip,
+			 const struct es1869_esfm_ops *ops, void *data)
+{
+	mutex_lock(&chip->state_mutex);
+	chip->esfm_ops = ops;
+	chip->esfm_data = data;
+	mutex_unlock(&chip->state_mutex);
+}
+EXPORT_SYMBOL_GPL(es1869_esfm_set_ops);
+
+// esfm_bank or esfm_square written, under state_mutex
+void es1869_esfm_bank_changed(struct es1869 *chip)
+{
+	if (chip->esfm_ops)
+		chip->esfm_ops->bank(chip->esfm_data);
+}
 
 void es1869_esfm_write(struct es1869 *chip, u16 reg, u8 val)
 {
@@ -163,8 +243,6 @@ EXPORT_SYMBOL_GPL(es1869_esfm_read);
 
 static int esfm_hwdep_open(struct snd_hwdep *hw, struct file *file)
 {
-	if (!es1869_val(ES_S_esfm))
-		return -EPERM;
 	return es1869_esfm_claim(hw->private_data);
 }
 
@@ -192,6 +270,7 @@ static int esfm_hwdep_write_regs(struct es1869 *chip, void __user *arg)
 		if (r.reg > 0x7FF)
 			return -EINVAL;
 		es1869_esfm_write(chip, r.reg, r.value);
+		cond_resched();
 	}
 	return 0;
 }

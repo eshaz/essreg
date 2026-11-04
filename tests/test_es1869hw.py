@@ -14,7 +14,10 @@ against the rate the model plays, the filter values, Audio 1's start held
 masked over the race that loses the first byte (with the race itself shown
 when the channel is unmasked at once), Audio 2's bytes spread over the words
 of DMA 5, the interrupt's mask dance, the DMA position, a recording, a
-pause, and the DSP left out of step.
+pause, the DSP left out of step, the storm guard, the rule that keeps a
+position from stepping back, the plan of what a ring copies for each kind of
+client, the wake from a power-down, the FM's reset and native mode, and the
+MPU-401 back in its UART mode.
 
 usage: python3 -m unittest tests.test_es1869hw   (needs gcc and unicorn)
 """
@@ -42,6 +45,7 @@ BUF = 0x40000                   # a DMA buffer, in one 128 KB page
 
 u8, u16, u32, u64 = (ctypes.c_uint8, ctypes.c_uint16, ctypes.c_uint32,
                      ctypes.c_uint64)
+ul = ctypes.c_ulong
 vp = ctypes.c_void_p
 
 INB = ctypes.CFUNCTYPE(u8, vp, u16)
@@ -50,7 +54,7 @@ UDELAY = ctypes.CFUNCTYPE(None, vp, ctypes.c_uint)
 NOW = ctypes.CFUNCTYPE(u64, vp)
 DMAPROG = ctypes.CFUNCTYPE(None, vp, ctypes.c_uint, u32, u32, u8)
 DMAMASK = ctypes.CFUNCTYPE(None, vp, ctypes.c_uint, ctypes.c_bool)
-DMARES = ctypes.CFUNCTYPE(u32, vp, ctypes.c_uint)
+DMARES = ctypes.CFUNCTYPE(None, vp, ctypes.c_uint, ctypes.POINTER(u32))
 
 IRQ_A1, IRQ_A2, IRQ_HWV, IRQ_MPU = 0x01, 0x02, 0x04, 0x08
 
@@ -73,6 +77,13 @@ class Stream(ctypes.Structure):
 
 class Ident(ctypes.Structure):
     _fields_ = [("dsp", u8 * 2), ("mixer", u8 * 2), ("cfg", u16)]
+
+
+class Fill(ctypes.Structure):
+    _fields_ = [("buffer", ul), ("boundary", ul), ("guard", ul),
+                ("lead", ul), ("slack", ul), ("filled", ul), ("seen", ul),
+                ("standing", ctypes.c_bool), ("backlog", ctypes.c_bool),
+                ("late", u32)]
 
 
 class Stats(ctypes.Structure):
@@ -144,8 +155,20 @@ def library():
             "es1869_irq_poll": ([P], u8),
             "es1869_irq_take": ([P], u8),
             "es1869_irq_exit": ([P], None),
+            "es1869_irq_edge": ([P], None),
             "es1869_irq_storm": ([P, ctypes.c_ulong, ctypes.c_ulong],
                                  ctypes.c_bool),
+            "es1869_forward": ([ctypes.POINTER(ul), ul, ul, ul], ul),
+            "es1869_fill_plan": ([ctypes.POINTER(Fill), ul, ul, ul,
+                                  ctypes.POINTER(ul)], ul),
+            "es1869_split": ([ctypes.c_char_p, ctypes.c_char_p,
+                              ctypes.c_char_p, u32, u32], None),
+            "es1869_power_wake": ([P, ctypes.c_bool], None),
+            "es1869_power_woken": ([P], None),
+            "es1869_power_down": ([P, ctypes.c_bool], None),
+            "es1869_mpu_uart": ([P], None),
+            "es1869_fm_reset": ([P], None),
+            "es1869_fm_native": ([P], None),
             "es1869_dma_pos": ([P, u8, u32], u32),
             "es1869_spread": ([ctypes.c_char_p, ctypes.c_char_p, u32],
                               None),
@@ -176,6 +199,9 @@ class Driver:
         cfg = CFG if cfg is None else cfg
         self.errors = []
         self.residues = []          # readings that stand in for the 8237's
+        self.frozen = None          # a clock that stands, a PIT's
+        self.stall = 0              # ns each reading of the clock jumps
+        self.skew = 0
         lib = self.lib = library()
         self.io = IO(None, INB(self._inb), OUTB(self._outb),
                      UDELAY(self._udelay), NOW(self._now),
@@ -209,7 +235,10 @@ class Driver:
 
     @_guard
     def _now(self, _ctx):
-        return self.chip.clock.us * 1000
+        if self.frozen is not None:
+            return self.frozen
+        self.skew += self.stall
+        return self.chip.clock.us * 1000 + self.skew
 
     # snd_dma_program() with DMA_MODE_NO_ENABLE: disable_dma, clear_dma_ff,
     # set_dma_mode, set_dma_addr (the page first), set_dma_count
@@ -236,15 +265,17 @@ class Driver:
     # clear_dma_ff, then get_dma_residue: 1 + the count, as a 16-bit
     # number, doubled on a word channel
     @_guard
-    def _dma_residue(self, _ctx, ch):
-        if self.residues:
-            return self.residues.pop(0)
+    def _dma_residue(self, _ctx, ch, r):
         ff, count = dma_ports(ch)[2], dma_ports(ch)[4]
         self.chip.outb(ff, 0)
-        c = self.chip.inb(count)
-        c |= self.chip.inb(count) << 8
-        c = (c + 1) & 0xFFFF
-        return c << 1 if ch >= 4 else c
+        for i in range(2):
+            if self.residues:
+                r[i] = self.residues.pop(0)
+                continue
+            c = self.chip.inb(count)
+            c |= self.chip.inb(count) << 8
+            c = (c + 1) & 0xFFFF
+            r[i] = c << 1 if ch >= 4 else c
 
     # --- calls ---------------------------------------------------------------
     def __getattr__(self, name):
@@ -888,6 +919,311 @@ class StormTest(unittest.TestCase):
         later = 1000 + self.WRAP // 2 + 2 * self.HZ
         self.assertEqual(self.calls(later, self.LIMIT - 100), 0)
         self.assertEqual(self.lib.lx_imr(self.hw), IRQ_A1 | IRQ_A2)
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class BringUpTest(unittest.TestCase):
+    """paths that come back after something went wrong"""
+
+    def test_a_stall_gets_a_reading(self):
+        """an SMI after a busy read isn't a timeout: the clock is read
+        before the status, which gets one more look"""
+        d = Driver()
+        reads = []
+        orig = d.chip.inb
+
+        def inb(port):
+            v = orig(port)
+            if port == BASE + 0xC:
+                reads.append(v)
+                if len(reads) == 1:
+                    d.skew += 10 ** 9
+                    return v | 0x80
+            return v
+        d.chip.inb = inb
+        self.assertEqual(d.dsp_cmd(b"\xC6", 1), 0)
+        self.assertEqual(d.errors, [])
+
+    def test_a_clock_that_stands_still(self):
+        """a PIT clock doesn't move with interrupts off: the reads are
+        counted, and a dead DSP still ends"""
+        d = Driver()
+        d.chip.busy = True
+        d.frozen = 1000
+        self.assertEqual(d.dsp_cmd(b"\xC6", 1), -16)      # EBUSY
+        self.assertEqual(d.errors, [])
+
+    def test_recording_takes_b7h_twice(self):
+        """Table 17's first write initializes the DAC and prevents pops"""
+        d = Driver()
+        d.reset()
+        before = len(d.chip.log)
+        s = stream(793800, 18, period=1024, size=4096, a8=0xF4)
+        self.assertEqual(d.a1_prepare(ctypes.byref(s), True, False), 0)
+        out = [e[2] for e in d.chip.log[before:] if e[0] == "out" and
+               e[1] == BASE + 0xC]
+        b7 = [out[i + 1] for i in range(len(out) - 1) if out[i] == 0xB7]
+        self.assertEqual(b7, [0x71, 0xBC])
+
+    def test_monitor_waits_for_the_settled_input(self):
+        """DS p.50, steps 7 and 8: with the codec turned at prepare, the
+        monitor goes on at the start"""
+        d = Driver()
+        d.reset()
+        s = stream(793800, 18, period=1024, size=4096, a8=0xF4)
+        s.adc = True
+        self.assertEqual(d.a1_prepare(ctypes.byref(s), True, True), 0)
+        self.assertEqual(d.chip.ctrl[0xA8] & 0x08, 0)
+        d._dma_mask(None, 1, False)
+        self.assertEqual(d.a1_go(True), 0)
+        self.assertEqual(d.chip.ctrl[0xA8] & 0x08, 0x08)
+
+    def test_an_edge_for_what_is_pending(self):
+        """Config_Base+7 falls and rises, so that a source pending from
+        before, which holds the line high, makes an edge"""
+        d = Driver()
+        d.lib.lx_set_imr(d.hw, IRQ_A1 | IRQ_MPU)
+        d.chip.mixer[0x64] |= 0x40
+        d.chip.cfg_ports[7] = IRQ_A1 | IRQ_MPU
+        d.chip.mpu_receive([0x90])
+        edges = len(d.chip.irq_edges)
+        self.assertTrue(d.chip.irq_line)
+        d.irq_exit()
+        self.assertEqual(len(d.chip.irq_edges), edges)
+        d.irq_edge()
+        self.assertEqual(len(d.chip.irq_edges), edges + 1)
+
+    def test_partial_wake(self):
+        """an audio access: nothing on the power bits"""
+        d = Driver()
+        d.lib.lx_set_port7(d.hw, 0x02)
+        d.power_down(False)
+        before = len(d.chip.log)
+        d.power_wake(False)
+        self.assertEqual([e for e in d.chip.log[before:] if e[0] == "out"], [])
+
+    def test_full_wake(self):
+        """+7 bit 3 starts the oscillator (DS p.76), the reset held over the
+        caller's wait as ESS's VxD holds it"""
+        d = Driver()
+        d.lib.lx_set_port7(d.hw, 0x02)
+        d.power_down(True)
+        before = len(d.chip.log)
+        d.power_wake(True)
+        d.power_woken()
+        out = [(e[1] - BASE, e[2]) for e in d.chip.log[before:]
+               if e[0] == "out"]
+        self.assertEqual(out[:1], [(7, 0x0A)])
+        self.assertEqual(out[1:], [(6, 1), (6, 0)])
+
+    def test_fm_reset_mutes_the_fm(self):
+        """36h at 0 over the reset, and back, as ESS's VxD does it"""
+        d = Driver()
+        d.mix_write(0x36, 0x88)
+        before = len(d.chip.log)
+        d.fm_reset()
+        out = [(e[1] - BASE, e[2]) for e in d.chip.log[before:]
+               if e[0] == "out"]
+        self.assertEqual(out, [(4, 0x36), (5, 0), (7, 0x20), (7, 0), (5, 0x88)])
+        self.assertEqual(d.chip.mixer[0x36], 0x88)
+
+    def test_native_mode_is_paced(self):
+        """status reads around each write, as ESFM.DRV has them"""
+        d = Driver()
+        before = len(d.chip.log)
+        d.fm_native()
+        log = d.chip.log[before:]
+        self.assertEqual([e[1:] for e in log if e[0] == "out"],
+                         [(BASE + 2, 0x05), (BASE + 3, 0x80)])
+        self.assertEqual([e[0] for e in log],
+                         ["in"] * 6 + ["out"] + ["in"] * 2 + ["out"] +
+                         ["in"] * 6)
+
+    def test_mpu_back_in_uart_mode(self):
+        """its reset, and the mode, the answers read; nothing left in its
+        input"""
+        d = Driver()
+        d.lib.lx_set_mpu(d.hw, 0x330)
+        d.mpu_uart()
+        self.assertEqual(d.chip.mpu_in, [])
+        self.assertEqual(d.errors, [])
+
+    def test_no_mpu_no_commands(self):
+        d = Driver()
+        before = len(d.chip.log)
+        d.mpu_uart()
+        self.assertEqual(len(d.chip.log), before)
+
+
+class PositionTest(unittest.TestCase):
+    """es1869_forward: a position that never steps back"""
+
+    def forward(self, last, off, size=2048, window=32):
+        cell = ul(last)
+        got = library().es1869_forward(ctypes.byref(cell), off, size, window)
+        self.assertEqual(cell.value, got)
+        return got
+
+    def test_two_periods(self):
+        """the step between two interrupts of a two-period stream is over
+        half the buffer whenever the second came later than the first"""
+        self.assertEqual(self.forward(1024 + 3, 2048 - 2048 + 30, 2048), 30)
+        last = 0
+        pos = 0
+        for late in (1, 3, 9, 4, 12, 30, 2, 17):
+            pos += 1024
+            off = (pos + late) % 2048
+            last = self.forward(last, off)
+            self.assertEqual(last, off)
+
+    def test_a_late_reading_is_held(self):
+        self.assertEqual(self.forward(1000, 980), 1000)
+        self.assertEqual(self.forward(1000, 968), 1000)
+
+    def test_the_wrap_is_a_step_forward(self):
+        self.assertEqual(self.forward(2040, 8), 8)
+
+    def test_held_across_the_wrap(self):
+        self.assertEqual(self.forward(8, 2040), 8)
+
+    def test_a_small_buffer_keeps_its_steps(self):
+        """on a buffer of 64 frames the window is a quarter of it, so that
+        a period's step is never taken for a late reading"""
+        self.assertEqual(self.forward(40, 20, 64), 20)
+        self.assertEqual(self.forward(40, 30, 64), 40)
+
+    def test_standing_still(self):
+        self.assertEqual(self.forward(700, 700), 700)
+
+
+class FillTest(unittest.TestCase):
+    """es1869_fill_plan: what a ring copies for each kind of client"""
+
+    B = 4096
+    BOUND = 4096 * 256
+
+    def fill(self, lead=1024):
+        return Fill(self.B, self.BOUND, 4, lead, 16)
+
+    def plan(self, f, appl, hw, budget=8192):
+        start = ul(0)
+        n = library().es1869_fill_plan(ctypes.byref(f), appl % self.BOUND,
+                                       hw % self.BOUND, budget,
+                                       ctypes.byref(start))
+        return start.value, n
+
+    def test_a_writer_gets_what_it_wrote_once(self):
+        f = self.fill()
+        self.assertEqual(self.plan(f, 1024, 0), (0, 1024))
+        self.assertEqual(self.plan(f, 2048, 100), (1024, 1024))
+        self.assertEqual(self.plan(f, 2048, 200)[1], 0)
+        self.assertFalse(f.standing)
+
+    def test_dmix_through_the_boundary(self):
+        """the pointer stays at 0 while hw runs to the boundary, 2^30 on
+        i386: near it the pointer is close ahead of hw, but it never moved,
+        and the copy goes on across the wrap, each time to the lead"""
+        f = self.fill()
+        hw = self.BOUND - 20 * 441
+        for _ in range(40):
+            start, n = self.plan(f, 0, hw)
+            self.assertTrue(f.standing)
+            self.assertFalse(f.backlog)
+            self.assertEqual(start, (hw + 4) % self.BOUND)
+            self.assertEqual(n, 1020)
+            hw += 441
+
+    def test_a_write_after_a_standing_start(self):
+        """a stream started on an empty buffer stands, and the first write
+        begins where the pointer stood, though the copy has a lead"""
+        f = self.fill()
+        self.assertEqual(self.plan(f, 0, 0), (4, 1020))
+        self.assertTrue(f.standing)
+        self.assertEqual(self.plan(f, 1024, 0), (0, 1024))
+        self.assertFalse(f.standing)
+
+    def test_a_rewind_takes_the_copy_back(self):
+        f = self.fill()
+        self.assertEqual(self.plan(f, 4000, 0), (0, 4000))
+        self.assertEqual(self.plan(f, 1200, 1000)[1], 0)
+        self.assertEqual(self.plan(f, 3000, 1100), (1200, 1800))
+
+    def test_rewinding_a_standing_stream(self):
+        f = self.fill()
+        self.plan(f, 0, 0)
+        self.assertTrue(f.standing)
+        self.assertEqual(self.plan(f, 3000, 0), (0, 3000))
+
+    def test_the_dma_past_the_copy(self):
+        f = self.fill()
+        self.assertEqual(self.plan(f, 1000, 0), (0, 1000))
+        self.assertEqual(self.plan(f, 1500, 1200), (1200, 300))
+        self.assertEqual(f.late, 1)
+
+    def test_the_budget_leaves_a_writer_a_backlog(self):
+        f = self.fill()
+        self.assertEqual(self.plan(f, 3000, 0, 1000), (0, 1000))
+        self.assertTrue(f.backlog)
+        self.assertEqual(self.plan(f, 3000, 200, 1000), (1000, 1000))
+        self.assertEqual(self.plan(f, 3000, 400, 1000), (2000, 1000))
+        self.assertFalse(f.backlog)
+
+    def test_a_standing_window_has_no_backlog(self):
+        """it starts again at each fill: a backlog there would never end,
+        and tick at 500 Hz, as it did at rates where the lead passed the
+        budget"""
+        f = self.fill(lead=3000)
+        self.plan(f, 0, 0, 1000)
+        for hw in range(441, 8000, 441):
+            self.assertEqual(self.plan(f, 0, hw, 1000), (hw + 4, 1000))
+            self.assertFalse(f.backlog)
+
+    def test_a_writer_that_stopped_stands(self):
+        """hw past the pointer: what the buffer holds, to the lead"""
+        f = self.fill()
+        self.assertEqual(self.plan(f, 1000, 0), (0, 1000))
+        self.assertEqual(self.plan(f, 1000, 1000), (1004, 1020))
+        self.assertTrue(f.standing)
+
+    def test_after_a_release_the_dma_is_behind(self):
+        """by up to the slack, with a full buffer: the newest buffer of what
+        was written wins"""
+        f = self.fill()
+        self.assertEqual(self.plan(f, self.B, 0, 16384), (0, self.B))
+        f.filled = 1000 - 10
+        start, n = self.plan(f, self.B + 1000, 990, 16384)
+        self.assertFalse(f.standing)
+        self.assertEqual((start, n), (1000, self.B))
+
+    def test_across_the_boundary(self):
+        f = self.fill()
+        hw = self.BOUND - 1000
+        f.seen = f.filled = hw
+        self.assertEqual(self.plan(f, hw + 2000, hw), (hw, 2000))
+
+
+class SplitTest(unittest.TestCase):
+    """es1869_split: four channels to Audio 1's bytes and Audio 2's words"""
+
+    def split(self, half, frames):
+        src = bytes(range(1, 1 + 2 * half * frames))
+        a = ctypes.create_string_buffer(half * frames)
+        w = ctypes.create_string_buffer(2 * half * frames)
+        library().es1869_split(a, w, src, frames, half)
+        return src, a.raw, w.raw
+
+    def test_16_bit(self):
+        src, a, w = self.split(4, 3)
+        for i in range(3):
+            self.assertEqual(a[4 * i:4 * i + 4], src[8 * i:8 * i + 4])
+            self.assertEqual(w[8 * i:8 * i + 8][0::2], src[8 * i + 4:8 * i + 8])
+            self.assertEqual(w[8 * i:8 * i + 8][1::2], bytes(4))
+
+    def test_8_bit(self):
+        src, a, w = self.split(2, 3)
+        self.assertEqual(a, src[0:2] + src[4:6] + src[8:10])
+        self.assertEqual(w[0::2], src[2:4] + src[6:8] + src[10:12])
+        self.assertEqual(w[1::2], bytes(6))
 
 
 if __name__ == "__main__":

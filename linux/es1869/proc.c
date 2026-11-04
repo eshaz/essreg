@@ -38,15 +38,26 @@ static void es1869_proc_read(struct snd_info_entry *entry,
 
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	st = hw->stats;
-	for (i = 0; i < 0x80; i++)
+	memcpy(ctrl, hw->ctrl, sizeof(ctrl));
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	// a register at a time: the dump, over a thousand port accesses, would
+	// hold interrupts off for longer than a short period
+	for (i = 0; i < 0x80; i++) {
+		spin_lock_irqsave(&chip->reg_lock, flags);
 		mix[i] = i == 0x40 || i == 0x66 || i == 0x00 ? hw->mix[i] :
 			 es1869_mix_read(hw, i);
-	memcpy(ctrl, hw->ctrl, sizeof(ctrl));
-	for (i = 0; i < 0x30; i++)
+		spin_unlock_irqrestore(&chip->reg_lock, flags);
+	}
+	for (i = 0; i < 0x30; i++) {
+		spin_lock_irqsave(&chip->reg_lock, flags);
 		card[i] = es1869_pnp_read(hw, 0xFF, i);
-	for (i = 0x30; i < 0x80; i++)
+		spin_unlock_irqrestore(&chip->reg_lock, flags);
+	}
+	for (i = 0x30; i < 0x80; i++) {
+		spin_lock_irqsave(&chip->reg_lock, flags);
 		ldn1[i] = es1869_pnp_read(hw, 1, i);
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
+		spin_unlock_irqrestore(&chip->reg_lock, flags);
+	}
 
 	snd_iprintf(buf, "\ninterrupts: Audio 1 %u, Audio 2 %u, buttons %u, MPU-401 %u, none %u\n",
 		    st.irq[0], st.irq[1], st.irq[2], st.irq[3], st.irq_none);
@@ -56,14 +67,17 @@ static void es1869_proc_read(struct snd_info_entry *entry,
 		    st.irq_stuck, st.irq_dropped,
 		    chip->hw.storm ? "; a storm took them all off" : "");
 	snd_iprintf(buf, "Audio 2 ring: late refills %u, largest %u bytes\n",
-		    chip->mirror.late, chip->mirror.max_chunk);
+		    chip->mirror.fill.late, chip->mirror.max_chunk);
 	// what the driver costs: TSC cycles a call, and the 8237's readings
-	snd_iprintf(buf, "cost: interrupts %u, %llu cycles each; ring ticks %u, %llu cycles each; 8237 readings %u\n",
+	snd_iprintf(buf, "cost: interrupts %u, %llu cycles each; ring ticks %u, %llu cycles each; ring copies %u, %llu cycles each; 8237 readings %u\n",
 		    chip->isr_calls,
 		    chip->isr_calls ? div_u64(chip->isr_cycles, chip->isr_calls) : 0,
 		    chip->mirror.ticks,
 		    chip->mirror.ticks ? div_u64(chip->mirror.tick_cycles,
 						 chip->mirror.ticks) : 0,
+		    chip->mirror.acks,
+		    chip->mirror.acks ? div_u64(chip->mirror.ack_cycles,
+						chip->mirror.acks) : 0,
 		    st.pos_reads);
 	snd_iprintf(buf, "Config_Base+6 missed a polled source %u times\n",
 		    st.status_miss);

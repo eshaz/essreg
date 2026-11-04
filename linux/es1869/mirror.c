@@ -17,21 +17,22 @@
  * SNDRV_PCM_INFO_SYNC_APPLPTR brings for mmap clients too), at a timer
  * tick and at the start, which copies a whole lead. The tick is a hard
  * timer, since a soft one ran late under load at 99 kHz, and the DMA then
- * played what the ring held before. While the pointer runs ahead of the
- * DMA, what the application wrote is copied once. When the pointer doesn't
- * move, as under dmix, which mixes straight into the buffer, each tick
- * copies the frames from just ahead of the DMA to a lead of a2_lead_ms
- * again.
+ * played what the ring held before. es1869_fill_plan in the chip core
+ * decides what each fill copies: what the application wrote, once, while
+ * its pointer moves, and when the pointer stands, as under dmix, which
+ * mixes straight into the buffer, the frames from just ahead of the DMA to
+ * a lead of a2_lead_ms, again at each tick.
  *
  * The core's silence, which alsa-lib's drain asks for past the last frame
- * and dmix for what has played, goes to the ring as well (.fill_silence):
- * a copy that follows the application's pointer never reaches past it, and
- * the DMA, which runs on to the next period's interrupt, played what the
- * ring held before. A drain silences a period and two FIFOs past the last
- * frame itself, as far as the buffer is free, and goes on at each pointer
- * reading as the DMA frees more: a drain that began with the buffer full,
- * as after a resume's restart, played up to a period of the ring's old
- * data.
+ * and free-running clients behind what has played, goes to the ring as well
+ * (.fill_silence): a copy that follows the application's pointer never
+ * reaches past it, and the DMA, which runs on to the next period's
+ * interrupt, played what the ring held before. A drain silences a period
+ * and two FIFOs past the last frame itself, as far as the buffer is free,
+ * and goes on at each pointer reading as the DMA frees more: a drain that
+ * began with the buffer full, as after a resume's restart, played up to a
+ * period of the ring's old data. Its position counts the FIFO, so that it
+ * ends once the DAC has played the last frame.
  *
  * A pause stops the engine and a release starts it afresh from the paused
  * frame, which plays in step every time; the chip's own pause through 78h
@@ -76,7 +77,7 @@ static const struct snd_pcm_hw_constraint_ratnums a2_rates_slaved = {
 
 static const struct snd_pcm_hardware a2_hw = {
 	.info = SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_MMAP_VALID |
-		SNDRV_PCM_INFO_INTERLEAVED,
+		SNDRV_PCM_INFO_INTERLEAVED | SNDRV_PCM_INFO_DRAIN_TRIGGER,
 	.formats = ES_FORMATS,
 	.rates = SNDRV_PCM_RATE_CONTINUOUS | SNDRV_PCM_RATE_KNOT,
 	.rate_min = 3100,
@@ -118,11 +119,12 @@ static snd_pcm_uframes_t mirror_offset(struct es1869 *chip,
 				       struct snd_pcm_runtime *rt)
 {
 	struct es1869_mirror *m = &chip->mirror;
+	u32 word = m->spread ? 2 : 1;
+	u32 ring = word * frames_to_bytes(rt, rt->buffer_size), pos;
 	unsigned long flags;
-	u32 ring = 2 * frames_to_bytes(rt, rt->buffer_size), pos;
 
 	spin_lock_irqsave(&chip->reg_lock, flags);
-	pos = es1869_dma_pos(&chip->hw, chip->dma2, ring) / 2;
+	pos = es1869_dma_pos(&chip->hw, chip->dma2, ring) / word;
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	return (bytes_to_frames(rt, pos) + m->rot) % rt->buffer_size;
 }
@@ -142,63 +144,23 @@ static snd_pcm_uframes_t mirror_hw(struct snd_pcm_runtime *rt,
 }
 
 // the ring brought up to date, under the stream's lock, by at most budget
-// bytes of the stream
+// bytes of the stream, with the DMA at hw
 static void mirror_fill(struct es1869 *chip, struct snd_pcm_runtime *rt,
-			u32 budget)
+			u32 budget, snd_pcm_uframes_t hw)
 {
 	struct es1869_mirror *m = &chip->mirror;
-	snd_pcm_uframes_t b = rt->buffer_size, bound = rt->boundary;
-	snd_pcm_uframes_t appl = rt->control->appl_ptr;
-	snd_pcm_uframes_t hw, ahead, start, end, frames, guard, lead;
+	unsigned long start, frames;
 
-	m->backlog = false;
-	if (!m->spread || !m->running)
-		return;
-	hw = mirror_hw(rt, mirror_offset(chip, rt));
-	guard = max(bytes_to_frames(rt, MIRROR_GUARD), 1L);
-	lead = min_t(snd_pcm_uframes_t,
-		     div_u64((u64)rt->rate * es1869_val(ES_S_a2_lead_ms), 1000),
-		     b - guard);
-	ahead = (appl + bound - hw) % bound;
-	if (ahead && ahead <= b + bytes_to_frames(rt, ES_FIFO_A2)) {
-		// the application moves its pointer: what it wrote, once; the
-		// DMA past what was copied is a late fill, and a rewind takes
-		// the copy back with the pointer. Right after a release the
-		// DMA may be up to a FIFO behind the pointer, and the newest
-		// buffer of what was written wins
-		if ((m->filled + bound - hw) % bound > b) {
-			m->late++;
-			m->filled = hw;
-		}
-		if ((m->filled + bound - hw) % bound > ahead)
-			m->filled = appl;
-		start = m->filled;
-		end = appl;
-		if ((end + bound - start) % bound > b)
-			start = (end + bound - b) % bound;
-		m->standing = false;
-	} else {
-		// dmix: the pointer stays and the data changes in place
-		start = (hw + guard) % bound;
-		end = (hw + lead) % bound;
-		m->standing = true;
-	}
-	frames = (end + bound - start) % bound;
-	if (frames > b)
-		return;
-	if (frames > bytes_to_frames(rt, budget)) {
-		frames = bytes_to_frames(rt, budget);
-		m->backlog = true;
-	}
+	frames = es1869_fill_plan(&m->fill, rt->control->appl_ptr, hw,
+				  bytes_to_frames(rt, budget), &start);
 	if (!frames)
 		return;
 	mirror_copy(chip, rt, start, frames);
-	m->filled = (start + frames) % bound;
 	m->max_chunk = max_t(u32, m->max_chunk, frames_to_bytes(rt, frames));
 }
 
 // the timer copies what .ack left: every a2_tick_us while a copy is behind,
-// and a quarter of the lead while the pointer stands, as under dmix, whose
+// and es1869_standing_us while the pointer stands, as under dmix, whose
 // data changes in place. An application that moves its pointer copies its
 // writes at .ack, and once nothing is left the timer stops until .ack
 // leaves some behind
@@ -208,21 +170,21 @@ static enum hrtimer_restart mirror_tick(struct hrtimer *t)
 	struct es1869_mirror *m = &chip->mirror;
 	struct snd_pcm_substream *ss = chip->a2_sub;
 	u32 us = es1869_val(ES_S_a2_tick_us);
-	u32 lead_us = es1869_val(ES_S_a2_lead_ms) * 1000;
 	cycles_t c0 = get_cycles();
 	unsigned long flags;
 
 	if (!ss || !m->running)
 		return HRTIMER_NORESTART;
 	snd_pcm_stream_lock_irqsave(ss, flags);
-	mirror_fill(chip, ss->runtime, MIRROR_BUDGET);
+	mirror_fill(chip, ss->runtime, MIRROR_BUDGET,
+		    mirror_hw(ss->runtime, mirror_offset(chip, ss->runtime)));
+	if (m->fill.standing)
+		us = es1869_standing_us(ss->runtime, MIRROR_BUDGET);
 	snd_pcm_stream_unlock_irqrestore(ss, flags);
 	m->ticks++;
 	m->tick_cycles += get_cycles() - c0;
-	if (!m->backlog && !m->standing)
+	if (!m->fill.backlog && !m->fill.standing)
 		return HRTIMER_NORESTART;
-	if (!m->backlog)
-		us = max(us, lead_us / 4);
 	hrtimer_forward_now(t, us_to_ktime(us));
 	return HRTIMER_RESTART;
 }
@@ -232,20 +194,39 @@ static void mirror_silence(struct es1869 *chip, struct snd_pcm_runtime *rt)
 {
 	const u8 *p = snd_pcm_format_silence_64(rt->format);
 	u32 n = frames_to_bytes(rt, rt->buffer_size), i;
-	u32 sb = max(snd_pcm_format_physical_width(rt->format) / 8, 1);
+	u8 low = p ? p[0] : 0, high = p ? p[1] : 0;
 	u8 *w = chip->mirror.ring.area;
 
+	// the pattern of a 16-bit sample, which an 8-bit one's byte repeats
 	for (i = 0; i < n; i++) {
-		w[2 * i] = p ? p[i % sb] : 0;
+		w[2 * i] = i & 1 ? high : low;
 		w[2 * i + 1] = 0;
 	}
 }
 
-// the core's silence, in the application's buffer and the ring alike
+// the silence past a drain's last frame: in the application's buffer, which
+// on an 8-bit channel is the DMA's, and the ring
+static int a2_drain_fill(struct snd_pcm_substream *ss, int channel,
+			 unsigned long pos, unsigned long bytes)
+{
+	struct es1869 *chip = snd_pcm_substream_chip(ss);
+	struct snd_pcm_runtime *rt = ss->runtime;
+
+	snd_pcm_format_set_silence(rt->format, rt->dma_area + pos,
+				   bytes_to_samples(rt, bytes));
+	if (chip->mirror.spread)
+		mirror_copy(chip, rt, bytes_to_frames(rt, pos),
+			    bytes_to_frames(rt, bytes));
+	return 0;
+}
+
+// the core's silence: under a standing pointer, in the interrupt, it stays
+// in the application's buffer for the timer to copy with the rest
 static int a2_fill_silence(struct snd_pcm_substream *ss, int channel,
 			   unsigned long pos, unsigned long bytes)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
+	struct es1869_mirror *m = &chip->mirror;
 	struct snd_pcm_runtime *rt = ss->runtime;
 
 	if (es1869_val(ES_S_irq_trace))
@@ -253,11 +234,10 @@ static int a2_fill_silence(struct snd_pcm_substream *ss, int channel,
 				     "Audio 2 silence at %lu, %lu bytes, appl %lu hw %lu\n",
 				     pos, bytes, rt->control->appl_ptr,
 				     rt->status->hw_ptr);
+	if (m->running && !m->fill.standing)
+		return a2_drain_fill(ss, channel, pos, bytes);
 	snd_pcm_format_set_silence(rt->format, rt->dma_area + pos,
 				   bytes_to_samples(rt, bytes));
-	if (chip->mirror.spread)
-		mirror_copy(chip, rt, bytes_to_frames(rt, pos),
-			    bytes_to_frames(rt, bytes));
 	return 0;
 }
 
@@ -274,10 +254,21 @@ static void mirror_drain(struct snd_pcm_substream *ss)
 	m->silent_to = rt->control->appl_ptr;
 	m->draining = true;
 	es1869_drain_silence(ss, rt->status->hw_ptr, ES_FIFO_A2, &m->silent_to,
-			     a2_fill_silence);
+			     a2_drain_fill);
 }
 
 // --- the stream ----------------------------------------------------------------
+
+// the rate a slaved Audio 2 holds Audio 1 to, which A1h sets for both, or 0
+unsigned int es1869_a2_tied_rate(struct es1869 *chip)
+{
+	struct snd_pcm_substream *ss = chip->a2_sub;
+
+	if (es1869_val(ES_S_audio2_own_clock) ||
+	    chip->a2_owner != ES_OWN_A2P || !ss || !ss->runtime)
+		return 0;
+	return ss->runtime->rate;
+}
 
 // another engine's rate that slaving ties Audio 2 to, or 0
 static unsigned int a1_rate(struct es1869 *chip)
@@ -289,6 +280,14 @@ static unsigned int a1_rate(struct es1869 *chip)
 	return ss->runtime->rate;
 }
 
+static void a2_release(struct es1869 *chip)
+{
+	mutex_lock(&chip->state_mutex);
+	chip->a2_owner = ES_OWN_NONE;
+	chip->a2_sub = NULL;
+	mutex_unlock(&chip->state_mutex);
+}
+
 static int a2_open(struct snd_pcm_substream *ss)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
@@ -298,6 +297,8 @@ static int a2_open(struct snd_pcm_substream *ss)
 	unsigned int tied;
 	int err = 0;
 
+	if (chip->dma2 < 0)
+		return -ENODEV;
 	mutex_lock(&chip->state_mutex);
 	if (chip->dead)
 		err = -ENODEV;
@@ -317,8 +318,7 @@ static int a2_open(struct snd_pcm_substream *ss)
 
 	rt->hw = a2_hw;
 	if (m->spread) {
-		rt->hw.info |= SNDRV_PCM_INFO_SYNC_APPLPTR | SNDRV_PCM_INFO_PAUSE |
-			       SNDRV_PCM_INFO_DRAIN_TRIGGER;
+		rt->hw.info |= SNDRV_PCM_INFO_SYNC_APPLPTR | SNDRV_PCM_INFO_PAUSE;
 		rt->hw.buffer_bytes_max = m->ring.bytes / 2;
 		rt->hw.period_bytes_max = m->ring.bytes / 2;
 	} else if (es1869_val(ES_S_a2_pause)) {
@@ -327,25 +327,22 @@ static int a2_open(struct snd_pcm_substream *ss)
 	err = snd_pcm_hw_constraint_ratnums(rt, 0, SNDRV_PCM_HW_PARAM_RATE,
 					    slaved ? &a2_rates_slaved :
 						     &a2_rates_own);
-	if (err < 0)
-		return err;
-	if (tied) {
+	if (err >= 0 && tied)
 		err = snd_pcm_hw_constraint_single(rt, SNDRV_PCM_HW_PARAM_RATE,
 						   tied);
-		if (err < 0)
-			return err;
-	}
-	return es1869_pcm_limits(rt, &es1869_limit_a2);
+	if (err >= 0)
+		err = es1869_pcm_limits(rt, &es1869_limit_a2);
+	// the core calls no close for an open that failed
+	if (err < 0)
+		a2_release(chip);
+	return err < 0 ? err : 0;
 }
 
 static int a2_close(struct snd_pcm_substream *ss)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 
-	mutex_lock(&chip->state_mutex);
-	chip->a2_owner = ES_OWN_NONE;
-	chip->a2_sub = NULL;
-	mutex_unlock(&chip->state_mutex);
+	a2_release(chip);
 	es1869_power_idle(chip);
 	return 0;
 }
@@ -384,7 +381,8 @@ static int a2_prepare(struct snd_pcm_substream *ss)
 		hrtimer_cancel(&m->tick);
 		m->running = false;
 		m->rot = 0;
-		m->filled = 0;
+		es1869_fill_init(&m->fill, rt, MIRROR_GUARD,
+				 bytes_to_frames(rt, ES_FIFO_A2));
 		mirror_silence(chip, rt);
 	}
 	spin_lock_irqsave(&chip->reg_lock, flags);
@@ -424,7 +422,6 @@ static int a2_prepare(struct snd_pcm_substream *ss)
 static void a2_go(struct es1869 *chip, struct snd_pcm_runtime *rt)
 {
 	struct es1869_mirror *m = &chip->mirror;
-	u64 lead = div_u64((u64)rt->rate * es1869_val(ES_S_a2_lead_ms), 1000);
 	unsigned long flags;
 
 	// the start copies the whole lead, since the first tick comes 2 ms
@@ -432,7 +429,8 @@ static void a2_go(struct es1869 *chip, struct snd_pcm_runtime *rt)
 	if (m->spread) {
 		m->running = true;
 		mirror_fill(chip, rt, max_t(u32, MIRROR_BUDGET,
-					    frames_to_bytes(rt, lead)));
+					    frames_to_bytes(rt, m->fill.lead)),
+			    mirror_hw(rt, mirror_offset(chip, rt)));
 	}
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	es1869_a2_go(&chip->hw, m->stream.burst, m->stream.single);
@@ -441,6 +439,27 @@ static void a2_go(struct es1869 *chip, struct snd_pcm_runtime *rt)
 	if (m->spread)
 		hrtimer_start(&m->tick, us_to_ktime(es1869_val(ES_S_a2_tick_us)),
 			      HRTIMER_MODE_REL_HARD);
+}
+
+// a release starts afresh from the paused frame, less the FIFO's 64 bytes
+// that the stop dropped unplayed, as far as the buffer still holds them: the
+// ring starts there, so all of it is copied again, and the pointer stays
+// at the paused frame until the DMA passes it again (es1869_forward). A
+// standing pointer's copy starts ahead of the DMA, so there it starts at
+// the paused frame itself, and what the guard skips is copied here
+static void a2_rotate(struct es1869 *chip, struct snd_pcm_runtime *rt)
+{
+	struct es1869_mirror *m = &chip->mirror;
+	snd_pcm_uframes_t b = rt->buffer_size, back = 0;
+	snd_pcm_uframes_t queued = (rt->control->appl_ptr + rt->boundary -
+				    rt->status->hw_ptr) % rt->boundary;
+
+	if (!m->fill.standing && queued <= b)
+		back = min3(bytes_to_frames(rt, ES_FIFO_A2), b - queued, b / 4);
+	m->rot = (m->pos + b - back) % b;
+	m->fill.filled = mirror_hw(rt, m->rot);
+	if (m->fill.standing)
+		mirror_copy(chip, rt, m->pos, m->fill.guard);
 }
 
 static int a2_trigger(struct snd_pcm_substream *ss, int cmd)
@@ -455,8 +474,7 @@ static int a2_trigger(struct snd_pcm_substream *ss, int cmd)
 		a2_go(chip, rt);
 		return 0;
 	case SNDRV_PCM_TRIGGER_DRAIN:
-		if (m->spread)
-			mirror_drain(ss);
+		mirror_drain(ss);
 		return 0;
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
@@ -494,17 +512,15 @@ static int a2_trigger(struct snd_pcm_substream *ss, int cmd)
 			spin_unlock_irqrestore(&chip->reg_lock, flags);
 			return 0;
 		}
-		// afresh from the paused frame, less the FIFO's 64 bytes that
-		// the stop dropped unplayed: the ring starts there, so all of
-		// it is copied again, and the pointer stays at the paused
-		// frame until the DMA passes it again (es1869_forward)
-		m->rot = (m->pos + rt->buffer_size -
-			  bytes_to_frames(rt, ES_FIFO_A2)) % rt->buffer_size;
-		m->filled = mirror_hw(rt, m->rot);
+		a2_rotate(chip, rt);
 		spin_lock_irqsave(&chip->reg_lock, flags);
 		es1869_a2_prepare(&chip->hw, &m->stream, true);
 		spin_unlock_irqrestore(&chip->reg_lock, flags);
 		a2_go(chip, rt);
+		// the core skips its check of the time since the last reading
+		// once at a release, but the interrupts no longer fall on
+		// period boundaries, and the first would add a buffer
+		rt->hw_ptr_jiffies = jiffies;
 		return 0;
 	}
 	return -EINVAL;
@@ -513,35 +529,30 @@ static int a2_trigger(struct snd_pcm_substream *ss, int cmd)
 static snd_pcm_uframes_t a2_pointer(struct snd_pcm_substream *ss)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
+	struct es1869_mirror *m = &chip->mirror;
 	struct snd_pcm_runtime *rt = ss->runtime;
-	unsigned long flags;
-	u32 pos;
+	snd_pcm_uframes_t off = mirror_offset(chip, rt);
 
-	rt->delay = bytes_to_frames(rt, ES_FIFO_A2);
-	if (chip->mirror.spread) {
-		snd_pcm_uframes_t off = mirror_offset(chip, rt);
-
-		if (chip->mirror.draining)
-			es1869_drain_silence(ss, mirror_hw(rt, off), ES_FIFO_A2,
-					     &chip->mirror.silent_to,
-					     a2_fill_silence);
-		return es1869_forward(&chip->mirror.last, off, rt->buffer_size);
-	}
-	spin_lock_irqsave(&chip->reg_lock, flags);
-	pos = es1869_dma_pos(&chip->hw, chip->dma2, snd_pcm_lib_buffer_bytes(ss));
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
-	return es1869_forward(&chip->mirror.last, bytes_to_frames(rt, pos),
-			      rt->buffer_size);
+	if (m->draining)
+		es1869_drain_silence(ss, mirror_hw(rt, off), ES_FIFO_A2,
+				     &m->silent_to, a2_drain_fill);
+	return es1869_play_pointer(rt, off, ES_FIFO_A2, m->draining, &m->last);
 }
 
+// the core has just read the pointer for hw_ptr, so the 8237 needn't be read
+// again; what the budget left, the timer copies
 static int a2_ack(struct snd_pcm_substream *ss)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 	struct es1869_mirror *m = &chip->mirror;
+	cycles_t c0 = get_cycles();
 
-	mirror_fill(chip, ss->runtime, MIRROR_BUDGET);
-	// what the budget left, the timer copies
-	if (m->running && m->backlog && !hrtimer_active(&m->tick))
+	if (!m->spread || !m->running)
+		return 0;
+	mirror_fill(chip, ss->runtime, MIRROR_BUDGET, ss->runtime->status->hw_ptr);
+	m->acks++;
+	m->ack_cycles += get_cycles() - c0;
+	if (m->fill.backlog && !hrtimer_active(&m->tick))
 		hrtimer_start(&m->tick, us_to_ktime(es1869_val(ES_S_a2_tick_us)),
 			      HRTIMER_MODE_REL_HARD);
 	return 0;
@@ -587,6 +598,8 @@ int es1869_mirror_init(struct es1869 *chip)
 	hrtimer_setup(&m->tick, mirror_tick, CLOCK_MONOTONIC,
 		      HRTIMER_MODE_REL_HARD);
 	m->spread = chip->dma2 >= 4;
+	if (chip->dma2 < 0)
+		return 0;
 	if (!m->spread) {
 		snd_pcm_set_managed_buffer(ss, SNDRV_DMA_TYPE_DEV, chip->card->dev,
 					   ES1869_A2_BUF, ES1869_A2_BUF);

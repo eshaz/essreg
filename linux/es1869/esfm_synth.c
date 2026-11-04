@@ -10,15 +10,23 @@
  * used, and gives it back when the last user leaves, so that the OPL3
  * synth and the ESFM hwdep can have it in between. The bank is read at
  * that first use: the esfm_bank parameter's file (es1869/esfm-gm.bin), or
- * es1869/esfm-gm-square.bin with esfm_square. Without one, every program
- * plays a sine.
+ * es1869/esfm-gm-square.bin with esfm_square, and a write of either loads
+ * it for the notes to come. Without one, every program plays a sine.
+ *
+ * A note on is up to 74 register writes of 17 port accesses each, over a
+ * millisecond, and the sequencer delivers events from its timer with
+ * interrupts off, whole chords at a time. So an event only goes into a
+ * queue, as MIDI bytes, and the engine runs in a work item, with interrupts
+ * on between the registers.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
 
 #include <linux/firmware.h>
+#include <linux/kfifo.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/workqueue.h>
 #include <sound/asoundef.h>
 #include <sound/core.h>
 #include <sound/seq_device.h>
@@ -27,15 +35,27 @@
 #include "es1869.h"
 #include "esfm_gm.h"
 
+// the queue's entries beside a status and its two bytes: a system exclusive
+// message with its length, a GM reset, and the chip's lost state
+#define ESFM_Q_SYSEX 0xF0
+#define ESFM_Q_RESET 0xFF
+#define ESFM_Q_CHIP 0xFE
+#define ESFM_QUEUE 4096
+
 struct esfm_synth {
 	struct es1869 *chip;
 	int client, port;
 	struct esfm_gm gm;
 	struct esfm_gm_io io;
 	const struct firmware *fw;
-	spinlock_t lock; // the engine, against concurrent events
+	struct mutex gm_mutex; // the engine
+	spinlock_t lock; // the queue, against concurrent events
+	DECLARE_KFIFO(queue, u8, ESFM_QUEUE);
+	struct work_struct work, bank_work;
 	struct mutex use_mutex;
 	int users;
+	bool open; // events count
+	u32 lost; // events the full queue dropped
 };
 
 // the sine every program and drum plays without a bank: one voice, its
@@ -106,7 +126,6 @@ static int esfm_use(void *private_data, struct snd_seq_port_subscribe *info)
 	struct esfm_synth *s = private_data;
 	struct esfm_gm_opts opts;
 	const u8 *bank;
-	unsigned long flags;
 	u32 len;
 	int err = 0;
 
@@ -116,15 +135,12 @@ static int esfm_use(void *private_data, struct snd_seq_port_subscribe *info)
 	if (!s->users) {
 		err = es1869_esfm_claim(s->chip);
 		if (!err) {
-			// the reset's 596 writes before the events see the
-			// engine, outside the event lock
 			esfm_load(s, &bank, &len);
 			esfm_opts(&opts);
-			esfm_gm_init(&s->gm, &s->io, NULL, 0, &opts);
-			spin_lock_irqsave(&s->lock, flags);
-			s->gm.bank = bank;
-			s->gm.bank_len = len;
-			spin_unlock_irqrestore(&s->lock, flags);
+			mutex_lock(&s->gm_mutex);
+			esfm_gm_init(&s->gm, &s->io, bank, len, &opts);
+			mutex_unlock(&s->gm_mutex);
+			WRITE_ONCE(s->open, true);
 		}
 	}
 	if (!err)
@@ -138,14 +154,15 @@ static int esfm_use(void *private_data, struct snd_seq_port_subscribe *info)
 static int esfm_unuse(void *private_data, struct snd_seq_port_subscribe *info)
 {
 	struct esfm_synth *s = private_data;
-	unsigned long flags;
 
 	mutex_lock(&s->use_mutex);
 	if (s->users && !--s->users) {
-		spin_lock_irqsave(&s->lock, flags);
+		WRITE_ONCE(s->open, false);
+		flush_work(&s->work);
+		mutex_lock(&s->gm_mutex);
 		esfm_gm_close(&s->gm);
 		s->gm.bank = NULL;
-		spin_unlock_irqrestore(&s->lock, flags);
+		mutex_unlock(&s->gm_mutex);
 		es1869_esfm_release(s->chip);
 		release_firmware(s->fw);
 		s->fw = NULL;
@@ -155,86 +172,189 @@ static int esfm_unuse(void *private_data, struct snd_seq_port_subscribe *info)
 	return 0;
 }
 
+// an entry for the work item, whole or not at all
+static void esfm_put(struct esfm_synth *s, const u8 *b, unsigned int n)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&s->lock, flags);
+	if (kfifo_avail(&s->queue) >= n)
+		kfifo_in(&s->queue, b, n);
+	else
+		s->lost++;
+	spin_unlock_irqrestore(&s->lock, flags);
+}
+
+static void esfm_short(struct esfm_synth *s, u8 status, u8 d1, u8 d2)
+{
+	u8 b[3] = { status, d1, d2 };
+
+	esfm_put(s, b, 3);
+}
+
 // a 14-bit controller or parameter as the MIDI messages it stands for
-static void esfm_cc14(struct esfm_gm *g, u8 ch, u8 msb_cc, u8 lsb_cc,
+static void esfm_cc14(struct esfm_synth *s, u8 ch, u8 msb_cc, u8 lsb_cc,
 		      unsigned int val)
 {
-	esfm_gm_short(g, 0xB0 | ch, msb_cc, (val >> 7) & 0x7F);
-	esfm_gm_short(g, 0xB0 | ch, lsb_cc, val & 0x7F);
+	esfm_short(s, 0xB0 | ch, msb_cc, (val >> 7) & 0x7F);
+	esfm_short(s, 0xB0 | ch, lsb_cc, val & 0x7F);
+}
+
+static unsigned int esfm_get(struct esfm_synth *s, u8 *b, unsigned int n)
+{
+	unsigned long flags;
+	unsigned int got;
+
+	spin_lock_irqsave(&s->lock, flags);
+	got = kfifo_out(&s->queue, b, n);
+	spin_unlock_irqrestore(&s->lock, flags);
+	return got;
+}
+
+static void esfm_work(struct work_struct *work)
+{
+	struct esfm_synth *s = container_of(work, struct esfm_synth, work);
+	struct esfm_gm *g = &s->gm;
+	u8 b[3], sysex[128];
+
+	mutex_lock(&s->gm_mutex);
+	while (esfm_get(s, b, 1)) {
+		if (b[0] == ESFM_Q_SYSEX) {
+			if (esfm_get(s, b + 1, 1) &&
+			    esfm_get(s, sysex, b[1]) == b[1] && g->bank)
+				esfm_gm_sysex(g, sysex, b[1]);
+		} else if (b[0] == ESFM_Q_RESET) {
+			if (g->bank)
+				esfm_gm_gm_reset(g);
+		} else if (b[0] == ESFM_Q_CHIP) {
+			if (g->bank)
+				esfm_gm_reset(g);
+		} else if (esfm_get(s, b + 1, 2) == 2 && g->bank) {
+			esfm_gm_short(g, b[0], b[1], b[2]);
+		}
+		cond_resched();
+	}
+	mutex_unlock(&s->gm_mutex);
 }
 
 static int esfm_event(struct snd_seq_event *ev, int direct, void *private_data,
 		      int atomic, int hop)
 {
 	struct esfm_synth *s = private_data;
-	struct esfm_gm *g = &s->gm;
-	u8 ch, sysex[128];
+	u8 ch, sysex[2 + 128];
 	unsigned int param, val;
-	unsigned long flags;
-	long len = 0;
+	long len;
 
-	if (ev->type == SNDRV_SEQ_EVENT_SYSEX)
-		len = snd_seq_expand_var_event(ev, sizeof(sysex), sysex, 1, 0);
-	spin_lock_irqsave(&s->lock, flags);
-	if (!g->bank) {
-		spin_unlock_irqrestore(&s->lock, flags);
+	if (!READ_ONCE(s->open))
 		return 0;
-	}
 	ch = ev->data.control.channel & 0x0F;
 	param = ev->data.control.param;
 	val = ev->data.control.value;
 	switch (ev->type) {
 	case SNDRV_SEQ_EVENT_NOTEON:
-		esfm_gm_short(g, 0x90 | (ev->data.note.channel & 0x0F),
-			      ev->data.note.note, ev->data.note.velocity);
+		esfm_short(s, 0x90 | (ev->data.note.channel & 0x0F),
+			   ev->data.note.note, ev->data.note.velocity);
 		break;
 	case SNDRV_SEQ_EVENT_NOTEOFF:
-		esfm_gm_short(g, 0x80 | (ev->data.note.channel & 0x0F),
-			      ev->data.note.note, 0);
+		esfm_short(s, 0x80 | (ev->data.note.channel & 0x0F),
+			   ev->data.note.note, 0);
 		break;
 	case SNDRV_SEQ_EVENT_CONTROLLER:
-		esfm_gm_short(g, 0xB0 | ch, param, val);
+		esfm_short(s, 0xB0 | ch, param, val);
 		break;
 	case SNDRV_SEQ_EVENT_CONTROL14:
 		if (param < 32)
-			esfm_cc14(g, ch, param, param + 32, val);
+			esfm_cc14(s, ch, param, param + 32, val);
 		else
-			esfm_gm_short(g, 0xB0 | ch, param, val);
+			esfm_short(s, 0xB0 | ch, param, val);
 		break;
 	case SNDRV_SEQ_EVENT_REGPARAM:
-		esfm_cc14(g, ch, MIDI_CTL_REGIST_PARM_NUM_MSB,
+		esfm_cc14(s, ch, MIDI_CTL_REGIST_PARM_NUM_MSB,
 			  MIDI_CTL_REGIST_PARM_NUM_LSB, param);
-		esfm_cc14(g, ch, MIDI_CTL_MSB_DATA_ENTRY, MIDI_CTL_LSB_DATA_ENTRY,
+		esfm_cc14(s, ch, MIDI_CTL_MSB_DATA_ENTRY, MIDI_CTL_LSB_DATA_ENTRY,
 			  val);
 		break;
 	case SNDRV_SEQ_EVENT_NONREGPARAM:
-		esfm_cc14(g, ch, MIDI_CTL_NONREG_PARM_NUM_MSB,
+		esfm_cc14(s, ch, MIDI_CTL_NONREG_PARM_NUM_MSB,
 			  MIDI_CTL_NONREG_PARM_NUM_LSB, param);
-		esfm_cc14(g, ch, MIDI_CTL_MSB_DATA_ENTRY, MIDI_CTL_LSB_DATA_ENTRY,
+		esfm_cc14(s, ch, MIDI_CTL_MSB_DATA_ENTRY, MIDI_CTL_LSB_DATA_ENTRY,
 			  val);
 		break;
 	case SNDRV_SEQ_EVENT_PGMCHANGE:
-		esfm_gm_short(g, 0xC0 | ch, val, 0);
+		esfm_short(s, 0xC0 | ch, val, 0);
 		break;
 	case SNDRV_SEQ_EVENT_CHANPRESS:
-		esfm_gm_short(g, 0xD0 | ch, val, 0);
+		esfm_short(s, 0xD0 | ch, val, 0);
 		break;
 	case SNDRV_SEQ_EVENT_PITCHBEND:
 		// -8192 to 8191, the 14 bits less 2000h
 		val = clamp(ev->data.control.value + 0x2000, 0, 0x3FFF);
-		esfm_gm_short(g, 0xE0 | ch, val & 0x7F, val >> 7);
+		esfm_short(s, 0xE0 | ch, val & 0x7F, val >> 7);
 		break;
 	case SNDRV_SEQ_EVENT_SYSEX:
-		if (len > 0)
-			esfm_gm_sysex(g, sysex, len);
+		len = snd_seq_expand_var_event(ev, sizeof(sysex) - 2, sysex + 2,
+					       1, 0);
+		if (len > 0) {
+			sysex[0] = ESFM_Q_SYSEX;
+			sysex[1] = len;
+			esfm_put(s, sysex, 2 + len);
+		}
 		break;
 	case SNDRV_SEQ_EVENT_RESET:
-		esfm_gm_gm_reset(g);
+		sysex[0] = ESFM_Q_RESET;
+		esfm_put(s, sysex, 1);
 		break;
+	default:
+		return 0;
 	}
-	spin_unlock_irqrestore(&s->lock, flags);
+	queue_work(system_highpri_wq, &s->work);
 	return 0;
 }
+
+// the chip came back from a suspend without what the engine wrote
+static void esfm_chip_resume(void *data)
+{
+	struct esfm_synth *s = data;
+	u8 b = ESFM_Q_CHIP;
+
+	if (!READ_ONCE(s->open))
+		return;
+	esfm_put(s, &b, 1);
+	queue_work(system_highpri_wq, &s->work);
+}
+
+static void esfm_bank_work(struct work_struct *work)
+{
+	struct esfm_synth *s = container_of(work, struct esfm_synth, bank_work);
+	const struct firmware *old;
+	const u8 *bank;
+	u32 len;
+
+	mutex_lock(&s->use_mutex);
+	if (s->users) {
+		old = s->fw;
+		s->fw = NULL;
+		esfm_load(s, &bank, &len);
+		mutex_lock(&s->gm_mutex);
+		s->gm.bank = bank;
+		s->gm.bank_len = len;
+		mutex_unlock(&s->gm_mutex);
+		release_firmware(old);
+	}
+	mutex_unlock(&s->use_mutex);
+}
+
+static void esfm_chip_bank(void *data)
+{
+	struct esfm_synth *s = data;
+
+	schedule_work(&s->bank_work);
+}
+
+static const struct es1869_esfm_ops esfm_chip_ops = {
+	.resume = esfm_chip_resume,
+	.bank = esfm_chip_bank,
+};
 
 static int esfm_probe(struct device *_dev)
 {
@@ -257,7 +377,11 @@ static int esfm_probe(struct device *_dev)
 	s->io.ctx = chip;
 	s->io.write = esfm_write;
 	spin_lock_init(&s->lock);
+	mutex_init(&s->gm_mutex);
 	mutex_init(&s->use_mutex);
+	INIT_KFIFO(s->queue);
+	INIT_WORK(&s->work, esfm_work);
+	INIT_WORK(&s->bank_work, esfm_bank_work);
 	s->client = snd_seq_create_kernel_client(chip->card, dev->device,
 						 "ES1869 ESFM synth");
 	if (s->client < 0) {
@@ -284,6 +408,7 @@ static int esfm_probe(struct device *_dev)
 		return err;
 	}
 	dev_set_drvdata(_dev, s);
+	es1869_esfm_set_ops(chip, &esfm_chip_ops, s);
 	return 0;
 }
 
@@ -293,7 +418,10 @@ static int esfm_remove(struct device *_dev)
 
 	if (!s)
 		return 0;
+	es1869_esfm_set_ops(s->chip, NULL, NULL);
 	snd_seq_delete_kernel_client(s->client);
+	cancel_work_sync(&s->work);
+	cancel_work_sync(&s->bank_work);
 	release_firmware(s->fw);
 	kfree(s);
 	return 0;
