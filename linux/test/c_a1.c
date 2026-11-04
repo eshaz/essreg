@@ -141,6 +141,62 @@ enum et_result c_a1rec_rate(struct et_ctx *c, const struct et_case *k)
 	return a1rec_run(c, &f, 0.2, 1.5, f.rate % 8000 ? 100 : 600);
 }
 
+// the mean of each side over a recording's last second, past the first
+// second, in which the ADC's input still settles
+static int rec_dc(struct et_ctx *c, double dc[2])
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	struct et_stream s = et_rec(ET_A1C, &f, 2 * f.rate, 0);
+	unsigned int ch;
+	long i, n;
+
+	if (et_run(c, &s, 1)) {
+		et_fail(c, "the recording failed");
+		free(s.data);
+		return -1;
+	}
+	n = (long)s.done - f.rate;
+	for (ch = 0; ch < 2; ch++) {
+		double *x = et_chan(&f, s.data, s.done, ch), sum = 0;
+
+		for (i = 0; i < (long)f.rate; i++)
+			sum += x[n + i];
+		dc[ch] = sum / f.rate;
+		free(x);
+	}
+	free(s.data);
+	return 0;
+}
+
+// a1rec.dc: the ADC's own offset, from a record source that nothing drives
+// at the lowest level, as ESSDC.EXE measures it. It doesn't depend on the
+// source or the level, so it arises after them. Over half a step of the
+// offset registers, "Capture DC Offset" has something to correct. A step of
+// that control moves it by 64 (DS p.71)
+enum et_result c_a1rec_dc(struct et_ctx *c, const struct et_case *k)
+{
+	double dc[2], moved[2];
+
+	(void)k;
+	et_mix_quiet(c);
+	et_mix_dig(c, 0);
+	et_ctl_set_enum(c, "Capture Source", "Line");
+	et_ctl_set(c, "Capture Volume", 0, 0, 0);
+	et_ctl_set(c, "Capture DC Offset", 0, 0, 0);
+	if (rec_dc(c, dc))
+		return ET_ERROR;
+	et_measure(c, "the ADC's offset, left", dc[0], "", -32, 32);
+	et_measure(c, "the ADC's offset, right", dc[1], "", -32, 32);
+	et_ctl_set(c, "Capture DC Offset", 0, 1, 1);
+	if (rec_dc(c, moved))
+		return ET_ERROR;
+	et_measure(c, "a step of Capture DC Offset, left", moved[0] - dc[0], "",
+		   58, 70);
+	et_measure(c, "a step of Capture DC Offset, right", moved[1] - dc[1], "",
+		   58, 70);
+	return ET_PASS;
+}
+
 // a recording's start against its tone, fitted over 50-250 ms: the
 // frames at the start more than 5 % of the tone off it, and the offset
 // over the first 5 ms, which the ADC's input carries while it settles

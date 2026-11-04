@@ -151,7 +151,9 @@ The cases reach the chip four ways:
 * `fm`: PCM 1's idle level, which output each FM side bit reaches with
   `fm_sides` on and off, and a note's pitch.
 * `a1rec`: Audio 1's recordings: formats, rates, sides, pitch, and the
-  frames at their start.
+  frames at their start. `a1rec.dc` measures the ADC's offset from a source
+  that nothing drives, which should stay under half a step of the offset
+  registers, and what a step of `Capture DC Offset` moves it by.
 * `a1play`: Audio 1's playback through the cable: formats, rates and twenty
   starts, measured late in each tone, with THD+N over 600 Hz: the second
   card's clock wanders while it records, which leaves sidebands within 20 Hz

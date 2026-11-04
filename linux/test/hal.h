@@ -116,5 +116,6 @@ int et_klog_fault(const char *msg);
 #define SIM_A1_RESUME 0x40000 // a resume leaves Audio 1 off the mixer
 #define SIM_A1_DRAIN 0x80000 // a drain drops what Audio 1's FIFO holds
 #define SIM_A1_PAUSEDRAIN 0x100000 // a drain from a pause loses a buffer
+#define SIM_ADC_DC 0x200000 // the ADC is off by more than half a step
 
 #endif

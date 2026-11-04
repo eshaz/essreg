@@ -609,6 +609,22 @@ laptop 49,612.5 Hz, the master over 480, as essprobe and, with its sign
 corrected, the Linux driver's test measured it (the Linux report's 49,819.5
 Hz had the sign backwards).
 
+The ADC has an offset of its own. On the Armada it is +18 on the left and
++21 on the right, in 16-bit steps, about -64 dBFS, and the same from every
+record source measured and at every level of B4h, so it arises after them,
+and it holds to a step over 20 seconds. In a recording's first second it is
+about 8 higher, while the input settles. BAh and BBh move it by 64 a step,
+as the data sheet says (DS p.71), measured at +64.2 and +63.9, so a card
+under 32 has nothing to gain from them, and code 0 is its best setting.
+
+ESS's drivers correct two ways. ES1869.DRV subtracts the mean of a
+recording's first block from all that follow (`DCdrift`), which mostly takes
+out the thump of turning the CODEC at the start. ESSDC.EXE, a daemon,
+records every 10 minutes at 22050 Hz from source 6, a line that nothing
+drives, with B4h at 0, tries codes on BAh and BBh over the last blocks, and
+keeps the one with the smallest mean on each side. It restores 1Ch and B4h
+after that.
+
 ## Audio 2
 
 Audio 2 is a second stereo DAC with a FIFO of 32 words, which plays only by

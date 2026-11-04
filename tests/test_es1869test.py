@@ -47,6 +47,7 @@ FAULTS = {
     0x40000: "pm.a1",              # a resume leaves Audio 1 off the mixer
     0x80000: "a1play.drain",       # a drain drops Audio 1's FIFO
     0x100000: "a1play.pausedrain",  # a drain from a pause loses a buffer
+    0x200000: "a1rec.dc",          # the ADC is off by more than half a step
 }
 
 # the cases that run only when named, or with someone at the machine

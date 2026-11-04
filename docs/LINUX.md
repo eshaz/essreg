@@ -58,6 +58,12 @@ The driver also follows the other measurements in
 * What the ring copies depends on whether the application's pointer moved,
   not on how far it is from the DMA, because dmix's pointer stands at 0 and
   the DMA comes near it when the position nears the boundary, after 6 hours.
+* Nothing corrects the ADC's offset by itself, as ESS's DCdrift and
+  ESSDC.EXE do. On the Armada it is +18 and +21 of 32768, about -64 dBFS,
+  which is under half a step of the offset registers, and a recording's
+  start, which ESS's correction mostly served, settles before it begins.
+  es1869test's `a1rec.dc` measures it, and `Capture DC Offset` corrects a
+  card that needs it, in steps of 64.
 * Every device takes a whole number of periods in its buffer, two at least.
   Without that the interrupts moved against the buffer at each wrap, and
   speaker-test, which wants two periods, took one of 12000 frames, more than

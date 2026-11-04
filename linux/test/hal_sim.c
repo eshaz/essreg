@@ -433,6 +433,9 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 				v[ch] = ctl_gain("Capture Volume", 0,
 						 ch ^ ((sim.faults & SIM_B4_SWAP) != 0)) *
 					in;
+				// after the level, as the chip's own offset
+				v[ch] += 64 * ctl("Capture DC Offset", 0, ch) +
+					 (sim.faults & SIM_ADC_DC ? 200 : 8);
 			}
 		} else {
 			double m = ctl("Master Playback Switch", 0, 0) ?

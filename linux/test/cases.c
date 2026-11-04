@@ -32,6 +32,7 @@ FN(c_fm_esfm_sides)
 FN(c_fm_opl3_sides)
 FN(c_fm_pitch)
 FN(c_a1rec_fmt)
+FN(c_a1rec_dc)
 FN(c_a1rec_rate)
 FN(c_a1rec_start)
 FN(c_a1rec_settle0)
@@ -154,6 +155,8 @@ const struct et_case et_cases[] = {
 	CASE("a1rec.start.u8", 0, c_a1rec_start, 2, "the same, 8-bit stereo")
 	CASE("a1rec.start.8000", 0, c_a1rec_start, 3, "the same, at 8000 Hz")
 	CASE("a1rec.start.48000", 0, c_a1rec_start, 4, "the same, at 48000 Hz")
+	CASE("a1rec.dc", N, c_a1rec_dc, 0,
+	     "the ADC's offset with a silent source, and a step of Capture DC Offset")
 	CASE("a1rec.settle0", ET_ROOT | N, c_a1rec_settle0, 0,
 	     "a1c_settle_ms=0, ESS's start: the input's offset at the start")
 
