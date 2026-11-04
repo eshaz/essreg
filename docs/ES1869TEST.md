@@ -141,7 +141,13 @@ The cases reach the chip four ways:
   bad values are refused.
 * `dig`: Audio 2's formats, starts, a pause, mmap, dmix and half a minute,
   frame by frame, and `dig.drain.full`, a pattern of one whole buffer whose
-  drain begins with the buffer full, followed only by idle frames.
+  drain begins with the buffer full, followed only by idle frames, and
+  `dig.drain.two`, the same with two periods in the buffer. `dig.two` plays
+  two periods in the buffer, polled as JACK does it, so that nothing but the
+  interrupts reads the pointer: a driver that took a step of over half the
+  buffer for a step back lost a buffer there, with no xrun. `dig.runout`
+  stops writing, with no stop threshold and the core's silence behind the
+  DMA: only idle frames after the pattern.
 * `fm`: PCM 1's idle level, which output each FM side bit reaches with
   `fm_sides` on and off, and a note's pitch.
 * `a1rec`: Audio 1's recordings: formats, rates, sides, pitch, and the
@@ -167,14 +173,19 @@ The cases reach the chip four ways:
   record source and arecord recording eight times, and the output falls
   silent in each recording, since the monitor puts the record source on AOUT
   in place of the playback mix.
+* `a1play.drain`: a second of tone at 8 kHz in 8 bits, whose last frame ends
+  a period, drained: it lasts the second, within the second card's clock,
+  where a stop at the DMA's end cuts the 32 ms that the chip's FIFO holds.
+  `a1play.pausedrain` pauses for 200 ms before that drain, and the buffer
+  that was queued still plays.
 * `dual`: the four-channel device's channels on their DACs and one clock,
   and when each DAC began, from the phase of its own tone, at three rates.
 * `latency`: the smallest period of four that each engine plays without an
   xrun.
 * `music`: aplay plays a file on Audio 2, checked frame by frame.
 * `cpu`: the driver's share of the CPU while each engine plays 44.1 kHz
-  16-bit stereo, from its own cycle counts, under 1 % for one engine and 2 %
-  for both.
+  16-bit stereo, from its own cycle counts of the interrupts and of the
+  ring's ticks and copies, under 1 % for one engine and 2 % for both.
 * `midi`: GMCHECK.MID on the ESFM synth, every step on PCM 1; WildMidi on a
   DAC; a note out of the MPU-401.
 * `3d`: the 3-D effect measured as ess3d measures it (src/s3dmeas.c), tones
@@ -196,14 +207,15 @@ The cases reach the chip four ways:
 * `pm` (opt-in, `--destructive`): the machine's devices suspended and
   resumed through pm_test, every mixer register and B4h the same after it,
   and every engine working; a stream through a suspend goes on once prepared
-  again, the pattern's last second in order. Every device of the machine
-  goes through it: on the Armada both cases passed, but its CardBus network
-  card (an RTL8169) didn't come back until it was taken out and put back.
-  The socket finds the card again as it resumes, and the card's PHY driver
-  can't be requested then, since the kernel refuses usermode helpers during
-  a suspend and resume with EBUSY, which libphy doesn't accept as it does
-  ENOENT (the Armada kit's patch 0008 does). So run `pm` at the machine, not
-  over its network.
+  again, the pattern's last second in order; and a tone on Audio 1 is heard
+  after the resume at its level before it (`pm.a1`, through the second
+  card). Every device of the machine goes through it: on the Armada both
+  cases passed, but its CardBus network card (an RTL8169) didn't come back
+  until it was taken out and put back. The socket finds the card again as it
+  resumes, and the card's PHY driver can't be requested then, since the
+  kernel refuses usermode helpers during a suspend and resume with EBUSY,
+  which libphy doesn't accept as it does ENOENT (the Armada kit's patch 0008
+  does). So run `pm` at the machine, not over its network.
 * `load` (opt-in, `--destructive`): five reloads of the driver, the card
   complete after each, a parameter given at load in force and gone at the
   next, every setting put back after udev's alsactl restore, and the engines

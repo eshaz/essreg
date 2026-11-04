@@ -46,6 +46,9 @@ struct et_fmt {
 #define ET_DMIX 0x02 // through a dmix plugin on the role's device
 #define ET_NOSTART 0x04 // the stream starts with the first write
 #define ET_STALL 0x08 // the pause is a stall: no transfers, the PCM runs
+#define ET_RUNOUT 0x10 // past its last frame it runs on the core's silence
+#define ET_POLLED 0x20 // as JACK: poll, and the mapped buffer
+#define ET_PAUSEDRAIN 0x40 // paused when all is written, then drained
 
 struct et_stream {
 	enum et_role role;

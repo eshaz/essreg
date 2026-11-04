@@ -327,6 +327,64 @@ enum et_result c_pm_stream(struct et_ctx *c, const struct et_case *k)
 	return ET_PASS;
 }
 
+// pm.a1: a tone on Audio 1 through a suspend. The resume's reset takes Audio
+// 1 off the mixer, and the prepare after it has to put it back, which a
+// driver that remembered D1h across the reset didn't: the DMA and the
+// interrupts ran, in silence, until the stream closed
+enum et_result c_pm_a1(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	unsigned long pn = 14 * f.rate, rn = 7 * 48000;
+	struct et_stream s[3];
+	double before, after, *x;
+	char cmd[300];
+	int i;
+
+	(void)k;
+	if (access("/sys/power/pm_test", F_OK) &&
+	    strcmp(c->hal->name, "simulated")) {
+		et_note(c, "no /sys/power/pm_test: the kernel needs CONFIG_PM_DEBUG");
+		return ET_SKIP;
+	}
+	if (et_mix_quiet(c) || et_mix_dig(c, 0))
+		return ET_ERROR;
+	et_mix_out(c, 14, 0);
+	s[0] = et_rec(ET_REC2, &et_rec2_fmt, rn, 0);
+	s[1] = et_play(ET_A1P, &f, et_tone(&f, pn, ET_HZ, ET_HZ, 6000), pn, 0.4);
+	snprintf(cmd, sizeof(cmd), "%s --suspend", self());
+	memset(&s[2], 0, sizeof(s[2]));
+	s[2].role = ET_CMD;
+	s[2].cmd = cmd;
+	s[2].start = 2.5;
+	s[2].timeout = 30;
+	for (i = 0; i < 2; i++)
+		s[i].timeout = 40;
+	if (et_run(c, s, 3) && (s[0].err || s[1].err)) {
+		et_fail(c, "the streams after the resume: %s, %s",
+			s[0].err ? strerror(-s[0].err) : "ok",
+			s[1].err ? strerror(-s[1].err) : "ok");
+		free(s[0].data);
+		free(s[1].data);
+		return ET_FAIL;
+	}
+	et_measure(c, "the suspend's exit", s[2].status, "", 0, 0);
+	x = et_chan(&et_rec2_fmt, s[0].data, s[0].done, 0);
+	// the second card's gain settles through the tone's first second, and
+	// the recording stops with its suspend, so the seconds around it
+	before = an_dbfs(an_tone(x + 72000, 28800, 48000, ET_HZ, NULL) / M_SQRT2);
+	after = an_dbfs(an_tone(x + s[0].done - 48000, 38400, 48000, ET_HZ, NULL) /
+			M_SQRT2);
+	et_measure(c, "the tone before the suspend", before, "dBFS", -60, -1);
+	et_measure(c, "the tone after the resume, against that", after - before,
+		   "dB", -6, 6);
+	if (c->fails)
+		et_dump(c, "rec2", &et_rec2_fmt, s[0].data, s[0].done);
+	free(x);
+	free(s[0].data);
+	free(s[1].data);
+	return ET_PASS;
+}
+
 // --- load --------------------------------------------------------------------
 
 #define MAXCTL 256

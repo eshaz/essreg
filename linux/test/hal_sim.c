@@ -332,11 +332,26 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 
 			if (sim.faults & SIM_LOSS)
 				k += k / 10000;
+			// a buffer played again, with no xrun
+			if (a2 && (sim.faults & SIM_TWO_PERIODS) && k > 20000 &&
+			    a2->buffer_got == 2 * a2->period_got)
+				k -= a2->buffer_got;
 			if (dig && k >= 0 && k < (long)a2->frames &&
 			    !(sim.faults & SIM_A2_SILENT)) {
 				int out[2];
 
 				et_dig_frame(&a2->fmt, a2->data, k, out);
+				v[0] = out[0] - ET_FM_IDLE;
+				v[1] = out[1] - ET_FM_IDLE;
+			} else if (dig && (sim.faults & SIM_RUNOUT_STALE) &&
+				   (a2->flags & ET_RUNOUT) &&
+				   k >= (long)a2->frames &&
+				   k < (long)(a2->frames + a2->buffer_got)) {
+				// the ring goes round on what it held
+				int out[2];
+
+				et_dig_frame(&a2->fmt, a2->data,
+					     k - a2->buffer_got, out);
 				v[0] = out[0] - ET_FM_IDLE;
 				v[1] = out[1] - ET_FM_IDLE;
 			} else if (dig && (sim.faults & SIM_DRAIN_STALE) &&
@@ -423,11 +438,30 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 			double m = ctl("Master Playback Switch", 0, 0) ?
 					   ctl_gain("Master Playback Volume", 0, 0) :
 					   0;
-			double l = m * (ctl_gain("PCM Playback Volume", 0, 0) *
-						a2_out(a2, t, 0) +
-					ctl_gain("PCM Playback Volume", 1, 0) *
-						(a1 ? at(a1, t, a1->fmt.rate, 0) :
-						      0));
+			int a1_on = a1 != NULL;
+			double l, a1t = t;
+
+			// off the mixer since a resume, or the FIFO lost
+			if (a1 && (sim.faults & SIM_A1_RESUME) && cmd &&
+			    strstr(cmd->cmd, "--suspend") && t > cmd->start)
+				a1_on = 0;
+			if (a1 && (sim.faults & SIM_A1_DRAIN) &&
+			    t > a1->start + (a1->frames - 256.0) / a1->fmt.rate)
+				a1_on = 0;
+			// the pause when the last frame is written, or the
+			// buffer it dropped
+			if (a1 && (a1->flags & ET_PAUSEDRAIN) &&
+			    t > a1->start + 0.5) {
+				a1t = t - 0.2 > a1->start + 0.5 ? t - 0.2 :
+								  a1->start + 0.5;
+				if ((sim.faults & SIM_A1_PAUSEDRAIN) &&
+				    a1t > a1->start + 0.6)
+					a1_on = 0;
+			}
+			l = m * (ctl_gain("PCM Playback Volume", 0, 0) *
+					 a2_out(a2, t, 0) +
+				 ctl_gain("PCM Playback Volume", 1, 0) *
+					 (a1_on ? at(a1, a1t, a1->fmt.rate, 0) : 0));
 
 			// dual: channel 1 on Audio 1, channel 3 on Audio 2
 			if (dual)

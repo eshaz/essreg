@@ -63,13 +63,32 @@ static void measure(const double *x, long n, double rate, double lo,
 
 // --- a1rec -------------------------------------------------------------------
 
+static void a1rec_check(struct et_ctx *c, const struct et_fmt *f,
+			const struct tones *t, double ppm)
+{
+	et_measure(c, "441 Hz", t[0].a441, "dBFS", -40, -1);
+	if (f->channels == 2) {
+		et_measure(c, "661.5 Hz on the left", t[0].a661 - t[0].a441,
+			   "dB", -200, -20);
+		et_measure(c, "441 Hz on the right", t[1].a441 - t[1].a661,
+			   "dB", -200, -20);
+	}
+	et_measure(c, "THD+N, left", t[0].thdn, "dB", -200,
+		   eight(f) ? -25 : -30);
+	et_measure(c, "pitch", (t[0].hz / ET_HZ - 1) * 1e6, "ppm", -ppm, ppm);
+	et_measure(c, "glitches", t[0].glitches, "", 0, 0);
+}
+
+// a recording of Audio 2's tones, checked before its dump, so that a
+// failure keeps its recording
 static enum et_result a1rec_run(struct et_ctx *c, const struct et_fmt *cf,
-				double skip, double secs, struct tones *t)
+				double skip, double secs, double ppm)
 {
 	static const struct et_fmt pf = { ET_S16, 2, 44100 };
 	unsigned long pn = (unsigned long)((secs + skip + 0.6) * 44100);
 	unsigned long cn = (unsigned long)((secs + skip) * cf->rate);
 	struct et_stream s[2];
+	struct tones t[2];
 	unsigned int ch;
 	double *x;
 
@@ -99,6 +118,7 @@ static enum et_result a1rec_run(struct et_ctx *c, const struct et_fmt *cf,
 		measure(x + from, (long)s[1].done - from, cf->rate, 100, &t[ch]);
 		free(x);
 	}
+	a1rec_check(c, cf, t, ppm);
 	if (c->fails)
 		et_dump(c, "a1c", cf, s[1].data, s[1].done);
 	free(s[0].data);
@@ -106,31 +126,10 @@ static enum et_result a1rec_run(struct et_ctx *c, const struct et_fmt *cf,
 	return ET_PASS;
 }
 
-static void a1rec_check(struct et_ctx *c, const struct et_fmt *f,
-			const struct tones *t, double ppm)
-{
-	et_measure(c, "441 Hz", t[0].a441, "dBFS", -40, -1);
-	if (f->channels == 2) {
-		et_measure(c, "661.5 Hz on the left", t[0].a661 - t[0].a441,
-			   "dB", -200, -20);
-		et_measure(c, "441 Hz on the right", t[1].a441 - t[1].a661,
-			   "dB", -200, -20);
-	}
-	et_measure(c, "THD+N, left", t[0].thdn, "dB", -200,
-		   eight(f) ? -25 : -30);
-	et_measure(c, "pitch", (t[0].hz / ET_HZ - 1) * 1e6, "ppm", -ppm, ppm);
-	et_measure(c, "glitches", t[0].glitches, "", 0, 0);
-}
-
 // a1rec.fmt.*: each format at 44.1 or 22.05 kHz
 enum et_result c_a1rec_fmt(struct et_ctx *c, const struct et_case *k)
 {
-	struct tones t[2];
-	enum et_result r = a1rec_run(c, &fmts[k->arg], 0.2, 1.5, t);
-
-	if (r == ET_PASS)
-		a1rec_check(c, &fmts[k->arg], t, 100);
-	return r;
+	return a1rec_run(c, &fmts[k->arg], 0.2, 1.5, 100);
 }
 
 // a1rec.rate.*: 16-bit stereo at each rate; 48 kHz runs from the other
@@ -138,12 +137,8 @@ enum et_result c_a1rec_fmt(struct et_ctx *c, const struct et_case *k)
 enum et_result c_a1rec_rate(struct et_ctx *c, const struct et_case *k)
 {
 	struct et_fmt f = { ET_S16, 2, rates[k->arg] };
-	struct tones t[2];
-	enum et_result r = a1rec_run(c, &f, 0.2, 1.5, t);
 
-	if (r == ET_PASS)
-		a1rec_check(c, &f, t, f.rate % 8000 ? 100 : 600);
-	return r;
+	return a1rec_run(c, &f, 0.2, 1.5, f.rate % 8000 ? 100 : 600);
 }
 
 // a recording's start against its tone, fitted over 50-250 ms: the
@@ -377,6 +372,76 @@ enum et_result c_a1play_rate(struct et_ctx *c, const struct et_case *k)
 	if (r == ET_PASS && !c->fails)
 		a1play_check(c, &f, &t);
 	return r;
+}
+
+static int cmp_double(const void *a, const void *b)
+{
+	double x = *(const double *)a, y = *(const double *)b;
+
+	return x < y ? -1 : x > y;
+}
+
+// a1play.drain: a second of tone at the lowest byte rate, whose last frame
+// ends a period, drained: the chip's FIFO holds 32 ms of it then, which a
+// stop at the DMA's end would drop. Heard on the second card, at half the
+// tone's level, since its capture starts with a thump of its own. With a
+// pause of 200 ms before the drain (a1play.pausedrain), the buffer that
+// was queued still plays: the core takes a position short of the period's
+// end for an interrupt acknowledged twice, right after a release
+enum et_result c_a1play_drain(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_U8, 1, 8000 };
+	double len = k->arg ? 1200 : 1000;
+	unsigned long pn = 8000, rn = 2 * 48000;
+	struct et_stream s[2];
+	double *x, *sorted, level;
+	long on, off, i;
+
+	et_mix_quiet(c);
+	et_mix_dig(c, 0);
+	et_mix_out(c, 14, 0);
+	s[0] = et_rec(ET_REC2, &et_rec2_fmt, rn, 0);
+	s[1] = et_play(ET_A1P, &f, et_tone(&f, pn, ET_HZ, 0, AMP), pn, 0.4);
+	s[1].period = 1000;
+	s[1].buffer = 4000;
+	s[1].flags = k->arg;
+	if (et_run(c, s, 2)) {
+		et_fail(c, "the streams failed");
+		free(s[0].data);
+		free(s[1].data);
+		return ET_ERROR;
+	}
+	x = et_chan(&et_rec2_fmt, s[0].data, s[0].done, 0);
+	// the tone's level, past a click that its largest sample might be
+	sorted = malloc(s[0].done * sizeof(*sorted));
+	if (!sorted) {
+		free(x);
+		free(s[0].data);
+		free(s[1].data);
+		return ET_ERROR;
+	}
+	for (i = 0; i < (long)s[0].done; i++)
+		sorted[i] = fabs(x[i]);
+	qsort(sorted, s[0].done, sizeof(*sorted), cmp_double);
+	level = 0.6 * sorted[s[0].done * 99 / 100];
+	free(sorted);
+	for (on = 0; on < (long)s[0].done && fabs(x[on]) < level; on++)
+		;
+	for (off = (long)s[0].done - 1; off > on; off--)
+		if (fabs(x[off]) > level)
+			break;
+	if (level < 100) {
+		et_fail(c, "the second card heard nothing");
+	} else {
+		et_measure(c, "the tone's length", (off - on) * 1000.0 / 48000,
+			   "ms", len - 15, len + 30);
+	}
+	if (c->fails)
+		et_dump(c, "rec2", &et_rec2_fmt, s[0].data, s[0].done);
+	free(x);
+	free(s[0].data);
+	free(s[1].data);
+	return ET_PASS;
 }
 
 // a1play.start: ten starts each of 16-bit and 8-bit stereo, in step: the

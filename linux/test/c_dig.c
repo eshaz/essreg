@@ -302,6 +302,45 @@ enum et_result c_dig_drain(struct et_ctx *c, const struct et_case *k)
 		       1000);
 }
 
+// dig.drain.two: two periods in the buffer, full as the drain begins: the
+// DMA reaches the last frame before the drain ends, and its silence has to
+// reach that far
+enum et_result c_dig_drain_two(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+
+	(void)k;
+	return dig_run(c, &f, 8192 + 8192 + 900, 0, 0, 0, 53, NULL, NULL, 8192,
+		       4096);
+}
+
+// dig.two: two periods in the buffer, polled as JACK does it, where nothing
+// but the interrupts reads the pointer: each reading is then over half the
+// buffer on from the last, whenever its interrupt came later than the one
+// before. A driver that took that for a step back lost a buffer at the next,
+// which played again with no xrun
+enum et_result c_dig_two(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+
+	(void)k;
+	return dig_run(c, &f, 3 * 49716, ET_MMAP | ET_POLLED, 0, 0, 13, NULL,
+		       NULL, 4096, 2048);
+}
+
+// dig.runout: an application that stops writing, with no stop threshold and
+// the core's silence behind the DMA, as OSS's emulation and free-running
+// clients ask for it: idle frames after the pattern, none of what the ring
+// held before
+enum et_result c_dig_runout(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+
+	(void)k;
+	return dig_run(c, &f, 8192 + 5000, ET_RUNOUT, 0, 0, 52, NULL, NULL, 8192,
+		       1024);
+}
+
 enum et_result et_dig_run(struct et_ctx *c, const struct et_fmt *f,
 			  unsigned long frames, int seed,
 			  struct et_stream *extra)

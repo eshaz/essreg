@@ -42,6 +42,11 @@ FAULTS = {
     0x2000: "both.a1play",         # Audio 1's close silences Audio 2
     0x4000: "dig.drain.full",      # a drain plays the ring's old frames
     0x8000: "dac.corner.11025",    # the filter's corner ignores the rate
+    0x10000: "dig.two",            # two periods lose a buffer
+    0x20000: "dig.runout",         # the core's silence misses the ring
+    0x40000: "pm.a1",              # a resume leaves Audio 1 off the mixer
+    0x80000: "a1play.drain",       # a drain drops Audio 1's FIFO
+    0x100000: "a1play.pausedrain",  # a drain from a pause loses a buffer
 }
 
 # the cases that run only when named, or with someone at the machine
@@ -103,7 +108,7 @@ class SimTest(unittest.TestCase):
         code, out = run("--sim", "-i", "--destructive", "-c", OPT_IN)
         found = results(out)
         self.assertEqual(code, 0, out[-2000:])
-        for case in ("hwvol.buttons", "pm.suspend", "pm.stream",
+        for case in ("hwvol.buttons", "pm.suspend", "pm.stream", "pm.a1",
                      "load.cycle", "stress.reopen", "stress.all", "3d.full"):
             self.assertEqual(found.get(case), "PASS", out[-2000:])
 

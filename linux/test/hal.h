@@ -111,5 +111,10 @@ int et_klog_fault(const char *msg);
 #define SIM_A1_MUTES 0x2000 // Audio 1's close silences Audio 2 for 100 ms
 #define SIM_DRAIN_STALE 0x4000 // a drain plays the ring's old frames to a period's end
 #define SIM_FILTER_FIXED 0x8000 // Audio 2's filter corner ignores the rate
+#define SIM_TWO_PERIODS 0x10000 // two periods in the buffer lose a buffer
+#define SIM_RUNOUT_STALE 0x20000 // the core's silence misses the ring
+#define SIM_A1_RESUME 0x40000 // a resume leaves Audio 1 off the mixer
+#define SIM_A1_DRAIN 0x80000 // a drain drops what Audio 1's FIFO holds
+#define SIM_A1_PAUSEDRAIN 0x100000 // a drain from a pause loses a buffer
 
 #endif

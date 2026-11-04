@@ -195,10 +195,50 @@ static int setup(struct et_stream *s, snd_pcm_t *pcm)
 	snd_pcm_sw_params_set_start_threshold(pcm, sw,
 					      s->flags & ET_NOSTART ? 1 :
 								      buffer * 2);
+	// no underrun, and the core's silence behind the DMA
+	if (s->flags & ET_RUNOUT) {
+		snd_pcm_uframes_t boundary;
+
+		snd_pcm_sw_params_get_boundary(sw, &boundary);
+		snd_pcm_sw_params_set_stop_threshold(pcm, sw, boundary);
+		snd_pcm_sw_params_set_silence_threshold(pcm, sw, 0);
+		snd_pcm_sw_params_set_silence_size(pcm, sw, boundary);
+	}
 	err = snd_pcm_sw_params(pcm, sw);
 	if (err < 0)
 		return err;
 	return snd_pcm_prepare(pcm);
+}
+
+// a write as JACK makes it: poll, then the room avail_update gives, in the
+// mapped buffer, so that nothing but the interrupts reads the pointer
+static snd_pcm_sframes_t polled(struct et_stream *s, snd_pcm_t *pcm,
+				unsigned long frames)
+{
+	unsigned int fb = et_fmt_bytes(&s->fmt);
+	const snd_pcm_channel_area_t *areas;
+	snd_pcm_uframes_t off, n = frames;
+	snd_pcm_sframes_t avail;
+	int err;
+
+	if (snd_pcm_state(pcm) == SND_PCM_STATE_RUNNING) {
+		err = snd_pcm_wait(pcm, 1000);
+		if (err < 0)
+			return err;
+	}
+	avail = snd_pcm_avail_update(pcm);
+	if (avail < 0)
+		return avail;
+	if ((snd_pcm_uframes_t)avail < n)
+		n = avail;
+	if (!n)
+		return -EAGAIN;
+	err = snd_pcm_mmap_begin(pcm, &areas, &off, &n);
+	if (err < 0)
+		return err;
+	memcpy((char *)areas[0].addr + off * fb,
+	       (char *)s->data + s->done * fb, n * fb);
+	return snd_pcm_mmap_commit(pcm, off, n);
 }
 
 static snd_pcm_sframes_t xfer(struct et_stream *s, snd_pcm_t *pcm,
@@ -207,6 +247,8 @@ static snd_pcm_sframes_t xfer(struct et_stream *s, snd_pcm_t *pcm,
 	unsigned int fb = et_fmt_bytes(&s->fmt);
 	char *p = (char *)s->data + s->done * fb;
 
+	if (s->flags & ET_POLLED)
+		return polled(s, pcm, frames);
 	if (s->capture)
 		return s->flags & ET_MMAP ? snd_pcm_mmap_readi(pcm, p, frames) :
 					    snd_pcm_readi(pcm, p, frames);
@@ -322,7 +364,18 @@ static void stream_body(struct alsa *a, struct et_stream *s, snd_pcm_t *pcm)
 	if (!s->capture && s->done == s->frames) {
 		if (snd_pcm_state(pcm) == SND_PCM_STATE_PREPARED)
 			snd_pcm_start(pcm);
-		snd_pcm_drain(pcm);
+		if (s->flags & ET_RUNOUT) {
+			usleep((useconds_t)(1e6 * ((double)s->buffer_got /
+						   s->fmt.rate + 0.2)));
+			snd_pcm_drop(pcm);
+		} else {
+			// the drain releases the pause itself
+			if (s->flags & ET_PAUSEDRAIN) {
+				snd_pcm_pause(pcm, 1);
+				usleep(200000);
+			}
+			snd_pcm_drain(pcm);
+		}
 	}
 	s->t_end = mono() - a->t0;
 	if (s->done < s->frames && !s->err)

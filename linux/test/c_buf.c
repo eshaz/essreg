@@ -136,21 +136,22 @@ enum et_result c_buf_xrun(struct et_ctx *c, const struct et_case *k)
 }
 
 // the driver's cycles so far, from its proc file's cost line: interrupts
-// and ring ticks, each count times its average
+// ring ticks and ring copies, each count times its average
 static int cost(struct et_ctx *c, double *cycles, unsigned long *irqs,
 		unsigned long *ticks)
 {
 	static char proc[16384];
-	unsigned long icyc, tcyc;
+	unsigned long icyc, tcyc, copies = 0, ccyc = 0;
 	char *p;
 
 	if (c->hal->proc(c->hal->ctx, proc, sizeof(proc)) < 0)
 		return -1;
 	p = strstr(proc, "cost: ");
-	if (!p || sscanf(p, "cost: interrupts %lu, %lu cycles each; ring ticks %lu, %lu cycles each",
-			 irqs, &icyc, ticks, &tcyc) != 4)
+	if (!p || sscanf(p, "cost: interrupts %lu, %lu cycles each; ring ticks %lu, %lu cycles each; ring copies %lu, %lu cycles each",
+			 irqs, &icyc, ticks, &tcyc, &copies, &ccyc) < 4)
 		return -1;
-	*cycles = (double)*irqs * icyc + (double)*ticks * tcyc;
+	*cycles = (double)*irqs * icyc + (double)*ticks * tcyc +
+		  (double)copies * ccyc;
 	return 0;
 }
 

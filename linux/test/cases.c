@@ -24,6 +24,9 @@ FN(c_dig_pause)
 FN(c_dig_access)
 FN(c_dig_long)
 FN(c_dig_drain)
+FN(c_dig_drain_two)
+FN(c_dig_two)
+FN(c_dig_runout)
 FN(c_fm_idle)
 FN(c_fm_esfm_sides)
 FN(c_fm_opl3_sides)
@@ -35,6 +38,7 @@ FN(c_a1rec_settle0)
 FN(c_a1play_fmt)
 FN(c_a1play_rate)
 FN(c_a1play_start)
+FN(c_a1play_drain)
 FN(c_midi_esfm)
 FN(c_midi_soft)
 FN(c_midi_opl3)
@@ -61,6 +65,7 @@ FN(c_gpo_out)
 FN(c_hwvol_buttons)
 FN(c_pm_suspend)
 FN(c_pm_stream)
+FN(c_pm_a1)
 FN(c_load_cycle)
 FN(c_stress_reopen)
 FN(c_stress_all)
@@ -111,6 +116,12 @@ const struct et_case et_cases[] = {
 	     "every frame through dmix")
 	CASE("dig.drain.full", N, c_dig_drain, 0,
 	     "a drain that begins with the buffer nearly full: idle frames after it")
+	CASE("dig.drain.two", N, c_dig_drain_two, 0,
+	     "a drain with two periods in the buffer: idle frames after it")
+	CASE("dig.two", N, c_dig_two, 0,
+	     "two periods in the buffer, polled as JACK does it, every frame")
+	CASE("dig.runout", N, c_dig_runout, 0,
+	     "an application that stops writing: the core's silence reaches the ring")
 	CASE("dig.long", N, c_dig_long, 0,
 	     "half a minute, every frame")
 
@@ -160,6 +171,10 @@ const struct et_case et_cases[] = {
 	CASE("a1play.start", Q | R, c_a1play_start, 0,
 	     "twenty starts in step: 16-bit clean, 8-bit with its sides")
 
+	CASE("a1play.drain", R, c_a1play_drain, 0,
+	     "a drain ending on a period's end plays Audio 1's FIFO out")
+	CASE("a1play.pausedrain", R, c_a1play_drain, ET_PAUSEDRAIN,
+	     "a drain out of a pause plays what was queued")
 	CASE("buf.delay", Q | N, c_buf_delay, 0,
 	     "Audio 2's delay counts its FIFO; its first frame plays at once")
 	CASE("buf.drain", 0, c_buf_drain, 0,
@@ -249,6 +264,8 @@ const struct et_case et_cases[] = {
 	     "a suspend and resume keep every setting, and the engines work")
 	CASE("pm.stream", DESTR, c_pm_stream, 0,
 	     "a stream through a suspend goes on once prepared again")
+	CASE("pm.a1", DESTR | R, c_pm_a1, 0,
+	     "a suspend with Audio 1 playing: it goes on, on the mixer")
 	CASE("load.cycle", DESTR, c_load_cycle, 0,
 	     "five reloads: the card the same, a parameter at load in force")
 	CASE("stress.reopen", ET_OPTIN, c_stress_reopen, 0,
