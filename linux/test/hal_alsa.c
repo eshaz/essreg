@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <linux/kd.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -946,6 +947,20 @@ static int put(const char *path, const char *val)
 // the devices suspended, held for pm_test's 5 s and resumed, without the
 // platform's sleep: the drivers' suspend and resume, and nothing that
 // needs the BIOS
+int et_pc_tone(unsigned int hz, unsigned int ms)
+{
+	int fd = open("/dev/tty0", O_WRONLY), err;
+
+	if (fd < 0)
+		fd = open("/dev/console", O_WRONLY);
+	if (fd < 0)
+		return -1;
+	err = ioctl(fd, KDMKTONE, (ms << 16) | (1193180 / hz));
+	close(fd);
+	usleep(ms * 1000);
+	return err;
+}
+
 int et_pm_test_suspend(void)
 {
 	int err;

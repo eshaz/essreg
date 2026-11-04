@@ -199,6 +199,9 @@ The cases reach the chip four ways:
   [SPATIALIZER.md](SPATIALIZER.md). `3d.full` (opt-in) runs ess3d's full
   plan for the comparison with that card. Each writes ess3d's report,
   `3d.quick.txt` or `3d.full.txt`, in the output directory.
+* `beep`: a console tone at the PC speaker's levels 0, 4 and 7, heard by the
+  second card: KNOWN where it doesn't hear that pin, which the board mixes
+  in after the chip. It needs root, and the pcspkr module.
 * `gpo`: a tone through the output at each state of GPO0 and GPO1, heard by
   the second card: KNOWN where neither pin changes the line output.
 * `hwvol` (with `-i`): the volume buttons, each pressed when asked, move the

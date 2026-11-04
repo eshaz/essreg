@@ -7,15 +7,17 @@
  * Notes:
  *
  * A parameter written at load only sets the value, which each card then
- * applies as it starts. The GPO pins stay as the chip has them unless a
- * parameter sets them. Written later, it goes to every card at once,
+ * applies as it starts. The GPO pins and the PC speaker's level stay as
+ * the chip has them unless a parameter sets them. Written later, it goes to
+ * every card at once,
  * under the card list's lock and each card's state mutex, and the card's
  * control announces it. A control's put sets the module-wide value too,
  * so a parameter reads what the controls last set: on a laptop with one
  * card the two are the same thing. The master's value also follows the
  * hardware volume buttons, which the interrupt reads back, and which its
  * control reads from the chip, since the buttons move the master with
- * their interrupt off the line too.
+ * their interrupt off the line too. So does the PC speaker's, which a
+ * notebook's BIOS may move from its Fn keys.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
@@ -356,9 +358,11 @@ void es1869_settings_found(struct es1869 *chip)
 			setting_from_shadow(chip, id);
 }
 
-// the master as the chip has it: the buttons move it by themselves, and their
-// interrupt, which reads it back, may be off the line
-static void master_sync(struct es1869 *chip)
+// what moves without the driver, as the chip has it: the buttons move the
+// master by themselves, and their interrupt, which reads it back, may be off
+// the line, and the BIOS of the Armada writes the PC speaker's level from
+// its Fn keys
+void es1869_settings_sync(struct es1869 *chip)
 {
 	struct es1869_hw *hw = &chip->hw;
 	unsigned long flags;
@@ -368,9 +372,17 @@ static void master_sync(struct es1869 *chip)
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	hw->mix[0x60] = es1869_mix_read(hw, 0x60);
 	hw->mix[0x62] = es1869_mix_read(hw, 0x62);
+	hw->mix[0x3C] = es1869_mix_read(hw, 0x3C);
 	setting_from_shadow(chip, ES_S_master_volume);
 	setting_from_shadow(chip, ES_S_master_switch);
+	setting_from_shadow(chip, ES_S_beep_volume);
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
+}
+
+static bool moves_by_itself(int id)
+{
+	return es1869_settings[id].kind == S_MASTER ||
+	       es1869_settings[id].kind == S_MASTERSW || id == ES_S_beep_volume;
 }
 
 // after the register hwdep wrote a register: the settings on it follow
@@ -595,8 +607,8 @@ static int es1869_ctl_get(struct snd_kcontrol *kctl,
 	const struct es1869_setting *s = &es1869_settings[id];
 	int i;
 
-	if (s->kind == S_MASTER || s->kind == S_MASTERSW)
-		master_sync(snd_kcontrol_chip(kctl));
+	if (moves_by_itself(id))
+		es1869_settings_sync(snd_kcontrol_chip(kctl));
 	if (s->kind == S_ENUM) {
 		uv->value.enumerated.item[0] = es1869_val(id);
 		return 0;
@@ -625,8 +637,8 @@ static int es1869_ctl_put(struct snd_kcontrol *kctl,
 	for (i = 0; i < 2; i++)
 		if (v[i] < s->min || v[i] > s->max)
 			return -EINVAL;
-	if (s->kind == S_MASTER || s->kind == S_MASTERSW)
-		master_sync(chip);
+	if (moves_by_itself(id))
+		es1869_settings_sync(chip);
 	if (v[0] == es1869_val2(id, 0) && v[1] == es1869_val2(id, 1))
 		return 0;
 	mutex_lock(&chip->state_mutex);

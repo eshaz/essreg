@@ -169,8 +169,10 @@ Audio 1's level (14h) follows the table unmeasured.
 The chip's clocks, measured against each other: the 768 kHz clock runs 252
 ppm fast of the 793.8 kHz one, and the FM's 0.21 % fast of 49716 Hz on it.
 PCM device 1 says 49716 Hz, the music DAC's nominal rate, and so records the
-FM about 0.2 % faster than it says. The 793.8 kHz clock runs 247 ppm slow of
-the laptop's own clock, which has no NTP.
+FM about 0.2 % faster than it says. The 793.8 kHz clock ran 178 to 247 ppm
+slow of the laptop's own clock, in different runs. That clock isn't
+disciplined: cron sets it from the network every six hours and nothing
+corrects its rate, so the figure is only as good as that clock.
 
 Audio 1 records up to 52.92 kHz (793.8 kHz / 15). From 54.86 kHz on, the DMA
 still runs at the rate, but the ADC delivers nothing: every sample reads
@@ -225,10 +227,17 @@ and data accesses and its DSP commands are safe. The BIOS's only DSP
 commands outside S3 and POST, C6h and then B4h at 22h, sit in an SMI that
 nothing calls, and its other writes of 3Ch come only from Computer Setup's
 int 15h call, which Linux never makes (celeronix-6a's BIOS notes, chapters
-05 and 09). The driver keeps its own copy of 3Ch, so "Beep Playback Volume"
-goes on showing the driver's value after the popup writes 3Ch, and a resume
-puts that value back. On the Armada CMOS 47h is 0, the same as the control's
-default and its saved state.
+05 and 09). "Beep Playback Volume" reads 3Ch from the chip, so it follows
+the popup, and a resume puts back what it had. At load the driver leaves 3Ch
+as the BIOS left it, unless a parameter sets it: the chip's reset value is
+4, and on the Armada CMOS 47h is 0, as is the saved state, so the PC speaker
+is silent there until something raises it.
+
+The PC speaker comes out on the chip's own pin (PCSPKO), and the board mixes
+it in after the chip, so the master, its mute and the volume buttons don't
+reach it. ESS's ES1869.DRV scales 3Ch by the master in software and zeroes
+it while the master is muted; this driver keeps the two apart, as snd-es18xx
+does.
 
 ## Power
 
@@ -377,7 +386,8 @@ saved state wins over a parameter. The defaults are the Kconfig options
 * `mono_volume` ("Mono Playback Volume"): 0 to 15 a channel, default 0.
   MONO_IN to the output (6Dh), 13 = 0 dB.
 * `beep_volume` ("Beep Playback Volume"): 0 to 7, default 0. The PC speaker
-  (3Ch bits 2:0), 7 = -6 dB, 0 mutes it.
+  (3Ch bits 2:0), 7 = -6 dB, 0 mutes it; the board mixes it in after the
+  master. Without a parameter at load, the chip keeps its level.
 * `capture_source` ("Capture Source"): 0 Mic, 1 Mic Master, 2 CD, 3 AOUT, 4
   Mic1, 5 Mix, 6 Line, 7 Master, default Mix. The record source (1Ch bits
   2:0): 5 the record mixer, 7 the 3-D output before the master.

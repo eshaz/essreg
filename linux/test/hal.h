@@ -90,6 +90,9 @@ struct et_hal *et_hal_sim(unsigned int faults);
 void et_hal_alsa_reload_cmd(const char *cmd);
 // a suspend and resume of the machine's devices, as the HAL's suspend
 int et_pm_test_suspend(void);
+// a tone on the PC speaker, as the console's bell rings it: 0, or -1 with
+// no console to ask
+int et_pc_tone(unsigned int hz, unsigned int ms);
 // a kernel log line that warns of a fault: a WARN, a BUG, an oops, a hung
 // task or an interrupt that nobody handled
 int et_klog_fault(const char *msg);
@@ -117,5 +120,6 @@ int et_klog_fault(const char *msg);
 #define SIM_A1_DRAIN 0x80000 // a drain drops what Audio 1's FIFO holds
 #define SIM_A1_PAUSEDRAIN 0x100000 // a drain from a pause loses a buffer
 #define SIM_ADC_DC 0x200000 // the ADC is off by more than half a step
+#define SIM_BEEP 0x400000 // the PC speaker's level is ignored
 
 #endif

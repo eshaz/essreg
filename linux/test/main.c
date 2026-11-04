@@ -394,6 +394,7 @@ int main(int argc, char **argv)
 		{ "list", 0, NULL, 'l' },    { "fm-note", 1, NULL, 'F' },
 		{ "gmcheck", 1, NULL, 'G' }, { "reload", 1, NULL, 'L' },
 		{ "suspend", 0, NULL, 'P' }, { "hammer", 1, NULL, 'H' },
+		{ "tone", 1, NULL, 'W' },
 		{ "baseline", 1, NULL, 'B' },
 		{ NULL, 0, NULL, 0 },
 	};
@@ -471,6 +472,8 @@ int main(int argc, char **argv)
 			return et_pm_test_suspend() ? 1 : 0;
 		case 'H':
 			return hammer(atof(optarg));
+		case 'W':
+			return et_pc_tone(1000, atoi(optarg)) ? 1 : 0;
 		default:
 			usage();
 			return 1;

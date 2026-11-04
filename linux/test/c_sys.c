@@ -66,6 +66,59 @@ static void engines(struct et_ctx *c)
 
 // --- gpo ---------------------------------------------------------------------
 
+// beep.out: a console tone at the PC speaker's levels, heard by the second
+// card where the board mixes that pin into what it hears
+enum et_result c_beep_out(struct et_ctx *c, const struct et_case *k)
+{
+	static const int levels[] = { 0, 4, 7 };
+	double lvl[3], quiet = 0;
+	char cmd[300];
+	int i;
+
+	(void)k;
+	et_mix_quiet(c);
+	et_mix_dig(c, 0);
+	snprintf(cmd, sizeof(cmd), "%s --tone 400", self());
+	for (i = 0; i < 3; i++) {
+		struct et_stream s[2];
+		double *x;
+
+		if (et_ctl_set(c, "Beep Playback Volume", 0, levels[i], 0) < 0)
+			return ET_ERROR;
+		s[0] = et_rec(ET_REC2, &et_rec2_fmt, 48000, 0);
+		memset(&s[1], 0, sizeof(s[1]));
+		s[1].role = ET_CMD;
+		s[1].cmd = cmd;
+		s[1].start = 0.3;
+		s[1].timeout = 5;
+		if (et_run(c, s, 2)) {
+			et_fail(c, "level %d: the recording: %s", levels[i],
+				s[0].err ? strerror(-s[0].err) : "ok");
+			free(s[0].data);
+			return ET_ERROR;
+		}
+		// the tone's middle, past the second card's first thump
+		x = et_chan(&et_rec2_fmt, s[0].data, s[0].done, 0);
+		lvl[i] = an_dbfs(an_tone(x + 20000, 9600, 48000, 1000, NULL) /
+				 M_SQRT2);
+		// and the same band before the tone, of the last recording
+		quiet = an_dbfs(an_tone(x + 6000, 7200, 48000, 1000, NULL) /
+				M_SQRT2);
+		et_note(c, "level %d: %.1f dBFS", levels[i], lvl[i]);
+		free(x);
+		free(s[0].data);
+	}
+	if (lvl[2] - quiet < 10) {
+		snprintf(c->why, sizeof(c->why),
+			 "the second card doesn't hear the PC speaker");
+		return ET_KNOWN;
+	}
+	et_measure(c, "level 7 over level 0", lvl[2] - lvl[0], "dB", 20, 200);
+	et_measure(c, "level 4 over level 0", lvl[1] - lvl[0], "dB", 3,
+		   lvl[2] - lvl[0]);
+	return ET_PASS;
+}
+
 // gpo.out: a tone through the output at each state of GPO0 and GPO1, heard
 // by the second card: what each pin does to the line output
 enum et_result c_gpo_out(struct et_ctx *c, const struct et_case *k)

@@ -473,6 +473,13 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 					  ctl_gain("PCM Playback Volume", 0, 0) *
 						  at(dual, t, dual->fmt.rate, 2));
 
+			// the PC speaker, which the master doesn't reach
+			if (cmd && strstr(cmd->cmd, "--tone") && t > cmd->start &&
+			    t < cmd->start + 0.4)
+				l += (sim.faults & SIM_BEEP ?
+					      7 :
+					      ctl("Beep Playback Volume", 0, 0)) *
+				     1200 * sin(2 * M_PI * 1000 * t);
 			// a recording with the record monitor on: AOUT
 			// carries the record source, here silent
 			if (rec_cmd && ctl("Record Monitor", 0, 0) &&

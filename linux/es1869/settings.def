@@ -58,8 +58,8 @@ ES1869_SET(mono_volume, MONO_VOLUME, S_STEREO, B_MIX, 0x6D, 0, 4, 0, 15, 0,
 	   T_AUX, F_CTL | F_PARAM | F_INIT, 0, "Mono Playback Volume", "",
 	   "MONO_IN to the output (6Dh), 13 = 0 dB")
 ES1869_SET(beep_volume, BEEP_VOLUME, S_INT, B_MIX, 0x3C, 0, 3, 0, 7, 0,
-	   T_BEEP, F_CTL | F_PARAM | F_INIT, 0, "Beep Playback Volume", "",
-	   "the PC speaker (3Ch bits 2:0), 7 = -6 dB, 0 mutes it")
+	   T_BEEP, F_CTL | F_PARAM | F_INIT | F_FOUND, 0, "Beep Playback Volume", "",
+	   "the PC speaker (3Ch bits 2:0), 7 = -6 dB, 0 mutes it; the board mixes it in after the master")
 
 /* recording */
 /* the source first: alsactl restores in this order, and the level's dB

@@ -63,6 +63,7 @@ FN(c_mix_cable)
 FN(c_3d_quick)
 FN(c_3d_full)
 FN(c_gpo_out)
+FN(c_beep_out)
 FN(c_hwvol_buttons)
 FN(c_pm_suspend)
 FN(c_pm_stream)
@@ -259,6 +260,8 @@ const struct et_case et_cases[] = {
 	CASE("cpu.both", N, c_cpu, 3,
 	     "the CPU while both play: under 2 %")
 
+	CASE("beep.out", R | ET_ROOT, c_beep_out, 0,
+	     "the PC speaker's levels, heard by the second card")
 	CASE("gpo.out", R | ET_OPTIN, c_gpo_out, 0,
 	     "what GPO0 and GPO1 do to the line output")
 	CASE("hwvol.buttons", ET_INTER, c_hwvol_buttons, 0,

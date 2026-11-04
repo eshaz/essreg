@@ -195,6 +195,7 @@ void es1869_drain_silence(struct snd_pcm_substream *ss, snd_pcm_uframes_t hw,
 
 // settings.c
 void es1869_settings_found(struct es1869 *chip);
+void es1869_settings_sync(struct es1869 *chip);
 void es1869_settings_card_add(struct es1869 *chip);
 void es1869_settings_card_del(struct es1869 *chip);
 int es1869_settings_controls(struct es1869 *chip);

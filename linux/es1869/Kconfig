@@ -143,9 +143,10 @@ config SND_ES1869_DEFAULT_BEEP_VOLUME
 	range 0 7
 	default 0
 	help
-	  The PC speaker (3Ch bits 2:0), 7 = -6 dB, 0 mutes it. The ALSA
-	  control "Beep Playback Volume". The module parameter
-	  beep_volume sets it at load and at runtime, through
+	  The PC speaker (3Ch bits 2:0), 7 = -6 dB, 0 mutes it; the
+	  board mixes it in after the master. The ALSA control "Beep
+	  Playback Volume". The module parameter beep_volume sets it at
+	  load and at runtime, through
 	  /sys/module/snd_es1869/parameters/beep_volume.
 
 config SND_ES1869_DEFAULT_CAPTURE_SOURCE

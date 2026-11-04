@@ -785,6 +785,8 @@ static int es1869_suspend(struct snd_card *card)
 	unsigned long flags;
 
 	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
+	// a resume puts back what the chip has now
+	es1869_settings_sync(chip);
 	cancel_delayed_work_sync(&chip->pwr_work);
 	cancel_work_sync(&chip->wake_work);
 	hrtimer_cancel(&chip->a1_settle);
