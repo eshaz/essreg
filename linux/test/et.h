@@ -31,6 +31,7 @@ enum et_role {
 	ET_DUAL, // both DACs, PCM 2, four channels
 	ET_REC2, // the second card's capture, through the cable
 	ET_CMD, // a shell command, run at the stream's start
+	ET_CTL, // a control written at the stream's start, cmd to value
 	ET_NROLES
 };
 
@@ -50,6 +51,13 @@ struct et_fmt {
 #define ET_POLLED 0x20 // as JACK: poll, and the mapped buffer
 #define ET_PAUSEDRAIN 0x40 // paused when all is written, then drained
 
+// a reading of a stream's position: when, on the clock NTP steers and on the
+// raw one, the frame then playing
+struct et_stamp {
+	double t, raw;
+	double frame;
+};
+
 struct et_stream {
 	enum et_role role;
 	int capture;
@@ -58,7 +66,10 @@ struct et_stream {
 	unsigned int flags;
 	void *data; // what to play, or room for the recording
 	unsigned long frames; // to play or to record
-	const char *cmd; // ET_CMD: the command line
+	const char *cmd; // ET_CMD: the command line; ET_CTL: the control
+	long value; // ET_CTL: what it is set to
+	struct et_stamp *stamps; // readings at each write, or NULL
+	unsigned long max_stamps;
 	double start; // seconds after the run's start
 	double pause_at, pause_for; // a pause, seconds into the stream
 	double timeout; // seconds the stream may take, 0 for its length + 5 s
@@ -77,6 +88,7 @@ struct et_stream {
 	long probe_avail; // its room, in frames
 	unsigned long probe_done; // the frames moved by then
 	int status; // ET_CMD: the exit status
+	unsigned long stamped; // readings taken
 };
 
 // a control's description

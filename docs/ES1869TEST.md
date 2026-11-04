@@ -131,13 +131,18 @@ The cases reach the chip four ways:
   with the stages off; and the corner of its switched-capacitor filter at
   11025, 22050 and 32000 Hz (`dac.corner`), whose clock the driver sets from
   the rate (72h): six tones from 0.15 to 0.46 of the rate with the filter in
-  use and without, and the -3 dB point of their ratio.
+  use and without, and the -3 dB point of their ratio. `dac.fold` plays 16
+  kHz at 48 kHz with the DAC's stages off, heard at the same rate, six
+  starts with the ADC's filter off and six with it on: off, the DAC's image
+  at 32 kHz folds back onto the tone in a phase that each start draws.
 * `a2`: Audio 2 at each standard rate from 8 to 96 kHz (`a2.rate`), heard
   through the record mixer by Audio 1 at 48 kHz with both filters on: the
   pitch on the clock the driver chose, which a wrong divisor or clock puts
   thousands of ppm off, and THD+N below the first image.
 * `probe`: the devices, the proc file, the register hwdep, and every control
-  and parameter against settings.def.
+  and parameter against settings.def. `probe.alsamixer` looks for the rate
+  correction and the DAC stages where alsamixer does, among the simple
+  mixer's elements in its Playback view.
 * `params`: a parameter written at runtime moves its control and back, and
   bad values are refused.
 * `dig`: Audio 2's formats, starts, a pause, mmap, dmix and half a minute,
@@ -152,13 +157,48 @@ The cases reach the chip four ways:
 * `dig.trim`: a tone of 997 Hz through the rate correction with
   `a2_trim_ppb` at 1000 ppm, read back as the DMA took it, one frame for
   one: the pitch has moved by the step within 0.1 ppm, with THD+N under -75
-  dB and no glitches. `dig.trim.mono` is the same in mono, and
-  `dig.trim.two` with two periods in the buffer, polled as JACK does it,
-  which the timer on the period boundaries has to wake. `dig.trim.exact`,
-  with nothing to correct, gets every frame back as it went in. `dig.clock`
-  plays 48 kHz in the Clock mode: the samples go down by the 251.95 ppm of
-  the 768 kHz clock and by what the driver measures of the master, within 3
-  ppm.
+  dB and no glitches. `dig.trim.mono` is the same in mono, `dig.trim.down`
+  the other way, `dig.trim.48` at 48 kHz, and `dig.trim.two` with two
+  periods in the buffer, polled as JACK does it, which the timer on the
+  period boundaries has to wake. `dig.trim.exact`, with nothing to correct,
+  gets every frame back as it went in. `dig.clock` plays 48 kHz in the Clock
+  mode: the samples go down by the 251.95 ppm of the 768 kHz clock and by
+  what the driver measures of the master, within 3 ppm.
+* `rs`: the rate correction, in depth.
+  * `rs.exact` plays noise and a sweep up the band through the filter, reads
+    them back on the dig path, and compares every frame with what the same
+    filter's C code makes here. The kernel runs MMX, under real interrupts,
+    in chunks that the fills cut as they come, so a frame that differs by 1
+    fails it. `.down`, `.mono`, `.30`, `.48` and `.two` are the other steps,
+    formats and a client polling two periods.
+  * `rs.band` measures tones up to 20 kHz at 30 ppm, the step that the
+    Armada's crystal takes, and `rs.band.48` at 48 kHz's 252 ppm: the level
+    within 0.01 dB, THD+N under -85 dB and the worst spur under -90 dB. The
+    top of the band is where a short filter shows.
+  * `rs.imd.ccif` plays 19 and 20 kHz and `rs.imd.smpte` 60 Hz under 7 kHz,
+    and reads what falls between the tones, under -92 dBFS.
+  * `rs.quiet` keeps a tone's level at -60 dBFS within 0.1 dB, over the
+    noise of 16-bit rounding.
+  * `rs.dither` reads what `a2_resample_dither` does at -80 dBFS and 1 ppm,
+    where rounding is at its most regular: the noise it adds and the spurs
+    it takes.
+  * `rs.live` writes the mixer's controls under a playing stream, as
+    alsamixer does: Off, Trim up and down, Clock and Off again, each read
+    from the tone's pitch, with no xrun.
+  * `rs.pause` goes on in step within a FIFO, `rs.xrun` recovers from an
+    underrun at the same pitch, `rs.drain` plays every frame, and
+    `rs.runout` hears silence, not the ring's old frames, after a client
+    stops writing with no stop threshold.
+  * `rs.clock.44` and `rs.clock.48` take a line through a minute of readings
+    of the stream's position against the clock that NTP steers, off the dig
+    path, in the Off mode, the control, and in Clock, within 0.1 ppm.
+    `rs.clock.long44` and `rs.clock.long48` (opt-in) take half an hour.
+  * `rs.rates` does the same at eight rates on every clock of the chip,
+    within 2 ppm.
+  * `rs.bench` gives the filter's cycles a frame on this CPU, MMX and C.
+  * `rs.analog` plays a tone through the DAC and the ADC with the filter and
+    without it, in turn, since the level moves between sessions: the filter
+    moves THD+N by under 1.5 dB and the level by under 0.1 dB.
 * `fm`: PCM 1's idle level, which output each FM side bit reaches with
   `fm_sides` on and off, and a note's pitch.
 * `a1rec`: Audio 1's recordings: formats, rates, sides, pitch, and the
@@ -190,7 +230,8 @@ The cases reach the chip four ways:
   a period, drained: it lasts the second, within the second card's clock,
   where a stop at the DMA's end cuts the 32 ms that the chip's FIFO holds.
   `a1play.pausedrain` pauses for 200 ms before that drain, and the buffer
-  that was queued still plays.
+  that was queued still plays. `a1play.click` reads the largest sample just
+  after a pause's release, against the tone's peak, six times.
 * `dual`: the four-channel device's channels on their DACs and one clock,
   and when each DAC began, from the phase of its own tone, at three rates.
 * `latency`: the smallest period of four that each engine plays without an
@@ -199,6 +240,13 @@ The cases reach the chip four ways:
 * `cpu`: the driver's share of the CPU while each engine plays 44.1 kHz
   16-bit stereo, from its own cycle counts of the interrupts and of the
   ring's ticks and copies, under 1 % for one engine and 2 % for both.
+  `cpu.rs` turns the filter off and on every 4 s under one stream, with a
+  watch running: what a thread of idle priority counts, which time in the
+  idle loop can't hide from, gives the filter's part of the whole machine,
+  and a real-time timer every millisecond how late the machine can be. With
+  them the longest a fill held interrupts off, under 350 us, and the
+  driver's own cycles in each mode, at 44.1 and 48 kHz, in mono and at 96
+  kHz.
 * `midi`: GMCHECK.MID on the ESFM synth, every step on PCM 1; WildMidi on a
   DAC; a note out of the MPU-401.
 * `3d`: the 3-D effect measured as ess3d measures it (src/s3dmeas.c), tones
@@ -231,11 +279,18 @@ The cases reach the chip four ways:
   resumes, and the card's PHY driver can't be requested then, since the
   kernel refuses usermode helpers during a suspend and resume with EBUSY,
   which libphy doesn't accept as it does ENOENT (the Armada kit's patch 0008
-  does). So run `pm` at the machine, not over its network.
+  does). So run `pm` at the machine, not over its network. `pm.fm` plays a
+  note through the OPL3 and through the native ESFM before and after a
+  suspend.
+* `pwr`: `pwr_save` puts the idle chip down, partly (`pwr.partial`) or fully
+  (`pwr.full`), as the proc file says, and Audio 2's next stream wakes it,
+  every frame exact. `pwr.self` does the same after the chip's own
+  Self-Timed Power Down.
 * `load` (opt-in, `--destructive`): five reloads of the driver, the card
   complete after each, a parameter given at load in force and gone at the
   next, every setting put back after udev's alsactl restore, and the engines
-  working after the last.
+  working after the last. `load.fm` loads with `opl3=0` and with `esfm=0`,
+  each of which takes one way to the FM away and leaves the other.
 * `stress` (opt-in): 200 open and close cycles over the devices, and a
   minute of the dig path, exact, while the suite's helper reads every
   control, its dB scale, the proc file and the mixer's registers.

@@ -137,8 +137,8 @@ enum et_result c_buf_xrun(struct et_ctx *c, const struct et_case *k)
 
 // the driver's cycles so far, from its proc file's cost line: interrupts
 // ring ticks and ring copies, each count times its average
-static int cost(struct et_ctx *c, double *cycles, unsigned long *irqs,
-		unsigned long *ticks)
+int et_cost(struct et_ctx *c, double *cycles, unsigned long *irqs,
+	    unsigned long *ticks)
 {
 	static char proc[16384];
 	unsigned long icyc, tcyc, copies = 0, ccyc = 0;
@@ -185,7 +185,7 @@ enum et_result c_cpu(struct et_ctx *c, const struct et_case *k)
 			s[ns].buffer = 8192;
 			ns++;
 		}
-	if (cost(c, &cyc0, &irq0, &tick0) < 0) {
+	if (et_cost(c, &cyc0, &irq0, &tick0) < 0) {
 		et_fail(c, "no cost line in the proc file");
 		free(tone);
 		return ET_FAIL;
@@ -194,7 +194,7 @@ enum et_result c_cpu(struct et_ctx *c, const struct et_case *k)
 		free(tone);
 		return ET_ERROR;
 	}
-	cost(c, &cyc1, &irq1, &tick1);
+	et_cost(c, &cyc1, &irq1, &tick1);
 	c->hal->cpu(c->hal->ctx, &b2, &t2);
 	secs = (double)n / 44100;
 	et_measure(c, "interrupts a second", (irq1 - irq0) / secs, "", 1, 0);

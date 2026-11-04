@@ -568,6 +568,60 @@ fail:
 	return 0;
 }
 
+double an_sub_sine(double *x, long n, double rate, double f)
+{
+	double w, p[3];
+
+	if (fit_sine(x, n, rate, f, 0, &w, p))
+		return 0;
+	fit_resid(x, n, w, (n - 1) / 2.0, p, x);
+	return hypot(p[0], p[1]);
+}
+
+// a 4-term Blackman-Harris window's sidelobes are at -92 dB, and what it
+// looks at has had the tones taken off
+double an_spur(const double *r, long n, double rate, double lo, double hi,
+	       double amp, double *at)
+{
+	static const double a[4] = { 0.35875, 0.48829, 0.14128, 0.01168 };
+	long m = 1, i, top = 1;
+	double *re, *im, gain = 0, best = 0;
+
+	while (2 * m <= n)
+		m *= 2;
+	re = malloc(m * sizeof(*re));
+	im = calloc(m, sizeof(*im));
+	if (!re || !im || !(amp > 0)) {
+		free(re);
+		free(im);
+		return 0;
+	}
+	for (i = 0; i < m; i++) {
+		double t = 2 * PI * i / m;
+		double v = a[0] - a[1] * cos(t) + a[2] * cos(2 * t) -
+			   a[3] * cos(3 * t);
+
+		re[i] = (r[i] - 0) * v;
+		gain += v;
+	}
+	an_fft(re, im, m);
+	for (i = 2; i < m / 2; i++) {
+		double hz = i * rate / m;
+		double v = re[i] * re[i] + im[i] * im[i];
+
+		if (hz >= lo && hz <= hi && v > best) {
+			best = v;
+			top = i;
+		}
+	}
+	free(re);
+	free(im);
+	if (at)
+		*at = top * rate / m;
+	best = 2 * sqrt(best) / gain / amp;
+	return best > 1e-10 ? 20 * log10(best) : -200;
+}
+
 // --- pitch -------------------------------------------------------------------
 
 // the rising zero crossings of y: their count, and the times of crossings

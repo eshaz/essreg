@@ -8,9 +8,23 @@
 #ifndef ET_SIM_RS_H
 #define ET_SIM_RS_H
 
+// a stretch of a stream at a change of rate: from its frame on, or copied as
+// it is with on 0, its line going on
+struct sim_rs_part {
+	unsigned long from;
+	long ppb;
+	int on;
+	int dither;
+};
+
 long sim_rs_trim(int item);
 short *sim_rs_stream(const short *src, unsigned long frames,
 		     unsigned int channels, long ppb, int sign_768,
 		     unsigned long *made);
+short *sim_rs_parts(const short *src, unsigned long frames,
+		    unsigned int channels, const struct sim_rs_part *parts,
+		    int n, unsigned long *made);
+// what the filter costs on this CPU, in cycles a frame, by MMX or C, or 0
+double sim_rs_cycles(unsigned int channels, int mmx);
 
 #endif /* ET_SIM_RS_H */

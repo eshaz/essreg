@@ -15,7 +15,7 @@ CPPFLAGS += -DESS_HOST -I$(SRC)
 LDLIBS = -lasound -lpthread -lm
 
 OBJS = main.o run.o cases.o c_util.o c_probe.o c_dig.o c_fm.o c_a1.o c_midi.o \
-	c_buf.o c_mix.o c_dual.o c_rate.o c_3d.o c_sys.o \
+	c_buf.o c_mix.o c_dual.o c_rate.o c_rs.o c_3d.o c_sys.o \
 	an.o settab.o fmnote.o hal_alsa.o hal_sim.o
 SHARED = s3dmeas.o s3dsim.o
 DRV = ../es1869
@@ -33,7 +33,7 @@ resample.o: $(DRV)/resample.c $(DRV)/resample.h $(DRV)/hw_compat.h
 sim_rs.o: sim_rs.c sim_rs.h $(DRV)/resample.h $(DRV)/hw_compat.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-hal_sim.o: sim_rs.h
+hal_sim.o c_rs.o: sim_rs.h
 
 $(SHARED): %.o: $(SRC)/%.c $(SRC)/%.h $(SRC)/esstypes.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<

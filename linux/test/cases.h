@@ -64,6 +64,11 @@ void *et_dig_pattern(const struct et_fmt *f, unsigned long frames, int seed);
 long et_dig_tail(const struct et_fmt *f, const void *pat, unsigned long frames,
 		 const short *rec, unsigned long nrec, unsigned long n);
 
+// the driver's cycles so far, by its proc file's cost line, with its
+// interrupts and ring ticks: 0, or -1 with no such line
+int et_cost(struct et_ctx *c, double *cycles, unsigned long *irqs,
+	    unsigned long *ticks);
+
 // the DAC that plays to the second card: Audio 1 on snd-es18xx, whose
 // Audio 2 is silent on a 16-bit channel
 enum et_role et_out_role(const struct et_ctx *c);

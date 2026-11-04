@@ -14,11 +14,14 @@
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
 
+#define _GNU_SOURCE // SCHED_IDLE
+
 #include <alsa/asoundlib.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -271,6 +274,30 @@ static double trigger_time(struct alsa *a, snd_pcm_t *pcm)
 	return ts.tv_sec + ts.tv_nsec * 1e-9 - a->t0;
 }
 
+// where a running stream is, and when: what was written less what is still
+// to play, at the time of that reading of the pointer
+static void stamp(struct et_stream *s, snd_pcm_t *pcm)
+{
+	snd_pcm_status_t *st;
+	snd_htimestamp_t ts;
+	struct timespec raw, now;
+
+	snd_pcm_status_alloca(&st);
+	if (snd_pcm_status(pcm, st) < 0 ||
+	    snd_pcm_status_get_state(st) != SND_PCM_STATE_RUNNING)
+		return;
+	snd_pcm_status_get_htstamp(st, &ts);
+	s->stamps[s->stamped].t = ts.tv_sec + ts.tv_nsec * 1e-9;
+	clock_gettime(CLOCK_MONOTONIC_RAW, &raw);
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	s->stamps[s->stamped].raw = s->stamps[s->stamped].t +
+		(raw.tv_sec + raw.tv_nsec * 1e-9) -
+		(now.tv_sec + now.tv_nsec * 1e-9);
+	s->stamps[s->stamped].frame = (double)s->done -
+				      snd_pcm_status_get_delay(st);
+	s->stamped++;
+}
+
 static void stream_body(struct alsa *a, struct et_stream *s, snd_pcm_t *pcm)
 {
 	double end = a->t0 + s->start +
@@ -349,6 +376,8 @@ static void stream_body(struct alsa *a, struct et_stream *s, snd_pcm_t *pcm)
 			return;
 		}
 		s->done += n;
+		if (s->stamped < s->max_stamps)
+			stamp(s, pcm);
 		// a playback that an xrun stopped goes on with its next write
 		if (restart && snd_pcm_state(pcm) == SND_PCM_STATE_PREPARED) {
 			restart = 0;
@@ -471,6 +500,27 @@ static void *cmd_thread(void *arg)
 	return NULL;
 }
 
+static int alsa_ctl_set(void *ctx, const char *name, int index, const long *v,
+			int n);
+
+// a control written at its time, as alsamixer writes it
+static void *ctl_thread(void *arg)
+{
+	struct worker *w = arg;
+	struct alsa *a = w->a;
+	struct et_stream *s = w->s;
+
+	pthread_barrier_wait(&a->ready);
+	pthread_barrier_wait(&a->go);
+	sleep_until(a->t0 + s->start);
+	s->t_trigger = mono() - a->t0;
+	s->err = alsa_ctl_set(a, s->cmd, 0, &s->value, 1);
+	if (s->err > 0)
+		s->err = 0;
+	s->t_end = mono() - a->t0;
+	return NULL;
+}
+
 static int alsa_run(void *ctx, struct et_stream *s, int n)
 {
 	struct alsa *a = ctx;
@@ -488,8 +538,10 @@ static int alsa_run(void *ctx, struct et_stream *s, int n)
 		s[i].xruns = 0;
 		s[i].done = 0;
 		s[i].t_trigger = s[i].t_end = 0;
+		s[i].stamped = 0;
 		if (pthread_create(&w[i].th, NULL,
 				   s[i].role == ET_CMD ? cmd_thread :
+				   s[i].role == ET_CTL ? ctl_thread :
 							 stream_thread,
 				   &w[i])) {
 			// no thread: the barriers can't be met, so stop here
@@ -515,7 +567,7 @@ static int alsa_has(void *ctx, enum et_role r)
 	struct alsa *a = ctx;
 	snd_pcm_info_t *info;
 
-	if (r == ET_CMD)
+	if (r == ET_CMD || r == ET_CTL)
 		return 1;
 	if (r == ET_REC2)
 		return a->rec2[0] != 0;
@@ -686,6 +738,40 @@ static int alsa_ctl_db(void *ctx, const char *name, int index, long value,
 	return snd_ctl_convert_to_dB(a->ctl, id, value, cdb);
 }
 
+// as alsamixer asks: an enum that isn't a capture enum, a playback switch or
+// a playback volume is in its Playback view
+static int alsa_selem(void *ctx, const char *name, int *playback)
+{
+	snd_mixer_t *m;
+	snd_mixer_elem_t *e;
+	int err;
+
+	(void)ctx;
+	err = snd_mixer_open(&m, 0);
+	if (err < 0)
+		return err;
+	err = snd_mixer_attach(m, "hw:CARD=" CARD_ID);
+	if (err >= 0)
+		err = snd_mixer_selem_register(m, NULL, NULL);
+	if (err >= 0)
+		err = snd_mixer_load(m);
+	if (err >= 0)
+		err = -ENOENT;
+	for (e = err == -ENOENT ? snd_mixer_first_elem(m) : NULL; e;
+	     e = snd_mixer_elem_next(e)) {
+		if (strcmp(snd_mixer_selem_get_name(e), name))
+			continue;
+		*playback = snd_mixer_selem_is_enumerated(e) ?
+				    !snd_mixer_selem_is_enum_capture(e) :
+				    snd_mixer_selem_has_playback_switch(e) ||
+					    snd_mixer_selem_has_playback_volume(e);
+		err = 0;
+		break;
+	}
+	snd_mixer_close(m);
+	return err;
+}
+
 static int alsa_ctl_nth(void *ctx, int nth, char *name, int len, int *index)
 {
 	struct alsa *a = ctx;
@@ -820,6 +906,86 @@ static int alsa_cpu(void *ctx, double *busy, double *total)
 	// idle and iowait aren't busy
 	*busy = (*total - v[3] - v[4]) / hz;
 	*total /= hz;
+	return 0;
+}
+
+// the watch: one thread counts in what idle time it gets, and one wakes from
+// a timer at a real-time priority every millisecond
+static struct {
+	pthread_t spin, timer;
+	volatile int stop;
+	volatile unsigned long long count;
+	double t0, late;
+	int timed;
+	unsigned long long slot[4096];
+	int slots;
+} watching;
+
+static void *spin_thread(void *arg)
+{
+	struct sched_param p = { 0 };
+
+	(void)arg;
+	sched_setscheduler(0, SCHED_IDLE, &p);
+	while (!watching.stop)
+		watching.count++;
+	return NULL;
+}
+
+static void *timer_thread(void *arg)
+{
+	struct sched_param p = { .sched_priority = 40 };
+	struct timespec next;
+	int n = 0;
+
+	(void)arg;
+	watching.timed = !sched_setscheduler(0, SCHED_FIFO, &p);
+	clock_gettime(CLOCK_MONOTONIC, &next);
+	while (!watching.stop) {
+		double late;
+
+		next.tv_nsec += 1000000;
+		if (next.tv_nsec >= 1000000000) {
+			next.tv_nsec -= 1000000000;
+			next.tv_sec++;
+		}
+		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
+		late = mono() - (next.tv_sec + next.tv_nsec * 1e-9);
+		if (++n > 20 && late > watching.late)
+			watching.late = late;
+		if (!(n % 250) && watching.slots < 4096)
+			watching.slot[watching.slots++] = watching.count;
+	}
+	return NULL;
+}
+
+static int alsa_watch(void *ctx, int on, double *spins, double *late_us,
+		      double *trace, int max)
+{
+	int i;
+
+	(void)ctx;
+	if (on) {
+		memset(&watching, 0, sizeof(watching));
+		watching.t0 = mono();
+		if (pthread_create(&watching.spin, NULL, spin_thread, NULL))
+			return -EAGAIN;
+		if (pthread_create(&watching.timer, NULL, timer_thread, NULL)) {
+			watching.stop = 1;
+			pthread_join(watching.spin, NULL);
+			return -EAGAIN;
+		}
+		return 0;
+	}
+	*spins = watching.count / (mono() - watching.t0);
+	watching.stop = 1;
+	pthread_join(watching.spin, NULL);
+	pthread_join(watching.timer, NULL);
+	*late_us = watching.timed ? watching.late * 1e6 : -1;
+	for (i = 0; i < max; i++)
+		trace[i] = i < watching.slots && i ?
+				   (double)(watching.slot[i] - watching.slot[i - 1]) :
+				   0;
 	return 0;
 }
 
@@ -1179,6 +1345,7 @@ struct et_hal *et_hal_alsa(const char *rec2)
 		.ctl_info = alsa_ctl_info,
 		.ctl_get = alsa_ctl_get,
 		.ctl_set = alsa_ctl_set,
+		.selem = alsa_selem,
 		.ctl_enum_name = alsa_ctl_enum_name,
 		.ctl_db = alsa_ctl_db,
 		.ctl_nth = alsa_ctl_nth,
@@ -1188,6 +1355,7 @@ struct et_hal *et_hal_alsa(const char *rec2)
 		.info = alsa_info,
 		.proc = alsa_proc,
 		.cpu = alsa_cpu,
+		.watch = alsa_watch,
 		.cpu_hz = alsa_cpu_hz,
 		.now = alsa_now,
 		.sleep = alsa_sleep,

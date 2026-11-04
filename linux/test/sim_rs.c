@@ -18,43 +18,61 @@ long sim_rs_trim(int item)
 	return es1869_trim_ppb(item);
 }
 
-// a stream of 16-bit frames as the ring would hold it, with ppb the change
-// of rate and sign_768 how the 768 kHz clock's offset adds to it, or NULL
-// with nothing to change; a buffer of *made frames for the caller to free
-short *sim_rs_stream(const short *src, unsigned long frames,
-		     unsigned int channels, long ppb, int sign_768,
-		     unsigned long *made)
+static s16 *rs_tab(void)
 {
-	static s16 ch[2][ES_RS_WINDOW];
-	static u8 ring[8 * (ES_RS_CHUNK + 8)];
 	static s16 *tab;
-	unsigned long pos = 0, o = 0, n = frames + 256;
-	struct es1869_rs_job j;
-	s32 step = es1869_clock_q32(ppb) + sign_768 * es1869_clock_base(768000);
-	short *data;
-	unsigned int c;
 
-	if (!step)
-		return NULL;
 	if (!tab) {
 		tab = malloc(ES_RS_TABLE * sizeof(*tab));
 		if (!tab)
 			abort();
 		es1869_rs_table(tab);
 	}
-	data = calloc(n, 2 * channels);
+	return tab;
+}
+
+short *sim_rs_parts(const short *src, unsigned long frames,
+		    unsigned int channels, const struct sim_rs_part *parts,
+		    int n, unsigned long *made)
+{
+	static s16 ch[2][ES_RS_WINDOW];
+	static u8 ring[8 * (ES_RS_CHUNK + 8)];
+	unsigned long pos = 0, o = 0, cap = frames + frames / 128 + 256;
+	struct es1869_rs_job j;
+	short *data;
+	unsigned int c;
+	int at = 0;
+
+	data = calloc(cap, 2 * channels);
 	if (!data)
 		abort();
 	memset(&j, 0, sizeof(j));
-	j.tab = tab;
+	j.tab = rs_tab();
 	j.ch[0] = ch[0];
 	j.ch[1] = ch[1];
-	j.step = step;
 	j.stereo = channels == 2;
-	while (pos < frames && o + ES_RS_CHUNK + 8 < n) {
-		unsigned long i;
+	j.seed = 0x12345;
+	while (pos < frames && o + ES_RS_CHUNK + 8 < cap) {
+		unsigned long i, chunk = ES_RS_CHUNK, end = frames;
 		u32 out;
 
+		while (at + 1 < n && parts[at + 1].from <= pos)
+			at++;
+		if (at + 1 < n)
+			end = parts[at + 1].from;
+		if (end - pos < chunk)
+			chunk = end - pos;
+		if (!parts[at].on) {
+			// a copy leaves the fraction behind, as the driver does
+			j.frac = 0;
+			for (i = 0; i < chunk * channels; i++)
+				data[o * channels + i] = src[pos * channels + i];
+			o += chunk;
+			pos += chunk;
+			continue;
+		}
+		j.step = es1869_clock_q32(parts[at].ppb);
+		j.dither = parts[at].dither;
 		// the frames around the run, silence before and after the stream
 		for (i = 0; i < ES_RS_WINDOW; i++) {
 			long f = (long)(pos + i) - ES_RS_BEHIND;
@@ -64,7 +82,7 @@ short *sim_rs_stream(const short *src, unsigned long frames,
 						   src[f * channels + c] : 0;
 		}
 		j.dst = ring;
-		j.frames = ES_RS_CHUNK;
+		j.frames = chunk;
 		j.room = ES_RS_CHUNK + 8;
 		out = es1869_rs_run_c(&j);
 		for (i = 0; i < out * channels; i++)
@@ -74,4 +92,66 @@ short *sim_rs_stream(const short *src, unsigned long frames,
 	}
 	*made = o;
 	return data;
+}
+
+// a stream of 16-bit frames as the ring would hold it, with ppb the change
+// of rate and sign_768 how the 768 kHz clock's offset adds to it, or NULL
+// with nothing to change; a buffer of *made frames for the caller to free
+short *sim_rs_stream(const short *src, unsigned long frames,
+		     unsigned int channels, long ppb, int sign_768,
+		     unsigned long *made)
+{
+	struct sim_rs_part part = { 0, ppb, 1, 0 };
+
+	if (!ppb && !sign_768)
+		return NULL;
+	if (sign_768)
+		part.ppb += (long)((double)sign_768 *
+				   es1869_clock_base(768000) * 1e9 / 4294967296.0);
+	return sim_rs_parts(src, frames, channels, &part, 1, made);
+}
+
+double sim_rs_cycles(unsigned int channels, int mmx)
+{
+#if defined(__i386__) || defined(__x86_64__)
+	static s16 ch[2][4096 + ES_RS_TAPS + 2];
+	static u8 ring[16 * 4096];
+	struct es1869_rs_job j;
+	unsigned long long best = ~0ULL;
+	unsigned int i;
+	int pass;
+
+	for (i = 0; i < 4096 + ES_RS_TAPS + 2; i++) {
+		ch[0][i] = (s16)(i * 2654435761U >> 16) / 4;
+		ch[1][i] = (s16)(i * 2246822519U >> 16) / 4;
+	}
+	memset(&j, 0, sizeof(j));
+	j.tab = rs_tab();
+	j.ch[0] = ch[0];
+	j.ch[1] = ch[1];
+	j.dst = ring;
+	j.frames = 4096;
+	j.room = 4096 + 8;
+	j.stereo = channels == 2;
+	j.step = es1869_clock_q32(30000);
+	for (pass = 0; pass < 20; pass++) {
+		unsigned long long t;
+
+		t = __builtin_ia32_rdtsc();
+#ifdef ES1869_RS_MMX
+		if (mmx)
+			es1869_rs_run_mmx(&j);
+		else
+#endif
+			es1869_rs_run_c(&j);
+		t = __builtin_ia32_rdtsc() - t;
+		if (t < best)
+			best = t;
+	}
+	return (double)best / 4096;
+#else
+	(void)channels;
+	(void)mmx;
+	return 0;
+#endif
 }

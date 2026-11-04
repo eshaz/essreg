@@ -500,6 +500,77 @@ enum et_result c_a1play_drain(struct et_ctx *c, const struct et_case *k)
 	return ET_PASS;
 }
 
+// a1play.click: what a pause's release does to the output, heard by the second
+// card: the largest sample in the 5 ms after the pause's silence ends, against
+// the tone's peak, six times, since the pause falls anywhere in the tone
+enum et_result c_a1play_click(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	unsigned long pn = 2 * 44100, rn = 3 * 48000;
+	double worst = 0, sum = 0;
+	void *tone = et_tone(&f, pn, ET_HZ, ET_HZ, AMP);
+	int run;
+
+	(void)k;
+	et_mix_quiet(c);
+	et_mix_dig(c, 0);
+	et_mix_out(c, 14, 0);
+	for (run = 0; run < 6; run++) {
+		struct et_stream s[2];
+		double *x, peak = 0, top = 0, env = 0;
+		long i, quiet = -1, end = -1;
+
+		s[0] = et_rec(ET_REC2, &et_rec2_fmt, rn, 0);
+		s[1] = et_play(ET_A1P, &f, tone, pn, 0.3);
+		s[1].period = 512;
+		s[1].buffer = 2048;
+		s[1].pause_at = 1.0 + 0.003 * run;
+		s[1].pause_for = 0.2;
+		if (et_run(c, s, 2)) {
+			free(s[0].data);
+			free(tone);
+			return ET_ERROR;
+		}
+		x = et_chan(&et_rec2_fmt, s[0].data, s[0].done, 0);
+		for (i = 24000; i < 48000; i++)
+			if (fabs(x[i]) > peak)
+				peak = fabs(x[i]);
+		// the first stretch of 40 ms under an eighth of the tone
+		for (i = 0; i < (long)s[0].done; i++) {
+			env = fabs(x[i]) > peak / 8 ? 0 : env + 1;
+			if (env > 1920 && quiet < 0)
+				quiet = i;
+			if (quiet >= 0 && env == 0) {
+				end = i;
+				break;
+			}
+		}
+		if (end < 0 || peak < 100) {
+			et_fail(c, "no pause in what the second card heard");
+			et_dump(c, "rec2", &et_rec2_fmt, s[0].data, s[0].done);
+			free(x);
+			free(s[0].data);
+			free(tone);
+			return ET_FAIL;
+		}
+		for (i = end; i < end + 240 && i < (long)s[0].done; i++)
+			if (fabs(x[i]) > top)
+				top = fabs(x[i]);
+		if (top / peak > worst) {
+			worst = top / peak;
+			if (getenv("ET_KEEP"))
+				et_dump(c, "rec2", &et_rec2_fmt, s[0].data, s[0].done);
+		}
+		sum += top / peak;
+		free(x);
+		free(s[0].data);
+	}
+	free(tone);
+	et_measure(c, "the worst click, of the tone's peak", worst, "", 0, 2.5);
+	et_measure(c, "the mean", sum / 6, "", 1, 0);
+	return ET_PASS;
+}
+
 // a1play.start: ten starts each of 16-bit and 8-bit stereo, in step: the
 // 16-bit ones clean, the 8-bit ones with the sides where they belong
 enum et_result c_a1play_start(struct et_ctx *c, const struct et_case *k)

@@ -36,6 +36,9 @@ struct et_hal {
 	// (ET_DB_MUTE for muted)
 	int (*ctl_db)(void *ctx, const char *name, int index, long value,
 		      long *cdb);
+	// an element of the simple mixer, which alsamixer and amixer show: 0
+	// and whether alsamixer's Playback view has it, or -ENOENT
+	int (*selem)(void *ctx, const char *name, int *playback);
 	// the card's controls, one at a time: 0 and the name, or -ENOENT
 	int (*ctl_nth)(void *ctx, int nth, char *name, int len, int *index);
 
@@ -53,6 +56,12 @@ struct et_hal {
 	// the CPU's busy and total time so far, in seconds, and its clock
 	int (*cpu)(void *ctx, double *busy, double *total);
 	double (*cpu_hz)(void *ctx);
+	// a watch over the machine, from on to off: what a thread that gets
+	// only idle time counts a second, and the latest a real-time thread
+	// woke after a timer, in us. Time in the idle loop can't hide from it.
+	// trace gets the count of each quarter of a second, at most max of them
+	int (*watch)(void *ctx, int on, double *spins, double *late_us,
+		     double *trace, int max);
 	// the time, and a wait, in seconds
 	double (*now)(void *ctx);
 	void (*sleep)(void *ctx, double s);
@@ -123,5 +132,9 @@ int et_klog_fault(const char *msg);
 #define SIM_BEEP 0x400000 // the PC speaker's level is ignored
 #define SIM_TRIM 0x800000 // the rate correction leaves the samples alone
 #define SIM_CLOCK_BASE 0x1000000 // and takes 768 kHz's offset the wrong way
+#define SIM_RS_SEAM 0x2000000 // a ring frame off by 1 at a chunk's seam
+#define SIM_RS_IMAGE 0x4000000 // the filter's short: images above 18 kHz
+#define SIM_RS_LIVE 0x8000000 // a change under a stream waits for its end
+#define SIM_RS_REAL_TIME 0x10000000 // the Clock mode misses the steered clock
 
 #endif

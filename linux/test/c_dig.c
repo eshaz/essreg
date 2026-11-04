@@ -505,10 +505,14 @@ enum et_result c_dig_trim_exact(struct et_ctx *c, const struct et_case *k)
 
 // dig.clock: 48 kHz in the Clock mode. The chip's 768 kHz clock plays 252
 // ppm sharp, so the samples go down by that and by what the driver measures
-// of the master clock, whatever the case before it left of that measure
+// of the master clock. Slaved to the FM a stream's interrupts tell nothing
+// of the chip's clock, so a few seconds off the dig path come first, for the
+// fits, whose first samples would move the pitch within the tone
 enum et_result c_dig_clock(struct et_ctx *c, const struct et_case *k)
 {
 	static const struct et_fmt f = { ET_S16, 2, 48000 };
+	unsigned long warm = 4 * 48000;
+	struct et_stream s;
 	double ppm, thdn, master, steered;
 	int glitches;
 	enum et_result r;
@@ -517,6 +521,13 @@ enum et_result c_dig_clock(struct et_ctx *c, const struct et_case *k)
 	if (et_param_set(c, "a2_resample", 2) ||
 	    et_param_set(c, "a2_trim_ppb", 0))
 		return ET_ERROR;
+	et_mix_dig(c, 0);
+	s = et_play(ET_A2, &f, et_alloc_frames(&f, warm), warm, 0);
+	if (et_run(c, &s, 1)) {
+		free(s.data);
+		return ET_ERROR;
+	}
+	free(s.data);
 	r = trim_tone(c, &f, 0, 0, 0, &ppm, &thdn, &glitches);
 	if (r != ET_PASS)
 		return r;

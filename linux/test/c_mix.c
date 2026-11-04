@@ -357,6 +357,77 @@ enum et_result c_dac_images(struct et_ctx *c, const struct et_case *k)
 	return ET_PASS;
 }
 
+// dac.fold: why a tone's level moves from one run to the next on the record
+// mixer. With the DAC's stages and the ADC's filter off, and both at one rate,
+// the DAC's image at the rate less the tone folds back onto the tone itself,
+// in a phase that each start draws. The ADC's filter takes the image. Six
+// starts each way: how far the levels spread, in dB
+enum et_result c_dac_fold(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 48000 };
+	double hz = 16000, spread[2], mean[2];
+	unsigned long pn = 2 * 48000, rn = 48000;
+	void *tone = et_tone(&f, pn, hz, hz, 6000);
+	int on;
+
+	(void)k;
+	et_mix_quiet(c);
+	et_mix_dig(c, 0);
+	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
+	if (et_mix_rec_a2(c, 13) < 0) {
+		free(tone);
+		return ET_ERROR;
+	}
+	et_ctl_set(c, "Audio 2 Filter Playback Switch", 0, 0, 0);
+	et_ctl_set(c, "Audio 2 Oversampling Playback Switch", 0, 0, 0);
+	for (on = 0; on < 2; on++) {
+		double lo = 1e9, hi = -1e9, total = 0;
+		int run;
+
+		et_ctl_set(c, "Audio 1 Filter Switch", 0, on, on);
+		for (run = 0; run < 6; run++) {
+			struct et_stream s[2];
+			struct an_fit fit;
+			double *x, db;
+
+			s[0] = et_play(ET_A2, &f, tone, pn, 0);
+			s[1] = et_rec(ET_A1C, &f, rn, 0.6);
+			if (et_run(c, s, 2)) {
+				free(tone);
+				free(s[1].data);
+				return ET_ERROR;
+			}
+			x = et_chan(&f, s[1].data, s[1].done, 0);
+			if (s[1].done < 24000 ||
+			    an_fit_sine(x + 4800, s[1].done - 4800, 48000, hz, 0,
+					&fit)) {
+				et_fail(c, "no tone in the recording");
+				free(x);
+				free(s[1].data);
+				free(tone);
+				return ET_ERROR;
+			}
+			db = 20 * log10(fit.amp);
+			if (db < lo)
+				lo = db;
+			if (db > hi)
+				hi = db;
+			total += db;
+			free(x);
+			free(s[1].data);
+		}
+		spread[on] = hi - lo;
+		mean[on] = total / 6;
+	}
+	free(tone);
+	et_measure(c, "the levels' spread, the ADC's filter off", spread[0], "dB",
+		   1, 0);
+	et_measure(c, "and on, the spread", spread[1], "dB", 0, 0.5);
+	et_measure(c, "the level, the filter off", mean[0] - 90.31, "dBFS", 1, 0);
+	et_measure(c, "and on", mean[1] - 90.31, "dBFS", 1, 0);
+	return ET_PASS;
+}
+
 // dac.corner.*: the corner of Audio 2's switched-capacitor filter, whose
 // clock the driver sets from the rate (72h = 256 - 199582 / rate below 44.1
 // kHz, a clock of 35.9 times the rate, and the data sheet's corner a 82nd

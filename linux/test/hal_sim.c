@@ -195,6 +195,8 @@ static int fm_note(const struct et_stream *s, double *hz, int side[2],
 			    &fnum, &block, len) != 5)
 		return 0;
 	*hz = fnum * ET_FM_RATE * pow(2, block - 20);
+	if (!strcmp(mode, "esfm") ? !param("esfm") : !param("opl3"))
+		return 0;
 	if (!strcmp(mode, "esfm")) {
 		int b = (int)strtol(bits, NULL, 0);
 
@@ -263,28 +265,76 @@ static long sim_setting(const char *id)
 	return i < 0 ? 0 : sim.val[i][0];
 }
 
-static const struct et_stream *sim_resampled(const struct et_stream *a2)
+// a change of the mode or the trim at a run's control writes
+static void sim_rs_at(const struct et_stream *c, long *mode, long *item)
 {
-	static struct et_stream out;
-	static short *data;
-	long mode = sim_setting("a2_resample");
-	long ppb = sim_setting("a2_trim_ppb") +
-		   sim_rs_trim(sim_setting("a2_trim"));
-	int sign = 0;
-	short *made;
+	if (!strcmp(c->cmd, "Audio 2 Rate Correction"))
+		*mode = c->value;
+	else if (!strcmp(c->cmd, "Audio 2 Rate Trim"))
+		*item = c->value;
+}
 
-	if (!mode || a2->fmt.format != ET_S16 || (sim.faults & SIM_TRIM))
-		return a2;
+// the change of rate for a mode and a trim's item, in ppb
+static long sim_rs_ppb(long mode, long item, const struct et_stream *a2,
+		       int *on)
+{
+	long ppb = sim_setting("a2_trim_ppb") + sim_rs_trim(item);
+
+	*on = mode != 0;
 	if (mode == 2) {
 		ppb -= SIM_MASTER_PPB;
 		if (a2->fmt.rate % 8000 == 0)
-			sign = sim.faults & SIM_CLOCK_BASE ? -1 : 1;
+			ppb += (long)((sim.faults & SIM_CLOCK_BASE ? 1 : -1) * 251953);
 	}
-	out = *a2;
-	made = sim_rs_stream(a2->data, a2->frames, a2->fmt.channels, ppb, sign,
-			     &out.frames);
-	if (!made)
+	return ppb;
+}
+
+// the stream as the driver's filter leaves it, with the run's control writes
+// taking effect at their times
+static const struct et_stream *sim_resampled(const struct et_stream *a2,
+					     const struct et_stream *s, int n)
+{
+	static struct et_stream out;
+	static short *data;
+	struct sim_rs_part parts[8];
+	long mode = sim_setting("a2_resample"), item = sim_setting("a2_trim");
+	int np = 1, any, i;
+	short *made;
+
+	if (a2->fmt.format != ET_S16 || (sim.faults & SIM_TRIM))
 		return a2;
+	memset(parts, 0, sizeof(parts));
+	parts[0].ppb = sim_rs_ppb(mode, item, a2, &parts[0].on);
+	parts[0].dither = sim_setting("a2_resample_dither");
+	any = parts[0].on && (parts[0].ppb || mode == 2);
+	for (i = 0; i < n && np < 8 && !(sim.faults & SIM_RS_LIVE); i++) {
+		if (s[i].role != ET_CTL)
+			continue;
+		sim_rs_at(&s[i], &mode, &item);
+		parts[np].from = (unsigned long)((s[i].start - a2->start) *
+						 a2_rate(a2));
+		parts[np].ppb = sim_rs_ppb(mode, item, a2, &parts[np].on);
+		parts[np].dither = parts[0].dither;
+		any |= parts[np].on;
+		np++;
+	}
+	if (!any)
+		return a2;
+	out = *a2;
+	made = sim_rs_parts(a2->data, a2->frames, a2->fmt.channels, parts, np,
+			    &out.frames);
+	if (sim.faults & (SIM_RS_SEAM | SIM_RS_IMAGE)) {
+		unsigned int ch = a2->fmt.channels;
+		unsigned long k;
+
+		for (k = 0; k < out.frames * ch; k++) {
+			if ((sim.faults & SIM_RS_SEAM) && k / ch % 256 == 255)
+				made[k] += 1;
+			if (sim.faults & SIM_RS_IMAGE)
+				made[k] = (short)(made[k] *
+						  (1 + 0.01 * cos(k / ch * 1e-3)));
+		}
+	}
 	free(data);
 	data = made;
 	out.data = data;
@@ -309,7 +359,7 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 		if (s[j].capture)
 			continue;
 		if (s[j].role == ET_A2)
-			a2 = sim_resampled(&s[j]);
+			a2 = sim_resampled(&s[j], s, n);
 		else if (s[j].role == ET_A1P)
 			a1 = &s[j];
 		else if (s[j].role == ET_CMD && strstr(s[j].cmd, "arecord -q"))
@@ -542,6 +592,9 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 	}
 }
 
+static int sim_ctl_set(void *ctx, const char *name, int index, const long *v,
+		       int n);
+
 static int sim_run(void *ctx, struct et_stream *s, int n)
 {
 	double end = 0;
@@ -560,7 +613,9 @@ static int sim_run(void *ctx, struct et_stream *s, int n)
 		x->delay0 = x->capture ? 0 :
 					 (long)x->buffer_got +
 						 (sim.faults & SIM_NO_FIFO ? 0 : 16);
-		if (x->role == ET_CMD && strstr(x->cmd, "--suspend")) {
+		if (x->role == ET_CTL) {
+			x->t_end = x->start;
+		} else if (x->role == ET_CMD && strstr(x->cmd, "--suspend")) {
 			x->status = 0;
 			x->t_end = x->start + 5.5;
 		} else if (x->role == ET_CMD && (strstr(x->cmd, "aplay -q") ||
@@ -590,6 +645,26 @@ static int sim_run(void *ctx, struct et_stream *s, int n)
 			if ((x->flags & ET_STALL) && x->pause_at > 0 &&
 			    x->pause_for * x->fmt.rate > x->buffer_got)
 				x->xruns = 1;
+			x->stamped = 0;
+			if (x->max_stamps) {
+				long mode = sim_setting("a2_resample");
+				double off = mode == 2 ?
+					(sim.faults & SIM_RS_REAL_TIME ? 1e-6 : 0) :
+					SIM_MASTER_PPB * 1e-9 +
+					(x->fmt.rate % 8000 ? 0 : 251.95e-6);
+
+				while (x->stamped < x->max_stamps &&
+				       x->stamped * x->period_got < x->frames) {
+					struct et_stamp *t = &x->stamps[x->stamped];
+
+					t->t = x->t_trigger + x->stamped *
+						(double)x->period_got / x->fmt.rate;
+					t->raw = t->t;
+					t->frame = (double)x->stamped * x->period_got *
+						   (1 + off);
+					x->stamped++;
+				}
+			}
 			if (x->probe_at > 0) {
 				double played = x->probe_at * rate;
 
@@ -611,6 +686,9 @@ static int sim_run(void *ctx, struct et_stream *s, int n)
 	for (i = 0; i < n; i++)
 		if (s[i].capture)
 			fill(&s[i], s, n);
+	for (i = 0; i < n; i++)
+		if (s[i].role == ET_CTL)
+			sim_ctl_set(NULL, s[i].cmd, 0, &s[i].value, 1);
 	// a suspend in the run stops every stream once, and they go on
 	for (i = 0; i < n; i++)
 		if (s[i].role == ET_CMD && strstr(s[i].cmd, "--suspend")) {
@@ -722,6 +800,25 @@ static int sim_ctl_set(void *ctx, const char *name, int index, const long *v,
 	if (et_settings[i].reg == 0x52 && et_settings[i].bank == B_MIX)
 		sim.lost52 = 0;
 	return count;
+}
+
+// a control's name less what the simple mixer takes off it
+static int sim_selem(void *ctx, const char *name, int *playback)
+{
+	static const char *const ends[] = { "", " Switch", " Playback Switch",
+					     " Playback Volume" };
+	char full[64];
+	unsigned int i;
+
+	(void)ctx;
+	for (i = 0; i < sizeof(ends) / sizeof(ends[0]); i++) {
+		snprintf(full, sizeof(full), "%s%s", name, ends[i]);
+		if (find_ctl(full, 0) >= 0) {
+			*playback = 1;
+			return 0;
+		}
+	}
+	return -ENOENT;
 }
 
 static int sim_ctl_enum_name(void *ctx, const char *name, int index, int item,
@@ -966,10 +1063,14 @@ static int sim_proc(void *ctx, char *buf, int len)
 	(void)ctx;
 	// the cost as a stream of 10 s at 21.5 interrupts a second leaves it
 	return snprintf(buf, len,
-			"ES1869 (simulated)\ninterrupts: Audio 1 0, Audio 2 0, buttons 0, MPU-401 0, none 0\n"
+			"ES1869 (simulated)\nAudio 1: free; Audio 2: free; power: %s\n"
+			"interrupts: Audio 1 0, Audio 2 0, buttons 0, MPU-401 0, none 0\n"
+			"Audio 2 ring: late refills 0, largest 1024 bytes, longest 20000 cycles\n"
 			"cost: interrupts %lu, 20000 cycles each; ring ticks %lu, 4000 cycles each; 8237 readings 0\n"
 			"clock: the master %+d ppb of 23814000 Hz on the raw clock, 257 samples in the line, 300 in all, from Audio 2\n"
 			"clock: the steered clock %+d ppb of the raw one, 300 samples\n",
+			!param("pwr_save") ? "up" :
+			param("pwr_full") ? "fully down" : "partly down",
 			(unsigned long)(sim.now * 21.5),
 			(unsigned long)(sim.now * 75), SIM_MASTER_PPB, 0);
 }
@@ -979,6 +1080,23 @@ static int sim_cpu(void *ctx, double *busy, double *total)
 	(void)ctx;
 	*busy = sim.now * 0.002;
 	*total = sim.now;
+	return 0;
+}
+
+// the filter's cost as a thread of idle priority would see it: the mode in
+// turn, every 16 quarters of a second from the 17th
+static int sim_watch(void *ctx, int on, double *spins, double *late_us,
+		     double *trace, int max)
+{
+	int i;
+
+	(void)ctx;
+	if (on)
+		return 0;
+	*spins = 1e8;
+	*late_us = 40;
+	for (i = 0; i < max; i++)
+		trace[i] = 2.5e7 * ((i / 16) & 1 ? 0.97 : 1);
 	return 0;
 }
 
@@ -1011,6 +1129,7 @@ struct et_hal *et_hal_sim(unsigned int faults)
 		.ctl_info = sim_ctl_info,
 		.ctl_get = sim_ctl_get,
 		.ctl_set = sim_ctl_set,
+		.selem = sim_selem,
 		.ctl_enum_name = sim_ctl_enum_name,
 		.ctl_db = sim_ctl_db,
 		.ctl_nth = sim_ctl_nth,
@@ -1020,6 +1139,7 @@ struct et_hal *et_hal_sim(unsigned int faults)
 		.info = sim_info,
 		.proc = sim_proc,
 		.cpu = sim_cpu,
+		.watch = sim_watch,
 		.cpu_hz = sim_cpu_hz,
 		.now = sim_now,
 		.sleep = sim_sleep,

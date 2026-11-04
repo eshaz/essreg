@@ -81,6 +81,35 @@ static int parse_param(const char *buf, long v[2])
 	return 0;
 }
 
+// probe.alsamixer: what someone looks for in alsamixer is there, in its
+// Playback view: a control can exist and not make it to the simple mixer
+enum et_result c_probe_alsamixer(struct et_ctx *c, const struct et_case *k)
+{
+	static const char *const names[] = {
+		"Audio 2 Rate Correction", "Audio 2 Rate Trim",
+		"Audio 2 Rate Dither", "Audio 2 Filter", "Audio 2 Oversampling",
+		"Audio 2 Own Clock", "Audio 2 To FM",
+	};
+	unsigned int i;
+	int seen = 0;
+
+	(void)k;
+	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		int playback = 0;
+
+		if (c->hal->selem(c->hal->ctx, names[i], &playback) < 0)
+			et_fail(c, "no element '%s'", names[i]);
+		else if (!playback)
+			et_fail(c, "'%s' isn't in the Playback view", names[i]);
+		else
+			seen++;
+	}
+	et_measure(c, "elements in the Playback view", seen, "",
+		   sizeof(names) / sizeof(names[0]),
+		   sizeof(names) / sizeof(names[0]));
+	return ET_PASS;
+}
+
 // probe.controls: every control of settings.def, its type and range, and
 // its parameter holding the same value
 enum et_result c_probe_controls(struct et_ctx *c, const struct et_case *k)

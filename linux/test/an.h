@@ -50,6 +50,16 @@ int an_fit_sine(const double *x, long n, double rate, double f0, int refine,
 double an_thdn(const double *x, long n, double rate, double f0, double lo,
 	       double hi);
 
+// the strongest thing in the band lo-hi Hz of what's left in r (the fitted
+// tones taken off), in dB against amp, with where it is to at (or NULL),
+// from a window's spectrum of the largest power of 2 of samples
+double an_spur(const double *r, long n, double rate, double lo, double hi,
+	       double amp, double *at);
+
+// a sine's samples taken off x, for an_spur: the fit of frequency f, whose
+// amplitude comes back
+double an_sub_sine(double *x, long n, double rate, double f);
+
 // the pitch near f0 from the zero crossings of a band around it
 double an_pitch(const double *x, long n, double rate, double f0);
 

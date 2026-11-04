@@ -51,10 +51,14 @@ FAULTS = {
     0x400000: "beep.out",          # the PC speaker's level is ignored
     0x800000: "dig.trim",          # the rate correction changes nothing
     0x1000000: "dig.clock",        # 768 kHz's offset the wrong way
+    0x2000000: "rs.exact",         # a ring frame off by 1 at a chunk's seam
+    0x4000000: "rs.band",          # the filter's images
+    0x8000000: "rs.live",          # a change waits for the stream's end
+    0x10000000: "rs.clock.44",     # the Clock mode misses the steered clock
 }
 
 # the cases that run only when named, or with someone at the machine
-OPT_IN = "hwvol,pm,load,stress,3d.full"
+OPT_IN = "hwvol,pm,load,stress,3d.full,rs.clock.long44,rs.clock.long48"
 
 _BUILT = {}
 

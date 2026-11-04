@@ -380,6 +380,67 @@ enum et_result c_pm_stream(struct et_ctx *c, const struct et_case *k)
 	return ET_PASS;
 }
 
+// pm.fm: the FM through a suspend: the OPL3's and the native ESFM's notes both
+// sound after it, at their levels, and so does the MPU-401 take a byte
+enum et_result c_pm_fm(struct et_ctx *c, const struct et_case *k)
+{
+	static const char *const notes[2] = { "opl3:LR:581:4:1.0",
+					       "esfm:0x30:581:4:1.0" };
+	double before[2], after[2];
+	char cmd[300];
+	int pass, m, err;
+
+	(void)k;
+	if (access("/sys/power/pm_test", F_OK) &&
+	    strcmp(c->hal->name, "simulated")) {
+		et_note(c, "no /sys/power/pm_test: the kernel needs CONFIG_PM_DEBUG");
+		return ET_SKIP;
+	}
+	et_ctl_set(c, "Video Playback Switch", 0, 0, 0);
+	et_mix_dig(c, 0);
+	for (pass = 0; pass < 2; pass++) {
+		if (pass) {
+			err = c->hal->suspend(c->hal->ctx);
+			if (err) {
+				et_fail(c, "the suspend: %s", strerror(-err));
+				return ET_ERROR;
+			}
+		}
+		for (m = 0; m < 2; m++) {
+			struct et_stream s[2];
+			double *x, rms;
+
+			snprintf(cmd, sizeof(cmd), "%s --fm-note %s", self(),
+				 notes[m]);
+			s[0] = et_rec(ET_FMC, &et_fm_fmt, ET_FM_RATE, 0);
+			memset(&s[1], 0, sizeof(s[1]));
+			s[1].role = ET_CMD;
+			s[1].cmd = cmd;
+			s[1].start = 0.1;
+			s[1].timeout = 5;
+			if (et_run(c, s, 2) || s[1].status) {
+				et_fail(c, "the note: exit %d", s[1].status);
+				free(s[0].data);
+				return ET_ERROR;
+			}
+			x = et_chan(&et_fm_fmt, s[0].data, s[0].done, 0);
+			rms = an_rms(x + ET_FM_RATE / 3, ET_FM_RATE / 3, 1);
+			(pass ? after : before)[m] = rms;
+			free(x);
+			free(s[0].data);
+		}
+	}
+	for (m = 0; m < 2; m++) {
+		et_measure(c, m ? "ESFM's level, after over before" :
+				  "OPL3's level, after over before",
+			   20 * log10((after[m] + 1) / (before[m] + 1)), "dB",
+			   -1, 1);
+		et_measure(c, m ? "ESFM's note" : "OPL3's note", before[m], "",
+			   50, 40000);
+	}
+	return ET_PASS;
+}
+
 // pm.a1: a tone on Audio 1 through a suspend. The resume's reset takes Audio
 // 1 off the mixer, and the prepare after it has to put it back, which a
 // driver that remembered D1h across the reset didn't: the DMA and the
@@ -509,6 +570,96 @@ static int snap_put(struct et_ctx *c, const struct snap *s)
 			fixed++;
 	}
 	return fixed;
+}
+
+// pwr.partial, pwr.full: pwr_save puts the idle chip down, as the proc file
+// says, and a stream wakes it: Audio 2's every frame, exact
+enum et_result c_pwr_save(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	char proc[1024];
+
+	if (et_param_set(c, "pwr_full", k->arg) ||
+	    et_param_set(c, "pwr_save", 1))
+		return ET_ERROR;
+	c->hal->sleep(c->hal->ctx, 2.5);
+	if (c->hal->proc(c->hal->ctx, proc, sizeof(proc)) < 0)
+		return ET_ERROR;
+	if (!strstr(proc, k->arg ? "power: fully down" : "power: partly down"))
+		et_fail(c, "the chip hasn't gone down");
+	if (et_param_set(c, "pwr_save", 0))
+		return ET_ERROR;
+	return et_dig_run(c, &f, 2 * 49716, 71, NULL);
+}
+
+// pwr.self: Self-Timed Power Down at its shortest: the chip goes down by
+// itself, which nothing can read, and the next stream wakes it
+enum et_result c_pwr_self(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+
+	(void)k;
+	if (et_ctl_set(c, "Self-Timed Power Down", 0, 1, 1) < 0)
+		return ET_ERROR;
+	c->hal->sleep(c->hal->ctx, 10);
+	if (et_ctl_set(c, "Self-Timed Power Down", 0, 0, 0) < 0)
+		return ET_ERROR;
+	return et_dig_run(c, &f, 2 * 49716, 72, NULL);
+}
+
+// a note on the FM, as much of it as the driver allows: its exit status
+static int load_note(struct et_ctx *c, const char *note)
+{
+	struct et_stream s;
+	char cmd[400];
+
+	snprintf(cmd, sizeof(cmd), "%s --fm-note %s", self(), note);
+	memset(&s, 0, sizeof(s));
+	s.role = ET_CMD;
+	s.cmd = cmd;
+	s.timeout = 5;
+	et_run(c, &s, 1);
+	return s.status;
+}
+
+// load.fm: opl3=0 and esfm=0 each take one way to the FM away and leave the
+// other, and neither gets in the way of the card
+enum et_result c_load_fm(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct {
+		const char *params;
+		int opl3, esfm;
+	} t[] = { { "opl3=0", 0, 1 }, { "esfm=0", 1, 0 } };
+	struct snap *s = calloc(1, sizeof(*s));
+	unsigned int i;
+
+	(void)k;
+	if (!s)
+		abort();
+	snap_take(c, s);
+	for (i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+		char name[64];
+		int err = c->hal->reload(c->hal->ctx, t[i].params);
+
+		if (err) {
+			et_fail(c, "reload with %s: %s", t[i].params,
+				strerror(-err));
+			break;
+		}
+		snprintf(name, sizeof(name), "%s: OPL3's note", t[i].params);
+		et_measure(c, name, !load_note(c, "opl3:LR:581:4:0.3"), "",
+			   t[i].opl3, t[i].opl3);
+		snprintf(name, sizeof(name), "%s: ESFM's note", t[i].params);
+		et_measure(c, name, !load_note(c, "esfm:0x30:581:4:0.3"), "",
+			   t[i].esfm, t[i].esfm);
+		snap_put(c, s);
+		engines(c);
+	}
+	if (c->hal->reload(c->hal->ctx, ""))
+		et_fail(c, "the driver didn't load again");
+	snap_put(c, s);
+	free(s);
+	return ET_PASS;
 }
 
 // load.cycle: five reloads, each card the same and complete, a parameter

@@ -15,6 +15,7 @@
 FN(c_cal_rec2)
 FN(c_probe_card)
 FN(c_probe_controls)
+FN(c_probe_alsamixer)
 FN(c_probe_params)
 FN(c_params_rw)
 FN(c_params_bad)
@@ -30,6 +31,20 @@ FN(c_dig_runout)
 FN(c_dig_trim)
 FN(c_dig_trim_exact)
 FN(c_dig_clock)
+FN(c_rs_exact)
+FN(c_rs_band)
+FN(c_rs_imd)
+FN(c_rs_quiet)
+FN(c_rs_dither)
+FN(c_rs_live)
+FN(c_rs_pause)
+FN(c_rs_drain)
+FN(c_rs_runout)
+FN(c_rs_clock)
+FN(c_rs_rates)
+FN(c_rs_bench)
+FN(c_rs_analog)
+FN(c_cpu_rs)
 FN(c_fm_idle)
 FN(c_fm_esfm_sides)
 FN(c_fm_opl3_sides)
@@ -43,6 +58,7 @@ FN(c_a1play_fmt)
 FN(c_a1play_rate)
 FN(c_a1play_start)
 FN(c_a1play_drain)
+FN(c_a1play_click)
 FN(c_midi_esfm)
 FN(c_midi_soft)
 FN(c_midi_opl3)
@@ -61,6 +77,7 @@ FN(c_midi_mpu)
 FN(c_clock)
 FN(c_dac_images)
 FN(c_dac_corner)
+FN(c_dac_fold)
 FN(c_a2_rate)
 FN(c_mix_cable)
 FN(c_3d_quick)
@@ -72,6 +89,10 @@ FN(c_pm_suspend)
 FN(c_pm_stream)
 FN(c_pm_a1)
 FN(c_load_cycle)
+FN(c_load_fm)
+FN(c_pm_fm)
+FN(c_pwr_save)
+FN(c_pwr_self)
 FN(c_stress_reopen)
 FN(c_stress_all)
 
@@ -97,6 +118,8 @@ const struct et_case et_cases[] = {
 	     "the PCM devices, the proc file, the register hwdep, settings.def")
 	CASE("probe.controls", Q | N, c_probe_controls, 0,
 	     "every control as settings.def has it, its parameter agreeing")
+	CASE("probe.alsamixer", Q | N, c_probe_alsamixer, 0,
+	     "the rate correction and the DAC stages in alsamixer's Playback view")
 	CASE("probe.params", Q | N, c_probe_params, 0,
 	     "every parameter readable and in its range")
 	CASE("params.rw", Q | ET_ROOT | N, c_params_rw, 0,
@@ -136,6 +159,56 @@ const struct et_case et_cases[] = {
 	     "the rate correction with nothing to correct: every frame as it was")
 	CASE("dig.clock", N, c_dig_clock, 0,
 	     "the Clock mode at 48 kHz: the samples follow the clock it measures")
+	CASE("rs.exact", N, c_rs_exact, 0,
+	     "every frame the DMA took, +1000 ppm, is the filter's C code's")
+	CASE("rs.exact.down", N, c_rs_exact, 1, "the same, -1000 ppm")
+	CASE("rs.exact.mono", N, c_rs_exact, 2, "the same, in mono")
+	CASE("rs.exact.30", N, c_rs_exact, 3, "the same, at the crystal's 30 ppm")
+	CASE("rs.exact.48", N, c_rs_exact, 4, "the same, at 48 kHz's -252 ppm")
+	CASE("rs.exact.two", N, c_rs_exact, 5,
+	     "the same, a client polling two periods")
+	CASE("rs.band", N, c_rs_band, 0,
+	     "tones to 20 kHz at 30 ppm: level, THD+N and the worst spur")
+	CASE("rs.band.48", N, c_rs_band, 1, "the same at 48 kHz, -252 ppm")
+	CASE("rs.imd.ccif", N, c_rs_imd, 0,
+	     "19 and 20 kHz: what falls between them")
+	CASE("rs.imd.smpte", N, c_rs_imd, 1,
+	     "60 Hz under 7 kHz: what falls between them")
+	CASE("rs.quiet", N, c_rs_quiet, 0,
+	     "a tone at -60 dBFS keeps its level, over 16-bit noise")
+	CASE("rs.dither", N, c_rs_dither, 0,
+	     "dither at -80 dBFS: the noise it adds, the spurs it takes")
+	CASE("rs.live", N, c_rs_live, 0,
+	     "the mixer's controls under a stream take effect at once")
+	CASE("rs.pause", N, c_rs_pause, 0,
+	     "a pause goes on in step within a FIFO, at the same pitch")
+	CASE("rs.xrun", N, c_rs_pause, 1,
+	     "an underrun recovers at the same pitch")
+	CASE("rs.drain", N, c_rs_drain, 0,
+	     "a drain plays every frame through the filter")
+	CASE("rs.runout", N, c_rs_runout, 0,
+	     "a client that stops writing hears silence, not the ring's old frames")
+	CASE("rs.clock.44", N, c_rs_clock, 0,
+	     "44.1 kHz for a minute: within 0.1 ppm of the slope the driver fitted")
+	CASE("rs.clock.48", N, c_rs_clock, 1,
+	     "48 kHz for a minute: within 0.1 ppm of the slope the driver fitted")
+	CASE("rs.clock.long44", ET_OPTIN | N, c_rs_clock, 2,
+	     "44.1 kHz for half an hour: within 0.05 ppm of the steered clock")
+	CASE("rs.clock.long48", ET_OPTIN | N, c_rs_clock, 3,
+	     "48 kHz for half an hour: within 0.05 ppm of the steered clock")
+	CASE("rs.rates", N, c_rs_rates, 0,
+	     "the Clock mode at every clock family's rates, within 2 ppm")
+	CASE("rs.bench", N, c_rs_bench, 0,
+	     "the filter's cycles a frame on this CPU, MMX and C")
+	CASE("rs.analog.1k", N, c_rs_analog, 0,
+	     "at 1 kHz through the DAC and ADC the filter adds nothing")
+	CASE("rs.analog.10k", N, c_rs_analog, 1, "the same at 10 kHz")
+	CASE("rs.analog.16k", N, c_rs_analog, 2, "the same at 16 kHz")
+	CASE("cpu.rs.44", N, c_cpu_rs, 0,
+	     "the filter's part of the machine, 44.1 kHz stereo; the longest fill")
+	CASE("cpu.rs.48", N, c_cpu_rs, 1, "the same at 48 kHz")
+	CASE("cpu.rs.mono", N, c_cpu_rs, 2, "the same, 44.1 kHz mono")
+	CASE("cpu.rs.96", N, c_cpu_rs, 3, "the same at 96 kHz")
 	CASE("dig.runout", N, c_dig_runout, 0,
 	     "an application that stops writing: the core's silence reaches the ring")
 	CASE("dig.long", N, c_dig_long, 0,
@@ -193,6 +266,8 @@ const struct et_case et_cases[] = {
 	     "a drain ending on a period's end plays Audio 1's FIFO out")
 	CASE("a1play.pausedrain", R, c_a1play_drain, ET_PAUSEDRAIN,
 	     "a drain out of a pause plays what was queued")
+	CASE("a1play.click", R, c_a1play_click, 0,
+	     "the click at a pause's release, against the tone's peak")
 	CASE("buf.delay", Q | N, c_buf_delay, 0,
 	     "Audio 2's delay counts its FIFO; its first frame plays at once")
 	CASE("buf.drain", 0, c_buf_drain, 0,
@@ -218,6 +293,8 @@ const struct et_case et_cases[] = {
 	CASE("dac.images", N, c_dac_images, 0,
 	     "Audio 2's image at 22.05 kHz, with each DAC stage")
 
+	CASE("dac.fold", N, c_dac_fold, 0,
+	     "the ADC's filter takes the image that moves a tone's level")
 	CASE("dac.corner.11025", N, c_dac_corner, 0,
 	     "Audio 2's filter corner at 11025 Hz, from the driver's 72h")
 	CASE("dac.corner.22050", N, c_dac_corner, 1, "the same at 22050 Hz")
@@ -286,6 +363,16 @@ const struct et_case et_cases[] = {
 	     "a stream through a suspend goes on once prepared again")
 	CASE("pm.a1", DESTR | R, c_pm_a1, 0,
 	     "a suspend with Audio 1 playing: it goes on, on the mixer")
+	CASE("pm.fm", DESTR, c_pm_fm, 0,
+	     "the OPL3 and the native ESFM sound after a suspend")
+	CASE("pwr.partial", ET_ROOT | N, c_pwr_save, 0,
+	     "pwr_save puts the idle chip partly down, and a stream wakes it")
+	CASE("pwr.full", ET_ROOT | N, c_pwr_save, 1,
+	     "the same, fully down")
+	CASE("pwr.self", ET_ROOT | N, c_pwr_self, 0,
+	     "after Self-Timed Power Down a stream wakes the chip")
+	CASE("load.fm", DESTR, c_load_fm, 0,
+	     "opl3=0 and esfm=0 each take one way to the FM and leave the other")
 	CASE("load.cycle", DESTR, c_load_cycle, 0,
 	     "five reloads: the card the same, a parameter at load in force")
 	CASE("stress.reopen", ET_OPTIN, c_stress_reopen, 0,
