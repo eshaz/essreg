@@ -792,6 +792,8 @@ static int es1869_suspend(struct snd_card *card)
 	hrtimer_cancel(&chip->a1_settle);
 	hrtimer_cancel(&chip->mirror.tick);
 	hrtimer_cancel(&chip->dual.tick);
+	cancel_work_sync(&chip->mirror.copy_work);
+	cancel_work_sync(&chip->dual.copy_work);
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	// a software reset wouldn't stop Audio 2: both engines stopped, and
 	// no source left on the line; a chip fully down hears no command

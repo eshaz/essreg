@@ -58,6 +58,7 @@ struct es1869_dual {
 	struct snd_pcm *pcm; // device 2
 	struct hrtimer tick;
 	struct es1869_fill fill; // what both halves hold
+	struct work_struct copy_work; // the rest of what .ack left
 	unsigned long last; // the last offset the pointer gave
 	bool running;
 	bool draining; // as the mirror's
@@ -81,13 +82,14 @@ struct es1869_mirror {
 	snd_pcm_uframes_t pos; // the paused position
 	unsigned long last; // the last offset the DMA was read at
 	struct es1869_fill fill; // what the ring holds, and what comes next
+	struct work_struct copy_work; // the rest of what .ack left
 	struct es1869_stream stream; // as prepared, for a pause's restart
 	bool spread; // a 16-bit channel: bytes in words, a mirrored buffer
 	bool running;
 	u32 max_chunk; // the largest refill, in bytes
 	u32 ticks; // timer ticks, and the TSC cycles they took
 	u64 tick_cycles;
-	u32 acks; // copies at the application's writes, and theirs
+	u32 acks; // copies after the application's writes, and theirs
 	u64 ack_cycles;
 	bool draining; // a drain's silence goes on past the last frame
 	snd_pcm_uframes_t silent_to; // the absolute frame it has reached

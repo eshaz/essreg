@@ -15,9 +15,13 @@
  *
  * The ring is filled when the application moves its pointer (.ack, which
  * SNDRV_PCM_INFO_SYNC_APPLPTR brings for mmap clients too), at a timer
- * tick and at the start, which copies a whole lead. The tick is a hard
- * timer, since a soft one ran late under load at 99 kHz, and the DMA then
- * played what the ring held before. es1869_fill_plan in the chip core
+ * tick and at the start, which copies a whole lead. .ack runs with
+ * interrupts off, and an mmap client such as MPD through plughw hands
+ * over a whole period at once, so that it copies only what a short write
+ * brings, and a work item copies the rest a little at a time, with
+ * interrupts on in between. The tick stays as the net under that work
+ * item. It is a hard timer, since a soft one ran late under load at 99 kHz,
+ * and the DMA then played what the ring held before. es1869_fill_plan in the chip core
  * decides what each fill copies: what the application wrote, once, while
  * its pointer moves, and when the pointer stands, as under dmix, which
  * mixes straight into the buffer, the frames from just ahead of the DMA to
@@ -55,7 +59,8 @@
 
 #define ES_FORMATS (SNDRV_PCM_FMTBIT_U8 | SNDRV_PCM_FMTBIT_S8 | \
 		    SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_U16_LE)
-#define MIRROR_BUDGET 8192 // the stream bytes one fill copies, at most
+#define MIRROR_BUDGET 8192 // the stream bytes the timer copies, at most
+#define MIRROR_SHORT 1024 // and .ack or the work item, about 18 us of them
 #define MIRROR_GUARD 16 // the bytes left alone just ahead of the DMA
 
 static const struct snd_ratnum a2_clocks[] = {
@@ -159,11 +164,44 @@ static void mirror_fill(struct es1869 *chip, struct snd_pcm_runtime *rt,
 	m->max_chunk = max_t(u32, m->max_chunk, frames_to_bytes(rt, frames));
 }
 
-// the timer copies what .ack left: every a2_tick_us while a copy is behind,
-// and es1869_standing_us while the pointer stands, as under dmix, whose
-// data changes in place. An application that moves its pointer copies its
-// writes at .ack, and once nothing is left the timer stops until .ack
-// leaves some behind
+// what .ack left, a piece at a time under the stream's lock, so that
+// interrupts run between the pieces; hw_ptr does for the DMA's position,
+// which only the count of late fills would need closer
+static void mirror_copy_work(struct work_struct *work)
+{
+	struct es1869 *chip = container_of(work, struct es1869, mirror.copy_work);
+	struct es1869_mirror *m = &chip->mirror;
+	struct snd_pcm_substream *ss = chip->a2_sub;
+	unsigned long flags;
+	bool more;
+
+	if (!ss)
+		return;
+	do {
+		cycles_t c0 = get_cycles();
+
+		snd_pcm_stream_lock_irqsave(ss, flags);
+		more = m->running;
+		if (more) {
+			mirror_fill(chip, ss->runtime, MIRROR_SHORT,
+				    ss->runtime->status->hw_ptr);
+			more = m->fill.backlog;
+			m->acks++;
+			m->ack_cycles += get_cycles() - c0;
+		}
+		snd_pcm_stream_unlock_irqrestore(ss, flags);
+		cond_resched();
+	} while (more);
+	// nothing left for the net to catch; a standing pointer needs its tick
+	if (!READ_ONCE(m->fill.standing))
+		hrtimer_try_to_cancel(&m->tick);
+}
+
+// the timer copies what the work item hasn't got to: every a2_tick_us while
+// a copy is behind, and es1869_standing_us while the pointer stands, as under
+// dmix, whose data changes in place. An application that moves its pointer
+// gets its writes copied after .ack, and once nothing is left the timer stops
+// until .ack leaves some behind
 static enum hrtimer_restart mirror_tick(struct hrtimer *t)
 {
 	struct es1869 *chip = container_of(t, struct es1869, mirror.tick);
@@ -342,6 +380,7 @@ static int a2_close(struct snd_pcm_substream *ss)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 
+	cancel_work_sync(&chip->mirror.copy_work);
 	a2_release(chip);
 	es1869_power_idle(chip);
 	return 0;
@@ -379,6 +418,7 @@ static int a2_prepare(struct snd_pcm_substream *ss)
 	m->draining = false;
 	if (m->spread) {
 		hrtimer_cancel(&m->tick);
+		cancel_work_sync(&m->copy_work);
 		m->running = false;
 		m->rot = 0;
 		es1869_fill_init(&m->fill, rt, MIRROR_GUARD,
@@ -540,7 +580,7 @@ static snd_pcm_uframes_t a2_pointer(struct snd_pcm_substream *ss)
 }
 
 // the core has just read the pointer for hw_ptr, so the 8237 needn't be read
-// again; what the budget left, the timer copies
+// again; what a short copy leaves goes to the work item, under the timer
 static int a2_ack(struct snd_pcm_substream *ss)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
@@ -549,10 +589,13 @@ static int a2_ack(struct snd_pcm_substream *ss)
 
 	if (!m->spread || !m->running)
 		return 0;
-	mirror_fill(chip, ss->runtime, MIRROR_BUDGET, ss->runtime->status->hw_ptr);
+	mirror_fill(chip, ss->runtime, MIRROR_SHORT, ss->runtime->status->hw_ptr);
 	m->acks++;
 	m->ack_cycles += get_cycles() - c0;
-	if (m->fill.backlog && !hrtimer_active(&m->tick))
+	if (!m->fill.backlog)
+		return 0;
+	queue_work(system_highpri_wq, &m->copy_work);
+	if (!hrtimer_active(&m->tick))
 		hrtimer_start(&m->tick, us_to_ktime(es1869_val(ES_S_a2_tick_us)),
 			      HRTIMER_MODE_REL_HARD);
 	return 0;
@@ -563,6 +606,7 @@ static int a2_sync_stop(struct snd_pcm_substream *ss)
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 
 	hrtimer_cancel(&chip->mirror.tick);
+	cancel_work_sync(&chip->mirror.copy_work);
 	synchronize_irq(chip->irq);
 	return 0;
 }
@@ -597,6 +641,7 @@ int es1869_mirror_init(struct es1869 *chip)
 
 	hrtimer_setup(&m->tick, mirror_tick, CLOCK_MONOTONIC,
 		      HRTIMER_MODE_REL_HARD);
+	INIT_WORK(&m->copy_work, mirror_copy_work);
 	m->spread = chip->dma2 >= 4;
 	if (chip->dma2 < 0)
 		return 0;

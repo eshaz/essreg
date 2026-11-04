@@ -10,7 +10,8 @@
  * each frame is copied to Audio 1's DMA buffer, and its second half to
  * Audio 2's ring of words, as mirror.c copies Audio 2's playback. Audio 2
  * runs on Audio 1's clock (71h bit 1 clear), so the two never drift, and
- * its interrupt is off: Audio 1's periods are the device's.
+ * its interrupt is off: Audio 1's periods are the device's. As in mirror.c,
+ * .ack copies a little, a work item the rest, under a timer.
  *
  * The start holds DMA 1 masked over B8h bit 0 as Audio 1's playback does,
  * and the timer that unmasks it writes 78h right after, so that both DACs
@@ -27,7 +28,8 @@
 
 #include "es1869.h"
 
-#define DUAL_BUDGET 8192 // the stream bytes one copy takes, at most
+#define DUAL_BUDGET 8192 // the stream bytes the timer copies, at most
+#define DUAL_SHORT 1024 // and .ack or the work item
 #define DUAL_GUARD 16 // the bytes left alone just ahead of the DMA
 #define DUAL_FIFO (2 * ES_FIFO_A1) // Audio 1's, in four-channel bytes
 
@@ -142,6 +144,32 @@ static void dual_fill(struct es1869 *chip, struct snd_pcm_runtime *rt,
 		dual_copy(chip, rt, start, frames);
 }
 
+// what .ack left, a piece at a time, with interrupts on in between
+static void dual_copy_work(struct work_struct *work)
+{
+	struct es1869 *chip = container_of(work, struct es1869, dual.copy_work);
+	struct es1869_dual *d = &chip->dual;
+	struct snd_pcm_substream *ss = chip->a1_sub;
+	unsigned long flags;
+	bool more;
+
+	if (!ss)
+		return;
+	do {
+		snd_pcm_stream_lock_irqsave(ss, flags);
+		more = d->running;
+		if (more) {
+			dual_fill(chip, ss->runtime, DUAL_SHORT,
+				  ss->runtime->status->hw_ptr);
+			more = d->fill.backlog;
+		}
+		snd_pcm_stream_unlock_irqrestore(ss, flags);
+		cond_resched();
+	} while (more);
+	if (!READ_ONCE(d->fill.standing))
+		hrtimer_try_to_cancel(&d->tick);
+}
+
 static enum hrtimer_restart dual_tick(struct hrtimer *t)
 {
 	struct es1869 *chip = container_of(t, struct es1869, dual.tick);
@@ -226,6 +254,7 @@ static int dual_close(struct snd_pcm_substream *ss)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 
+	cancel_work_sync(&chip->dual.copy_work);
 	dual_release(chip);
 	es1869_power_idle(chip);
 	return 0;
@@ -260,6 +289,7 @@ static int dual_prepare(struct snd_pcm_substream *ss)
 	    2 * rt->buffer_size * half > chip->mirror.ring.bytes)
 		return -EINVAL;
 	hrtimer_cancel(&d->tick);
+	cancel_work_sync(&d->copy_work);
 	d->running = false;
 	es1869_fill_init(&d->fill, rt, DUAL_GUARD, 0);
 	d->last = 0;
@@ -385,8 +415,11 @@ static int dual_ack(struct snd_pcm_substream *ss)
 
 	if (!d->running)
 		return 0;
-	dual_fill(chip, ss->runtime, DUAL_BUDGET, ss->runtime->status->hw_ptr);
-	if (d->fill.backlog && !hrtimer_active(&d->tick))
+	dual_fill(chip, ss->runtime, DUAL_SHORT, ss->runtime->status->hw_ptr);
+	if (!d->fill.backlog)
+		return 0;
+	queue_work(system_highpri_wq, &d->copy_work);
+	if (!hrtimer_active(&d->tick))
 		hrtimer_start(&d->tick, us_to_ktime(es1869_val(ES_S_a2_tick_us)),
 			      HRTIMER_MODE_REL_HARD);
 	return 0;
@@ -397,6 +430,7 @@ static int dual_sync_stop(struct snd_pcm_substream *ss)
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 
 	hrtimer_cancel(&chip->dual.tick);
+	cancel_work_sync(&chip->dual.copy_work);
 	hrtimer_cancel(&chip->a1_settle);
 	synchronize_irq(chip->irq);
 	return 0;
@@ -421,6 +455,7 @@ int es1869_dual_new(struct es1869 *chip)
 
 	hrtimer_setup(&d->tick, dual_tick, CLOCK_MONOTONIC,
 		      HRTIMER_MODE_REL_HARD);
+	INIT_WORK(&d->copy_work, dual_copy_work);
 	err = snd_pcm_new(chip->card, "ES1869 Dual", 2, 1, 0, &d->pcm);
 	if (err < 0)
 		return err;

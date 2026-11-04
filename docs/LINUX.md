@@ -194,8 +194,12 @@ what each part costs, in TSC cycles, on its `cost:` line:
   where it lives, as ESS's drivers do, only when that read finds nothing,
   and counts the times polling then finds one (none on the Armada).
 * Audio 2's ring is copied when the application writes, two bytes to a
-  store. Its timer runs only while a write left more than 8 KB to copy, and
-  every 10 ms under dmix, whose data changes in place.
+  store. The write's own call copies up to 1 KB, with interrupts off, about
+  18 us, and a work item copies the rest in pieces of that size, with
+  interrupts on between them, so that a whole period handed over at once, as
+  MPD does through plughw, doesn't hold them off for 140 us. The timer runs
+  under the work item while a copy is behind, and every 10 ms under dmix,
+  whose data changes in place.
 * Each position is two readings of the 8237's count that agree within 32
   transfers, so that a reading the low byte's wrap tore is never used, and
   the pointer never steps back.
