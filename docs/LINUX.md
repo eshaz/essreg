@@ -219,15 +219,39 @@ that stands, as under dmix, whose data changes in place. The samples are
 then no longer the application's, a choice between the true rate and the
 exact samples, so it stays off by default.
 
-The filter is a Kaiser-windowed sinc of 36 taps, blended from 128 places at
-each frame, in MMX where the CPU has it. On a 16-bit tone at -1 dBFS and an
-offset of 252 ppm its noise and distortion are -86 to -90 dB up to 18 kHz,
-and its worst spur is -92 dB. It gives way above that: -56 dB at 19 kHz.
-Through the chip's digital path, es1869test reads -88.5 dB from the kernel's
-filter. Through the analog path, heard by Audio 1, the output is the same
-with and without it, within 0.1 dB: -61.5, -58.7 and -55.8 dB at 1, 10 and
-16 kHz, the chip's own floor. It takes about 2.8 % of the Armada's CPU at
-44.1 kHz stereo.
+The filter is a Kaiser-windowed sinc of 68 taps, blended from 128 places at
+each frame, in MMX where the CPU has it. What sets its length is the top of
+the band: a tone's image comes back right beside it, at the beat, and at
+44.1 kHz the image of 20 kHz lies at 24.1 kHz, so the filter's edge has to
+fall between them. A first version of 36 taps held up to 18 kHz and then
+gave -56 dB at 19 kHz and -29 dB at 20 kHz.
+
+These are measures of the driver's code, at -1 dBFS on a 16-bit stream, and
+none of them moves with the step from 0.1 to 1000 ppm:
+
+| Measure                       | Result            | A perfect filter |
+|-------------------------------|-------------------|------------------|
+| THD+N, 20 Hz to 18 kHz        | -90.3 to -93.1 dB | -94.5 dB         |
+| THD+N, 19 and 20 kHz          | -89.0 to -89.4 dB | -94.5 dB         |
+| Worst spur to 20 kHz          | -94.6 dB          |                  |
+| Level to 20 kHz               | within 0.0004 dB  |                  |
+| Level at 21 kHz               | -0.36 dB          |                  |
+| 19 and 20 kHz together (CCIF) | -102 dBFS         |                  |
+| 60 Hz under 7 kHz (SMPTE)     | -122 dBFS         |                  |
+| 500 tones with music's slope  | 0.42 LSB rms left | 0.41 LSB         |
+
+A perfect filter still rounds twice, its input and its output, which is its
+-94.5 dB. `tools/rsquality.py` gives these numbers and more on the host, and
+`tests/test_es1869rs.py` holds the filter to them.
+
+On the chip, the dig path reads every frame that the DMA took, and
+es1869test compares them with the filter's C code on the same stream
+(`rs.exact`): not one of about 176,000 differs, in stereo, in mono, or with
+a client polling two periods. Tones through that path (`rs.band`) read the
+same as on the host within 0.01 dB. Through the analog path, heard by Audio
+1, the filter takes nothing that the chip can show: with it and without it
+in turn, THD+N reads -61.6, -52.7 and -43.7 dB at 1, 10 and 16 kHz, within
+0.06 dB, and the level stays within 0.002 dB.
 
 A stream's period no longer matches the ring's, so a timer wakes the client
 on the stream's own period boundaries, and the chip's interrupts stay as the
@@ -235,12 +259,16 @@ net under it. The ring holds as many frames as the buffer, and a step down
 makes more ring frames than stream frames, so a fill stops short of a whole
 lap.
 
-`a2_resample_dither` rounds to 16 bits with triangular noise. In simulation
-it adds 3 dB of noise everywhere, and lowers spurs by up to 13 dB only for a
-quiet tone at about 1 ppm, where they lie near -100 dBFS, some 40 dB under
-the chip's floor, so it stays off. Dithering the filter's place instead
-trades 20 dB of spurs for 5 dB of noise with a nearest-row filter, and
-blending the rows beats it on both, so the driver has none.
+`a2_resample_dither` rounds to 16 bits with triangular noise. It doesn't
+pay. Across tones from -60 to -96 dBFS and steps of 0.1, 1 and 30 ppm it
+adds 3 to 6.6 dB of noise, and the worst spur moves by 2 dB either way, but
+for one case of 6.5 dB at -60 dBFS and 0.1 ppm, near -110 dBFS, some 50 dB
+under the chip's floor. On the chip, at -80 dBFS and 1 ppm, it adds 6.2 dB
+of noise and leaves the worst spur at -106 dBFS (`rs.dither`). The switch
+stays, off by default, for anyone who wants to hear that for themselves.
+Dithering the filter's place instead trades 20 dB of spurs for 5 dB of noise
+with a nearest-row filter, and blending the rows beats it on both, so the
+driver has none.
 
 The Clock mode follows a chain of two measures, which
 `/proc/asound/card0/es1869` shows:

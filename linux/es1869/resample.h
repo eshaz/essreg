@@ -11,9 +11,9 @@
 
 #include "hw_compat.h"
 
-#define ES_RS_TAPS 36 // of the filter, four to an MMX word
-#define ES_RS_BEHIND 17 // the frames before a position that it reads
-#define ES_RS_AHEAD 18 // and from the position on
+#define ES_RS_TAPS 68 // of the filter, four to an MMX word
+#define ES_RS_BEHIND 33 // the frames before a position that it reads
+#define ES_RS_AHEAD 34 // and from the position on
 #define ES_RS_ROWS 128 // the places between two frames that it holds
 #define ES_RS_STRIDE (2 * ES_RS_TAPS) // a row: the taps, then their steps
 #define ES_RS_TABLE (ES_RS_ROWS * ES_RS_STRIDE) // the table's entries

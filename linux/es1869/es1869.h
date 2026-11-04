@@ -94,9 +94,11 @@ struct es1869_mirror {
 	u64 tick_cycles;
 	u32 acks; // copies after the application's writes, and theirs
 	u64 ack_cycles;
+	u32 fill_max; // the most cycles a fill held the lock, this stream
 	bool draining; // a drain's silence goes on past the last frame
 	snd_pcm_uframes_t silent_to; // the absolute frame it has reached
 	struct es1869_rs rs;
+	u32 rs_quiet; // where in the ring its silence has reached, in bytes
 	u32 clk_period; // the master's ticks to a period of this stream
 };
 

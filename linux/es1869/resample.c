@@ -13,22 +13,23 @@
  * Armada the master reads 800 / 481 of the board's 14.318 MHz, the same
  * crystal as the system's PM timer by all appearances.
  *
- * The filter is a Kaiser-windowed sinc (beta 9) of 36 taps, which the table
+ * The filter is a Kaiser-windowed sinc (beta 9) of 68 taps, which the table
  * holds at 128 places between two frames. A frame's row is blended from the
  * two places around it, each coefficient, so that the place is exact to 15
  * more bits, where the nearest of 1024 places left a noise of -64 dB at 16
- * kHz. Measured on a 16-bit stream with a tone at -1 dBFS and an offset of
- * 252 ppm, its noise and distortion are -86 to -90 dB up to 18 kHz, its
- * worst spur -92 dB, and it gives way at 19 kHz. The spurs of a shorter
- * filter lie at the beat right beside the tone: the image of each frequency
- * comes back there, so that its stopband decides them, not its places.
+ * kHz. What sets the length is the top of the band: a tone's image comes back
+ * right beside it, at the beat, so that the stopband decides the spurs there,
+ * not the places. At 44.1 kHz the image of 20 kHz lies at 24.1 kHz, and the
+ * filter's edge has to fall between them. 36 taps held up to 18 kHz and then
+ * gave -56 dB at 19 kHz and -29 dB at 20 kHz; 68 hold to 20 kHz.
  *
  * MMX has 16-bit coefficients, whose rounding alone would stop it at -84 dB,
- * so the taps have scales by how large they get: 4 taps at the centre with
- * 15 bits and the outer ones up to 21. The sums are shifted to one scale from
- * the outside in, and the scales are as fine as the worst signal allows
- * without a sum leaving 32 bits. A coefficient of 1 doesn't fit in 15 bits:
- * the first row has 32767 at the centre, a gain of -0.0003 dB there.
+ * so the taps have scales by how large they get, from 16 bits at the centre
+ * to 24 at the ends. A coefficient of 1 fits in none of them, so the two taps
+ * nearest the place hold what they have over 1/2, and rs_half adds the half
+ * back. The sums are shifted to one scale from the outside in, and the scales
+ * are as fine as the worst signal allows without a sum leaving 32 bits. The
+ * first row, whose 1/2 doesn't fit in 16 bits, has a gain of -0.0001 dB.
  *
  * es1869_rs_run_c() and es1869_rs_run_mmx() give the same bytes.
  *
@@ -49,13 +50,13 @@
 
 #include "resample.h"
 
-// the words' scales in bits, outside in: 4 words either side of the centre's
+// the words' scales in bits, outside in and out again
 static const u8 rs_scale[ES_RS_TAPS / 4] = {
-	21, 20, 18, 16, 15, 16, 18, 20, 21
+	24, 24, 23, 21, 20, 19, 18, 17, 16, 17, 18, 19, 20, 21, 23, 24, 24
 };
 
-#define RS_FINE 22 // the finest scale, on which a row's sum is taken
-#define RS_ONE (1 << 15) // 1 on the centre's scale
+#define RS_FINE 24 // the finest scale, on which a row's sum is taken
+#define RS_CENTRE 16 // the centre word's
 
 // --- the table, in integers ----------------------------------------------------
 
@@ -111,8 +112,9 @@ static s64 kaiser(const s64 *c, s64 d)
 	return v;
 }
 
-// one row at the place i of ES_RS_ROWS past a frame, with the sum of its
-// taps made exact at the centre, on the finest scale
+// one row at the place i of ES_RS_ROWS past a frame. The two taps around the
+// place give up 1/2, which makes the gain 1, so that the rest sums to 0, and
+// the tap nearest the place takes what the rounding left of that
 static void rs_row(s16 *row, unsigned int i, const s64 *series)
 {
 	s64 s = q30_sin(div_s64(RS_PI_Q30 * i, ES_RS_ROWS));
@@ -135,20 +137,31 @@ static void rs_row(s16 *row, unsigned int i, const s64 *series)
 				h = -h;
 		}
 		v = q30_mul(h, kaiser(series, d));
+		if (n == ES_RS_BEHIND || n == ES_RS_BEHIND + 1)
+			v -= Q30 / 2;
 		v = (v + (1LL << (29 - bits))) >> (30 - bits);
 		taps[n] = v;
 		sum += v * (1LL << (RS_FINE - bits));
 	}
-	// the tap nearest the place takes what the rounding left of the sum
 	c = ES_RS_BEHIND + (i * 2 >= ES_RS_ROWS);
-	taps[c] += ((s64)(RS_ONE * (1LL << (RS_FINE - 15))) - sum + (1 << 6)) >> 7;
+	taps[c] += (-sum + (1 << (RS_FINE - RS_CENTRE - 1))) >>
+		   (RS_FINE - RS_CENTRE);
 	for (n = 0; n < ES_RS_TAPS; n++)
-		row[n] = taps[n] > 32767 ? 32767 : taps[n];
+		row[n] = taps[n] > 32767 ? 32767 :
+			 taps[n] < -32768 ? -32768 : taps[n];
+}
+
+static s16 rs_up(s16 v)
+{
+	return v < 32767 ? v + 1 : v;
 }
 
 // the filter: for each place the taps, then 2 x the way to the next place's,
 // which PMULHW with a 15-bit fraction takes back to the place in between.
-// The second half of the places are the first's taps the other way round
+// The second half of the places are the first's taps the other way round.
+// PMULHW rounds down, by half a unit of each tap on average, a little gain
+// lost at the low end, so every other tap has one unit more, the same ones
+// at every place: anything that changed with the place would be a spur
 void es1869_rs_table(s16 *tab)
 {
 	s16 end[ES_RS_TAPS];
@@ -165,6 +178,12 @@ void es1869_rs_table(s16 *tab)
 				    ES_RS_TAPS - 1 - n];
 	for (n = 0; n < ES_RS_TAPS; n++)
 		end[n] = tab[ES_RS_TAPS - 1 - n];
+	for (n = 0; n < ES_RS_TAPS; n += 2) {
+		for (i = 0; i < ES_RS_ROWS; i++)
+			tab[i * ES_RS_STRIDE + n] =
+				rs_up(tab[i * ES_RS_STRIDE + n]);
+		end[n] = rs_up(end[n]);
+	}
 	for (i = 0; i < ES_RS_ROWS; i++) {
 		s16 *row = tab + i * ES_RS_STRIDE;
 		const s16 *next = i + 1 < ES_RS_ROWS ? row + ES_RS_STRIDE : end;
@@ -197,6 +216,8 @@ static inline u32 rs_blend_bits(u32 frac)
 {
 	return (frac >> 10) & 0x7FFF;
 }
+
+#define RS_HALF (1 << 13) // the 1/2 that the taps around the place gave up
 
 static inline const s16 *rs_place(const s16 *tab, u32 frac)
 {
@@ -249,34 +270,54 @@ static void rs_blend_c(s16 *c, const s16 *row, s32 f)
 		c[i] = row[i] + ((row[ES_RS_TAPS + i] * f) >> 16);
 }
 
-#define RS_WORD_C(w) do { \
+#define RS_WORD_C(a, b, w) do { \
 	a += x[4 * (w)] * c[4 * (w)] + x[4 * (w) + 1] * c[4 * (w) + 1]; \
 	b += x[4 * (w) + 2] * c[4 * (w) + 2] + x[4 * (w) + 3] * c[4 * (w) + 3]; \
+} while (0)
+
+#define RS_SHIFT_C(a, b, n) do { \
+	a >>= n; \
+	b >>= n; \
 } while (0)
 
 // the taps' sum on the scale of 14 bits, the shifts per MMX lane as there
 static s32 rs_sum_c(const s16 *x, const s16 *c)
 {
-	s32 a = 0, b = 0;
+	s32 a = 0, b = 0, p = 0, q = 0;
 
-	RS_WORD_C(0);
-	RS_WORD_C(8);
-	a >>= 1;
-	b >>= 1;
-	RS_WORD_C(1);
-	RS_WORD_C(7);
-	a >>= 2;
-	b >>= 2;
-	RS_WORD_C(2);
-	RS_WORD_C(6);
-	a >>= 2;
-	b >>= 2;
-	RS_WORD_C(3);
-	RS_WORD_C(5);
-	a >>= 2;
-	b >>= 2;
-	a += (x[16] * c[16] + x[17] * c[17]) >> 1;
-	b += (x[18] * c[18] + x[19] * c[19]) >> 1;
+	RS_WORD_C(a, b, 0);
+	RS_WORD_C(a, b, 16);
+	RS_WORD_C(a, b, 1);
+	RS_WORD_C(a, b, 15);
+	RS_SHIFT_C(a, b, 1);
+	RS_WORD_C(a, b, 2);
+	RS_WORD_C(a, b, 14);
+	RS_SHIFT_C(a, b, 2);
+	RS_WORD_C(a, b, 3);
+	RS_WORD_C(a, b, 13);
+	RS_SHIFT_C(a, b, 1);
+	RS_WORD_C(a, b, 4);
+	RS_WORD_C(a, b, 12);
+	RS_SHIFT_C(a, b, 1);
+	RS_WORD_C(a, b, 5);
+	RS_WORD_C(a, b, 11);
+	RS_SHIFT_C(a, b, 1);
+	RS_WORD_C(a, b, 6);
+	RS_WORD_C(a, b, 10);
+	RS_SHIFT_C(a, b, 2);
+	// 17 bits don't fit under the sum so far: down to its 16 first
+	RS_WORD_C(p, q, 7);
+	RS_WORD_C(p, q, 9);
+	RS_SHIFT_C(p, q, 1);
+	a += p;
+	b += q;
+	RS_SHIFT_C(a, b, 2);
+	p = 0;
+	q = 0;
+	RS_WORD_C(p, q, 8);
+	RS_SHIFT_C(p, q, 2);
+	a += p + x[ES_RS_BEHIND] * RS_HALF;
+	b += q + x[ES_RS_BEHIND + 1] * RS_HALF;
 	return a + b;
 }
 
@@ -335,11 +376,15 @@ static inline void rs_blend_mmx(s16 *c, const s16 *row, u32 f)
 {
 	asm volatile("movd %2,%%mm7\n\t"
 		     "punpckldq %%mm7,%%mm7\n\t"
-		     RS_BLEND("0", "72") RS_BLEND("8", "80")
-		     RS_BLEND("16", "88") RS_BLEND("24", "96")
-		     RS_BLEND("32", "104") RS_BLEND("40", "112")
-		     RS_BLEND("48", "120") RS_BLEND("56", "128")
-		     RS_BLEND("64", "136")
+		     RS_BLEND("0", "136") RS_BLEND("8", "144")
+		     RS_BLEND("16", "152") RS_BLEND("24", "160")
+		     RS_BLEND("32", "168") RS_BLEND("40", "176")
+		     RS_BLEND("48", "184") RS_BLEND("56", "192")
+		     RS_BLEND("64", "200") RS_BLEND("72", "208")
+		     RS_BLEND("80", "216") RS_BLEND("88", "224")
+		     RS_BLEND("96", "232") RS_BLEND("104", "240")
+		     RS_BLEND("112", "248") RS_BLEND("120", "256")
+		     RS_BLEND("128", "264")
 		     : : "r" (c), "r" (row), "r" (f | f << 16) : "memory");
 }
 
@@ -348,26 +393,45 @@ static inline void rs_blend_mmx(s16 *c, const s16 *row, u32 f)
 	"pmaddwd " w "(%1),%%mm1\n\t" \
 	"paddd %%mm1,%%mm0\n\t"
 
+// the half for the taps around the place, the second and third of their word
+static const u64 rs_half __aligned(8) = (u64)RS_HALF << 16 | (u64)RS_HALF << 32;
+
 // the taps' sum into mm0, its low 32 bits
 static inline void rs_sum_mmx(const s16 *x, const s16 *c)
 {
 	asm volatile("pxor %%mm0,%%mm0\n\t"
-		     RS_WORD("0") RS_WORD("64")
+		     RS_WORD("0") RS_WORD("128") RS_WORD("8") RS_WORD("120")
 		     "psrad $1,%%mm0\n\t"
-		     RS_WORD("8") RS_WORD("56")
+		     RS_WORD("16") RS_WORD("112")
 		     "psrad $2,%%mm0\n\t"
-		     RS_WORD("16") RS_WORD("48")
+		     RS_WORD("24") RS_WORD("104")
+		     "psrad $1,%%mm0\n\t"
+		     RS_WORD("32") RS_WORD("96")
+		     "psrad $1,%%mm0\n\t"
+		     RS_WORD("40") RS_WORD("88")
+		     "psrad $1,%%mm0\n\t"
+		     RS_WORD("48") RS_WORD("80")
 		     "psrad $2,%%mm0\n\t"
-		     RS_WORD("24") RS_WORD("40")
-		     "psrad $2,%%mm0\n\t"
-		     "movq 32(%0),%%mm1\n\t"
-		     "pmaddwd 32(%1),%%mm1\n\t"
+		     "movq 56(%0),%%mm1\n\t"
+		     "pmaddwd 56(%1),%%mm1\n\t"
+		     "movq 72(%0),%%mm2\n\t"
+		     "pmaddwd 72(%1),%%mm2\n\t"
+		     "paddd %%mm2,%%mm1\n\t"
 		     "psrad $1,%%mm1\n\t"
 		     "paddd %%mm1,%%mm0\n\t"
+		     "psrad $2,%%mm0\n\t"
+		     "movq 64(%0),%%mm2\n\t"
+		     "movq %%mm2,%%mm1\n\t"
+		     "pmaddwd 64(%1),%%mm1\n\t"
+		     "pmaddwd %2,%%mm2\n\t"
+		     "psrad $2,%%mm1\n\t"
+		     "paddd %%mm1,%%mm0\n\t"
+		     "paddd %%mm2,%%mm0\n\t"
 		     "movq %%mm0,%%mm1\n\t"
 		     "psrlq $32,%%mm1\n\t"
 		     "paddd %%mm1,%%mm0\n\t"
-		     : : "r" (x), "r" (c) : "memory");
+		     : : "r" (x), "r" (c), "m" (rs_half)
+		     : "memory");
 }
 
 // mm0 and the channel before it, in mm5, to words of the ring

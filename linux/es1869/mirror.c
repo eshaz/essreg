@@ -54,9 +54,9 @@
  * off. The ring keeps a straight line between its frames and the stream's:
  * a position is the frame the ring writes next, w, plus rot and a fraction,
  * less what lies between the DMA and w. The filter is slow, for this CPU,
- * so it runs only in the work item and at the timer, never in .ack, and in
- * a chunk that keeps interrupts off for about 70 us at most, with the FPU
- * from kernel_fpu_begin() around MMX. A filter reaches ES_RS_AHEAD frames past
+ * so it runs only in the work item and at the timer, never in .ack, in
+ * pieces of a little under 3 ms of 44.1 kHz stereo, which keep interrupts
+ * off for about 80 us, with the FPU from kernel_fpu_begin() around MMX. A filter reaches ES_RS_AHEAD frames past
  * its place, so the last frames written are made as if silence followed,
  * and again when what follows has come. A pointer that stands, as under
  * dmix, whose data changes in place, isn't filtered: its window would
@@ -94,7 +94,8 @@
 #define MIRROR_BUDGET 8192 // the stream bytes the timer copies, at most
 #define MIRROR_SHORT 1024 // and .ack or the work item, about 18 us of them
 #define MIRROR_GUARD 16 // the bytes left alone just ahead of the DMA
-#define MIRROR_RS_START 2048 // the stream bytes the filter makes at the start
+#define MIRROR_RS_SHORT 512 // what the filter takes at once, about 80 us of it
+#define MIRROR_RS_START 1024 // the stream bytes the filter makes at the start
 #define MIRROR_RS_MIN 256 // the frames a buffer needs for the filter
 
 static const struct snd_ratnum a2_clocks[] = {
@@ -193,11 +194,13 @@ static void mirror_resample(struct es1869 *chip, struct snd_pcm_runtime *rt,
 	if (s.mmx)
 		kernel_fpu_end();
 #endif
-	if (!m->fill.backlog) {
+	m->rs_quiet = rs->w * 2 * frames_to_bytes(rt, 1);
+	if (!m->fill.backlog)
 		es1869_rs_seek(rs, &s, -ES_RS_AHEAD);
-		m->fill.filled = (m->fill.filled + rt->boundary - ES_RS_AHEAD) %
-				 rt->boundary;
-	}
+	// the line decides where the next fill begins: a run can end a frame
+	// past the plan, and those fills add up, which left frames behind that
+	// were made as if silence followed
+	m->fill.filled = rs->pos;
 }
 
 // where the DMA is in the application's buffer; through the filter, its
@@ -216,7 +219,8 @@ static snd_pcm_uframes_t mirror_offset(struct es1869 *chip,
 	pos = es1869_dma_pos(&chip->hw, chip->dma2, ring) / word;
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	off = bytes_to_frames(rt, pos);
-	if (m->rs.on && !m->fill.standing)
+	// before its first fill a stream has no line to read
+	if (m->rs.on && m->rs.lined && !m->fill.standing)
 		adj = es1869_rs_behind(&m->rs, (m->rs.w + b - off) % b) % (long)b;
 	return (off + m->rot + b + adj) % b;
 }
@@ -264,6 +268,17 @@ static void mirror_fill(struct es1869 *chip, struct snd_pcm_runtime *rt,
 	m->max_chunk = max_t(u32, m->max_chunk, frames_to_bytes(rt, frames));
 }
 
+// a fill's cycles, since c0, and the most any fill took
+static void mirror_cost(struct es1869_mirror *m, u32 *calls, u64 *total,
+			cycles_t c0)
+{
+	u32 c = get_cycles() - c0;
+
+	*calls += 1;
+	*total += c;
+	m->fill_max = max(m->fill_max, c);
+}
+
 // the filter's work from a context that shouldn't do it itself, with the
 // timer as the net under it
 static void mirror_kick(struct es1869 *chip)
@@ -290,16 +305,17 @@ static void mirror_copy_work(struct work_struct *work)
 	if (!ss)
 		return;
 	do {
-		cycles_t c0 = get_cycles();
+		cycles_t c0;
 
 		snd_pcm_stream_lock_irqsave(ss, flags);
+		c0 = get_cycles();
 		more = m->running;
 		if (more) {
-			mirror_fill(chip, ss->runtime, MIRROR_SHORT,
+			mirror_fill(chip, ss->runtime, m->rs.on ?
+				    MIRROR_RS_SHORT : MIRROR_SHORT,
 				    ss->runtime->status->hw_ptr);
 			more = m->fill.backlog;
-			m->acks++;
-			m->ack_cycles += get_cycles() - c0;
+			mirror_cost(m, &m->acks, &m->ack_cycles, c0);
 		}
 		snd_pcm_stream_unlock_irqrestore(ss, flags);
 		cond_resched();
@@ -320,20 +336,20 @@ static enum hrtimer_restart mirror_tick(struct hrtimer *t)
 	struct es1869_mirror *m = &chip->mirror;
 	struct snd_pcm_substream *ss = chip->a2_sub;
 	u32 us = es1869_val(ES_S_a2_tick_us);
-	cycles_t c0 = get_cycles();
 	unsigned long flags;
+	cycles_t c0;
 
 	if (!ss || !m->running)
 		return HRTIMER_NORESTART;
 	snd_pcm_stream_lock_irqsave(ss, flags);
+	c0 = get_cycles();
 	mirror_fill(chip, ss->runtime,
-		    m->rs.on && !m->fill.standing ? MIRROR_SHORT : MIRROR_BUDGET,
+		    m->rs.on && !m->fill.standing ? MIRROR_RS_SHORT : MIRROR_BUDGET,
 		    mirror_hw(ss->runtime, mirror_offset(chip, ss->runtime)));
 	if (m->fill.standing)
 		us = es1869_standing_us(ss->runtime, MIRROR_BUDGET);
+	mirror_cost(m, &m->ticks, &m->tick_cycles, c0);
 	snd_pcm_stream_unlock_irqrestore(ss, flags);
-	m->ticks++;
-	m->tick_cycles += get_cycles() - c0;
 	if (!m->fill.backlog && !m->fill.standing)
 		return HRTIMER_NORESTART;
 	hrtimer_forward_now(t, us_to_ktime(us));
@@ -396,6 +412,31 @@ static void mirror_silence(struct es1869 *chip, struct snd_pcm_runtime *rt)
 	}
 }
 
+// a client that stopped writing and lets the stream run on, on the core's
+// silence: nothing comes to fill the ring on the line, so its frames go
+// silent from the next one to write on, and then as the DMA leaves them, up to
+// a little behind it, and the DMA finds silence wherever it goes next
+static void rs_ring_silence(struct es1869 *chip, struct snd_pcm_runtime *rt)
+{
+	struct es1869_mirror *m = &chip->mirror;
+	u32 fb = 2 * frames_to_bytes(rt, 1), ring = rt->buffer_size * fb;
+	u32 from = m->rs_quiet, to, n;
+	unsigned long flags;
+
+	spin_lock_irqsave(&chip->reg_lock, flags);
+	to = es1869_dma_pos(&chip->hw, chip->dma2, ring);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	to = (to + ring - ES_RS_ROOM * fb) % ring;
+	to -= to % fb;
+	n = (to + ring - from) % ring;
+	m->rs_quiet = to;
+	if (from + n > ring) {
+		memset(m->ring.area, 0, from + n - ring);
+		n = ring - from;
+	}
+	memset(m->ring.area + from, 0, n);
+}
+
 // the silence past a drain's last frame: in the application's buffer, which
 // on an 8-bit channel is the DMA's, and the ring
 static int a2_drain_fill(struct snd_pcm_substream *ss, int channel,
@@ -406,12 +447,17 @@ static int a2_drain_fill(struct snd_pcm_substream *ss, int channel,
 
 	snd_pcm_format_set_silence(rt->format, rt->dma_area + pos,
 				   bytes_to_samples(rt, bytes));
-	if (chip->mirror.spread)
+	// on the line a frame of the buffer has no fixed place in the ring, so
+	// the filter's fill takes the silence there: its tail reaches into it
+	if (chip->mirror.rs.lined) {
+		if (chip->mirror.draining)
+			mirror_kick(chip);
+		else
+			rs_ring_silence(chip, rt);
+	} else if (chip->mirror.spread) {
 		mirror_copy(chip, rt, bytes_to_frames(rt, pos),
 			    bytes_to_frames(rt, bytes));
-	// the filter's tail reaches into that silence
-	if (chip->mirror.rs.on && chip->mirror.draining)
-		mirror_kick(chip);
+	}
 	return 0;
 }
 
@@ -665,7 +711,7 @@ static int a2_prepare(struct snd_pcm_substream *ss)
 		mirror_silence(chip, rt);
 		m->rs.on = false;
 		m->rs.lined = false;
-		m->rs.frac = 0;
+		es1869_rs_start(&m->rs, 0);
 		m->rs.seed = 0x2545F491;
 		m->rs.last[0] = m->rs.last[1] = 0;
 		m->rs.base = es1869_clock_base(num);
@@ -715,6 +761,7 @@ static void a2_go(struct es1869 *chip, struct snd_pcm_runtime *rt)
 	if (m->spread) {
 		rs_apply(chip, rt);
 		m->running = true;
+		m->fill_max = 0;
 		mirror_fill(chip, rt, m->rs.on ? MIRROR_RS_START :
 				max_t(u32, MIRROR_BUDGET,
 				      frames_to_bytes(rt, m->fill.lead)),
@@ -753,6 +800,7 @@ static void a2_rotate(struct es1869 *chip, struct snd_pcm_runtime *rt)
 	m->rot = (m->pos + b - back) % b;
 	m->fill.filled = mirror_hw(rt, m->rot);
 	m->rs.lined = false;
+	es1869_rs_start(&m->rs, m->fill.filled);
 	if (m->fill.standing)
 		mirror_copy(chip, rt, m->pos, m->fill.guard);
 }
@@ -851,8 +899,7 @@ static int a2_ack(struct snd_pcm_substream *ss)
 		return 0;
 	}
 	mirror_fill(chip, ss->runtime, MIRROR_SHORT, ss->runtime->status->hw_ptr);
-	m->acks++;
-	m->ack_cycles += get_cycles() - c0;
+	mirror_cost(m, &m->acks, &m->ack_cycles, c0);
 	if (!m->fill.backlog)
 		return 0;
 	queue_work(system_highpri_wq, &m->copy_work);
