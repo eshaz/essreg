@@ -268,7 +268,8 @@ static const struct et_stream *sim_resampled(const struct et_stream *a2)
 	static struct et_stream out;
 	static short *data;
 	long mode = sim_setting("a2_resample");
-	long ppb = sim_setting("a2_trim_ppb");
+	long ppb = sim_setting("a2_trim_ppb") +
+		   sim_rs_trim(sim_setting("a2_trim"));
 	int sign = 0;
 	short *made;
 

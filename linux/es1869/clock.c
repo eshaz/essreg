@@ -30,13 +30,9 @@ void es1869_clock_setup(struct es1869 *chip)
 	es1869_clock_init(&chip->clk);
 }
 
-// a stream at num / den: what its interrupt adds to the master's count, for
-// a stream that feeds the clock
-u32 es1869_clock_period(struct es1869 *chip, u32 num, u32 den, u32 frames)
+// a stream at num / den: what its interrupt adds to the master's count
+u32 es1869_clock_period(u32 num, u32 den, u32 frames)
 {
-	if (es1869_val(ES_S_a2_resample) != 2)
-		return 0;
-	chip->clk_used = true;
 	return es1869_clock_tpf(num, den) * frames;
 }
 
@@ -70,7 +66,7 @@ void es1869_clock_proc(struct es1869 *chip, struct snd_info_buffer *buf)
 	unsigned long flags;
 	u8 src;
 
-	if (!chip->clk_used)
+	if (es1869_val(ES_S_a2_resample) != 2 && !chip->clk.samples)
 		return;
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	c = chip->clk;

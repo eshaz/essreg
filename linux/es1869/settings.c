@@ -75,15 +75,16 @@ static LIST_HEAD(es1869_cards);
 static DEFINE_MUTEX(es1869_cards_lock);
 
 // an enum's texts, split from its "a|b|c" once
-#define ES_ENUM_MAX 8
-static const char *es1869_items[ES_S_COUNT][ES_ENUM_MAX];
+#define ES_ITEMS_MAX 64 // every enum's texts together
+static const char *es1869_items[ES_ITEMS_MAX];
+static u8 es1869_first[ES_S_COUNT];
 static int es1869_nitems[ES_S_COUNT];
 static char es1869_item_buf[512];
 
 static void es1869_split_items(void)
 {
 	size_t used = 0;
-	int id;
+	int id, all = 0;
 
 	if (es1869_nitems[ES_S_capture_source])
 		return;
@@ -99,8 +100,11 @@ static void es1869_split_items(void)
 			break;
 		p = memcpy(es1869_item_buf + used, s->items, len);
 		used += len;
-		while ((tok = strsep(&p, "|")) && es1869_nitems[id] < ES_ENUM_MAX)
-			es1869_items[id][es1869_nitems[id]++] = tok;
+		es1869_first[id] = all;
+		while ((tok = strsep(&p, "|")) && all < ES_ITEMS_MAX) {
+			es1869_items[all++] = tok;
+			es1869_nitems[id]++;
+		}
 	}
 }
 
@@ -271,6 +275,12 @@ void es1869_setting_apply(struct es1869 *chip, int id)
 		break;
 	case ES_S_esfm_square:
 		es1869_esfm_bank_changed(chip);
+		break;
+	case ES_S_a2_resample:
+	case ES_S_a2_trim:
+	case ES_S_a2_trim_ppb:
+	case ES_S_a2_resample_dither:
+		es1869_a2_rate_changed(chip);
 		break;
 	}
 }
@@ -471,7 +481,7 @@ static int item_index(int id, const char *text)
 
 	es1869_split_items();
 	for (i = 0; i < es1869_nitems[id]; i++)
-		if (sysfs_streq(es1869_items[id][i], text))
+		if (sysfs_streq(es1869_items[es1869_first[id] + i], text))
 			return i;
 	return -EINVAL;
 }
@@ -586,7 +596,7 @@ static int es1869_ctl_info(struct snd_kcontrol *kctl,
 
 	if (s->kind == S_ENUM)
 		return snd_ctl_enum_info(uinfo, 1, es1869_nitems[id],
-					 es1869_items[id]);
+					 es1869_items + es1869_first[id]);
 	uinfo->count = es1869_set_count(s);
 	if (s->kind == S_BOOL || s->kind == S_MASTERSW) {
 		uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;

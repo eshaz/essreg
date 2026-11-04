@@ -97,6 +97,7 @@ struct es1869_mirror {
 	bool draining; // a drain's silence goes on past the last frame
 	snd_pcm_uframes_t silent_to; // the absolute frame it has reached
 	struct es1869_rs rs;
+	u32 clk_period; // the master's ticks to a period of this stream
 };
 
 struct es1869 {
@@ -144,7 +145,6 @@ struct es1869 {
 	u32 clk_a1, clk_a2; // the master's ticks to a period; 0 doesn't count
 	u8 clk_src; // the source that feeds it, 0 to begin a new stretch
 	s32 clk_offset; // what the step takes for it, 32 bits
-	bool clk_used; // since load: a stream asked for it
 
 	// Audio 2
 	enum es1869_owner a2_owner;
@@ -240,7 +240,7 @@ int es1869_dsp_recover(struct es1869 *chip);
 
 // clock.c
 void es1869_clock_setup(struct es1869 *chip);
-u32 es1869_clock_period(struct es1869 *chip, u32 num, u32 den, u32 frames);
+u32 es1869_clock_period(u32 num, u32 den, u32 frames);
 void es1869_clock_tick(struct es1869 *chip, u8 source, u64 raw);
 void es1869_clock_proc(struct es1869 *chip, struct snd_info_buffer *buf);
 
@@ -249,6 +249,7 @@ extern const struct snd_pcm_ops es1869_a2_ops;
 int es1869_mirror_init(struct es1869 *chip);
 void es1869_a2_irq(struct es1869 *chip, struct snd_pcm_substream **sub);
 unsigned int es1869_a2_tied_rate(struct es1869 *chip);
+void es1869_a2_rate_changed(struct es1869 *chip);
 
 // regs_hwdep.c
 int es1869_regs_hwdep_new(struct es1869 *chip);

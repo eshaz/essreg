@@ -16,6 +16,7 @@ usage: python3 -m unittest tests.test_es1869rs   (needs gcc and numpy)
 import ctypes
 import os
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
@@ -75,6 +76,7 @@ class Clock(ctypes.Structure):
 class RS(ctypes.Structure):
     _fields_ = [("tab", s16p), ("on", ctypes.c_bool), ("mmx", ctypes.c_bool),
                 ("clock", ctypes.c_bool), ("dither", ctypes.c_bool),
+                ("lined", ctypes.c_bool),
                 ("frac", ctypes.c_uint32), ("trim", ctypes.c_int32),
                 ("base", ctypes.c_int32), ("step", ctypes.c_int32),
                 ("w", ctypes.c_ulong), ("pos", ctypes.c_ulong),
@@ -153,6 +155,8 @@ def library():
         lib.es1869_clock_base.restype = ctypes.c_int32
         lib.es1869_clock_q32.argtypes = [ctypes.c_int32]
         lib.es1869_clock_q32.restype = ctypes.c_int32
+        lib.es1869_trim_ppb.argtypes = [ctypes.c_uint]
+        lib.es1869_trim_ppb.restype = ctypes.c_int32
         lib.es1869_clock_tpf.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
         lib.es1869_clock_tpf.restype = ctypes.c_uint32
         _LIB["lib"] = lib
@@ -614,6 +618,18 @@ class ClockTest(unittest.TestCase):
         self.assertAlmostEqual(base * 1e6, -251.9526, places=3)
         self.assertEqual(lib.es1869_clock_q32(1000000000 // 1000),
                          round(2 ** 32 / 1000))
+
+    def test_trim_items(self):
+        """a2_trim's texts in settings.def are what it adds"""
+        lib = library()
+        with open(os.path.join(DRV, "settings.def"), encoding="utf-8") as f:
+            text = f.read()
+        row = text[text.index("ES1869_SET(a2_trim, "):]
+        items = re.search(r'"(-500 ppm[^"]*)"', row).group(1).split("|")
+        self.assertEqual(len(items), 25)
+        for i, item in enumerate(items):
+            want = 0 if item == "0" else round(float(item.split()[0]) * 1000)
+            self.assertEqual(lib.es1869_trim_ppb(i), want, item)
 
 
 if __name__ == "__main__":

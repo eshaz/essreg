@@ -50,6 +50,7 @@ struct es1869_rs {
 	bool mmx; // the CPU has MMX
 	bool clock; // it follows the chip's clock (a2_resample 2)
 	bool dither;
+	bool lined; // w and pos are on the line: the last fill went through it
 	u32 frac; // how far past pos, 32 bits
 	s32 trim; // a2_trim_ppb in the step's 32 bits
 	s32 base; // what the stream's clock is off by, in the same
@@ -91,6 +92,7 @@ unsigned long es1869_rs_limit(unsigned long to, unsigned long hw,
 // the master clock in Hz, which 30 divides to the 793.8 kHz clock and 31 to
 // what the chip calls 768 kHz, 768193.5 Hz
 #define ES_CLOCK_HZ 23814000
+#define ES_TRIM_ZERO 12 // a2_trim's item for no trim
 #define ES_CLOCK_GROUP_NS 1073741824 // a second of interrupts, one sample
 
 // a line through samples of a time against a reference, over the last kmax
@@ -127,6 +129,7 @@ struct es1869_clock {
 u32 es1869_clock_tpf(u32 num, u32 den);
 s32 es1869_clock_base(u32 num);
 s32 es1869_clock_q32(s32 ppb);
+s32 es1869_trim_ppb(unsigned int item);
 s64 es1869_clock_ppb(s64 rate);
 void es1869_clock_init(struct es1869_clock *c);
 void es1869_clock_stretch(struct es1869_clock *c);

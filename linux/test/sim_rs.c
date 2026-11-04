@@ -12,6 +12,12 @@
 #include "../es1869/resample.h"
 #include "sim_rs.h"
 
+// a2_trim's item in ppb
+long sim_rs_trim(int item)
+{
+	return es1869_trim_ppb(item);
+}
+
 // a stream of 16-bit frames as the ring would hold it, with ppb the change
 // of rate and sign_768 how the 768 kHz clock's offset adds to it, or NULL
 // with nothing to change; a buffer of *made frames for the caller to free

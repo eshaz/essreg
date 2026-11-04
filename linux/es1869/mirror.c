@@ -174,6 +174,15 @@ static void mirror_resample(struct es1869 *chip, struct snd_pcm_runtime *rt,
 
 	rs->step = rs->trim +
 		(rs->clock ? rs->base + READ_ONCE(chip->clk_offset) : 0);
+	// after frames that were copied the line begins again at this frame:
+	// those frames took no step
+	if (!rs->lined) {
+		es1869_rs_start(rs, start);
+		rs->w = (start % rt->buffer_size + rt->buffer_size - m->rot) %
+			rt->buffer_size;
+		rs->since = start;
+		rs->lined = true;
+	}
 #ifdef ES1869_RS_MMX
 	s.mmx = rs->mmx && irq_fpu_usable();
 	if (s.mmx)
@@ -248,8 +257,10 @@ static void mirror_fill(struct es1869 *chip, struct snd_pcm_runtime *rt,
 	if (m->rs.on && !m->fill.standing &&
 	    (m->rs.frac || m->rs.trim || m->rs.clock))
 		mirror_resample(chip, rt, start, frames, appl);
-	else
+	else {
 		mirror_copy(chip, rt, start, frames);
+		m->rs.lined = false;
+	}
 	m->max_chunk = max_t(u32, m->max_chunk, frames_to_bytes(rt, frames));
 }
 
@@ -539,43 +550,76 @@ static void rs_free(void *tab)
 	kvfree(tab);
 }
 
-// the filter for a stream that asks for it and that it can serve: 16 bits,
-// and enough of a buffer to hold what the filter reads around a frame
-static void rs_prepare(struct es1869 *chip, struct snd_pcm_runtime *rt, u32 num)
+// the filter's table, made once, when the settings first ask for it
+static void rs_table(struct es1869 *chip)
 {
 	struct es1869_rs *rs = &chip->mirror.rs;
-	u32 mode = es1869_val(ES_S_a2_resample);
+	s16 *tab;
 
-	rs->on = false;
-	if (!mode || !chip->mirror.spread ||
-	    rt->format != SNDRV_PCM_FORMAT_S16_LE ||
-	    rt->buffer_size < MIRROR_RS_MIN)
+	if (rs->tab || !es1869_val(ES_S_a2_resample))
 		return;
-	if (!rs->tab) {
-		s16 *tab = kvmalloc_array(ES_RS_TABLE, sizeof(s16), GFP_KERNEL);
-
-		if (!tab || devm_add_action_or_reset(chip->card->dev, rs_free,
-						     tab)) {
-			dev_err(chip->dev, "no memory for the rate correction: off\n");
-			return;
-		}
-		es1869_rs_table(tab);
-		rs->tab = tab;
+	tab = kvmalloc_array(ES_RS_TABLE, sizeof(s16), GFP_KERNEL);
+	if (!tab || devm_add_action_or_reset(chip->card->dev, rs_free, tab)) {
+		dev_err(chip->dev, "no memory for the rate correction: off\n");
+		return;
 	}
-	rs->mmx = false;
-#ifdef CONFIG_X86
-	rs->mmx = boot_cpu_has(X86_FEATURE_MMX);
-#endif
-	rs->on = true;
-	rs->clock = mode == 2;
+	es1869_rs_table(tab);
+	rs->tab = tab;
+}
+
+// the settings as the stream takes them, under its lock, from a prepare, a
+// start or a change while it plays. Going through the filter begins at the
+// next frame to copy, on the line from the ring frame it falls on, and
+// coming out leaves that frame's fraction behind, less than a frame
+static void rs_apply(struct es1869 *chip, struct snd_pcm_runtime *rt)
+{
+	struct es1869_mirror *m = &chip->mirror;
+	struct es1869_rs *rs = &m->rs;
+	u32 mode = es1869_val(ES_S_a2_resample);
+	bool want = mode && rs->tab && m->spread &&
+		    rt->format == SNDRV_PCM_FORMAT_S16_LE &&
+		    rt->buffer_size >= MIRROR_RS_MIN;
+	u32 clk = want && mode == 2 ? m->clk_period : 0;
+
 	rs->dither = es1869_val(ES_S_a2_resample_dither);
-	rs->trim = es1869_clock_q32(es1869_val(ES_S_a2_trim_ppb));
-	rs->base = es1869_clock_base(num);
+	rs->trim = es1869_clock_q32(es1869_trim_ppb(es1869_val(ES_S_a2_trim)) +
+				    es1869_val(ES_S_a2_trim_ppb));
+	rs->clock = mode == 2;
+	if (clk != chip->clk_a2) {
+		chip->clk_a2 = clk;
+		chip->clk_src = 0;
+	}
+	if (want == rs->on)
+		return;
+	rs->on = want;
+	if (!want) {
+		hrtimer_try_to_cancel(&m->period);
+		rs->frac = 0;
+		return;
+	}
+	rs->lined = false;
 	rs->step = rs->trim;
-	es1869_rs_start(rs, 0);
-	rs->since = 0;
-	rs->seed = 0x2545F491;
-	rs->last[0] = rs->last[1] = 0;
+	if (m->running) {
+		queue_work(system_highpri_wq, &m->copy_work);
+		hrtimer_start(&m->period, ns_to_ktime(mirror_period_ns(rt)),
+			      HRTIMER_MODE_REL_HARD);
+	}
+}
+
+// a setting of the rate correction written: a playing stream takes it at once,
+// and one that hasn't started at its start
+void es1869_a2_rate_changed(struct es1869 *chip)
+{
+	struct snd_pcm_substream *ss = chip->a2_sub;
+	unsigned long flags;
+
+	rs_table(chip);
+	if (!ss || chip->a2_owner != ES_OWN_A2P)
+		return;
+	snd_pcm_stream_lock_irqsave(ss, flags);
+	if (chip->mirror.running)
+		rs_apply(chip, ss->runtime);
+	snd_pcm_stream_unlock_irqrestore(ss, flags);
 }
 
 static int a2_prepare(struct snd_pcm_substream *ss)
@@ -603,7 +647,8 @@ static int a2_prepare(struct snd_pcm_substream *ss)
 	int err = 0;
 
 	es1869_stream_rate(rt, slaved, &num, &den);
-	chip->clk_a2 = es1869_clock_period(chip, num, den, rt->period_size);
+	m->clk_period = es1869_clock_period(num, den, rt->period_size);
+	chip->clk_a2 = 0;
 	if (es1869_val(ES_S_irq_trace))
 		dev_info(chip->dev, "Audio 2: DMA %d at %#x, %u bytes, period %u\n",
 			 s.ch, s.dma_phys, s.dma_bytes, s.period);
@@ -618,7 +663,13 @@ static int a2_prepare(struct snd_pcm_substream *ss)
 		es1869_fill_init(&m->fill, rt, MIRROR_GUARD,
 				 bytes_to_frames(rt, ES_FIFO_A2));
 		mirror_silence(chip, rt);
-		rs_prepare(chip, rt, num);
+		m->rs.on = false;
+		m->rs.lined = false;
+		m->rs.frac = 0;
+		m->rs.seed = 0x2545F491;
+		m->rs.last[0] = m->rs.last[1] = 0;
+		m->rs.base = es1869_clock_base(num);
+		rs_table(chip);
 	}
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	if (slaved) {
@@ -662,6 +713,7 @@ static void a2_go(struct es1869 *chip, struct snd_pcm_runtime *rt)
 	// the start copies the whole lead, since the first tick comes 2 ms
 	// on and the DMA takes 4 KB in 8 ms at the highest rates
 	if (m->spread) {
+		rs_apply(chip, rt);
 		m->running = true;
 		mirror_fill(chip, rt, m->rs.on ? MIRROR_RS_START :
 				max_t(u32, MIRROR_BUDGET,
@@ -700,7 +752,7 @@ static void a2_rotate(struct es1869 *chip, struct snd_pcm_runtime *rt)
 		back = min3(bytes_to_frames(rt, ES_FIFO_A2), b - queued, b / 4);
 	m->rot = (m->pos + b - back) % b;
 	m->fill.filled = mirror_hw(rt, m->rot);
-	es1869_rs_start(&m->rs, m->fill.filled);
+	m->rs.lined = false;
 	if (m->fill.standing)
 		mirror_copy(chip, rt, m->pos, m->fill.guard);
 }
@@ -850,6 +902,9 @@ int es1869_mirror_init(struct es1869 *chip)
 	size_t size;
 
 	es1869_clock_setup(chip);
+#ifdef CONFIG_X86
+	m->rs.mmx = boot_cpu_has(X86_FEATURE_MMX);
+#endif
 	hrtimer_setup(&m->tick, mirror_tick, CLOCK_MONOTONIC,
 		      HRTIMER_MODE_REL_HARD);
 	hrtimer_setup(&m->period, mirror_period, CLOCK_MONOTONIC,

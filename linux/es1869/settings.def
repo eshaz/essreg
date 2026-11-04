@@ -251,14 +251,18 @@ ES1869_SET(a2_pause, A2_PAUSE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
 	   T_NONE, F_PARAM | F_NEXT, 0, "", "",
 	   "pause on an 8-bit Audio 2 channel through 78h, which may resume off step")
 ES1869_SET(a2_resample, A2_RESAMPLE, S_ENUM, B_NONE, 0, 0, 0, 0, 2, 0,
-	   T_NONE, F_CTL | F_PARAM | F_NEXT, 0, "Audio 2 Rate Correction",
+	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Rate Correction",
 	   "Off|Trim|Clock",
-	   "Audio 2's 16-bit streams on DMA 5 through a filter that corrects their rate: 1 by a2_trim_ppb, 2 also to the system's clock, as the chip's measures against it; 0 leaves the samples as they are")
+	   "Audio 2's 16-bit streams on DMA 5 through a filter that corrects their rate, also while one plays: Trim by a2_trim, Clock also to the system's clock, as the chip's measures against it; Off leaves the samples as they are")
+ES1869_SET(a2_trim, A2_TRIM, S_ENUM, B_NONE, 0, 0, 0, 0, 24, 12,
+	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Rate Trim",
+	   "-500 ppm|-200 ppm|-100 ppm|-50 ppm|-20 ppm|-10 ppm|-5 ppm|-2 ppm|-1 ppm|-0.5 ppm|-0.2 ppm|-0.1 ppm|0|+0.1 ppm|+0.2 ppm|+0.5 ppm|+1 ppm|+2 ppm|+5 ppm|+10 ppm|+20 ppm|+50 ppm|+100 ppm|+200 ppm|+500 ppm",
+	   "what the rate correction adds to the stream's rate")
 ES1869_SET(a2_trim_ppb, A2_TRIM_PPB, S_INT, B_NONE, 0, 0, 0, -2000000, 2000000, 0,
-	   T_NONE, F_PARAM | F_NEXT, 0, "", "",
-	   "what the rate correction adds to the stream's rate (ppb)")
+	   T_NONE, F_PARAM, 0, "", "",
+	   "more of the same in ppb, added to a2_trim")
 ES1869_SET(a2_resample_dither, A2_RESAMPLE_DITHER, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
-	   T_NONE, F_PARAM | F_NEXT, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Rate Dither Playback Switch", "",
 	   "the rate correction's rounding to 16 bits with triangular noise of 1 LSB: 3 dB more noise for spurs at about -100 dBFS")
 
 /* rates (the highest ones come from es1869test's rate.max) */

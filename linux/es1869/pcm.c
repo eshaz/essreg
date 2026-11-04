@@ -486,8 +486,9 @@ static int a1_prepare(struct snd_pcm_substream *substream)
 	} else {
 		es1869_stream_rate(runtime, true, &s.rate_num, &s.rate_den);
 	}
-	chip->clk_a1 = chip->a1_owner == ES_OWN_FMC ? 0 :
-		es1869_clock_period(chip, s.rate_num, s.rate_den,
+	chip->clk_a1 = chip->a1_owner == ES_OWN_FMC ||
+		       es1869_val(ES_S_a2_resample) != 2 ? 0 :
+		es1869_clock_period(s.rate_num, s.rate_den,
 				    runtime->period_size);
 	// a recording turns the codec to the ADC now, unless it is there
 	s.adc = chip->a1_owner == ES_OWN_A1C && es1869_val(ES_S_a1c_settle_ms);

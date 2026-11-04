@@ -611,6 +611,23 @@ s32 es1869_clock_q32(s32 ppb)
 	return div_s64((s64)ppb << 32, 1000000000);
 }
 
+// a2_trim's items in ppb: 0 in the middle, and 0.1, 0.2, 0.5 ppm and so on
+// to 500 either side of it
+s32 es1869_trim_ppb(unsigned int item)
+{
+	static const u8 digit[] = { 1, 2, 5 };
+	int n = (int)item - ES_TRIM_ZERO, a = n < 0 ? -n : n;
+	s32 v = 100;
+	int i;
+
+	if (!n)
+		return 0;
+	for (i = 0; i < (a - 1) / 3; i++)
+		v *= 10;
+	v *= digit[(a - 1) % 3];
+	return n < 0 ? -v : v;
+}
+
 // the fit's slope in ppb
 s64 es1869_clock_ppb(s64 rate)
 {

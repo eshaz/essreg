@@ -718,20 +718,31 @@ config SND_ES1869_DEFAULT_A2_RESAMPLE
 	default 0
 	help
 	  Audio 2's 16-bit streams on DMA 5 through a filter that
-	  corrects their rate: 1 by a2_trim_ppb, 2 also to the system's
-	  clock, as the chip's measures against it; 0 leaves the samples
-	  as they are. The ALSA control "Audio 2 Rate Correction". The
-	  module parameter a2_resample sets it at load and at runtime,
-	  through /sys/module/snd_es1869/parameters/a2_resample.
+	  corrects their rate, also while one plays: Trim by a2_trim,
+	  Clock also to the system's clock, as the chip's measures
+	  against it; Off leaves the samples as they are. The ALSA
+	  control "Audio 2 Rate Correction". The module parameter
+	  a2_resample sets it at load and at runtime, through
+	  /sys/module/snd_es1869/parameters/a2_resample.
+
+config SND_ES1869_DEFAULT_A2_TRIM
+	int "a2_trim"
+	range 0 24
+	default 12
+	help
+	  What the rate correction adds to the stream's rate. The ALSA
+	  control "Audio 2 Rate Trim". The module parameter a2_trim sets
+	  it at load and at runtime, through
+	  /sys/module/snd_es1869/parameters/a2_trim.
 
 config SND_ES1869_DEFAULT_A2_TRIM_PPB
 	int "a2_trim_ppb"
 	range -2000000 2000000
 	default 0
 	help
-	  What the rate correction adds to the stream's rate (ppb). The
-	  module parameter a2_trim_ppb sets it at load and at runtime,
-	  through /sys/module/snd_es1869/parameters/a2_trim_ppb.
+	  More of the same in ppb, added to a2_trim. The module
+	  parameter a2_trim_ppb sets it at load and at runtime, through
+	  /sys/module/snd_es1869/parameters/a2_trim_ppb.
 
 config SND_ES1869_DEFAULT_A2_RESAMPLE_DITHER
 	int "a2_resample_dither"
@@ -740,7 +751,8 @@ config SND_ES1869_DEFAULT_A2_RESAMPLE_DITHER
 	help
 	  The rate correction's rounding to 16 bits with triangular
 	  noise of 1 LSB: 3 dB more noise for spurs at about -100 dBFS.
-	  The module parameter a2_resample_dither sets it at load and at
+	  The ALSA control "Audio 2 Rate Dither Playback Switch". The
+	  module parameter a2_resample_dither sets it at load and at
 	  runtime, through
 	  /sys/module/snd_es1869/parameters/a2_resample_dither.
 

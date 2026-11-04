@@ -8,6 +8,7 @@
 #ifndef ET_SIM_RS_H
 #define ET_SIM_RS_H
 
+long sim_rs_trim(int item);
 short *sim_rs_stream(const short *src, unsigned long frames,
 		     unsigned int channels, long ppb, int sign_768,
 		     unsigned long *made);

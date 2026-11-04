@@ -202,9 +202,15 @@ The chip has one clock input and no trim, so that a stream's rate can only
 be changed in its samples. `a2_resample`, the control Audio 2 Rate
 Correction, puts Audio 2's stream through a filter on its way to the ring:
 * `0`, Off, the default, leaves the samples as the application wrote them.
-* `1`, Trim, moves the rate by `a2_trim_ppb`. At 0 the samples stay exact.
-* `2`, Clock, plays the stream true to the system's clock, plus
-  `a2_trim_ppb`.
+* `1`, Trim, moves the rate by `a2_trim`, the control Audio 2 Rate Trim, a
+  list from -500 to +500 ppm that alsamixer steps through, plus
+  `a2_trim_ppb` for a value in between. At 0 the samples stay exact.
+* `2`, Clock, plays the stream true to the system's clock, plus the same
+  trim.
+
+The controls show up in alsamixer's Playback view (F3) with Audio 2 Rate
+Dither, and all of them take effect while a stream plays. Turning the
+correction off under a stream leaves out less than a frame.
 
 It serves S16_LE streams of Audio 2 on a 16-bit DMA channel, which is the
 Armada's, with a buffer of at least 256 frames. Any other stream, Audio 1,
@@ -251,7 +257,9 @@ The Clock mode follows a chain of two measures, which
 
 The two are measured apart and nothing feeds back from the filter into them,
 so the correction can't hunt. A new stream starts from what the last one
-measured.
+measured. With chronyd running, a 48 kHz stream in the Clock mode read +29.5
+ppm against the raw clock, over 12 s, while chrony had that clock 29.48 ppm
+slow of real time.
 
 A correction of the rate is not one of jitter. Jitter is in the DAC's clock
 at the moment of each conversion, after all of this, and no change to the
@@ -263,11 +271,16 @@ clock.
 
 The rate register itself can be changed under a running stream. A write to
 70h takes effect at the next sample, in steps of 13 or 18 of the master's
-ticks, 0.55 or 0.76 us, and a burst shorter than a sample works on average.
-It isn't used: at best its steps leave about 160 ns rms, some 30 times the
-chip's own figure, against the filter's none. Pulses from user space
-measured 4 to 5 us. The filter clock (72h) moves a low-pass corner and has
-no part in the timing.
+ticks, 0.55 or 0.76 us, and a burst shorter than a sample works on average:
+100 ms a second on the other clock read +2466.9 ppm of a predicted +2466.8.
+So the rate could be held by pulse width with the samples left exact, but
+the steps stay whole periods, however the pulses are timed. Tuned pulses in
+the kernel, with interrupts off, of a sample's length, 40 a second, measured
+0.9 to 1.8 us rms of timing noise and THD+N of -48, -21 and -11 dB at 1, 10
+and 16 kHz, where plain playback and the filter both read 13 to 21 ns and
+-61, -52 and -46 dB in the same session. Perfect pulses would still leave
+about 220 ns, so the driver doesn't use them. The filter clock (72h) moves a
+low-pass corner and has no part in the timing.
 
 ## CPU and latency
 
@@ -614,14 +627,20 @@ saved state wins over a parameter. The defaults are the Kconfig options
   78h, which may resume off step. It takes effect at the next prepare.
 * `a2_resample` ("Audio 2 Rate Correction"): 0 Off, 1 Trim, 2 Clock, default
   Off. Audio 2's 16-bit streams on DMA 5 through a filter that corrects
-  their rate: 1 by a2_trim_ppb, 2 also to the system's clock, as the chip's
-  measures against it; 0 leaves the samples as they are. It takes effect at
-  the next prepare.
-* `a2_trim_ppb`: -2000000 to 2000000, default 0. What the rate correction
-  adds to the stream's rate (ppb). It takes effect at the next prepare.
-* `a2_resample_dither`: 0 to 1, default 0. The rate correction's rounding to
-  16 bits with triangular noise of 1 LSB: 3 dB more noise for spurs at about
-  -100 dBFS. It takes effect at the next prepare.
+  their rate, also while one plays: Trim by a2_trim, Clock also to the
+  system's clock, as the chip's measures against it; Off leaves the samples
+  as they are.
+* `a2_trim` ("Audio 2 Rate Trim"): 0 -500 ppm, 1 -200 ppm, 2 -100 ppm, 3 -50
+  ppm, 4 -20 ppm, 5 -10 ppm, 6 -5 ppm, 7 -2 ppm, 8 -1 ppm, 9 -0.5 ppm, 10
+  -0.2 ppm, 11 -0.1 ppm, 12 0, 13 +0.1 ppm, 14 +0.2 ppm, 15 +0.5 ppm, 16 +1
+  ppm, 17 +2 ppm, 18 +5 ppm, 19 +10 ppm, 20 +20 ppm, 21 +50 ppm, 22 +100
+  ppm, 23 +200 ppm, 24 +500 ppm, default 0. What the rate correction adds to
+  the stream's rate.
+* `a2_trim_ppb`: -2000000 to 2000000, default 0. More of the same in ppb,
+  added to a2_trim.
+* `a2_resample_dither` ("Audio 2 Rate Dither Playback Switch"): 0 to 1,
+  default 0. The rate correction's rounding to 16 bits with triangular noise
+  of 1 LSB: 3 dB more noise for spurs at about -100 dBFS.
 * `a1p_max_rate`: 3101 to 793800, default 48000. Audio 1 playback's highest
   rate (Hz). It takes effect at the next prepare.
 * `a1c_max_rate`: 3101 to 793800, default 52920. Audio 1 recording's highest
