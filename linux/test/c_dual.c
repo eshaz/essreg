@@ -140,10 +140,11 @@ enum et_result c_dual_align(struct et_ctx *c, const struct et_case *k)
 		d -= p3;
 	if (d < -p3 / 2)
 		d += p3;
-	et_measure(c, "Audio 2 against Audio 1", d * f4.rate, "frames", -6, 6);
+	et_measure(c, "Audio 2 against Audio 1", d * f4.rate, "frames", -20, 20);
 	et_measure(c, "Audio 2 against Audio 1, in time", d * 1e6, "us", 1, 0);
-	// on the Armada the two began 1 to 4.5 frames apart, not the same at
-	// every rate or every start, so no fixed skew puts them in step
+	// on the Armada the two began 1 to 4.5 frames apart at 44.1 kHz and
+	// from -15 to +15 at 22050 Hz, on any build, not the same at every rate
+	// or every start, so no fixed skew puts them in step
 	if (fabs(d * f4.rate) > 0.5 && !c->fails) {
 		snprintf(c->why, sizeof(c->why),
 			 "Audio 2 began %+.1f frames from Audio 1, not in step",

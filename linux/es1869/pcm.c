@@ -403,6 +403,7 @@ static int a1_close(struct snd_pcm_substream *substream)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(substream);
 
+	chip->clk_a1 = 0;
 	a1_release(chip);
 	es1869_power_idle(chip);
 	return 0;
@@ -485,6 +486,9 @@ static int a1_prepare(struct snd_pcm_substream *substream)
 	} else {
 		es1869_stream_rate(runtime, true, &s.rate_num, &s.rate_den);
 	}
+	chip->clk_a1 = chip->a1_owner == ES_OWN_FMC ? 0 :
+		es1869_clock_period(chip, s.rate_num, s.rate_den,
+				    runtime->period_size);
 	// a recording turns the codec to the ADC now, unless it is there
 	s.adc = chip->a1_owner == ES_OWN_A1C && es1869_val(ES_S_a1c_settle_ms);
 	// a read waits out the settle on top of the core's own timeout, the
@@ -574,6 +578,7 @@ static int a1_trigger(struct snd_pcm_substream *substream, int cmd)
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	if (es1869_val(ES_S_irq_trace))
 		dev_info(chip->dev, "Audio 1 trigger %d\n", cmd);
+	chip->clk_src = 0;
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 		if (capture && a1c_settle_left(chip)) {

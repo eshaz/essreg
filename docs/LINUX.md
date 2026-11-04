@@ -118,10 +118,10 @@ programs that set the master still work.
   16-bit stereo at 49716 Hz (mixer 7Fh bit 4).
 * PCM device 2, playback: both DACs as one four-channel device, channels 1
   and 2 on Audio 1 and 3 and 4 on Audio 2, on Audio 1's clock and from one
-  start; on the Armada the two DACs began 1 to 4.5 frames apart, not the
-  same at every rate or every start (es1869test's dual.align). It opens with
-  `dual_playback=1`, and needs both engines free and Audio 2 on a 16-bit DMA
-  channel.
+  start; on the Armada the two DACs began 1 to 4.5 frames apart at 44.1 kHz
+  and from -15 to +15 at 22050 Hz, not the same at every rate or every start
+  (es1869test's dual.align). It opens with `dual_playback=1`, and needs both
+  engines free and Audio 2 on a 16-bit DMA channel.
 * hwdep 0 and the sequencer's "OPL3 FM" synth: the FM in its OPL3 mode.
 * hwdep 1, "ES1869 ESFM": the FM in its native ESFM mode, for programs that
   write its registers themselves (ioctls in `uapi/es1869.h`).
@@ -153,7 +153,7 @@ and `a1p_max_rate`), and `rate_limit=0` lifts them:
 
 From 153.6 kHz on, DMA 5 delivers no more than about 572,000 transfers a
 second, and the chip then plays slower instead of skipping: at 198.45 kHz a
-441 Hz tone came out at 318 Hz. The rates of the 768 kHz clock come out 250
+441 Hz tone came out at 318 Hz. The rates of the 768 kHz clock come out 252
 ppm above those of the 793.8 kHz clock.
 
 The mixer's dB scales are the data sheet's. Measured on the Armada through
@@ -166,20 +166,108 @@ microphone input that it ends in hears a 6 dB step as 7 to 10 dB. The master
 is measured through AOUT, record source 3, within 0.33 dB of the table, and
 Audio 1's level (14h) follows the table unmeasured.
 
-The chip's clocks, measured against each other: the 768 kHz clock runs 252
-ppm fast of the 793.8 kHz one, and the FM's 0.21 % fast of 49716 Hz on it.
-PCM device 1 says 49716 Hz, the music DAC's nominal rate, and so records the
-FM about 0.2 % faster than it says. The 793.8 kHz clock ran 178 to 247 ppm
-slow of the laptop's own clock, in different runs. That clock isn't
-disciplined: cron sets it from the network every six hours and nothing
-corrects its rate, so the figure is only as good as that clock.
+The chip's clocks are one master clock divided. The 768 kHz clock and the
+793.8 kHz one stand exactly 30 to 31 apart: es1869test reads 251.955 and
+251.952 ppm, and 31 / 30 is 251.953. The FM's stays 2081.82 ppm fast of
+49716 Hz on them, to 0.003 ppm over 90 minutes. PCM device 1 says 49716 Hz,
+the music DAC's nominal rate, and so records the FM about 0.2 % faster than
+it says.
 
-Audio 1 records up to 52.92 kHz (793.8 kHz / 15). From 54.86 kHz on, the DMA
-still runs at the rate, but the ADC delivers nothing: every sample reads
-8000h, or 0 at the highest rates. A recording that started at once after the
-codec turned to the ADC would begin near full scale, with the input's offset
-decaying through the first 100 ms; the driver waits `a1c_settle_ms` for it
-(above).
+The 793.8 kHz clock is the true one, and what the chip calls 768 kHz is
+768193.5 Hz. So 44.1 kHz plays at 44100.04 Hz by the Armada's raw system
+clock, 0.86 to 0.88 ppm fast in three runs, and 48 kHz at 48012.1 Hz, 252.9
+ppm sharp on any crystal. A line through the earliest interrupt of each
+second leaves 1.4 to 4 us rms, and its slope moved by about 0.02 ppm while
+the laptop compiled and warmed up. An earlier reading here, of 178 to 247
+ppm slow, was the test's: it timed a stream from its start through the end
+of its drain.
+
+Those readings point to one crystal under the chip and the system timer. A
+master of 800 / 481 of the board's 14.318 MHz gives +0.873 ppm against the
+kernel's count of the PM timer, which is what the three runs read, and two
+crystals would hardly agree that well while the laptop's clock is off by 30
+ppm. The FM's clock fits no such small ratio of either. On one crystal the
+difference between the chip and the system can't drift, so that a warming
+crystal shows only against NTP.
+
+The system clock isn't disciplined: cron sets it from the network every six
+hours and nothing corrects its rate. Two offsets from NTP 1404 s apart put
+the Armada's crystal about 30 ppm slow of real time, as chrony's drift file
+has it, so that 44.1 kHz plays about 29 ppm flat of real time and 48 kHz
+about 223 ppm sharp.
+
+## Rate correction
+
+The chip has one clock input and no trim, so that a stream's rate can only
+be changed in its samples. `a2_resample`, the control Audio 2 Rate
+Correction, puts Audio 2's stream through a filter on its way to the ring:
+* `0`, Off, the default, leaves the samples as the application wrote them.
+* `1`, Trim, moves the rate by `a2_trim_ppb`. At 0 the samples stay exact.
+* `2`, Clock, plays the stream true to the system's clock, plus
+  `a2_trim_ppb`.
+
+It serves S16_LE streams of Audio 2 on a 16-bit DMA channel, which is the
+Armada's, with a buffer of at least 256 frames. Any other stream, Audio 1,
+the FM and the dual device play as they always do, and so does a pointer
+that stands, as under dmix, whose data changes in place. The samples are
+then no longer the application's, a choice between the true rate and the
+exact samples, so it stays off by default.
+
+The filter is a Kaiser-windowed sinc of 36 taps, blended from 128 places at
+each frame, in MMX where the CPU has it. On a 16-bit tone at -1 dBFS and an
+offset of 252 ppm its noise and distortion are -86 to -90 dB up to 18 kHz,
+and its worst spur is -92 dB. It gives way above that: -56 dB at 19 kHz.
+Through the chip's digital path, es1869test reads -88.5 dB from the kernel's
+filter. Through the analog path, heard by Audio 1, the output is the same
+with and without it, within 0.1 dB: -61.5, -58.7 and -55.8 dB at 1, 10 and
+16 kHz, the chip's own floor. It takes about 2.8 % of the Armada's CPU at
+44.1 kHz stereo.
+
+A stream's period no longer matches the ring's, so a timer wakes the client
+on the stream's own period boundaries, and the chip's interrupts stay as the
+net under it. The ring holds as many frames as the buffer, and a step down
+makes more ring frames than stream frames, so a fill stops short of a whole
+lap.
+
+`a2_resample_dither` rounds to 16 bits with triangular noise. In simulation
+it adds 3 dB of noise everywhere, and lowers spurs by up to 13 dB only for a
+quiet tone at about 1 ppm, where they lie near -100 dBFS, some 40 dB under
+the chip's floor, so it stays off. Dithering the filter's place instead
+trades 20 dB of spurs for 5 dB of noise with a nearest-row filter, and
+blending the rows beats it on both, so the driver has none.
+
+The Clock mode follows a chain of two measures, which
+`/proc/asound/card0/es1869` shows:
+* The chip against the raw system clock. Every stream's interrupts are a
+  known count of the chip's master clock, and a line through the earliest of
+  each second gives its rate, whichever stream runs: Audio 2 while it plays,
+  Audio 1, playing or recording, otherwise. It leaves 1.4 to 4 us rms, so
+  that a few minutes give it to a few ppb.
+* The raw clock against the clock NTP steers, over about a quarter of an
+  hour, so that the daemon's corrections of its own offset don't reach the
+  pitch. This needs `chronyd` running as a service; `chronyd -q` from cron
+  leaves the kernel's frequency at 0, and the stream then locks to the
+  laptop's own crystal.
+
+The two are measured apart and nothing feeds back from the filter into them,
+so the correction can't hunt. A new stream starts from what the last one
+measured.
+
+A correction of the rate is not one of jitter. Jitter is in the DAC's clock
+at the moment of each conversion, after all of this, and no change to the
+samples reaches it. The filter's own place between two frames is exact to 22
+bits, so it adds none. Around a tone heard by Audio 1, the Armada shows 5 ns
+rms of timing noise at 10 kHz and 14 ns at 16 kHz, within 2 kHz of it, which
+is an upper bound: it holds the path's noise, and the two engines share a
+clock.
+
+The rate register itself can be changed under a running stream. A write to
+70h takes effect at the next sample, in steps of 13 or 18 of the master's
+ticks, 0.55 or 0.76 us, and a burst shorter than a sample works on average.
+It isn't used: at best its steps leave about 160 ns rms, some 30 times the
+chip's own figure, against the filter's none. Pulses from user space
+measured 4 to 5 us. The filter clock (72h) moves a low-pass corner and has
+no part in the timing.
 
 ## CPU and latency
 
@@ -524,6 +612,16 @@ saved state wins over a parameter. The defaults are the Kconfig options
   is longer.
 * `a2_pause`: 0 to 1, default 0. Pause on an 8-bit Audio 2 channel through
   78h, which may resume off step. It takes effect at the next prepare.
+* `a2_resample` ("Audio 2 Rate Correction"): 0 Off, 1 Trim, 2 Clock, default
+  Off. Audio 2's 16-bit streams on DMA 5 through a filter that corrects
+  their rate: 1 by a2_trim_ppb, 2 also to the system's clock, as the chip's
+  measures against it; 0 leaves the samples as they are. It takes effect at
+  the next prepare.
+* `a2_trim_ppb`: -2000000 to 2000000, default 0. What the rate correction
+  adds to the stream's rate (ppb). It takes effect at the next prepare.
+* `a2_resample_dither`: 0 to 1, default 0. The rate correction's rounding to
+  16 bits with triangular noise of 1 LSB: 3 dB more noise for spurs at about
+  -100 dBFS. It takes effect at the next prepare.
 * `a1p_max_rate`: 3101 to 793800, default 48000. Audio 1 playback's highest
   rate (Hz). It takes effect at the next prepare.
 * `a1c_max_rate`: 3101 to 793800, default 52920. Audio 1 recording's highest

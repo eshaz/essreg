@@ -124,8 +124,9 @@ The cases reach the chip four ways:
   volumes. A microphone input with its own gain control, as on the Armada's
   Play! 3, doesn't, and then the cases that measure levels through the cable
   skip.
-* `clock`: the chip's clocks against each other, and the 793.8 kHz one
-  against the system's.
+* `clock`: the chip's clocks against each other, and in `clock.system` the
+  driver's line through 30 s of a stream's interrupts, the master clock
+  against the raw system clock and the clock NTP steers against that.
 * `dac`: Audio 2's image at 22.05 kHz with each of its DAC stages, KNOWN
   with the stages off; and the corner of its switched-capacitor filter at
   11025, 22050 and 32000 Hz (`dac.corner`), whose clock the driver sets from
@@ -148,6 +149,16 @@ The cases reach the chip four ways:
   buffer for a step back lost a buffer there, with no xrun. `dig.runout`
   stops writing, with no stop threshold and the core's silence behind the
   DMA: only idle frames after the pattern.
+* `dig.trim`: a tone of 997 Hz through the rate correction with
+  `a2_trim_ppb` at 1000 ppm, read back as the DMA took it, one frame for
+  one: the pitch has moved by the step within 0.1 ppm, with THD+N under -75
+  dB and no glitches. `dig.trim.mono` is the same in mono, and
+  `dig.trim.two` with two periods in the buffer, polled as JACK does it,
+  which the timer on the period boundaries has to wake. `dig.trim.exact`,
+  with nothing to correct, gets every frame back as it went in. `dig.clock`
+  plays 48 kHz in the Clock mode: the samples go down by the 251.95 ppm of
+  the 768 kHz clock and by what the driver measures of the master, within 3
+  ppm.
 * `fm`: PCM 1's idle level, which output each FM side bit reaches with
   `fm_sides` on and off, and a note's pitch.
 * `a1rec`: Audio 1's recordings: formats, rates, sides, pitch, and the
@@ -255,10 +266,11 @@ Without the driver's settle (`a1c_settle_ms=0`), a recording starts with the
 ADC's input offset decaying, as with ESS's drivers; `a1rec.settle0` measures
 it and reports it as KNOWN.
 
-The dual device's two DACs began 1 to 4.5 frames apart on the Armada, not
-the same at every rate or every start, so no fixed skew puts them in step;
-`dual.align` reports that as KNOWN within 6 frames, and the driver keeps
-`dual_playback` off by default.
+The dual device's two DACs began 1 to 4.5 frames apart on the Armada at 44.1
+kHz and from -15 to +15 at 22050 Hz, on the installed driver and a test
+build alike, not the same at every rate or every start, so no fixed skew
+puts them in step; `dual.align` reports that as KNOWN within 20 frames, and
+the driver keeps `dual_playback` off by default.
 
 ## The simulated chip
 

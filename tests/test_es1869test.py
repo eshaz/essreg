@@ -49,6 +49,8 @@ FAULTS = {
     0x100000: "a1play.pausedrain",  # a drain from a pause loses a buffer
     0x200000: "a1rec.dc",          # the ADC is off by more than half a step
     0x400000: "beep.out",          # the PC speaker's level is ignored
+    0x800000: "dig.trim",          # the rate correction changes nothing
+    0x1000000: "dig.clock",        # 768 kHz's offset the wrong way
 }
 
 # the cases that run only when named, or with someone at the machine
@@ -64,7 +66,8 @@ def suite():
         # with essreg's 3-D measurement and its simulated effect
         sources = sorted(glob.glob(os.path.join(SUITE, "*.c"))) + [
             os.path.join(ROOT, "src", "s3dmeas.c"),
-            os.path.join(ROOT, "src", "s3dsim.c")]
+            os.path.join(ROOT, "src", "s3dsim.c"),
+            os.path.join(ROOT, "linux", "es1869", "resample.c")]
         subprocess.run(["gcc", "-std=gnu99", "-Wall", "-Wextra", "-Werror",
                         "-O2", "-fno-math-errno", "-DESS_HOST",
                         "-I" + os.path.join(ROOT, "src"), "-o", exe] +

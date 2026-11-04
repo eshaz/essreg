@@ -174,6 +174,7 @@ int et_ctl_set(struct et_ctx *c, const char *name, int index, long l, long r);
 int et_ctl_set_enum(struct et_ctx *c, const char *name, const char *item);
 int et_param_get(struct et_ctx *c, const char *id, long *v);
 int et_param_set(struct et_ctx *c, const char *id, long v);
+int et_master_ppm(struct et_ctx *c, double *master, double *steered);
 
 // the case table (cases.c)
 extern const struct et_case et_cases[];

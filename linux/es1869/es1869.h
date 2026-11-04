@@ -33,6 +33,7 @@
 struct pci_dev;
 
 #include "hw.h"
+#include "resample.h"
 #include "settings.h"
 
 #define ES1869_A1_BUF (64 * 1024) // Audio 1's buffer, one 64 KiB page
@@ -42,6 +43,7 @@ struct pci_dev;
 struct file;
 struct pnp_dev;
 struct snd_hwdep;
+struct snd_info_buffer;
 
 enum es1869_owner {
 	ES_OWN_NONE,
@@ -78,6 +80,7 @@ enum es1869_a1_state {
 struct es1869_mirror {
 	struct snd_dma_buffer ring; // the words the 8237 moves
 	struct hrtimer tick;
+	struct hrtimer period; // period boundaries while the filter runs
 	snd_pcm_uframes_t rot; // the application's frame at the ring's start
 	snd_pcm_uframes_t pos; // the paused position
 	unsigned long last; // the last offset the DMA was read at
@@ -93,6 +96,7 @@ struct es1869_mirror {
 	u64 ack_cycles;
 	bool draining; // a drain's silence goes on past the last frame
 	snd_pcm_uframes_t silent_to; // the absolute frame it has reached
+	struct es1869_rs rs;
 };
 
 struct es1869 {
@@ -134,6 +138,13 @@ struct es1869 {
 	bool a1_dac; // D1h sent: Audio 1 into the mixer
 	bool a1_draining; // a drain's silence goes on past the last frame
 	snd_pcm_uframes_t a1_silent_to; // the absolute frame it has reached
+
+	// the chip's clock, from the interrupts of a running stream (clock.c)
+	struct es1869_clock clk;
+	u32 clk_a1, clk_a2; // the master's ticks to a period; 0 doesn't count
+	u8 clk_src; // the source that feeds it, 0 to begin a new stretch
+	s32 clk_offset; // what the step takes for it, 32 bits
+	bool clk_used; // since load: a stream asked for it
 
 	// Audio 2
 	enum es1869_owner a2_owner;
@@ -226,6 +237,12 @@ void es1869_stream_rate(struct snd_pcm_runtime *runtime, bool a1, u32 *num,
 void es1869_a1_irq(struct es1869 *chip, struct snd_pcm_substream **sub);
 bool es1869_a1_busy(struct es1869 *chip);
 int es1869_dsp_recover(struct es1869 *chip);
+
+// clock.c
+void es1869_clock_setup(struct es1869 *chip);
+u32 es1869_clock_period(struct es1869 *chip, u32 num, u32 den, u32 frames);
+void es1869_clock_tick(struct es1869 *chip, u8 source, u64 raw);
+void es1869_clock_proc(struct es1869 *chip, struct snd_info_buffer *buf);
 
 // mirror.c
 extern const struct snd_pcm_ops es1869_a2_ops;

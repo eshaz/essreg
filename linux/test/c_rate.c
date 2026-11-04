@@ -283,6 +283,26 @@ static const char *self_exe(void)
 // 768 kHz family against the 793.8 kHz one, the FM's against the 793.8 kHz
 // one, and the 793.8 kHz one against the system's clock, which has no NTP
 // on the Armada, so only within 500 ppm
+// what the driver's clock has measured: the master against the raw system
+// clock and the clock NTP steers against that, in ppm
+int et_master_ppm(struct et_ctx *c, double *master, double *steered)
+{
+	char proc[4096];
+	const char *p, *q;
+	long long m, st;
+
+	if (c->hal->proc(c->hal->ctx, proc, sizeof(proc)) < 0)
+		return -1;
+	p = strstr(proc, "clock: the master ");
+	q = strstr(proc, "clock: the steered clock ");
+	if (!p || !q || sscanf(p, "clock: the master %lld", &m) != 1 ||
+	    sscanf(q, "clock: the steered clock %lld", &st) != 1)
+		return -1;
+	*master = m / 1e3;
+	*steered = st / 1e3;
+	return 0;
+}
+
 enum et_result c_clock(struct et_ctx *c, const struct et_case *k)
 {
 	static const struct et_fmt a2f = { ET_S16, 2, 44100 };
@@ -299,17 +319,27 @@ enum et_result c_clock(struct et_ctx *c, const struct et_case *k)
 	if (et_mix_rec_a2(c, k->arg == 1 ? 0 : 13) < 0)
 		return ET_ERROR;
 	if (k->arg == 2) {
-		// the pointer's rate: frames over the time they took
-		s[0] = et_play(ET_A2, &a2f, et_tone(&a2f, 10 * 44100, ET_HZ, 0, 0),
-			       10 * 44100, 0);
+		// the driver's line through 30 s of the stream's interrupts; a
+		// stream's start and end, timed by hand, are off by milliseconds
+		double master, steered;
+
+		if (et_param_set(c, "a2_resample", 2))
+			return ET_ERROR;
+		s[0] = et_play(ET_A2, &a2f, et_tone(&a2f, 30 * 44100, 0, 0, 0),
+			       30 * 44100, 0);
 		if (et_run(c, s, 1)) {
 			free(s[0].data);
 			return ET_ERROR;
 		}
-		ppm = (10.0 / (s[0].t_end - s[0].t_trigger) - 1) * 1e6;
-		et_measure(c, "793.8 kHz against the system's clock", ppm, "ppm",
-			   -500, 500);
 		free(s[0].data);
+		if (et_master_ppm(c, &master, &steered)) {
+			et_fail(c, "the driver has no reading of the clock");
+			return ET_ERROR;
+		}
+		et_measure(c, "793.8 kHz against the system's raw clock", master,
+			   "ppm", -100, 100);
+		et_measure(c, "the steered clock against the raw one", steered,
+			   "ppm", -500, 500);
 		return ET_PASS;
 	}
 	if (k->arg == 0) {

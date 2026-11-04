@@ -179,6 +179,8 @@ static irqreturn_t es1869_interrupt(int irq_no, void *dev_id)
 	struct es1869 *chip = dev_id;
 	struct es1869_hw *hw = &chip->hw;
 	bool dance = es1869_val(ES_S_irq_mode) == 1;
+	// when the stream's clock counts, the first thing the handler does
+	u64 raw = chip->clk_a1 || chip->clk_a2 ? ktime_get_raw_ns() : 0;
 	cycles_t c0 = get_cycles();
 	struct snd_pcm_substream *s1, *s2;
 	unsigned int pass;
@@ -204,10 +206,14 @@ static irqreturn_t es1869_interrupt(int irq_no, void *dev_id)
 			st = es1869_irq_take(hw);
 		if (!dance && !st && !pass)
 			st = es1869_irq_poll(hw);
-		if (st & ES_IRQ_A1)
+		if (st & ES_IRQ_A1) {
 			es1869_a1_irq(chip, &s1);
-		if (st & ES_IRQ_A2)
+			es1869_clock_tick(chip, ES_IRQ_A1, pass ? 0 : raw);
+		}
+		if (st & ES_IRQ_A2) {
 			es1869_a2_irq(chip, &s2);
+			es1869_clock_tick(chip, ES_IRQ_A2, pass ? 0 : raw);
+		}
 		dropped ^= hw->stats.irq_dropped;
 		spin_unlock(&chip->reg_lock);
 
@@ -791,6 +797,7 @@ static int es1869_suspend(struct snd_card *card)
 	cancel_work_sync(&chip->wake_work);
 	hrtimer_cancel(&chip->a1_settle);
 	hrtimer_cancel(&chip->mirror.tick);
+	hrtimer_cancel(&chip->mirror.period);
 	hrtimer_cancel(&chip->dual.tick);
 	cancel_work_sync(&chip->mirror.copy_work);
 	cancel_work_sync(&chip->dual.copy_work);

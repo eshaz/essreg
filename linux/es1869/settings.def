@@ -250,6 +250,16 @@ ES1869_SET(a2_tick_us, A2_TICK_US, S_INT, B_NONE, 0, 0, 0, 500, 20000, 2000,
 ES1869_SET(a2_pause, A2_PAUSE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
 	   T_NONE, F_PARAM | F_NEXT, 0, "", "",
 	   "pause on an 8-bit Audio 2 channel through 78h, which may resume off step")
+ES1869_SET(a2_resample, A2_RESAMPLE, S_ENUM, B_NONE, 0, 0, 0, 0, 2, 0,
+	   T_NONE, F_CTL | F_PARAM | F_NEXT, 0, "Audio 2 Rate Correction",
+	   "Off|Trim|Clock",
+	   "Audio 2's 16-bit streams on DMA 5 through a filter that corrects their rate: 1 by a2_trim_ppb, 2 also to the system's clock, as the chip's measures against it; 0 leaves the samples as they are")
+ES1869_SET(a2_trim_ppb, A2_TRIM_PPB, S_INT, B_NONE, 0, 0, 0, -2000000, 2000000, 0,
+	   T_NONE, F_PARAM | F_NEXT, 0, "", "",
+	   "what the rate correction adds to the stream's rate (ppb)")
+ES1869_SET(a2_resample_dither, A2_RESAMPLE_DITHER, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
+	   T_NONE, F_PARAM | F_NEXT, 0, "", "",
+	   "the rate correction's rounding to 16 bits with triangular noise of 1 LSB: 3 dB more noise for spurs at about -100 dBFS")
 
 /* rates (the highest ones come from es1869test's rate.max) */
 ES1869_SET(a1p_max_rate, A1P_MAX_RATE, S_INT, B_NONE, 0, 0, 0, 3101, 793800, 48000,

@@ -29,8 +29,10 @@
 #include "hal.h"
 #include "settab.h"
 #include "s3dsim.h"
+#include "sim_rs.h"
 
 #define REC2_PPM 800.0
+#define SIM_MASTER_PPB 880 // the master clock against the raw system clock
 
 struct sim {
 	unsigned int faults;
@@ -252,6 +254,42 @@ static s16 clip16(double v)
 	return v > 32767 ? 32767 : v < -32768 ? -32768 : (s16)lrint(v);
 }
 
+// the rate correction, through the driver's own filter: Audio 2's stream as
+// the ring would hold it, in a copy of the stream
+static long sim_setting(const char *id)
+{
+	int i = find_id(id);
+
+	return i < 0 ? 0 : sim.val[i][0];
+}
+
+static const struct et_stream *sim_resampled(const struct et_stream *a2)
+{
+	static struct et_stream out;
+	static short *data;
+	long mode = sim_setting("a2_resample");
+	long ppb = sim_setting("a2_trim_ppb");
+	int sign = 0;
+	short *made;
+
+	if (!mode || a2->fmt.format != ET_S16 || (sim.faults & SIM_TRIM))
+		return a2;
+	if (mode == 2) {
+		ppb -= SIM_MASTER_PPB;
+		if (a2->fmt.rate % 8000 == 0)
+			sign = sim.faults & SIM_CLOCK_BASE ? -1 : 1;
+	}
+	out = *a2;
+	made = sim_rs_stream(a2->data, a2->frames, a2->fmt.channels, ppb, sign,
+			     &out.frames);
+	if (!made)
+		return a2;
+	free(data);
+	data = made;
+	out.data = data;
+	return &out;
+}
+
 static void fill(struct et_stream *r, struct et_stream *s, int n)
 {
 	// Audio 2's DAC stages, as low-passes at 0.45 of its rate: the
@@ -270,7 +308,7 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 		if (s[j].capture)
 			continue;
 		if (s[j].role == ET_A2)
-			a2 = &s[j];
+			a2 = sim_resampled(&s[j]);
 		else if (s[j].role == ET_A1P)
 			a1 = &s[j];
 		else if (s[j].role == ET_CMD && strstr(s[j].cmd, "arecord -q"))
@@ -928,9 +966,11 @@ static int sim_proc(void *ctx, char *buf, int len)
 	// the cost as a stream of 10 s at 21.5 interrupts a second leaves it
 	return snprintf(buf, len,
 			"ES1869 (simulated)\ninterrupts: Audio 1 0, Audio 2 0, buttons 0, MPU-401 0, none 0\n"
-			"cost: interrupts %lu, 20000 cycles each; ring ticks %lu, 4000 cycles each; 8237 readings 0\n",
+			"cost: interrupts %lu, 20000 cycles each; ring ticks %lu, 4000 cycles each; 8237 readings 0\n"
+			"clock: the master %+d ppb of 23814000 Hz on the raw clock, 257 samples in the line, 300 in all, from Audio 2\n"
+			"clock: the steered clock %+d ppb of the raw one, 300 samples\n",
 			(unsigned long)(sim.now * 21.5),
-			(unsigned long)(sim.now * 75));
+			(unsigned long)(sim.now * 75), SIM_MASTER_PPB, 0);
 }
 
 static int sim_cpu(void *ctx, double *busy, double *total)

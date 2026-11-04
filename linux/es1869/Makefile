@@ -3,7 +3,7 @@
 # The ES1869 driver: snd-es1869, and the ESFM synthesizer snd-es1869-esfm.
 
 snd-es1869-y := main.o hw.o pcm.o mirror.o dual.o mixer.o settings.o \
-		esfm.o regs_hwdep.o proc.o
+		esfm.o regs_hwdep.o proc.o resample.o clock.o
 
 obj-$(CONFIG_SND_ES1869) += snd-es1869.o
 

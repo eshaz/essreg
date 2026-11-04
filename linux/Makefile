@@ -47,6 +47,8 @@ DIST_FILES := LICENSE docs/ES1869TEST.md docs/LINUX.md \
 	linux/tools/essreg/Makefile linux/tools/essreg/esshw_linux.c \
 	linux/tools/essreg/shim/i86.h \
 	linux/es1869/settings.def linux/es1869/settings_kinds.h \
+	linux/es1869/resample.c linux/es1869/resample.h \
+	linux/es1869/hw_compat.h \
 	linux/es1869/uapi/es1869.h \
 	src/esstypes.h src/s3dmeas.c src/s3dmeas.h src/s3dsim.c src/s3dsim.h \
 	src/main.c src/regs.c src/regs.h src/debug.c src/debug.h src/esshw.h

@@ -12,6 +12,7 @@
 #ifdef __KERNEL__
 #include <linux/bits.h>
 #include <linux/errno.h>
+#include <linux/limits.h>
 #include <linux/math.h>
 #include <linux/math64.h>
 #include <linux/minmax.h>
@@ -42,7 +43,12 @@ typedef int64_t s64;
 #define DIV_ROUND_UP(n, d) (((n) + (d) - 1) / (d))
 #define DIV_ROUND_CLOSEST(n, d) (((n) + (d) / 2) / (d))
 
+#define S64_MAX INT64_MAX
+#define __aligned(n) __attribute__((aligned(n)))
+
 static inline u64 div_u64(u64 n, u32 d) { return n / d; }
+static inline s64 div_s64(s64 n, s32 d) { return n / d; }
+static inline s64 div64_s64(s64 n, s64 d) { return n / d; }
 #endif
 
 #endif /* ES1869_HW_COMPAT_H */

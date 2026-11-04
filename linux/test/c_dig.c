@@ -21,9 +21,11 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "an.h"
 #include "cases.h"
 
 static int idle(const short *r)
@@ -379,3 +381,153 @@ long et_dig_tail(const struct et_fmt *f, const void *pat, unsigned long frames,
 	}
 	return (long)k;
 }
+
+// --- the rate correction ------------------------------------------------------
+
+#define TRIM_PPB 1000000L // 1000 ppm, a clear step
+#define TRIM_HZ 997.0 // a tone that shares no factor with the rates
+#define TRIM_LEVEL 20000
+
+// a tone through the rate correction, read back as the DMA took it: its
+// frames recorded one for one, whatever the clock, so that the tone's pitch
+// against the stream's rate is the step. How far it moved in ppm, its noise
+// and distortion in dB
+static enum et_result trim_tone(struct et_ctx *c, const struct et_fmt *f,
+				unsigned int flags, unsigned long buffer,
+				unsigned long period, double *ppm, double *thdn,
+				int *glitches)
+{
+	unsigned long frames = 6 * f->rate;
+	unsigned long nrec = (unsigned long)((0.3 + 6.0 * f->rate / ET_FM_RATE +
+					      0.6) * ET_FM_RATE);
+	void *tone = et_tone(f, frames, TRIM_HZ, TRIM_HZ, TRIM_LEVEL);
+	struct et_stream s[2];
+	struct an_fit fit;
+	unsigned long a = 0, b, i;
+	double *x;
+
+	if (et_mix_quiet(c) || et_mix_dig(c, 1)) {
+		free(tone);
+		et_fail(c, "the mixer refused the dig path");
+		return ET_ERROR;
+	}
+	s[0] = et_rec(ET_FMC, &et_fm_fmt, nrec, 0);
+	s[1] = et_play(ET_A2, f, tone, frames, 0.3);
+	s[1].flags = flags;
+	s[1].buffer = buffer;
+	s[1].period = period;
+	if (et_run(c, s, 2)) {
+		et_fail(c, "the streams: %s, %s",
+			s[0].err ? strerror(-s[0].err) : "ok",
+			s[1].err ? strerror(-s[1].err) : "ok");
+		free(s[0].data);
+		free(tone);
+		et_mix_dig(c, 0);
+		return ET_ERROR;
+	}
+	et_mix_dig(c, 0);
+	x = et_chan(&et_fm_fmt, s[0].data, s[0].done, 0);
+	free(tone);
+	// the tone's middle, past its start's and end's edges
+	for (i = 0; i < s[0].done; i++) {
+		if (fabs(x[i] - ET_FM_IDLE) > 1000) {
+			if (!a)
+				a = i;
+			b = i;
+		}
+	}
+	if (!a || b < a + 3 * f->rate) {
+		free(s[0].data);
+		free(x);
+		et_fail(c, "no tone came back");
+		return ET_ERROR;
+	}
+	a += f->rate / 2;
+	b -= f->rate / 2;
+	if (an_fit_sine(x + a, b - a, f->rate, TRIM_HZ, 1, &fit)) {
+		free(s[0].data);
+		free(x);
+		et_fail(c, "no tone came back");
+		return ET_ERROR;
+	}
+	*ppm = (fit.f / TRIM_HZ - 1) * 1e6;
+	*thdn = an_thdn(x + a, b - a, f->rate, TRIM_HZ, 20, 0);
+	*glitches = an_glitches(x + a, b - a, f->rate, TRIM_HZ, 512, 20, NULL, 0);
+	if (*glitches)
+		et_dump(c, "fm", &et_fm_fmt, s[0].data, s[0].done);
+	free(s[0].data);
+	free(x);
+	return ET_PASS;
+}
+
+// dig.trim: 1000 ppm in a2_trim_ppb moves the samples' pitch by that much,
+// clean of steps and of the filter's noise, in stereo, in mono, and for a
+// client that polls two periods, which its period's timer has to wake;
+// down as well as up, and at 48 kHz
+enum et_result c_dig_trim(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt st = { ET_S16, 2, 44100 };
+	static const struct et_fmt mo = { ET_S16, 1, 44100 };
+	static const struct et_fmt st48 = { ET_S16, 2, 48000 };
+	long ppb = k->arg == 3 ? -TRIM_PPB : TRIM_PPB;
+	double ppm, thdn;
+	int glitches;
+	enum et_result r;
+
+	if (et_param_set(c, "a2_resample", 1) ||
+	    et_param_set(c, "a2_trim_ppb", ppb))
+		return ET_ERROR;
+	r = trim_tone(c, k->arg == 1 ? &mo : k->arg == 4 ? &st48 : &st,
+		      k->arg == 2 ? ET_MMAP | ET_POLLED : 0,
+		      k->arg == 2 ? 4096 : 0, k->arg == 2 ? 2048 : 0, &ppm,
+		      &thdn, &glitches);
+	if (r != ET_PASS)
+		return r;
+	et_measure(c, "the pitch's change", ppm, "ppm", ppb / 1e3 - 0.1,
+		   ppb / 1e3 + 0.1);
+	et_measure(c, "THD+N", thdn, "dB", -200, -75);
+	et_measure(c, "glitches", glitches, "", 0, 0);
+	return ET_PASS;
+}
+
+// dig.trim.exact: with nothing to change the stream takes the mirror's copy,
+// so that every frame comes back as it went in
+enum et_result c_dig_trim_exact(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+
+	(void)k;
+	if (et_param_set(c, "a2_resample", 1) ||
+	    et_param_set(c, "a2_trim_ppb", 0))
+		return ET_ERROR;
+	return dig_run(c, &f, 2 * 49716, 0, 0, 0, 61, NULL, NULL, 0, 0);
+}
+
+// dig.clock: 48 kHz in the Clock mode. The chip's 768 kHz clock plays 252
+// ppm sharp, so the samples go down by that and by what the driver measures
+// of the master clock, whatever the case before it left of that measure
+enum et_result c_dig_clock(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 48000 };
+	double ppm, thdn, master, steered;
+	int glitches;
+	enum et_result r;
+
+	(void)k;
+	if (et_param_set(c, "a2_resample", 2) ||
+	    et_param_set(c, "a2_trim_ppb", 0))
+		return ET_ERROR;
+	r = trim_tone(c, &f, 0, 0, 0, &ppm, &thdn, &glitches);
+	if (r != ET_PASS)
+		return r;
+	if (et_master_ppm(c, &master, &steered)) {
+		et_fail(c, "the driver has no reading of the clock");
+		return ET_ERROR;
+	}
+	et_measure(c, "the pitch's change, less the clock", ppm + master - steered,
+		   "ppm", -251.95 - 3, -251.95 + 3);
+	et_measure(c, "THD+N", thdn, "dB", -200, -75);
+	et_measure(c, "glitches", glitches, "", 0, 0);
+	return ET_PASS;
+}
+

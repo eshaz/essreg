@@ -46,14 +46,46 @@
  * rate, so it reaches A1h's low clock, down to 3101 Hz, and takes Audio
  * 1's rate while Audio 1 runs.
  *
+ * a2_resample puts a 16-bit stream through the filter of resample.c on its
+ * way to the ring. The chip then takes a ring frame for a little more or
+ * less than a stream frame, by a2_trim_ppb and, in the Clock mode, by what
+ * clock.c measures, so that the stream plays at its rate in the system's
+ * time. The samples are no longer the application's; the mode's default is
+ * off. The ring keeps a straight line between its frames and the stream's:
+ * a position is the frame the ring writes next, w, plus rot and a fraction,
+ * less what lies between the DMA and w. The filter is slow, for this CPU,
+ * so it runs only in the work item and at the timer, never in .ack, and in
+ * a chunk that keeps interrupts off for about 70 us at most, with the FPU
+ * from kernel_fpu_begin() around MMX. A filter reaches ES_RS_AHEAD frames past
+ * its place, so the last frames written are made as if silence followed,
+ * and again when what follows has come. A pointer that stands, as under
+ * dmix, whose data changes in place, isn't filtered: its window would
+ * cost ten times the filter's share of the CPU at each tick.
+ *
+ * The ring holds as many frames as the buffer, and a step down makes more
+ * ring frames than stream frames, so a fill stops a little short of a whole
+ * lap (es1869_rs_limit()), and the period's timer brings the rest.
+ *
+ * With the rate changed, a period of the ring is no longer a period of the
+ * stream, and the chip's interrupts slide past the period boundaries, by a
+ * period in a few minutes at 44.1 kHz. A client that waits for a period
+ * would then be woken up to a period late, with a two-period buffer
+ * almost empty, so a timer falls on the boundaries too.
+ *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
 
 #include <linux/hrtimer.h>
 #include <linux/interrupt.h>
 #include <linux/minmax.h>
+#include <linux/mm.h>
 #include <linux/sizes.h>
+#include <linux/slab.h>
 #include <sound/pcm_params.h>
+#ifdef CONFIG_X86
+#include <asm/cpufeature.h>
+#include <asm/fpu/api.h>
+#endif
 
 #include "es1869.h"
 
@@ -62,6 +94,8 @@
 #define MIRROR_BUDGET 8192 // the stream bytes the timer copies, at most
 #define MIRROR_SHORT 1024 // and .ack or the work item, about 18 us of them
 #define MIRROR_GUARD 16 // the bytes left alone just ahead of the DMA
+#define MIRROR_RS_START 2048 // the stream bytes the filter makes at the start
+#define MIRROR_RS_MIN 256 // the frames a buffer needs for the filter
 
 static const struct snd_ratnum a2_clocks[] = {
 	{ .num = ES_CLK_HI, .den_min = 1, .den_max = 128, .den_step = 1 },
@@ -119,19 +153,63 @@ static void mirror_copy(struct es1869 *chip, struct snd_pcm_runtime *rt,
 	}
 }
 
-// where the DMA is in the application's buffer
+// a fill's frames through the filter. Its last frames were made as if
+// silence followed, so they come again with the next fill. The stream's
+// rate may change at each fill
+static void mirror_resample(struct es1869 *chip, struct snd_pcm_runtime *rt,
+			    unsigned long start, unsigned long frames,
+			    unsigned long appl)
+{
+	struct es1869_mirror *m = &chip->mirror;
+	struct es1869_rs *rs = &m->rs;
+	struct es1869_rs_stream s = {
+		.src = rt->dma_area,
+		.ring = m->ring.area,
+		.buffer = rt->buffer_size,
+		.boundary = rt->boundary,
+		.appl = appl,
+		.rot = &m->rot,
+		.stereo = rt->channels == 2,
+	};
+
+	rs->step = rs->trim +
+		(rs->clock ? rs->base + READ_ONCE(chip->clk_offset) : 0);
+#ifdef ES1869_RS_MMX
+	s.mmx = rs->mmx && irq_fpu_usable();
+	if (s.mmx)
+		kernel_fpu_begin();
+#endif
+	es1869_rs_fill(rs, &s, start, frames);
+#ifdef ES1869_RS_MMX
+	if (s.mmx)
+		kernel_fpu_end();
+#endif
+	if (!m->fill.backlog) {
+		es1869_rs_seek(rs, &s, -ES_RS_AHEAD);
+		m->fill.filled = (m->fill.filled + rt->boundary - ES_RS_AHEAD) %
+				 rt->boundary;
+	}
+}
+
+// where the DMA is in the application's buffer; through the filter, its
+// frames lie on the line behind what the ring was last written to
 static snd_pcm_uframes_t mirror_offset(struct es1869 *chip,
 				       struct snd_pcm_runtime *rt)
 {
 	struct es1869_mirror *m = &chip->mirror;
 	u32 word = m->spread ? 2 : 1;
 	u32 ring = word * frames_to_bytes(rt, rt->buffer_size), pos;
+	snd_pcm_uframes_t b = rt->buffer_size, off;
 	unsigned long flags;
+	long adj = 0;
 
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	pos = es1869_dma_pos(&chip->hw, chip->dma2, ring) / word;
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
-	return (bytes_to_frames(rt, pos) + m->rot) % rt->buffer_size;
+	off = bytes_to_frames(rt, pos);
+	if (m->rs.on && !m->fill.standing)
+		adj = es1869_rs_behind(&m->rs, (m->rs.w + b - off) % b) % (long)b;
+	return (off + m->rot + b + adj) % b;
 }
 
 // that position as an absolute frame: the last hw_ptr and how far the DMA
@@ -154,14 +232,37 @@ static void mirror_fill(struct es1869 *chip, struct snd_pcm_runtime *rt,
 			u32 budget, snd_pcm_uframes_t hw)
 {
 	struct es1869_mirror *m = &chip->mirror;
-	unsigned long start, frames;
+	unsigned long appl = rt->control->appl_ptr, to = appl, start, frames;
 
-	frames = es1869_fill_plan(&m->fill, rt->control->appl_ptr, hw,
-				  bytes_to_frames(rt, budget), &start);
+	if (m->rs.on) {
+		// a drain's silence follows the last frame through the filter
+		if (m->draining)
+			to = m->silent_to;
+		to = es1869_rs_limit(to, hw, rt->buffer_size, rt->boundary);
+	}
+	frames = es1869_fill_plan(&m->fill, to, hw, bytes_to_frames(rt, budget),
+				  &start);
 	if (!frames)
 		return;
-	mirror_copy(chip, rt, start, frames);
+	// the filter with no change to make is a copy: step 0 at a whole frame
+	if (m->rs.on && !m->fill.standing &&
+	    (m->rs.frac || m->rs.trim || m->rs.clock))
+		mirror_resample(chip, rt, start, frames, appl);
+	else
+		mirror_copy(chip, rt, start, frames);
 	m->max_chunk = max_t(u32, m->max_chunk, frames_to_bytes(rt, frames));
+}
+
+// the filter's work from a context that shouldn't do it itself, with the
+// timer as the net under it
+static void mirror_kick(struct es1869 *chip)
+{
+	struct es1869_mirror *m = &chip->mirror;
+
+	queue_work(system_highpri_wq, &m->copy_work);
+	if (!hrtimer_active(&m->tick))
+		hrtimer_start(&m->tick, us_to_ktime(es1869_val(ES_S_a2_tick_us)),
+			      HRTIMER_MODE_REL_HARD);
 }
 
 // what .ack left, a piece at a time under the stream's lock, so that
@@ -214,7 +315,8 @@ static enum hrtimer_restart mirror_tick(struct hrtimer *t)
 	if (!ss || !m->running)
 		return HRTIMER_NORESTART;
 	snd_pcm_stream_lock_irqsave(ss, flags);
-	mirror_fill(chip, ss->runtime, MIRROR_BUDGET,
+	mirror_fill(chip, ss->runtime,
+		    m->rs.on && !m->fill.standing ? MIRROR_SHORT : MIRROR_BUDGET,
 		    mirror_hw(ss->runtime, mirror_offset(chip, ss->runtime)));
 	if (m->fill.standing)
 		us = es1869_standing_us(ss->runtime, MIRROR_BUDGET);
@@ -224,6 +326,47 @@ static enum hrtimer_restart mirror_tick(struct hrtimer *t)
 	if (!m->fill.backlog && !m->fill.standing)
 		return HRTIMER_NORESTART;
 	hrtimer_forward_now(t, us_to_ktime(us));
+	return HRTIMER_RESTART;
+}
+
+// the time until the stream reaches its next period's end, and a little
+// more for the steps the DMA's position moves in
+static u64 mirror_period_ns(struct snd_pcm_runtime *rt)
+{
+	snd_pcm_uframes_t to = rt->hw_ptr_interrupt + rt->period_size;
+	snd_pcm_uframes_t left = (to + rt->boundary - rt->status->hw_ptr) %
+				 rt->boundary;
+
+	if (left > rt->period_size)
+		left = rt->period_size;
+	return div_u64((u64)left * NSEC_PER_SEC, rt->rate) + 100 * NSEC_PER_USEC;
+}
+
+// the stream's periods, which the chip's interrupts slide past; those stay,
+// for the clock and as the net under this timer
+static enum hrtimer_restart mirror_period(struct hrtimer *t)
+{
+	struct es1869 *chip = container_of(t, struct es1869, mirror.period);
+	struct es1869_mirror *m = &chip->mirror;
+	struct snd_pcm_substream *ss = chip->a2_sub;
+	unsigned long flags;
+	u64 ns;
+
+	if (!ss || !m->running || !m->rs.on)
+		return HRTIMER_NORESTART;
+	snd_pcm_period_elapsed(ss);
+	snd_pcm_stream_lock_irqsave(ss, flags);
+	if (!ss->runtime || !m->running) {
+		snd_pcm_stream_unlock_irqrestore(ss, flags);
+		return HRTIMER_NORESTART;
+	}
+	ns = mirror_period_ns(ss->runtime);
+	// what a full ring held back
+	if ((ss->runtime->control->appl_ptr + ss->runtime->boundary -
+	     m->fill.filled) % ss->runtime->boundary > ES_RS_AHEAD)
+		queue_work(system_highpri_wq, &m->copy_work);
+	snd_pcm_stream_unlock_irqrestore(ss, flags);
+	hrtimer_forward_now(t, ns_to_ktime(ns));
 	return HRTIMER_RESTART;
 }
 
@@ -255,6 +398,9 @@ static int a2_drain_fill(struct snd_pcm_substream *ss, int channel,
 	if (chip->mirror.spread)
 		mirror_copy(chip, rt, bytes_to_frames(rt, pos),
 			    bytes_to_frames(rt, bytes));
+	// the filter's tail reaches into that silence
+	if (chip->mirror.rs.on && chip->mirror.draining)
+		mirror_kick(chip);
 	return 0;
 }
 
@@ -380,10 +526,56 @@ static int a2_close(struct snd_pcm_substream *ss)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 
+	hrtimer_cancel(&chip->mirror.period);
 	cancel_work_sync(&chip->mirror.copy_work);
+	chip->clk_a2 = 0;
 	a2_release(chip);
 	es1869_power_idle(chip);
 	return 0;
+}
+
+static void rs_free(void *tab)
+{
+	kvfree(tab);
+}
+
+// the filter for a stream that asks for it and that it can serve: 16 bits,
+// and enough of a buffer to hold what the filter reads around a frame
+static void rs_prepare(struct es1869 *chip, struct snd_pcm_runtime *rt, u32 num)
+{
+	struct es1869_rs *rs = &chip->mirror.rs;
+	u32 mode = es1869_val(ES_S_a2_resample);
+
+	rs->on = false;
+	if (!mode || !chip->mirror.spread ||
+	    rt->format != SNDRV_PCM_FORMAT_S16_LE ||
+	    rt->buffer_size < MIRROR_RS_MIN)
+		return;
+	if (!rs->tab) {
+		s16 *tab = kvmalloc_array(ES_RS_TABLE, sizeof(s16), GFP_KERNEL);
+
+		if (!tab || devm_add_action_or_reset(chip->card->dev, rs_free,
+						     tab)) {
+			dev_err(chip->dev, "no memory for the rate correction: off\n");
+			return;
+		}
+		es1869_rs_table(tab);
+		rs->tab = tab;
+	}
+	rs->mmx = false;
+#ifdef CONFIG_X86
+	rs->mmx = boot_cpu_has(X86_FEATURE_MMX);
+#endif
+	rs->on = true;
+	rs->clock = mode == 2;
+	rs->dither = es1869_val(ES_S_a2_resample_dither);
+	rs->trim = es1869_clock_q32(es1869_val(ES_S_a2_trim_ppb));
+	rs->base = es1869_clock_base(num);
+	rs->step = rs->trim;
+	es1869_rs_start(rs, 0);
+	rs->since = 0;
+	rs->seed = 0x2545F491;
+	rs->last[0] = rs->last[1] = 0;
 }
 
 static int a2_prepare(struct snd_pcm_substream *ss)
@@ -411,6 +603,7 @@ static int a2_prepare(struct snd_pcm_substream *ss)
 	int err = 0;
 
 	es1869_stream_rate(rt, slaved, &num, &den);
+	chip->clk_a2 = es1869_clock_period(chip, num, den, rt->period_size);
 	if (es1869_val(ES_S_irq_trace))
 		dev_info(chip->dev, "Audio 2: DMA %d at %#x, %u bytes, period %u\n",
 			 s.ch, s.dma_phys, s.dma_bytes, s.period);
@@ -418,12 +611,14 @@ static int a2_prepare(struct snd_pcm_substream *ss)
 	m->draining = false;
 	if (m->spread) {
 		hrtimer_cancel(&m->tick);
+		hrtimer_cancel(&m->period);
 		cancel_work_sync(&m->copy_work);
 		m->running = false;
 		m->rot = 0;
 		es1869_fill_init(&m->fill, rt, MIRROR_GUARD,
 				 bytes_to_frames(rt, ES_FIFO_A2));
 		mirror_silence(chip, rt);
+		rs_prepare(chip, rt, num);
 	}
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	if (slaved) {
@@ -468,17 +663,24 @@ static void a2_go(struct es1869 *chip, struct snd_pcm_runtime *rt)
 	// on and the DMA takes 4 KB in 8 ms at the highest rates
 	if (m->spread) {
 		m->running = true;
-		mirror_fill(chip, rt, max_t(u32, MIRROR_BUDGET,
-					    frames_to_bytes(rt, m->fill.lead)),
+		mirror_fill(chip, rt, m->rs.on ? MIRROR_RS_START :
+				max_t(u32, MIRROR_BUDGET,
+				      frames_to_bytes(rt, m->fill.lead)),
 			    mirror_hw(rt, mirror_offset(chip, rt)));
 	}
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	es1869_a2_go(&chip->hw, m->stream.burst, m->stream.single);
 	chip->a2_running = true;
+	chip->clk_src = 0;
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	if (m->spread)
 		hrtimer_start(&m->tick, us_to_ktime(es1869_val(ES_S_a2_tick_us)),
 			      HRTIMER_MODE_REL_HARD);
+	if (m->rs.on) {
+		queue_work(system_highpri_wq, &m->copy_work);
+		hrtimer_start(&m->period, ns_to_ktime(mirror_period_ns(rt)),
+			      HRTIMER_MODE_REL_HARD);
+	}
 }
 
 // a release starts afresh from the paused frame, less the FIFO's 64 bytes
@@ -498,6 +700,7 @@ static void a2_rotate(struct es1869 *chip, struct snd_pcm_runtime *rt)
 		back = min3(bytes_to_frames(rt, ES_FIFO_A2), b - queued, b / 4);
 	m->rot = (m->pos + b - back) % b;
 	m->fill.filled = mirror_hw(rt, m->rot);
+	es1869_rs_start(&m->rs, m->fill.filled);
 	if (m->fill.standing)
 		mirror_copy(chip, rt, m->pos, m->fill.guard);
 }
@@ -521,6 +724,7 @@ static int a2_trigger(struct snd_pcm_substream *ss, int cmd)
 		m->running = false;
 		m->draining = false;
 		hrtimer_try_to_cancel(&m->tick);
+		hrtimer_try_to_cancel(&m->period);
 		spin_lock_irqsave(&chip->reg_lock, flags);
 		es1869_a2_stop(&chip->hw, chip->dma2);
 		chip->a2_running = false;
@@ -538,6 +742,7 @@ static int a2_trigger(struct snd_pcm_substream *ss, int cmd)
 		}
 		m->running = false;
 		hrtimer_try_to_cancel(&m->tick);
+		hrtimer_try_to_cancel(&m->period);
 		m->pos = mirror_offset(chip, rt);
 		spin_lock_irqsave(&chip->reg_lock, flags);
 		es1869_a2_stop(&chip->hw, chip->dma2);
@@ -589,6 +794,10 @@ static int a2_ack(struct snd_pcm_substream *ss)
 
 	if (!m->spread || !m->running)
 		return 0;
+	if (m->rs.on) {
+		mirror_kick(chip);
+		return 0;
+	}
 	mirror_fill(chip, ss->runtime, MIRROR_SHORT, ss->runtime->status->hw_ptr);
 	m->acks++;
 	m->ack_cycles += get_cycles() - c0;
@@ -606,6 +815,7 @@ static int a2_sync_stop(struct snd_pcm_substream *ss)
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 
 	hrtimer_cancel(&chip->mirror.tick);
+	hrtimer_cancel(&chip->mirror.period);
 	cancel_work_sync(&chip->mirror.copy_work);
 	synchronize_irq(chip->irq);
 	return 0;
@@ -639,7 +849,10 @@ int es1869_mirror_init(struct es1869 *chip)
 	struct snd_dma_buffer *buf;
 	size_t size;
 
+	es1869_clock_setup(chip);
 	hrtimer_setup(&m->tick, mirror_tick, CLOCK_MONOTONIC,
+		      HRTIMER_MODE_REL_HARD);
+	hrtimer_setup(&m->period, mirror_period, CLOCK_MONOTONIC,
 		      HRTIMER_MODE_REL_HARD);
 	INIT_WORK(&m->copy_work, mirror_copy_work);
 	m->spread = chip->dma2 >= 4;

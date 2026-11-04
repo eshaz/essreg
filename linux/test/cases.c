@@ -27,6 +27,9 @@ FN(c_dig_drain)
 FN(c_dig_drain_two)
 FN(c_dig_two)
 FN(c_dig_runout)
+FN(c_dig_trim)
+FN(c_dig_trim_exact)
+FN(c_dig_clock)
 FN(c_fm_idle)
 FN(c_fm_esfm_sides)
 FN(c_fm_opl3_sides)
@@ -87,7 +90,7 @@ const struct et_case et_cases[] = {
 	     "the 768 kHz clock against the 793.8 kHz one")
 	CASE("clock.fm", N, c_clock, 1,
 	     "the FM's clock against the 793.8 kHz one")
-	CASE("clock.system", 0, c_clock, 2,
+	CASE("clock.system", N, c_clock, 2,
 	     "the 793.8 kHz clock against the system's")
 
 	CASE("probe.card", Q | N, c_probe_card, 0,
@@ -122,6 +125,17 @@ const struct et_case et_cases[] = {
 	     "a drain with two periods in the buffer: idle frames after it")
 	CASE("dig.two", N, c_dig_two, 0,
 	     "two periods in the buffer, polled as JACK does it, every frame")
+	CASE("dig.trim", N, c_dig_trim, 0,
+	     "the rate correction: a2_trim_ppb moves the samples' pitch, cleanly")
+	CASE("dig.trim.mono", N, c_dig_trim, 1, "the same in mono")
+	CASE("dig.trim.two", N, c_dig_trim, 2,
+	     "the same with two periods in the buffer, polled as JACK does it")
+	CASE("dig.trim.down", N, c_dig_trim, 3, "the same, down by as much")
+	CASE("dig.trim.48", N, c_dig_trim, 4, "the same at 48 kHz")
+	CASE("dig.trim.exact", N, c_dig_trim_exact, 0,
+	     "the rate correction with nothing to correct: every frame as it was")
+	CASE("dig.clock", N, c_dig_clock, 0,
+	     "the Clock mode at 48 kHz: the samples follow the clock it measures")
 	CASE("dig.runout", N, c_dig_runout, 0,
 	     "an application that stops writing: the core's silence reaches the ring")
 	CASE("dig.long", N, c_dig_long, 0,

@@ -121,5 +121,7 @@ int et_klog_fault(const char *msg);
 #define SIM_A1_PAUSEDRAIN 0x100000 // a drain from a pause loses a buffer
 #define SIM_ADC_DC 0x200000 // the ADC is off by more than half a step
 #define SIM_BEEP 0x400000 // the PC speaker's level is ignored
+#define SIM_TRIM 0x800000 // the rate correction leaves the samples alone
+#define SIM_CLOCK_BASE 0x1000000 // and takes 768 kHz's offset the wrong way
 
 #endif

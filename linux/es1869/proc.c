@@ -82,6 +82,7 @@ static void es1869_proc_read(struct snd_info_entry *entry,
 	snd_iprintf(buf, "Config_Base+6 missed a polled source %u times\n",
 		    st.status_miss);
 
+	es1869_clock_proc(chip, buf);
 	snd_iprintf(buf, "\nsettings (parameter = value, default):\n");
 	for (i = 0; i < ES_S_COUNT; i++) {
 		const struct es1869_setting *s = &es1869_settings[i];
