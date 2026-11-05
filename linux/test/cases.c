@@ -76,6 +76,7 @@ FN(c_rate_max)
 FN(c_latency_min)
 FN(c_music_aplay)
 FN(c_midi_mpu)
+FN(c_midi_loop)
 FN(c_clock)
 FN(c_dac_images)
 FN(c_dac_corner)
@@ -398,6 +399,8 @@ const struct et_case et_cases[] = {
 
 	CASE("midi.mpu", 0, c_midi_mpu, 0,
 	     "amidi sends a note out of the MPU-401")
+	CASE("midi.mpu.loop", 0, c_midi_loop, 0,
+	     "with a cable from MIDI out to in, the bytes come back as they went")
 	CASE("midi.esfm", ET_MIDI | N, c_midi_esfm, 0,
 	     "GMCHECK.MID on the ESFM synth, every step on PCM 1")
 	CASE("midi.opl3", ET_MIDI | N, c_midi_opl3, 0,

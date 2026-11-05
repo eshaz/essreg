@@ -262,7 +262,9 @@ The cases reach the chip four ways:
   driver's own cycles in each mode, at 44.1 and 48 kHz, in mono and at 96
   kHz.
 * `midi`: GMCHECK.MID on the ESFM synth, every step on PCM 1; WildMidi on a
-  DAC; a note out of the MPU-401.
+  DAC; a note out of the MPU-401. `midi.mpu.loop` sends 240 bytes and reads
+  them back through a cable from MIDI out to MIDI in, and skips with no
+  cable.
 * `3d`: the 3-D effect measured as ess3d measures it (src/s3dmeas.c), tones
   on Audio 2 recorded from record source 7, with each run's registers set
   through the driver's controls. `3d.quick` checks the boost with ESS's

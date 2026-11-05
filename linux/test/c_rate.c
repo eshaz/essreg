@@ -4,7 +4,8 @@
  * engine really keeps, with the driver's limits lifted (rate_limit=0), for
  * the Kconfig defaults; latency.min the smallest period that plays without
  * an xrun; music.aplay plays a file with aplay on Audio 2, frame by frame
- * on the dig path; midi.mpu sends bytes out of the MPU-401.
+ * on the dig path; midi.mpu sends bytes out of the MPU-401, and midi.mpu.loop
+ * hears them come back through a cable.
  *
  * Notes:
  *
@@ -266,6 +267,61 @@ enum et_result c_midi_mpu(struct et_ctx *c, const struct et_case *k)
 	s.timeout = 5;
 	et_run(c, &s, 1);
 	et_measure(c, "amidi's exit", s.status, "", 0, 0);
+	return ET_PASS;
+}
+
+// midi.mpu.loop: with a cable from the MPU-401's output to its input, a run of
+// notes comes back as it went, which takes the chip's input and its interrupt
+// as well as the output. Nothing back is no cable, not a failure
+#define LOOP_NOTES 80
+
+enum et_result c_midi_loop(struct et_ctx *c, const struct et_case *k)
+{
+	static char cmd[64 + 1024 + 300];
+	unsigned char sent[3 * LOOP_NOTES];
+	unsigned long got = 0, diff = 0;
+	char path[256], *p = cmd;
+	struct et_stream s;
+	unsigned int b;
+	FILE *f;
+	int i;
+
+	(void)k;
+	if (access("/usr/bin/amidi", X_OK) || !strcmp(c->hal->name, "simulated"))
+		return ET_SKIP;
+	snprintf(path, sizeof(path), "%s/midi-loop.txt", c->outdir);
+	p += sprintf(p, "amidi -p hw:CARD=ES1869,DEV=0 -S '");
+	for (i = 0; i < LOOP_NOTES; i++) {
+		sent[3 * i] = 0x90 | (i & 15);
+		sent[3 * i + 1] = 0x24 + i % 60;
+		sent[3 * i + 2] = 1 + (i * 37) % 126;
+		p += sprintf(p, "%02X %02X %02X ", sent[3 * i], sent[3 * i + 1],
+			     sent[3 * i + 2]);
+	}
+	snprintf(p, sizeof(cmd) - (p - cmd), "' -d -t 1 > %s 2>&1", path);
+	memset(&s, 0, sizeof(s));
+	s.role = ET_CMD;
+	s.cmd = cmd;
+	s.timeout = 5;
+	et_run(c, &s, 1);
+	f = fopen(path, "r");
+	if (!f) {
+		et_fail(c, "no output from amidi");
+		return ET_ERROR;
+	}
+	while (fscanf(f, "%x", &b) == 1) {
+		if (got < sizeof(sent) && b != sent[got])
+			diff++;
+		got++;
+	}
+	fclose(f);
+	if (!got) {
+		et_note(c, "nothing came back: no cable from MIDI out to MIDI in");
+		return ET_SKIP;
+	}
+	et_measure(c, "the bytes that came back", got, "", sizeof(sent),
+		   sizeof(sent));
+	et_measure(c, "the bytes that differ", diff, "", 0, 0);
 	return ET_PASS;
 }
 
