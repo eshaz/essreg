@@ -183,6 +183,7 @@ static void mirror_resample(struct es1869 *chip, struct snd_pcm_runtime *rt,
 			rt->buffer_size;
 		rs->since = start;
 		rs->lined = true;
+		m->rs_to = ULONG_MAX;
 	}
 #ifdef ES1869_RS_MMX
 	s.mmx = rs->mmx && irq_fpu_usable();
@@ -198,8 +199,10 @@ static void mirror_resample(struct es1869 *chip, struct snd_pcm_runtime *rt,
 	// a frame more than the filter reaches: on a step down a ring frame
 	// covers less than a stream frame, so that the reach alone left a frame
 	// behind that was made as if silence followed
-	if (!m->fill.backlog)
+	if (!m->fill.backlog) {
 		es1869_rs_seek(rs, &s, -(ES_RS_AHEAD + 1));
+		m->rs_to = (start + frames) % rt->boundary;
+	}
 	// the line decides where the next fill begins: a run can end a frame
 	// past the plan, and those fills add up
 	m->fill.filled = rs->pos;
@@ -261,9 +264,15 @@ static void mirror_fill(struct es1869 *chip, struct snd_pcm_runtime *rt,
 		return;
 	// the filter with no change to make is a copy: step 0 at a whole frame
 	if (m->rs.on && !m->fill.standing &&
-	    (m->rs.frac || m->rs.trim || m->rs.clock))
+	    (m->rs.frac || m->rs.trim || m->rs.clock)) {
+		// with nothing new, the last run's frames would only come again,
+		// over the silence that follows a client that stopped
+		if (m->rs.lined && (start + frames) % rt->boundary == m->rs_to) {
+			m->fill.filled = m->rs.pos;
+			return;
+		}
 		mirror_resample(chip, rt, start, frames, appl);
-	else {
+	} else {
 		mirror_copy(chip, rt, start, frames);
 		m->rs.lined = false;
 	}
@@ -322,9 +331,13 @@ static void mirror_copy_work(struct work_struct *work)
 		snd_pcm_stream_unlock_irqrestore(ss, flags);
 		cond_resched();
 	} while (more);
-	// nothing left for the net to catch; a standing pointer needs its tick
+	// nothing left for the net to catch; a standing pointer needs its tick,
+	// which keeps the window ahead of the DMA that a short fill can't
 	if (!READ_ONCE(m->fill.standing))
 		hrtimer_try_to_cancel(&m->tick);
+	else if (READ_ONCE(m->running) && !hrtimer_active(&m->tick))
+		hrtimer_start(&m->tick, us_to_ktime(es1869_val(ES_S_a2_tick_us)),
+			      HRTIMER_MODE_REL_HARD);
 }
 
 // the timer copies what the work item hasn't got to: every a2_tick_us while
@@ -392,7 +405,8 @@ static enum hrtimer_restart mirror_period(struct hrtimer *t)
 	ns = mirror_period_ns(ss->runtime);
 	// what a full ring held back
 	if ((ss->runtime->control->appl_ptr + ss->runtime->boundary -
-	     m->fill.filled) % ss->runtime->boundary > ES_RS_AHEAD)
+	     m->fill.filled) % ss->runtime->boundary > ES_RS_AHEAD &&
+	    ss->runtime->control->appl_ptr != m->rs_to)
 		queue_work(system_highpri_wq, &m->copy_work);
 	snd_pcm_stream_unlock_irqrestore(ss, flags);
 	hrtimer_forward_now(t, ns_to_ktime(ns));
@@ -587,6 +601,7 @@ static int a2_close(struct snd_pcm_substream *ss)
 
 	hrtimer_cancel(&chip->mirror.period);
 	cancel_work_sync(&chip->mirror.copy_work);
+	hrtimer_cancel(&chip->mirror.tick);
 	chip->clk_a2 = 0;
 	a2_release(chip);
 	es1869_power_idle(chip);
@@ -703,9 +718,9 @@ static int a2_prepare(struct snd_pcm_substream *ss)
 	m->last = 0;
 	m->draining = false;
 	if (m->spread) {
-		hrtimer_cancel(&m->tick);
 		hrtimer_cancel(&m->period);
 		cancel_work_sync(&m->copy_work);
+		hrtimer_cancel(&m->tick);
 		m->running = false;
 		m->rot = 0;
 		es1869_fill_init(&m->fill, rt, MIRROR_GUARD,
@@ -915,9 +930,9 @@ static int a2_sync_stop(struct snd_pcm_substream *ss)
 {
 	struct es1869 *chip = snd_pcm_substream_chip(ss);
 
-	hrtimer_cancel(&chip->mirror.tick);
 	hrtimer_cancel(&chip->mirror.period);
 	cancel_work_sync(&chip->mirror.copy_work);
+	hrtimer_cancel(&chip->mirror.tick);
 	synchronize_irq(chip->irq);
 	return 0;
 }

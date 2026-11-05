@@ -99,6 +99,7 @@ struct es1869_mirror {
 	snd_pcm_uframes_t silent_to; // the absolute frame it has reached
 	struct es1869_rs rs;
 	u32 rs_quiet; // where in the ring its silence has reached, in bytes
+	unsigned long rs_to; // the stream frame the last whole run came to
 	u32 clk_period; // the master's ticks to a period of this stream
 };
 
