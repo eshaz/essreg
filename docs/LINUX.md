@@ -329,14 +329,17 @@ nothing more. It reads the chip against itself to 470 ppb at 1 s and 11 ppb
 at 128 s, and shows Trim's +10 and -10 ppm as +9.99 and -9.996 ppm, and no
 phase jump of over about 2 us when the filter turns on or the mode changes.
 
-chrony's frequency moved by over 2 ppm in a day (28.9 to 31.15), which the
-fit of the steered clock follows within about 20 minutes. Temperature
-doesn't explain it: the frequency fell 0.9 ppm over an hour with every
-thermometer flat, and a CPU load of half an hour moved it by under 0.1 ppm.
-It may be the path to the servers and not the crystal, and the RTC, read
-every second, is the check of that. chrony's `tempcomp` directive could
-apply a map of temperature to frequency, which the Clock mode would inherit
-with no change here, but the data don't support one so far.
+chrony's frequency moved by over 2 ppm in a day (28.7 to 31.2), which the
+fit of the steered clock follows within about 20 minutes. Most of that is
+temperature, late: over 20 hours it follows the board's System sensor at
++0.23 ppm a degree, delayed by about an hour, which takes the swing from
+0.52 to 0.24 ppm rms. Part of the delay may be chrony's own averaging.
+Overnight, with the machine idle and the sensors flat, the frequency held
+within 0.1 ppm. The Clock mode doesn't need the map, since it holds a
+half-hour within 0.1 ppm with no sign of it. chrony's `tempcomp` directive
+could still apply one, which the Clock mode would inherit with no change
+here. The RTC is no help as a reference: it moved by 5 ppm in the same log,
+more with temperature than with chrony.
 
 A correction of the rate is not one of jitter. Jitter is in the DAC's clock
 at the moment of each conversion, after all of this, and no change to the
