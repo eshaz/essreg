@@ -154,7 +154,8 @@ int et_mix_rec_a2(struct et_ctx *c, int level)
 int et_mix_out(struct et_ctx *c, int a1, int a2)
 {
 	et_ctl_set(c, "Master Playback Switch", 0, 1, 1);
-	if (et_ctl_set(c, "Master Playback Volume", 0, 54, 54) < 0)
+	if (et_ctl_set(c, "Master Playback Volume", 0, 54,
+		       c->rec2_left ? 0 : 54) < 0)
 		return -1;
 	et_ctl_set(c, "PCM Playback Volume", 0, a2, a2);
 	et_ctl_set(c, "PCM Playback Volume", 1, a1, a1);

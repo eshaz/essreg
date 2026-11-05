@@ -64,7 +64,8 @@ static int dual_on(struct et_ctx *c)
 
 // a run of 441 Hz on channel 1 and 882 Hz on channel 3, both from
 // frame 0: each tone fitted over a steady half second of the output
-static int dual_tones(struct et_ctx *c, struct an_fit *f1, struct an_fit *f3)
+static int dual_tones(struct et_ctx *c, struct an_fit *f1, struct an_fit *f3,
+		      int same)
 {
 	unsigned long frames = 2 * f4.rate, i, n = 0;
 	void *buf = et_alloc_frames(&f4, frames);
@@ -79,8 +80,11 @@ static int dual_tones(struct et_ctx *c, struct an_fit *f1, struct an_fit *f3)
 	for (i = 0; i < frames; i++) {
 		double t = (double)i / f4.rate;
 
-		et_pack1(&f4, buf, i, 0, 4000 * sin(2 * M_PI * ET_HZ * t));
-		et_pack1(&f4, buf, i, 2, 4000 * sin(2 * M_PI * 2 * ET_HZ * t));
+		double a = 4000 * sin(2 * M_PI * ET_HZ * t);
+		double b = 4000 * sin(2 * M_PI * 2 * ET_HZ * t);
+
+		et_pack1(&f4, buf, i, 0, same ? a + b : a);
+		et_pack1(&f4, buf, i, 2, same ? 0 : b);
 	}
 	x = dual_run(c, buf, frames, &n);
 	free(buf);
@@ -106,7 +110,7 @@ enum et_result c_dual_map(struct et_ctx *c, const struct et_case *k)
 
 	(void)k;
 	f4.rate = 44100;
-	if (dual_tones(c, &f1, &f3))
+	if (dual_tones(c, &f1, &f3, 0))
 		return ET_ERROR;
 	et_measure(c, "channel 1, 441 Hz", an_dbfs(f1.amp / M_SQRT2), "dBFS",
 		   -60, -1);
@@ -117,29 +121,42 @@ enum et_result c_dual_map(struct et_ctx *c, const struct et_case *k)
 	return ET_PASS;
 }
 
-// dual.align: when each DAC began, from its tone's phase: a sine from
-// frame 0 has the phase 2 pi f (t - start) at t, so the starts differ by
-// what the phases leave after their own frequencies
-enum et_result c_dual_align(struct et_ctx *c, const struct et_case *k)
+// channel 3's tone against channel 1's start, from their phases, in seconds:
+// a sine from frame 0 has the phase 2 pi f (t - start) at t, so the starts
+// differ by what the phases leave after their own frequencies, within half
+// of channel 3's period, less what the second card's input does to the two
+// tones
+static double dual_gap(const struct an_fit *f1, const struct an_fit *f3,
+		       double path)
 {
-	struct an_fit f1, f3;
-	double s1, s3, d, p1, p3;
+	double p1 = 1 / f1->f, p3 = 1 / f3->f;
+	double s1 = fmod(fmod(-f1->phase / (2 * M_PI * f1->f), p1) + p1, p1);
+	double s3 = fmod(fmod(-f3->phase / (2 * M_PI * f3->f), p3) + p3, p3);
+	double d = fmod(s3 - s1 - path, p3);
 
-	f4.rate = dual_rates[k->arg];
-	if (dual_tones(c, &f1, &f3))
-		return ET_ERROR;
-	// the start of each, in the recording's seconds before its window,
-	// within one period of the tone: sin(2 pi f t + phase)
-	p1 = 1 / f1.f;
-	p3 = 1 / f3.f;
-	s1 = fmod(fmod(-f1.phase / (2 * M_PI * f1.f), p1) + p1, p1);
-	s3 = fmod(fmod(-f3.phase / (2 * M_PI * f3.f), p3) + p3, p3);
-	// the difference within half of channel 3's period
-	d = fmod(s3 - s1, p3);
 	if (d > p3 / 2)
 		d -= p3;
 	if (d < -p3 / 2)
 		d += p3;
+	return d;
+}
+
+// dual.align: when each DAC began, from its tone's phase. Both tones from
+// Audio 1 first, where they begin together, say what the second card's input
+// alone does to them: a high-pass in front of it moves 441 Hz more than 882 Hz
+enum et_result c_dual_align(struct et_ctx *c, const struct et_case *k)
+{
+	struct an_fit f1, f3;
+	double path, d;
+
+	f4.rate = dual_rates[k->arg];
+	if (dual_tones(c, &f1, &f3, 1))
+		return ET_ERROR;
+	path = dual_gap(&f1, &f3, 0);
+	if (dual_tones(c, &f1, &f3, 0))
+		return ET_ERROR;
+	d = dual_gap(&f1, &f3, path);
+	et_measure(c, "the two tones from one DAC, in time", path * 1e6, "us", 1, 0);
 	et_measure(c, "Audio 2 against Audio 1", d * f4.rate, "frames", -20, 20);
 	et_measure(c, "Audio 2 against Audio 1, in time", d * 1e6, "us", 1, 0);
 	// on the Armada the two began 1 to 4.5 frames apart at 44.1 kHz and

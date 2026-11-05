@@ -26,7 +26,9 @@ are in `linux/test/`, under the GPL version 3 or later.
   need. The card has to be quiet, since the cases find a tone by its rise
   over the noise, 18 dB and more. A Zoom H2n on USB power, whose own buzz
   reads -32 dBFS against a tone at -23, passes `cal.rec2` and `cal.linear`
-  and fails nearly all the rest, which says nothing about the driver.
+  and fails nearly all the rest, which says nothing about the driver. A
+  stereo plug in a balanced input hears left minus right, and a tone on both
+  sides cancels: `--rec2-left` then holds the right output down.
 * Root, for the cases that write the module's parameters (`params.*`),
   suspend the machine (`pm`) or reload the driver (`load`).
 * aplaymidi and snd-es1869-esfm with its bank, for `midi.esfm`; WildMidi for

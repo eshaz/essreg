@@ -143,6 +143,7 @@ struct et_ctx {
 	int have_rec2; // the second card hears the left output
 	double rec2_gain; // its level for a full-scale tone, dBFS
 	char rec2_name[32];
+	int rec2_left; // it takes left minus right: the right output stays down
 	int dig_exact; // Audio 2 into the music DAC records exactly
 	int rec2_linear; // the second card's input is linear (cal.linear)
 	// the case running

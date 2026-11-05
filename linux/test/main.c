@@ -3,7 +3,8 @@
  * es1869test: the loopback test suite of snd-es1869 (docs/ES1869TEST.md).
  *
  * usage: es1869test [-c CASES] [-x CASES] [-q] [-l] [-v] [-o DIR]
- *                   [--rec2 DEVICE] [--max-out DB] [-i] [--destructive]
+ *                   [--rec2 DEVICE] [--rec2-left] [--max-out DB] [-i]
+ *                   [--destructive]
  *                   [--reload CMD] [--baseline TSV] [--stock] [--sim[=FAULTS]]
  *                   [--restore] [--self-test] [--version]
  *
@@ -63,7 +64,8 @@ static void usage(void)
 {
 	fprintf(stderr,
 		"usage: es1869test [-c CASES] [-x CASES] [-q] [-l] [-v] [-o DIR]\n"
-		"                  [--rec2 DEVICE] [--max-out DB] [-i] [--destructive]\n"
+		"                  [--rec2 DEVICE] [--rec2-left] [--max-out DB] [-i]\n"
+		"                  [--destructive]\n"
 		"                  [--reload CMD] [--baseline TSV] [--stock] [--sim[=FAULTS]]\n"
 		"                  [--restore] [--self-test] [--version]\n"
 		"CASES is a comma list of case ids or their groups (a2, dig.fmt).\n");
@@ -388,6 +390,7 @@ int main(int argc, char **argv)
 {
 	static const struct option opts[] = {
 		{ "rec2", 1, NULL, 'r' },    { "max-out", 1, NULL, 'm' },
+		{ "rec2-left", 0, NULL, 'Y' },
 		{ "destructive", 0, NULL, 'D' }, { "stock", 0, NULL, 'S' },
 		{ "sim", 2, NULL, 's' },     { "restore", 0, NULL, 'R' },
 		{ "self-test", 0, NULL, 'T' }, { "version", 0, NULL, 'V' },
@@ -433,6 +436,9 @@ int main(int argc, char **argv)
 			break;
 		case 'r':
 			rec2 = optarg;
+			break;
+		case 'Y':
+			c.rec2_left = 1;
 			break;
 		case 'm':
 			c.max_out = atof(optarg);
