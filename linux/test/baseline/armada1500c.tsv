@@ -1,20 +1,20 @@
 case	measure	value	unit	lo	hi	result
-cal.rec2	441 Hz, left	-10.3035248	dBFS	-60	-1	ok
-cal.rec2	661.5 Hz, right	-78.0313307	dBFS	1	0	ok
-cal.rec2	noise	-56.4811393	dBFS	1	0	ok
-cal.rec2	clock against the chip	142.862793	ppm	1	0	ok
-cal.linear	worst 6 dB step through the cable	-4.43913888	dB	1	0	ok
-clock.families	768 kHz against 793.8 kHz	251.952275	ppm	-3000	3000	ok
-clock.fm	the FM's clock against 793.8 kHz	2081.81868	ppm	-3000	3000	ok
-clock.system	793.8 kHz against the system's raw clock	1.06	ppm	-100	100	ok
-clock.system	the steered clock against the raw one	29.86	ppm	-500	500	ok
+cal.rec2	441 Hz, left	-15.8340536	dBFS	-60	-1	ok
+cal.rec2	661.5 Hz, right	-55.0016611	dBFS	1	0	ok
+cal.rec2	noise	-64.6693254	dBFS	1	0	ok
+cal.rec2	clock against the chip	-28.2502671	ppm	1	0	ok
+cal.linear	worst 6 dB step through the cable	0.200578673	dB	1	0	ok
+clock.families	768 kHz against 793.8 kHz	251.955257	ppm	-3000	3000	ok
+clock.fm	the FM's clock against 793.8 kHz	2081.82467	ppm	-3000	3000	ok
+clock.system	793.8 kHz against the system's raw clock	1.275	ppm	-100	100	ok
+clock.system	the steered clock against the raw one	30.224	ppm	-500	500	ok
 probe.card	PCM devices	4	of 4	4	4	ok
 probe.card	7Ch against its control	0		0	0	ok
-probe.controls	controls as settings.def has them	57		57	57	ok
+probe.controls	controls as settings.def has them	59		59	59	ok
 probe.alsamixer	elements in the Playback view	7		7	7	ok
-probe.params	parameters	96		96	96	ok
-params.rw	parameters that reach their controls	49		49	49	ok
-params.bad	parameters that refuse bad values	31		31	31	ok
+probe.params	parameters	98		98	98	ok
+params.rw	parameters that reach their controls	51		51	51	ok
+params.bad	parameters that refuse bad values	32		32	32	ok
 dig.fmt.s16	frames missing at the end	0		0	16	ok
 dig.fmt.s16	xruns	0		0	0	ok
 dig.fmt.s16m	frames missing at the end	0		0	32	ok
@@ -71,10 +71,10 @@ dig.start	starts in step	20	of 20	20	20	ok
 dig.pause	frames missing at the end	0		0	16	ok
 dig.pause	the release against the pause	-3	frames	-16	16	ok
 dig.pause	xruns	0		0	0	ok
-dig.pause	pause, idle frames	19864		14914.8	29829.6	ok
+dig.pause	pause, idle frames	19863		14914.8	29829.6	ok
 dig.mmap	frames missing at the end	0		0	16	ok
 dig.mmap	xruns	0		0	0	ok
-dig.dmix	frames missing at the start	313		0	513	ok
+dig.dmix	frames missing at the start	333		0	513	ok
 dig.dmix	frames missing at the end	0		0	16	ok
 dig.dmix	xruns	0		0	0	ok
 dig.drain.full	frames missing at the end	0		0	16	ok
@@ -100,8 +100,8 @@ dig.trim.48	THD+N	-90.0320585	dB	-200	-75	ok
 dig.trim.48	glitches	0		0	0	ok
 dig.trim.exact	frames missing at the end	0		0	16	ok
 dig.trim.exact	xruns	0		0	0	ok
-dig.clock	the pitch's change, less the clock	-251.947254	ppm	-254.95	-248.95	ok
-dig.clock	THD+N	-89.8933343	dB	-200	-75	ok
+dig.clock	the pitch's change, less the clock	-251.9506	ppm	-254.95	-248.95	ok
+dig.clock	THD+N	-89.9734904	dB	-200	-75	ok
 dig.clock	glitches	0		0	0	ok
 rs.exact	the frames lost at the start	0		0	16	ok
 rs.exact	the frames compared	176174		172650.52	176174	ok
@@ -121,6 +121,15 @@ rs.exact.48	the frames that differ	0		0	0	ok
 rs.exact.two	the frames lost at the start	0		0	16	ok
 rs.exact.two	the frames compared	176174		172650.52	176174	ok
 rs.exact.two	the frames that differ	0		0	0	ok
+rs.over.2	the frames lost at the start	0		0	16	ok
+rs.over.2	the frames compared	352706		345651.88	352706	ok
+rs.over.2	the frames that differ	0		0	0	ok
+rs.over.3	the frames lost at the start	0		0	16	ok
+rs.over.3	the frames compared	264475		259185.5	264475	ok
+rs.over.3	the frames that differ	0		0	0	ok
+rs.over.drain	the frames short of the stream	-16.3356461		-70	18	ok
+rs.over.runout	the frames past the tone that aren't silent	0		0	0	ok
+rs.over.runout	xruns	0		0	0	ok
 rs.band	level at 100 Hz	4.62409837e-06	dB	-0.01	0.01	ok
 rs.band	THD+N at 100 Hz	-93.0723777	dB	-200	-85	ok
 rs.band	worst spur at 100 Hz	-118.708576	dB	-200	-90	ok
@@ -185,370 +194,417 @@ rs.band.48	level at 20000 Hz	-0.00013958501	dB	-0.01	0.01	ok
 rs.band.48	THD+N at 20000 Hz	-91.9641949	dB	-200	-85	ok
 rs.band.48	worst spur at 20000 Hz	-99.7904896	dB	-200	-90	ok
 rs.band.48	glitches at 20000 Hz	0		0	0	ok
+rs.treble	level over the DAC at 997 Hz	0.00818518739	dB	-0.2	0.2	ok
+rs.treble	THD+N at 997 Hz	-90.2944459	dB	-200	-85	ok
+rs.treble	glitches at 997 Hz	0		0	0	ok
+rs.treble	level over the DAC at 5001 Hz	0.102861	dB	-0.2	0.2	ok
+rs.treble	THD+N at 5001 Hz	-90.6832539	dB	-200	-85	ok
+rs.treble	glitches at 5001 Hz	0		0	0	ok
+rs.treble	level over the DAC at 10001 Hz	0.0172042796	dB	-0.2	0.2	ok
+rs.treble	THD+N at 10001 Hz	-91.4226394	dB	-200	-85	ok
+rs.treble	glitches at 10001 Hz	0		0	0	ok
+rs.treble	level over the DAC at 15000 Hz	0.0863714913	dB	-0.2	0.2	ok
+rs.treble	THD+N at 15000 Hz	-92.8730571	dB	-200	-85	ok
+rs.treble	glitches at 15000 Hz	0		0	0	ok
+rs.treble	level over the DAC at 18000 Hz	0.106467808	dB	-0.2	0.2	ok
+rs.treble	THD+N at 18000 Hz	-93.9104727	dB	-200	-85	ok
+rs.treble	glitches at 18000 Hz	0		0	0	ok
+rs.treble	level over the DAC at 20000 Hz	-0.141598894	dB	-0.2	0.2	ok
+rs.treble	THD+N at 20000 Hz	-94.3511833	dB	-200	-85	ok
+rs.treble	glitches at 20000 Hz	0		0	0	ok
+rs.treble.30	level over the DAC at 997 Hz	0.00749772589	dB	-0.2	0.2	ok
+rs.treble.30	THD+N at 997 Hz	-88.6342342	dB	-200	-85	ok
+rs.treble.30	glitches at 997 Hz	0		0	0	ok
+rs.treble.30	level over the DAC at 5001 Hz	0.102533908	dB	-0.2	0.2	ok
+rs.treble.30	THD+N at 5001 Hz	-88.4261056	dB	-200	-85	ok
+rs.treble.30	glitches at 5001 Hz	0		0	0	ok
+rs.treble.30	level over the DAC at 10001 Hz	0.0168807589	dB	-0.2	0.2	ok
+rs.treble.30	THD+N at 10001 Hz	-88.6436757	dB	-200	-85	ok
+rs.treble.30	glitches at 10001 Hz	0		0	0	ok
+rs.treble.30	level over the DAC at 15000 Hz	0.086127357	dB	-0.2	0.2	ok
+rs.treble.30	THD+N at 15000 Hz	-89.2922963	dB	-200	-85	ok
+rs.treble.30	glitches at 15000 Hz	0		0	0	ok
+rs.treble.30	level over the DAC at 18000 Hz	0.106103335	dB	-0.2	0.2	ok
+rs.treble.30	THD+N at 18000 Hz	-88.8731431	dB	-200	-85	ok
+rs.treble.30	glitches at 18000 Hz	0		0	0	ok
+rs.treble.30	level over the DAC at 20000 Hz	-0.141755032	dB	-0.2	0.2	ok
+rs.treble.30	THD+N at 20000 Hz	-88.4291557	dB	-200	-85	ok
+rs.treble.30	glitches at 20000 Hz	0		0	0	ok
 rs.imd.ccif	what falls between them	-101.957655	dBFS	-200	-92	ok
 rs.imd.smpte	what falls between them	-122.385363	dBFS	-200	-92	ok
 rs.quiet	the level	0.00782972373	dB	-0.1	0.1	ok
 rs.quiet	THD+N	-35.5827815	dB	-200	-32	ok
 rs.quiet	worst spur	-52.4368956	dB	-200	-38	ok
 rs.dither	noise, without	-101.966568	dBFS	-200	-90	ok
-rs.dither	noise, with	-95.7233407	dBFS	-200	-88	ok
+rs.dither	noise, with	-95.7259083	dBFS	-200	-88	ok
 rs.dither	worst spur, without	-106.060098	dBFS	1	0	ok
-rs.dither	worst spur, with	-105.731708	dBFS	1	0	ok
-rs.dither	the noise it adds	6.24322687	dB	0	7	ok
+rs.dither	worst spur, with	-105.544138	dBFS	1	0	ok
+rs.dither	the noise it adds	6.24065927	dB	0	7	ok
 rs.live	xruns	0		0	0	ok
 rs.live	the pitch, part 1	-1.77552158e-05	ppm	-0.5	0.5	ok
-rs.live	the pitch, part 2	99.9996801	ppm	99.5	100.5	ok
-rs.live	the pitch, part 3	-99.9997311	ppm	-100.5	-99.5	ok
-rs.live	the pitch, part 4	28.8158752	ppm	28.316	29.316	ok
+rs.live	the pitch, part 2	99.9997977	ppm	99.5	100.5	ok
+rs.live	the pitch, part 3	-99.9997832	ppm	-100.5	-99.5	ok
+rs.live	the pitch, part 4	29.0839881	ppm	28.585	29.585	ok
 rs.live	the pitch, part 5	2.10309247e-05	ppm	-0.5	0.5	ok
 rs.live	steps in the tone	1		0	4	ok
 rs.pause	xruns	0		0	0	ok
-rs.pause	the pitch after it	999.999934	ppm	999	1001	ok
-rs.pause	the frames it slips at the release	-3.91208262		-16	16	ok
+rs.pause	the pitch after it	1000	ppm	999	1001	ok
+rs.pause	the frames it slips at the release	-3.9060887		-16	16	ok
 rs.xrun	xruns	1		1	1	ok
 rs.xrun	the pitch after it	1000.00015	ppm	999	1001	ok
 rs.drain	the frames short of the stream	-23.1678231		-36	18	ok
 rs.runout	the frames past the tone that aren't silent	0		0	0	ok
 rs.runout	xruns	0		0	0	ok
-rs.clock.44	Off, on the steered clock	-28.8305913	ppm	-500	500	ok
-rs.clock.44	Clock, on the raw clock	29.8650507	ppm	1	0	ok
-rs.clock.44	the driver's reading of the steered clock	29.752	ppm	1	0	ok
-rs.clock.44	Clock, on the raw clock, less that	0.113050738	ppm	-2	2	ok
-rs.clock.44	Clock, on the steered clock	0.11209478	ppm	1	0	ok
-rs.clock.44	what's left of the readings	11.5685195	us	0	600	ok
-rs.clock.44	the master on the raw clock	0.786	ppm	1	0	ok
+rs.clock.44	Off, on the steered clock	-29.0723792	ppm	-500	500	ok
+rs.clock.44	Clock, on the raw clock	30.1627673	ppm	1	0	ok
+rs.clock.44	the driver's reading of the steered clock	30.078	ppm	1	0	ok
+rs.clock.44	Clock, on the raw clock, less that	0.0847673204	ppm	-2	2	ok
+rs.clock.44	Clock, on the steered clock	0.117858557	ppm	1	0	ok
+rs.clock.44	what's left of the readings	11.2725703	us	0	600	ok
+rs.clock.44	the master on the raw clock	0.714	ppm	1	0	ok
 rs.clock.44	xruns	0		0	0	ok
-rs.clock.48	Off, on the steered clock	223.026957	ppm	-500	500	ok
-rs.clock.48	Clock, on the raw clock	29.8190001	ppm	1	0	ok
-rs.clock.48	the driver's reading of the steered clock	29.744	ppm	1	0	ok
-rs.clock.48	Clock, on the raw clock, less that	0.0750000987	ppm	-2	2	ok
-rs.clock.48	Clock, on the steered clock	0.0686095956	ppm	1	0	ok
-rs.clock.48	what's left of the readings	9.94630752	us	0	600	ok
-rs.clock.48	the master on the raw clock	0.81	ppm	1	0	ok
+rs.clock.48	Off, on the steered clock	222.839602	ppm	-500	500	ok
+rs.clock.48	Clock, on the raw clock	30.1609012	ppm	1	0	ok
+rs.clock.48	the driver's reading of the steered clock	30.069	ppm	1	0	ok
+rs.clock.48	Clock, on the raw clock, less that	0.091901191	ppm	-2	2	ok
+rs.clock.48	Clock, on the steered clock	0.0979538598	ppm	1	0	ok
+rs.clock.48	what's left of the readings	8.7268275	us	0	600	ok
+rs.clock.48	the master on the raw clock	0.817	ppm	1	0	ok
 rs.clock.48	xruns	0		0	0	ok
-rs.rates	at 8000 Hz, less the steered clock	0.986679769	ppm	-6	6	ok
+rs.rates	at 8000 Hz, less the steered clock	-2.19590975	ppm	-6	6	ok
 rs.rates	xruns at 8000 Hz	0		0	0	ok
-rs.rates	at 11025 Hz, less the steered clock	-1.46983364	ppm	-6	6	ok
+rs.rates	at 11025 Hz, less the steered clock	-2.43673306	ppm	-6	6	ok
 rs.rates	xruns at 11025 Hz	0		0	0	ok
-rs.rates	at 22050 Hz, less the steered clock	-0.280105822	ppm	-2	2	ok
+rs.rates	at 22050 Hz, less the steered clock	0.446094643	ppm	-2	2	ok
 rs.rates	xruns at 22050 Hz	0		0	0	ok
-rs.rates	at 32000 Hz, less the steered clock	0.0998497196	ppm	-2	2	ok
+rs.rates	at 32000 Hz, less the steered clock	0.667051205	ppm	-2	2	ok
 rs.rates	xruns at 32000 Hz	0		0	0	ok
-rs.rates	at 44100 Hz, less the steered clock	-0.794839847	ppm	-2	2	ok
+rs.rates	at 44100 Hz, less the steered clock	0.209580159	ppm	-2	2	ok
 rs.rates	xruns at 44100 Hz	0		0	0	ok
-rs.rates	at 48000 Hz, less the steered clock	-0.29156668	ppm	-2	2	ok
+rs.rates	at 48000 Hz, less the steered clock	-0.217084814	ppm	-2	2	ok
 rs.rates	xruns at 48000 Hz	0		0	0	ok
-rs.rates	at 88200 Hz, less the steered clock	0.120053752	ppm	-2	2	ok
+rs.rates	at 88200 Hz, less the steered clock	0.903970252	ppm	-2	2	ok
 rs.rates	xruns at 88200 Hz	0		0	0	ok
-rs.rates	at 96000 Hz, less the steered clock	0.146099211	ppm	-2	2	ok
+rs.rates	at 96000 Hz, less the steered clock	0.0785313307	ppm	-2	2	ok
 rs.rates	xruns at 96000 Hz	0		0	0	ok
-rs.bench	MMX, stereo, cycles a frame	180.210693		1	0	ok
-rs.bench	MMX, mono, cycles a frame	117.929932		1	0	ok
-rs.bench	C, stereo, cycles a frame	605.542725		1	0	ok
-rs.bench	MMX, stereo at 44.1 kHz, of the CPU	1.98677819	%	0	6	ok
-rs.bench	the C code's cost over MMX's	3.36019308	x	1	0	ok
-rs.analog.1k	THD+N, Off	-61.5476268	dB	1	0	ok
-rs.analog.1k	THD+N, with the filter	-61.5462211	dB	1	0	ok
-rs.analog.1k	what the filter adds to THD+N	0.00140571413	dB	-1.5	1.5	ok
-rs.analog.1k	what it does to the level	-5.92001982e-05	dB	-0.1	0.1	ok
-rs.analog.10k	THD+N, Off	-52.665083	dB	1	0	ok
-rs.analog.10k	THD+N, with the filter	-52.6978448	dB	1	0	ok
-rs.analog.10k	what the filter adds to THD+N	-0.0327617426	dB	-1.5	1.5	ok
-rs.analog.10k	what it does to the level	-0.00334638907	dB	-0.1	0.1	ok
-rs.analog.16k	THD+N, Off	-43.5412133	dB	1	0	ok
-rs.analog.16k	THD+N, with the filter	-43.5551348	dB	1	0	ok
-rs.analog.16k	what the filter adds to THD+N	-0.0139214919	dB	-1.5	1.5	ok
-rs.analog.16k	what it does to the level	0.00161342412	dB	-0.1	0.1	ok
-cpu.rs.44	the filter's part, from what's left of the machine	11.6876781	%	1	0	ok
-cpu.rs.44	the latest timer	1207.837	us	1	0	ok
-cpu.rs.44	the longest fill	129.942076	us	0	350	ok
-cpu.rs.44	the driver's own cycles, Off	0.299492886	%	0	1	ok
-cpu.rs.44	and in Clock	3.20825915	%	0	6	ok
-cpu.rs.48	the filter's part, from what's left of the machine	4.67720527	%	1	0	ok
-cpu.rs.48	the latest timer	1327.071	us	1	0	ok
-cpu.rs.48	the longest fill	132.89201	us	0	350	ok
-cpu.rs.48	the driver's own cycles, Off	0.313628443	%	0	1	ok
-cpu.rs.48	and in Clock	3.91458055	%	0	6	ok
-cpu.rs.mono	the filter's part, from what's left of the machine	2.22483872	%	1	0	ok
-cpu.rs.mono	the latest timer	1610.838	us	1	0	ok
-cpu.rs.mono	the longest fill	130.604561	us	0	350	ok
-cpu.rs.mono	the driver's own cycles, Off	0.208144025	%	0	1	ok
-cpu.rs.mono	and in Clock	1.88614073	%	0	4	ok
-cpu.rs.96	the filter's part, from what's left of the machine	9.06928792	%	1	0	ok
-cpu.rs.96	the latest timer	1265.372	us	1	0	ok
-cpu.rs.96	the longest fill	132.507019	us	0	350	ok
-cpu.rs.96	the driver's own cycles, Off	0.66636559	%	0	1	ok
-cpu.rs.96	and in Clock	7.78381241	%	0	12	ok
+rs.bench	MMX, stereo, cycles a frame	179.26001		1	0	ok
+rs.bench	MMX, mono, cycles a frame	116.355713		1	0	ok
+rs.bench	C, stereo, cycles a frame	650.246094		1	0	ok
+rs.bench	MMX, stereo at 44.1 kHz, of the CPU	1.97630208	%	0	6	ok
+rs.bench	the C code's cost over MMX's	3.62739071	x	1	0	ok
+rs.analog.1k	THD+N, Off	-61.503349	dB	1	0	ok
+rs.analog.1k	THD+N, with the filter	-61.538343	dB	1	0	ok
+rs.analog.1k	what the filter adds to THD+N	-0.0349939674	dB	-1.5	1.5	ok
+rs.analog.1k	what it does to the level	-0.00124022232	dB	-0.1	0.1	ok
+rs.analog.10k	THD+N, Off	-52.6705534	dB	1	0	ok
+rs.analog.10k	THD+N, with the filter	-52.6567037	dB	1	0	ok
+rs.analog.10k	what the filter adds to THD+N	0.0138496296	dB	-1.5	1.5	ok
+rs.analog.10k	what it does to the level	0.00115871857	dB	-0.1	0.1	ok
+rs.analog.16k	THD+N, Off	-43.919571	dB	1	0	ok
+rs.analog.16k	THD+N, with the filter	-43.9016429	dB	1	0	ok
+rs.analog.16k	what the filter adds to THD+N	0.0179281273	dB	-1.5	1.5	ok
+rs.analog.16k	what it does to the level	-0.000323118118	dB	-0.1	0.1	ok
+cpu.rs.44	the filter's part, from what's left of the machine	11.8886929	%	1	0	ok
+cpu.rs.44	the latest timer	1378.489	us	1	0	ok
+cpu.rs.44	the longest fill	130.192396	us	0	350	ok
+cpu.rs.44	the driver's own cycles, Off	0.29467544	%	0	1	ok
+cpu.rs.44	and in Clock	3.2360797	%	0	6	ok
+cpu.rs.48	the filter's part, from what's left of the machine	4.7501425	%	1	0	ok
+cpu.rs.48	the latest timer	944.963	us	1	0	ok
+cpu.rs.48	the longest fill	134.604808	us	0	350	ok
+cpu.rs.48	the driver's own cycles, Off	0.316203384	%	0	1	ok
+cpu.rs.48	and in Clock	3.95186625	%	0	6	ok
+cpu.rs.mono	the filter's part, from what's left of the machine	3.67014405	%	1	0	ok
+cpu.rs.mono	the latest timer	261.3	us	1	0	ok
+cpu.rs.mono	the longest fill	125.857483	us	0	350	ok
+cpu.rs.mono	the driver's own cycles, Off	0.195776918	%	0	1	ok
+cpu.rs.mono	and in Clock	1.97665288	%	0	4	ok
+cpu.rs.96	the filter's part, from what's left of the machine	7.8462937	%	1	0	ok
+cpu.rs.96	the latest timer	1263.808	us	1	0	ok
+cpu.rs.96	the longest fill	127.51995	us	0	350	ok
+cpu.rs.96	the driver's own cycles, Off	0.670480507	%	0	1	ok
+cpu.rs.96	and in Clock	7.87168265	%	0	12	ok
+cpu.over.2	the driver's own cycles	6.14229849	%	0	10	ok
+cpu.over.2	and in Clock	6.26278779	%	0	10	ok
+cpu.over.3	the driver's own cycles	9.65668362	%	0	15	ok
+cpu.over.3	and in Clock	9.8623815	%	0	15	ok
 dig.runout	frames missing at the end	0		0	16	ok
 dig.runout	xruns	0		0	0	ok
 dig.long	frames missing at the end	0		0	16	ok
 dig.long	xruns	0		0	0	ok
 fm.idle	samples other than +128	0		0	0	ok
-fm.esfm.sides	bit 5, left	-12.0641169	dBFS	-40	0	ok
+fm.esfm.sides	bit 5, left	-12.0647715	dBFS	-40	0	ok
 fm.esfm.sides	bit 5, right	0	rms	0	0	ok
-fm.esfm.sides	bit 4, right	-12.0642952	dBFS	-40	0	ok
+fm.esfm.sides	bit 4, right	-12.0640623	dBFS	-40	0	ok
 fm.esfm.sides	bit 4, left	0	rms	0	0	ok
-fm.opl3.sides	fm_sides=1, A on the left	-18.1087375	dBFS	-40	0	ok
+fm.opl3.sides	fm_sides=1, A on the left	-18.1095465	dBFS	-40	0	ok
 fm.opl3.sides	fm_sides=1, A on the right	0	rms	0	0	ok
-fm.opl3.sides	fm_sides=1, B on the right	-18.1102317	dBFS	-40	0	ok
+fm.opl3.sides	fm_sides=1, B on the right	-18.1105853	dBFS	-40	0	ok
 fm.opl3.sides	fm_sides=1, B on the left	0	rms	0	0	ok
-fm.opl3.sides	fm_sides=0, A on the right	-18.1105476	dBFS	-40	0	ok
+fm.opl3.sides	fm_sides=0, A on the right	-18.1083189	dBFS	-40	0	ok
 fm.opl3.sides	fm_sides=0, A on the left	0	rms	0	0	ok
-fm.opl3.sides	fm_sides=0, B on the left	-18.1091525	dBFS	-40	0	ok
+fm.opl3.sides	fm_sides=0, B on the left	-18.1103087	dBFS	-40	0	ok
 fm.opl3.sides	fm_sides=0, B on the right	0	rms	0	0	ok
-fm.pitch	frequency	440.75006	Hz	440.745061	440.755061	ok
+fm.pitch	frequency	440.750059	Hz	440.745061	440.755061	ok
 fm.pitch	sides	0	dB	-0.1	0.1	ok
-a1rec.fmt.s16	441 Hz	-16.5356635	dBFS	-40	-1	ok
-a1rec.fmt.s16	661.5 Hz on the left	-81.46056	dB	-200	-20	ok
-a1rec.fmt.s16	441 Hz on the right	-77.5833085	dB	-200	-20	ok
-a1rec.fmt.s16	THD+N, left	-58.795995	dB	-200	-30	ok
-a1rec.fmt.s16	pitch	-0.00289395904	ppm	-100	100	ok
+a1rec.fmt.s16	441 Hz	-16.5372858	dBFS	-40	-1	ok
+a1rec.fmt.s16	661.5 Hz on the left	-82.3638814	dB	-200	-20	ok
+a1rec.fmt.s16	441 Hz on the right	-81.0202975	dB	-200	-20	ok
+a1rec.fmt.s16	THD+N, left	-58.7620559	dB	-200	-30	ok
+a1rec.fmt.s16	pitch	-0.0106010414	ppm	-100	100	ok
 a1rec.fmt.s16	glitches	0		0	0	ok
-a1rec.fmt.s16m	441 Hz	-16.3193947	dBFS	-40	-1	ok
-a1rec.fmt.s16m	THD+N, left	-58.8713546	dB	-200	-30	ok
-a1rec.fmt.s16m	pitch	0.00914961234	ppm	-100	100	ok
+a1rec.fmt.s16m	441 Hz	-16.3218046	dBFS	-40	-1	ok
+a1rec.fmt.s16m	THD+N, left	-58.7328091	dB	-200	-30	ok
+a1rec.fmt.s16m	pitch	0.020402741	ppm	-100	100	ok
 a1rec.fmt.s16m	glitches	0		0	0	ok
-a1rec.fmt.u8	441 Hz	-16.5618913	dBFS	-40	-1	ok
-a1rec.fmt.u8	661.5 Hz on the left	-81.1120779	dB	-200	-20	ok
-a1rec.fmt.u8	441 Hz on the right	-51.0817773	dB	-200	-20	ok
-a1rec.fmt.u8	THD+N, left	-33.5671807	dB	-200	-25	ok
-a1rec.fmt.u8	pitch	0.0944116649	ppm	-100	100	ok
+a1rec.fmt.u8	441 Hz	-16.567673	dBFS	-40	-1	ok
+a1rec.fmt.u8	661.5 Hz on the left	-69.279	dB	-200	-20	ok
+a1rec.fmt.u8	441 Hz on the right	-58.9274802	dB	-200	-20	ok
+a1rec.fmt.u8	THD+N, left	-33.5108489	dB	-200	-25	ok
+a1rec.fmt.u8	pitch	0.391204334	ppm	-100	100	ok
 a1rec.fmt.u8	glitches	0		0	0	ok
-a1rec.fmt.u8m	441 Hz	-16.3161817	dBFS	-40	-1	ok
-a1rec.fmt.u8m	THD+N, left	-35.1945411	dB	-200	-25	ok
-a1rec.fmt.u8m	pitch	-0.00277262308	ppm	-100	100	ok
+a1rec.fmt.u8m	441 Hz	-16.3065245	dBFS	-40	-1	ok
+a1rec.fmt.u8m	THD+N, left	-33.4352035	dB	-200	-25	ok
+a1rec.fmt.u8m	pitch	-0.0745122056	ppm	-100	100	ok
 a1rec.fmt.u8m	glitches	0		0	0	ok
-a1rec.fmt.s8	441 Hz	-16.5194752	dBFS	-40	-1	ok
-a1rec.fmt.s8	661.5 Hz on the left	-69.4153713	dB	-200	-20	ok
-a1rec.fmt.s8	441 Hz on the right	-49.1134529	dB	-200	-20	ok
-a1rec.fmt.s8	THD+N, left	-32.8704673	dB	-200	-25	ok
-a1rec.fmt.s8	pitch	-0.24634955	ppm	-100	100	ok
+a1rec.fmt.s8	441 Hz	-16.5494108	dBFS	-40	-1	ok
+a1rec.fmt.s8	661.5 Hz on the left	-78.6742312	dB	-200	-20	ok
+a1rec.fmt.s8	441 Hz on the right	-49.7454285	dB	-200	-20	ok
+a1rec.fmt.s8	THD+N, left	-32.8066108	dB	-200	-25	ok
+a1rec.fmt.s8	pitch	0.0185133466	ppm	-100	100	ok
 a1rec.fmt.s8	glitches	0		0	0	ok
-a1rec.fmt.u16	441 Hz	-16.5331241	dBFS	-40	-1	ok
-a1rec.fmt.u16	661.5 Hz on the left	-80.9309528	dB	-200	-20	ok
-a1rec.fmt.u16	441 Hz on the right	-77.9566388	dB	-200	-20	ok
-a1rec.fmt.u16	THD+N, left	-58.8296107	dB	-200	-30	ok
-a1rec.fmt.u16	pitch	0.00782189328	ppm	-100	100	ok
+a1rec.fmt.u16	441 Hz	-16.5330503	dBFS	-40	-1	ok
+a1rec.fmt.u16	661.5 Hz on the left	-84.021229	dB	-200	-20	ok
+a1rec.fmt.u16	441 Hz on the right	-77.1980587	dB	-200	-20	ok
+a1rec.fmt.u16	THD+N, left	-58.6421414	dB	-200	-30	ok
+a1rec.fmt.u16	pitch	0.00984378791	ppm	-100	100	ok
 a1rec.fmt.u16	glitches	0		0	0	ok
-a1rec.rate.8000	441 Hz	-16.6821097	dBFS	-40	-1	ok
-a1rec.rate.8000	661.5 Hz on the left	-84.1074203	dB	-200	-20	ok
-a1rec.rate.8000	441 Hz on the right	-81.0761184	dB	-200	-20	ok
-a1rec.rate.8000	THD+N, left	-54.2076645	dB	-200	-30	ok
-a1rec.rate.8000	pitch	-251.954215	ppm	-600	600	ok
+a1rec.rate.8000	441 Hz	-16.690525	dBFS	-40	-1	ok
+a1rec.rate.8000	661.5 Hz on the left	-79.7384798	dB	-200	-20	ok
+a1rec.rate.8000	441 Hz on the right	-81.223371	dB	-200	-20	ok
+a1rec.rate.8000	THD+N, left	-54.3950408	dB	-200	-30	ok
+a1rec.rate.8000	pitch	-251.956824	ppm	-600	600	ok
 a1rec.rate.8000	glitches	0		0	0	ok
-a1rec.rate.11025	441 Hz	-16.5285671	dBFS	-40	-1	ok
-a1rec.rate.11025	661.5 Hz on the left	-81.0889536	dB	-200	-20	ok
-a1rec.rate.11025	441 Hz on the right	-76.8993768	dB	-200	-20	ok
-a1rec.rate.11025	THD+N, left	-58.6304036	dB	-200	-30	ok
-a1rec.rate.11025	pitch	0.0098057674	ppm	-100	100	ok
+a1rec.rate.11025	441 Hz	-16.5323777	dBFS	-40	-1	ok
+a1rec.rate.11025	661.5 Hz on the left	-85.1497099	dB	-200	-20	ok
+a1rec.rate.11025	441 Hz on the right	-83.8599525	dB	-200	-20	ok
+a1rec.rate.11025	THD+N, left	-58.1152851	dB	-200	-30	ok
+a1rec.rate.11025	pitch	0.0119461891	ppm	-100	100	ok
 a1rec.rate.11025	glitches	0		0	0	ok
-a1rec.rate.16000	441 Hz	-16.6861819	dBFS	-40	-1	ok
-a1rec.rate.16000	661.5 Hz on the left	-82.2111906	dB	-200	-20	ok
-a1rec.rate.16000	441 Hz on the right	-79.4361607	dB	-200	-20	ok
-a1rec.rate.16000	THD+N, left	-54.3602991	dB	-200	-30	ok
-a1rec.rate.16000	pitch	-251.939437	ppm	-600	600	ok
+a1rec.rate.16000	441 Hz	-16.6882928	dBFS	-40	-1	ok
+a1rec.rate.16000	661.5 Hz on the left	-80.2594523	dB	-200	-20	ok
+a1rec.rate.16000	441 Hz on the right	-79.5260564	dB	-200	-20	ok
+a1rec.rate.16000	THD+N, left	-54.3305421	dB	-200	-30	ok
+a1rec.rate.16000	pitch	-251.942316	ppm	-600	600	ok
 a1rec.rate.16000	glitches	0		0	0	ok
-a1rec.rate.22050	441 Hz	-16.5363273	dBFS	-40	-1	ok
-a1rec.rate.22050	661.5 Hz on the left	-81.6845898	dB	-200	-20	ok
-a1rec.rate.22050	441 Hz on the right	-82.6432226	dB	-200	-20	ok
-a1rec.rate.22050	THD+N, left	-58.5102976	dB	-200	-30	ok
-a1rec.rate.22050	pitch	0.00198877348	ppm	-100	100	ok
+a1rec.rate.22050	441 Hz	-16.5304632	dBFS	-40	-1	ok
+a1rec.rate.22050	661.5 Hz on the left	-81.9094981	dB	-200	-20	ok
+a1rec.rate.22050	441 Hz on the right	-79.6969913	dB	-200	-20	ok
+a1rec.rate.22050	THD+N, left	-58.4470367	dB	-200	-30	ok
+a1rec.rate.22050	pitch	0.0116300015	ppm	-100	100	ok
 a1rec.rate.22050	glitches	0		0	0	ok
-a1rec.rate.32000	441 Hz	-16.6911627	dBFS	-40	-1	ok
-a1rec.rate.32000	661.5 Hz on the left	-82.7071523	dB	-200	-20	ok
-a1rec.rate.32000	441 Hz on the right	-80.3732013	dB	-200	-20	ok
-a1rec.rate.32000	THD+N, left	-54.3798194	dB	-200	-30	ok
-a1rec.rate.32000	pitch	-251.949806	ppm	-600	600	ok
+a1rec.rate.32000	441 Hz	-16.6904943	dBFS	-40	-1	ok
+a1rec.rate.32000	661.5 Hz on the left	-81.9424251	dB	-200	-20	ok
+a1rec.rate.32000	441 Hz on the right	-82.6283054	dB	-200	-20	ok
+a1rec.rate.32000	THD+N, left	-54.3842999	dB	-200	-30	ok
+a1rec.rate.32000	pitch	-251.940469	ppm	-600	600	ok
 a1rec.rate.32000	glitches	0		0	0	ok
-a1rec.rate.44100	441 Hz	-16.5325532	dBFS	-40	-1	ok
-a1rec.rate.44100	661.5 Hz on the left	-82.5516664	dB	-200	-20	ok
-a1rec.rate.44100	441 Hz on the right	-78.0607286	dB	-200	-20	ok
-a1rec.rate.44100	THD+N, left	-58.6525426	dB	-200	-30	ok
-a1rec.rate.44100	pitch	0.0118260093	ppm	-100	100	ok
+a1rec.rate.44100	441 Hz	-16.5330073	dBFS	-40	-1	ok
+a1rec.rate.44100	661.5 Hz on the left	-85.4530566	dB	-200	-20	ok
+a1rec.rate.44100	441 Hz on the right	-82.2081473	dB	-200	-20	ok
+a1rec.rate.44100	THD+N, left	-58.6456744	dB	-200	-30	ok
+a1rec.rate.44100	pitch	0.00615790931	ppm	-100	100	ok
 a1rec.rate.44100	glitches	0		0	0	ok
-a1rec.rate.48000	441 Hz	-16.6918342	dBFS	-40	-1	ok
-a1rec.rate.48000	661.5 Hz on the left	-83.0707022	dB	-200	-20	ok
-a1rec.rate.48000	441 Hz on the right	-82.1552852	dB	-200	-20	ok
-a1rec.rate.48000	THD+N, left	-54.3551002	dB	-200	-30	ok
-a1rec.rate.48000	pitch	-251.93987	ppm	-600	600	ok
+a1rec.rate.48000	441 Hz	-16.6926995	dBFS	-40	-1	ok
+a1rec.rate.48000	661.5 Hz on the left	-85.5991854	dB	-200	-20	ok
+a1rec.rate.48000	441 Hz on the right	-80.1880623	dB	-200	-20	ok
+a1rec.rate.48000	THD+N, left	-54.4892931	dB	-200	-30	ok
+a1rec.rate.48000	pitch	-251.941757	ppm	-600	600	ok
 a1rec.rate.48000	glitches	0		0	0	ok
 a1rec.start.s16	frames at the start off the tone	0		0	0	ok
-a1rec.start.s16	offset over the first 5 ms	3.67092592		-330	330	ok
+a1rec.start.s16	offset over the first 5 ms	10.9014391		-330	330	ok
 a1rec.start.s16m	frames at the start off the tone	0		0	0	ok
-a1rec.start.s16m	offset over the first 5 ms	3.79614687		-330	330	ok
+a1rec.start.s16m	offset over the first 5 ms	10.2030457		-330	330	ok
 a1rec.start.u8	frames at the start off the tone	0		0	0	ok
-a1rec.start.u8	offset over the first 5 ms	5.58575076		-330	330	ok
+a1rec.start.u8	offset over the first 5 ms	15.1824457		-330	330	ok
 a1rec.start.8000	frames at the start off the tone	0		0	0	ok
-a1rec.start.8000	offset over the first 5 ms	-8.66647382		-330	330	ok
+a1rec.start.8000	offset over the first 5 ms	9.80607013		-330	330	ok
 a1rec.start.48000	frames at the start off the tone	0		0	0	ok
-a1rec.start.48000	offset over the first 5 ms	-8.59450468		-330	330	ok
-a1rec.dc	the ADC's offset, left	-2.57895692		-32	32	ok
-a1rec.dc	the ADC's offset, right	19.0612925		-32	32	ok
-a1rec.dc	a step of Capture DC Offset, left	64.8880499		58	70	ok
-a1rec.dc	a step of Capture DC Offset, right	63.8749433		58	70	ok
+a1rec.start.48000	offset over the first 5 ms	9.75016011		-330	330	ok
+a1rec.dc	the ADC's offset, left	22.5385941		-32	32	ok
+a1rec.dc	the ADC's offset, right	26.7392971		-32	32	ok
+a1rec.dc	a step of Capture DC Offset, left	61.7331066		58	70	ok
+a1rec.dc	a step of Capture DC Offset, right	62.0421315		58	70	ok
 a1rec.settle0	frames at the start off the tone	2205		1	0	ok
-a1rec.settle0	offset over the first 5 ms	-23250.0412		1	0	ok
-a1play.fmt.s16	441 Hz	-15.0565613	dBFS	-60	-1	ok
-a1play.fmt.s16	661.5 Hz, the right side	-80.453339	dB	-200	-20	ok
-a1play.fmt.s16	THD+N	-37.7240302	dB	-200	-15	ok
-a1play.fmt.s16	pitch, against the second card	-641.797254	ppm	-6000	6000	ok
-a1play.fmt.s16m	441 Hz	-23.947938	dBFS	-60	-1	ok
-a1play.fmt.s16m	THD+N	-42.5504026	dB	-200	-15	ok
-a1play.fmt.s16m	pitch, against the second card	2292.41591	ppm	-6000	6000	ok
-a1play.fmt.u8	441 Hz	-14.5565311	dBFS	-60	-1	ok
-a1play.fmt.u8	661.5 Hz, the right side	-76.8469386	dB	-200	-20	ok
-a1play.fmt.u8	THD+N	-37.7502023	dB	-200	-12	ok
-a1play.fmt.u8	pitch, against the second card	-426.227006	ppm	-6000	6000	ok
-a1play.fmt.u8m	441 Hz	-18.0308345	dBFS	-60	-1	ok
-a1play.fmt.u8m	THD+N	-37.6701834	dB	-200	-12	ok
-a1play.fmt.u8m	pitch, against the second card	1495.97532	ppm	-6000	6000	ok
-a1play.fmt.s8	441 Hz	-14.2929094	dBFS	-60	-1	ok
-a1play.fmt.s8	661.5 Hz, the right side	-77.8802424	dB	-200	-20	ok
-a1play.fmt.s8	THD+N	-37.8875313	dB	-200	-12	ok
-a1play.fmt.s8	pitch, against the second card	173.584784	ppm	-6000	6000	ok
-a1play.fmt.u16	441 Hz	-16.1216175	dBFS	-60	-1	ok
-a1play.fmt.u16	661.5 Hz, the right side	-75.5951853	dB	-200	-20	ok
-a1play.fmt.u16	THD+N	-42.4140438	dB	-200	-15	ok
-a1play.fmt.u16	pitch, against the second card	1075.80229	ppm	-6000	6000	ok
-a1play.rate.8000	441 Hz	-14.9629092	dBFS	-60	-1	ok
-a1play.rate.8000	661.5 Hz, the right side	-81.5361707	dB	-200	-20	ok
-a1play.rate.8000	THD+N	-22.8014148	dB	-200	-15	ok
-a1play.rate.8000	pitch, against the second card	650.760219	ppm	-6000	6000	ok
-a1play.rate.11025	441 Hz	-15.4158576	dBFS	-60	-1	ok
-a1play.rate.11025	661.5 Hz, the right side	-79.0938611	dB	-200	-20	ok
-a1play.rate.11025	THD+N	-26.3981263	dB	-200	-15	ok
-a1play.rate.11025	pitch, against the second card	844.379572	ppm	-6000	6000	ok
-a1play.rate.22050	441 Hz	-14.4170437	dBFS	-60	-1	ok
-a1play.rate.22050	661.5 Hz, the right side	-82.2176596	dB	-200	-20	ok
-a1play.rate.22050	THD+N	-42.6575108	dB	-200	-15	ok
-a1play.rate.22050	pitch, against the second card	361.796569	ppm	-6000	6000	ok
-a1play.rate.48000	441 Hz	-15.8572075	dBFS	-60	-1	ok
-a1play.rate.48000	661.5 Hz, the right side	-76.2310917	dB	-200	-20	ok
-a1play.rate.48000	THD+N	-41.7971436	dB	-200	-15	ok
-a1play.rate.48000	pitch, against the second card	1005.9247	ppm	-6000	6000	ok
+a1rec.settle0	offset over the first 5 ms	26761.1415		1	0	ok
+a1play.fmt.s16	441 Hz	-19.6243514	dBFS	-60	-1	ok
+a1play.fmt.s16	661.5 Hz, the right side	-38.9732354	dB	-200	-20	ok
+a1play.fmt.s16	THD+N	-36.0173959	dB	-200	-15	ok
+a1play.fmt.s16	pitch, against the second card	-22.5459797	ppm	-6000	6000	ok
+a1play.fmt.s16m	441 Hz	-19.7183903	dBFS	-60	-1	ok
+a1play.fmt.s16m	THD+N	-39.384333	dB	-200	-15	ok
+a1play.fmt.s16m	pitch, against the second card	-22.3764703	ppm	-6000	6000	ok
+a1play.fmt.u8	441 Hz	-19.6675395	dBFS	-60	-1	ok
+a1play.fmt.u8	661.5 Hz, the right side	-39.1547759	dB	-200	-20	ok
+a1play.fmt.u8	THD+N	-33.9391166	dB	-200	-12	ok
+a1play.fmt.u8	pitch, against the second card	-22.4797062	ppm	-6000	6000	ok
+a1play.fmt.u8m	441 Hz	-19.7645861	dBFS	-60	-1	ok
+a1play.fmt.u8m	THD+N	-35.7101759	dB	-200	-12	ok
+a1play.fmt.u8m	pitch, against the second card	-22.1445488	ppm	-6000	6000	ok
+a1play.fmt.s8	441 Hz	-19.6702629	dBFS	-60	-1	ok
+a1play.fmt.s8	661.5 Hz, the right side	-38.9751093	dB	-200	-20	ok
+a1play.fmt.s8	THD+N	-34.1496389	dB	-200	-12	ok
+a1play.fmt.s8	pitch, against the second card	-22.2525715	ppm	-6000	6000	ok
+a1play.fmt.u16	441 Hz	-19.6240751	dBFS	-60	-1	ok
+a1play.fmt.u16	661.5 Hz, the right side	-39.0761955	dB	-200	-20	ok
+a1play.fmt.u16	THD+N	-36.1037962	dB	-200	-15	ok
+a1play.fmt.u16	pitch, against the second card	-22.4109183	ppm	-6000	6000	ok
+a1play.rate.8000	441 Hz	-19.7886342	dBFS	-60	-1	ok
+a1play.rate.8000	661.5 Hz, the right side	-39.4784631	dB	-200	-20	ok
+a1play.rate.8000	THD+N	-21.4773613	dB	-200	-15	ok
+a1play.rate.8000	pitch, against the second card	229.53111	ppm	-6000	6000	ok
+a1play.rate.11025	441 Hz	-19.6644066	dBFS	-60	-1	ok
+a1play.rate.11025	661.5 Hz, the right side	-39.3061181	dB	-200	-20	ok
+a1play.rate.11025	THD+N	-25.0837711	dB	-200	-15	ok
+a1play.rate.11025	pitch, against the second card	-22.6680908	ppm	-6000	6000	ok
+a1play.rate.22050	441 Hz	-19.6293618	dBFS	-60	-1	ok
+a1play.rate.22050	661.5 Hz, the right side	-39.0513258	dB	-200	-20	ok
+a1play.rate.22050	THD+N	-35.947993	dB	-200	-15	ok
+a1play.rate.22050	pitch, against the second card	-22.4488361	ppm	-6000	6000	ok
+a1play.rate.48000	441 Hz	-19.7112179	dBFS	-60	-1	ok
+a1play.rate.48000	661.5 Hz, the right side	-39.4322213	dB	-200	-20	ok
+a1play.rate.48000	THD+N	-36.2046124	dB	-200	-15	ok
+a1play.rate.48000	pitch, against the second card	229.264828	ppm	-6000	6000	ok
 a1play.start	16-bit starts in step	10	of 10	10	10	ok
 a1play.start	8-bit starts with their sides	10	of 10	10	10	ok
-a1play.drain	the tone's length	998.5625	ms	985	1030	ok
-a1play.pausedrain	the tone's length	1197.70833	ms	1185	1230	ok
-a1play.click	the worst click, of the tone's peak	3.05211268		1	0	ok
-a1play.click	the mean	1.37746669		1	0	ok
-buf.delay	first frame after the trigger	-0.798775661	ms	-5	5	ok
-buf.delay	the delay against the music DAC	-3.0055979	ms	-5	5	ok
+a1play.drain	the tone's length	999.354167	ms	985	1030	ok
+a1play.pausedrain	the tone's length	1199.5625	ms	1185	1230	ok
+a1play.click	the worst click, of the tone's peak	5.654814		1	0	ok
+a1play.click	the mean	1.78090726		1	0	ok
+buf.delay	first frame after the trigger	-0.799230417	ms	-5	5	ok
+buf.delay	the delay against the music DAC	-3.02157016	ms	-5	5	ok
 buf.delay	the FIFO in the delay	16	frames	16	16	ok
-buf.drain	half a second's drain	0.504897574	s	0.495	0.53	ok
+buf.drain	half a second's drain	0.504884101	s	0.495	0.53	ok
 buf.xrun.play	xruns	1		1	3	ok
 buf.xrun.play	frames moved	132300		132300	132300	ok
 buf.xrun.rec	xruns	1		1	3	ok
 buf.xrun.rec	frames moved	132300		132300	132300	ok
-mix.a2	left high, right low: their difference	8.74651271	dB	8.5	9.5	ok
+mix.a2	left high, right low: their difference	8.75091414	dB	8.5	9.5	ok
 mix.a2	steps measured	14		3	100	ok
-mix.a2	worst step against the scale	-0.627975631	dB	-0.7	0.7	ok
+mix.a2	worst step against the scale	-0.665553868	dB	-0.7	0.7	ok
 mix.a2	steps that rose	0		0	0	ok
 mix.a2	mutes that muted	1		1	1	ok
-mix.a2rec	left high, right low: their difference	8.69429705	dB	8.5	9.5	ok
+mix.a2rec	left high, right low: their difference	8.6956203	dB	8.5	9.5	ok
 mix.a2rec	steps measured	14		3	100	ok
-mix.a2rec	worst step against the scale	-0.541247793	dB	-0.7	0.7	ok
+mix.a2rec	worst step against the scale	-0.519809558	dB	-0.7	0.7	ok
 mix.a2rec	steps that rose	0		0	0	ok
 mix.a2rec	mutes that muted	1		1	1	ok
-mix.capture	left high, right low: their difference	8.76265422	dB	8.5	9.5	ok
+mix.capture	left high, right low: their difference	8.76119944	dB	8.5	9.5	ok
 mix.capture	steps measured	15		3	100	ok
-mix.capture	worst step against the scale	0.0746699933	dB	-0.7	0.7	ok
+mix.capture	worst step against the scale	0.0679525909	dB	-0.7	0.7	ok
 mix.capture	steps that rose	0		0	0	ok
 mix.capture	mutes that muted	1		1	1	ok
-mix.fmrec	left high, right low: their difference	9.29810261	dB	8.5	9.5	ok
+mix.fmrec	left high, right low: their difference	9.30206878	dB	8.5	9.5	ok
 mix.fmrec	steps measured	14		3	100	ok
-mix.fmrec	worst step against the scale	-0.191957353	dB	-0.7	0.7	ok
+mix.fmrec	worst step against the scale	-0.189070856	dB	-0.7	0.7	ok
 mix.fmrec	steps that rose	0		0	0	ok
 mix.fmrec	mutes that muted	1		1	1	ok
-mix.master	left high, right low: their difference	4.20401858	dB	4	5	ok
+mix.master	left high, right low: their difference	4.20335352	dB	4	5	ok
 mix.master	steps measured	24		3	100	ok
-mix.master	worst step against the scale	0.23970681	dB	-0.7	0.7	ok
+mix.master	worst step against the scale	0.180951652	dB	-0.7	0.7	ok
 mix.master	steps that rose	0		0	0	ok
 mix.master	mutes that muted	1		1	1	ok
-dac.images	image against the tone, stages off	-32.0424251	dB	1	0	ok
-dac.images	image against the tone, oversampling	-57.3878813	dB	1	0	ok
-dac.images	image against the tone, filter	-67.6311514	dB	1	0	ok
-dac.images	oversampling takes the image down	25.3454561	dB	10	200	ok
-dac.images	the filter takes the image down	35.5887263	dB	3	200	ok
-dac.fold	the levels' spread, the ADC's filter off	0.00614802659	dB	1	0	ok
-dac.fold	and on, the spread	0.00247232864	dB	0	0.5	ok
-dac.fold	the level, the filter off	-21.8051783	dBFS	1	0	ok
-dac.fold	and on	-21.5115172	dBFS	1	0	ok
-dac.corner.11025	the filter's -3 dB point, of the rate	0.439301962		0.3	0.5	ok
-dac.corner.11025	the filter's -3 dB point	4843.30413	Hz	1	0	ok
-dac.corner.22050	the filter's -3 dB point, of the rate	0.439280103		0.3	0.5	ok
-dac.corner.22050	the filter's -3 dB point	9686.12627	Hz	1	0	ok
-dac.corner.32000	the filter's -3 dB point, of the rate	0.453642828		0.3	0.5	ok
-dac.corner.32000	the filter's -3 dB point	14516.5705	Hz	1	0	ok
-a2.rate.8000	pitch against Audio 1's clock	0.00181717106	ppm	-100	100	ok
-a2.rate.8000	THD+N below the first image	-60.9658681	dB	-200	-30	ok
-a2.rate.11025	pitch against Audio 1's clock	-251.951573	ppm	-600	600	ok
-a2.rate.11025	THD+N below the first image	-60.4651847	dB	-200	-30	ok
-a2.rate.16000	pitch against Audio 1's clock	-0.00536136338	ppm	-100	100	ok
-a2.rate.16000	THD+N below the first image	-59.85013	dB	-200	-30	ok
-a2.rate.22050	pitch against Audio 1's clock	-251.945919	ppm	-600	600	ok
-a2.rate.22050	THD+N below the first image	-59.0766025	dB	-200	-30	ok
-a2.rate.32000	pitch against Audio 1's clock	0.00342565124	ppm	-100	100	ok
-a2.rate.32000	THD+N below the first image	-58.4352261	dB	-200	-30	ok
-a2.rate.44100	pitch against Audio 1's clock	-251.946348	ppm	-600	600	ok
-a2.rate.44100	THD+N below the first image	-57.9590776	dB	-200	-30	ok
-a2.rate.48000	pitch against Audio 1's clock	0.00267172602	ppm	-100	100	ok
-a2.rate.48000	THD+N below the first image	-58.0154702	dB	-200	-30	ok
-a2.rate.88200	pitch against Audio 1's clock	-251.951977	ppm	-600	600	ok
-a2.rate.88200	THD+N below the first image	-57.9209279	dB	-200	-30	ok
-a2.rate.96000	pitch against Audio 1's clock	0.00361068894	ppm	-100	100	ok
-a2.rate.96000	THD+N below the first image	-58.0510475	dB	-200	-30	ok
+mix.a1	steps measured	13		3	100	ok
+mix.a1	worst step against the scale	-0.187157932	dB	-0.7	0.7	ok
+mix.a1	steps that rose	0		0	0	ok
+mix.a1	mutes that muted	1		1	1	ok
+dac.images	image against the tone, stages off	-32.0449682	dB	1	0	ok
+dac.images	image against the tone, oversampling	-57.7172753	dB	1	0	ok
+dac.images	image against the tone, filter	-69.0160918	dB	1	0	ok
+dac.images	oversampling takes the image down	25.6723071	dB	10	200	ok
+dac.images	the filter takes the image down	36.9711236	dB	3	200	ok
+dac.fold	the levels' spread, the ADC's filter off	0.00157923443	dB	1	0	ok
+dac.fold	and on, the spread	0.00134649022	dB	0	0.5	ok
+dac.fold	the level, the filter off	-20.5149891	dBFS	1	0	ok
+dac.fold	and on	-21.8556815	dBFS	1	0	ok
+dac.corner.11025	the filter's -3 dB point, of the rate	0.439250822		0.3	0.5	ok
+dac.corner.11025	the filter's -3 dB point	4842.74032	Hz	1	0	ok
+dac.corner.22050	the filter's -3 dB point, of the rate	0.439067129		0.3	0.5	ok
+dac.corner.22050	the filter's -3 dB point	9681.4302	Hz	1	0	ok
+dac.corner.32000	the filter's -3 dB point, of the rate	0.453564128		0.3	0.5	ok
+dac.corner.32000	the filter's -3 dB point	14514.0521	Hz	1	0	ok
+a2.rate.8000	pitch against Audio 1's clock	0.0014883382	ppm	-100	100	ok
+a2.rate.8000	THD+N below the first image	-60.9213077	dB	-200	-30	ok
+a2.rate.11025	pitch against Audio 1's clock	-251.940323	ppm	-600	600	ok
+a2.rate.11025	THD+N below the first image	-60.5858275	dB	-200	-30	ok
+a2.rate.16000	pitch against Audio 1's clock	-0.00914659564	ppm	-100	100	ok
+a2.rate.16000	THD+N below the first image	-59.8869853	dB	-200	-30	ok
+a2.rate.22050	pitch against Audio 1's clock	-251.950927	ppm	-600	600	ok
+a2.rate.22050	THD+N below the first image	-59.1091998	dB	-200	-30	ok
+a2.rate.32000	pitch against Audio 1's clock	-0.000785740907	ppm	-100	100	ok
+a2.rate.32000	THD+N below the first image	-58.5231725	dB	-200	-30	ok
+a2.rate.44100	pitch against Audio 1's clock	-251.951449	ppm	-600	600	ok
+a2.rate.44100	THD+N below the first image	-58.0346081	dB	-200	-30	ok
+a2.rate.48000	pitch against Audio 1's clock	-0.00165205523	ppm	-100	100	ok
+a2.rate.48000	THD+N below the first image	-58.1527936	dB	-200	-30	ok
+a2.rate.88200	pitch against Audio 1's clock	-251.947809	ppm	-600	600	ok
+a2.rate.88200	THD+N below the first image	-58.0470372	dB	-200	-30	ok
+a2.rate.96000	pitch against Audio 1's clock	-7.13049729	ppm	-100	100	ok
+a2.rate.96000	THD+N below the first image	-36.2329311	dB	-200	-30	ok
 3d.quick	runs that failed or clipped	0		0	0	ok
-3d.quick	S>S at 400 Hz, ESS's setting	17.9509068	dB	12	24	ok
-3d.quick	M>M with ESS's setting, furthest from 0 dB	-0.00285944506	dB	-1	1	ok
-3d.quick	the boost at 400 Hz from level 63 to 32, against the scale	-0.0467714999	dB	-2	2	ok
-3d.quick	S>S at 400 Hz, level 0	0.251230478	dB	-1	1	ok
-3d.quick	M>S at 400 Hz with the model	13.9435558	dB	8	24	ok
-3d.quick	S>S at 400 Hz with the model	-23.6222191	dB	-100	-12	ok
-3d.quick	the limit's hold at 1 kHz, S/M +6 dB	15.327691	dB	6	40	ok
-3d.quick	the limit's hold at 1 kHz, S/M -24 dB	0.00434207916	dB	-1.5	1.5	ok
-3d.quick	54h-5Ah at their ends with the limit off, furthest from ESS's	-0.0127801895	dB	-0.5	0.5	ok
-3d.quick	the path at the end against the start	0.00603781827	dB	-0.5	0.5	ok
-dual.map	channel 1, 441 Hz	-17.7337455	dBFS	-60	-1	ok
-dual.map	channel 3, 882 Hz	-19.6345675	dBFS	-60	-1	ok
-dual.map	their pitches, against 2	17.4754494	ppm	-100	100	ok
-dual.align	Audio 2 against Audio 1	2.71967003	frames	-20	20	ok
-dual.align	Audio 2 against Audio 1, in time	61.6705223	us	1	0	ok
-dual.align.22050	Audio 2 against Audio 1	2.60483585	frames	-20	20	ok
-dual.align.22050	Audio 2 against Audio 1, in time	118.133145	us	1	0	ok
-dual.align.48000	Audio 2 against Audio 1	1.12936627	frames	-20	20	ok
-dual.align.48000	Audio 2 against Audio 1, in time	23.528464	us	1	0	ok
+3d.quick	S>S at 400 Hz, ESS's setting	17.9514866	dB	12	24	ok
+3d.quick	M>M with ESS's setting, furthest from 0 dB	-0.00697824312	dB	-1	1	ok
+3d.quick	the boost at 400 Hz from level 63 to 32, against the scale	-0.0458185134	dB	-2	2	ok
+3d.quick	S>S at 400 Hz, level 0	0.251019299	dB	-1	1	ok
+3d.quick	M>S at 400 Hz with the model	13.9463511	dB	8	24	ok
+3d.quick	S>S at 400 Hz with the model	-23.7243881	dB	-100	-12	ok
+3d.quick	the limit's hold at 1 kHz, S/M +6 dB	15.3401491	dB	6	40	ok
+3d.quick	the limit's hold at 1 kHz, S/M -24 dB	0.001080513	dB	-1.5	1.5	ok
+3d.quick	54h-5Ah at their ends with the limit off, furthest from ESS's	-0.0107803345	dB	-0.5	0.5	ok
+3d.quick	the path at the end against the start	0.00475698989	dB	-0.5	0.5	ok
+dual.map	channel 1, 441 Hz	-23.1975504	dBFS	-60	-1	ok
+dual.map	channel 3, 882 Hz	-24.8598098	dBFS	-60	-1	ok
+dual.map	their pitches, against 2	-1.44178606	ppm	-100	100	ok
+dual.align	the two tones from one DAC, in time	-553.16419	us	1	0	ok
+dual.align	Audio 2 against Audio 1	6.02460607	frames	-20	20	ok
+dual.align	Audio 2 against Audio 1, in time	136.612382	us	1	0	ok
+dual.align.22050	the two tones from one DAC, in time	-551.945599	us	1	0	ok
+dual.align.22050	Audio 2 against Audio 1	-0.321605577	frames	-20	20	ok
+dual.align.22050	Audio 2 against Audio 1, in time	-14.5852869	us	1	0	ok
+dual.align.48000	the two tones from one DAC, in time	-551.788812	us	1	0	ok
+dual.align.48000	Audio 2 against Audio 1	0.367101107	frames	-20	20	ok
+dual.align.48000	Audio 2 against Audio 1, in time	7.64793972	us	1	0	ok
 both.a1play	aplay's exit	0		0	0	ok
 both.a1play	Audio 2's xruns	0		0	0	ok
-both.a1play	Audio 2's lowest 50 ms against its median	-0.0148595888	dB	-6	0	ok
+both.a1play	Audio 2's lowest 50 ms against its median	-0.100436705	dB	-6	0	ok
 both.a1rec	arecord's exit	0		0	0	ok
 both.a1rec	Audio 2's xruns	0		0	0	ok
-both.a1rec	Audio 2's lowest 50 ms against its median	-0.00824627728	dB	-6	0	ok
+both.a1rec	Audio 2's lowest 50 ms against its median	-0.106491973	dB	-6	0	ok
 mix.monitor	arecord's exit	0		0	0	ok
 mix.monitor	Audio 2's xruns	0		0	0	ok
-mix.monitor	the output's lowest 50 ms with the monitor, against its median	-57.6110509	dB	-200	-20	ok
-latency.min.a2	smallest period without an xrun	128	frames	32	512	ok
-latency.min.a2	its buffer's latency	11.6099773	ms	1	0	ok
-latency.min.a1	smallest period without an xrun	128	frames	32	512	ok
-latency.min.a1	its buffer's latency	11.6099773	ms	1	0	ok
+mix.monitor	the output's lowest 50 ms with the monitor, against its median	-61.6103495	dB	-200	-20	ok
+latency.min.a2	smallest period without an xrun	32	frames	32	512	ok
+latency.min.a2	its buffer's latency	2.90249433	ms	1	0	ok
+latency.min.a1	smallest period without an xrun	32	frames	32	512	ok
+latency.min.a1	its buffer's latency	2.90249433	ms	1	0	ok
 music.aplay	frames played exactly	132300		132284	132300	ok
 cpu.a2	interrupts a second	21.6		1	0	ok
 cpu.a2	ring ticks a second	0		1	0	ok
-cpu.a2	the driver's share	0.285225882	%	0	1	ok
-cpu.a2	busy, idle	12.4373119	%	1	0	ok
-cpu.a2	busy, playing	1.90380762	%	1	0	ok
+cpu.a2	the driver's share	0.298527654	%	0	1	ok
+cpu.a2	busy, idle	0	%	1	0	ok
+cpu.a2	busy, playing	1.1	%	1	0	ok
 cpu.a1	interrupts a second	21.6		1	0	ok
 cpu.a1	ring ticks a second	0		1	0	ok
-cpu.a1	the driver's share	0.118543083	%	0	1	ok
-cpu.a1	busy, idle	1.49700599	%	1	0	ok
-cpu.a1	busy, playing	7.44786495	%	1	0	ok
+cpu.a1	the driver's share	0.0989746205	%	0	1	ok
+cpu.a1	busy, idle	0.200803213	%	1	0	ok
+cpu.a1	busy, playing	5.79420579	%	1	0	ok
 cpu.both	interrupts a second	43.2		1	0	ok
 cpu.both	ring ticks a second	0		1	0	ok
-cpu.both	the driver's share	0.461523591	%	0	2	ok
-cpu.both	busy, idle	1.1011011	%	1	0	ok
-cpu.both	busy, playing	2.68924303	%	1	0	ok
-beep.out	level 7 over level 0	40.6103489	dB	20	200	ok
-beep.out	level 4 over level 0	33.6134623	dB	3	40.6103489	ok
+cpu.both	the driver's share	0.424951626	%	0	2	ok
+cpu.both	busy, idle	0.100401606	%	1	0	ok
+cpu.both	busy, playing	1.40421264	%	1	0	ok
+beep.out	level 7 over level 0	23.3856007	dB	20	200	ok
+beep.out	level 4 over level 0	16.8824088	dB	3	23.3856007	ok
 pwr.partial	frames missing at the end	0		0	16	ok
 pwr.partial	xruns	0		0	0	ok
 pwr.full	frames missing at the end	0		0	16	ok
@@ -556,47 +612,47 @@ pwr.full	xruns	0		0	0	ok
 pwr.self	frames missing at the end	0		0	16	ok
 pwr.self	xruns	0		0	0	ok
 midi.mpu	amidi's exit	0		0	0	ok
-midi.esfm	MIDI time 0 in the recording	0.570259072	s	0	1.5	ok
+midi.esfm	MIDI time 0 in the recording	0.578827742	s	0	1.5	ok
 midi.esfm	C4, against A440	-11.9285167	cents	-20	0	ok
 midi.esfm	modulation 0: vibrato	0.216219819	cents	0	4	ok
-midi.esfm	modulation 40: vibrato	7.6692498	cents	5	22	ok
-midi.esfm	modulation 127: vibrato	16.4442418	cents	10	45	ok
-midi.esfm	modulation 0 again	0.236178474	cents	0	4	ok
-midi.esfm	pressure 90: vibrato	18.9912265	cents	10	45	ok
-midi.esfm	pressure 0: vibrato	0.150697967	cents	0	4	ok
-midi.esfm	pan 64, left	-26.0434936	dBFS	-50	0	ok
-midi.esfm	pan 64, right	-28.0335368	dBFS	-50	0	ok
-midi.esfm	pan 0, left	-26.1979544	dBFS	-50	0	ok
+midi.esfm	modulation 40: vibrato	8.15636866	cents	5	22	ok
+midi.esfm	modulation 127: vibrato	20.9584179	cents	10	45	ok
+midi.esfm	modulation 0 again	0.203900216	cents	0	4	ok
+midi.esfm	pressure 90: vibrato	18.4756179	cents	10	45	ok
+midi.esfm	pressure 0: vibrato	0.152588369	cents	0	4	ok
+midi.esfm	pan 64, left	-26.0434806	dBFS	-50	0	ok
+midi.esfm	pan 64, right	-28.0335253	dBFS	-50	0	ok
+midi.esfm	pan 0, left	-26.1978293	dBFS	-50	0	ok
 midi.esfm	pan 0, right	0	rms	0	0	ok
 midi.esfm	pan 127, left	0	rms	0	0	ok
-midi.esfm	pan 127, right	-29.4240934	dBFS	-50	0	ok
-midi.esfm	pan 64 again, left	-29.4766197	dBFS	-50	0	ok
-midi.esfm	pan 64 again, right	-31.8706318	dBFS	-50	0	ok
-midi.esfm	RPN 1 +50 cents	49.3721286	cents	40	60	ok
-midi.esfm	RPN 1 -50 cents	-46.5185963	cents	-60	-40	ok
-midi.esfm	RPN 1 in tune	-6.20971959	cents	-10	10	ok
-midi.esfm	RPN 2 +12	1201.57038	cents	1190	1210	ok
-midi.esfm	RPN 2 0	0.0953054139	cents	-10	10	ok
-midi.esfm	bend range 12, full	1200.86694	cents	1190	1210	ok
-midi.esfm	bend back to center	-0.125765504	cents	-10	10	ok
-midi.esfm	master 1000h against 3FFFh	-2.07831076	dB	-40	-1	ok
-midi.esfm	master 3FFFh against before	-2.59774729	dB	-3	3	ok
-midi.esfm	controller 121, before, left	-28.2645816	dBFS	-50	0	ok
+midi.esfm	pan 127, right	-29.4242333	dBFS	-50	0	ok
+midi.esfm	pan 64 again, left	-29.4770176	dBFS	-50	0	ok
+midi.esfm	pan 64 again, right	-31.8711268	dBFS	-50	0	ok
+midi.esfm	RPN 1 +50 cents	49.3722571	cents	40	60	ok
+midi.esfm	RPN 1 -50 cents	-46.5390042	cents	-60	-40	ok
+midi.esfm	RPN 1 in tune	-6.21645124	cents	-10	10	ok
+midi.esfm	RPN 2 +12	1201.57049	cents	1190	1210	ok
+midi.esfm	RPN 2 0	0.0950993878	cents	-10	10	ok
+midi.esfm	bend range 12, full	1200.86149	cents	1190	1210	ok
+midi.esfm	bend back to center	-0.118650777	cents	-10	10	ok
+midi.esfm	master 1000h against 3FFFh	-1.9718506	dB	-40	-1	ok
+midi.esfm	master 3FFFh against before	-2.63141705	dB	-3	3	ok
+midi.esfm	controller 121, before, left	-28.2443218	dBFS	-50	0	ok
 midi.esfm	controller 121, before, right	0	rms	0	0	ok
-midi.esfm	bend +1 semitone	100.999761	cents	90	110	ok
-midi.esfm	vibrato before 121	12.1130278	cents	10	45	ok
-midi.esfm	after 121: in tune	0.953814323	cents	-10	10	ok
-midi.esfm	after 121: vibrato	0.503631884	cents	0	4	ok
-midi.esfm	controller 121, after, left	-25.5973773	dBFS	-50	0	ok
+midi.esfm	bend +1 semitone	100.897924	cents	90	110	ok
+midi.esfm	vibrato before 121	17.4112384	cents	10	45	ok
+midi.esfm	after 121: in tune	0.983921146	cents	-10	10	ok
+midi.esfm	after 121: vibrato	0.496506282	cents	0	4	ok
+midi.esfm	controller 121, after, left	-25.4804319	dBFS	-50	0	ok
 midi.esfm	controller 121, after, right	0	rms	0	0	ok
-midi.opl3	MIDI time 0 in the recording	0.544170891	s	0	1.5	ok
-midi.opl3	C4, against A440	-9.42149151	cents	-25	25	ok
-midi.opl3	pan 64, left	-36.5365418	dBFS	-50	0	ok
-midi.opl3	pan 64, right	-36.5365418	dBFS	-50	0	ok
-midi.opl3	pan 0, left	-31.4578008	dBFS	-50	0	ok
+midi.opl3	MIDI time 0 in the recording	0.544090434	s	0	1.5	ok
+midi.opl3	C4, against A440	-9.42118519	cents	-25	25	ok
+midi.opl3	pan 64, left	-36.6309437	dBFS	-50	0	ok
+midi.opl3	pan 64, right	-36.6309437	dBFS	-50	0	ok
+midi.opl3	pan 0, left	-31.4177901	dBFS	-50	0	ok
 midi.opl3	pan 0, right	0	rms	0	0	ok
 midi.opl3	pan 127, left	0	rms	0	0	ok
-midi.opl3	pan 127, right	-31.5824457	dBFS	-50	0	ok
-midi.opl3	pan 64 again, left	-31.6251335	dBFS	-50	0	ok
-midi.opl3	pan 64 again, right	-31.6251335	dBFS	-50	0	ok
-midi.soft	music over the noise	23.624997	dB	10	200	ok
+midi.opl3	pan 127, right	-31.5644282	dBFS	-50	0	ok
+midi.opl3	pan 64 again, left	-31.6064253	dBFS	-50	0	ok
+midi.opl3	pan 64 again, right	-31.6064253	dBFS	-50	0	ok
+midi.soft	music over the noise	25.4976003	dB	10	200	ok
