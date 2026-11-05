@@ -238,7 +238,7 @@ static int regs_pattern(struct es1869 *chip, void __user *argp)
 	// alone it holds the machine, for what the streams' buffers last on a
 	// machine of 400 MHz
 	if ((p.flags & ES1869_PATTERN_ALONE) &&
-	    (p.step >> 16) * p.count > 1ULL << 27)
+	    (p.step >> 43 || (p.step >> 16) * p.count > 1ULL << 27))
 		return -EINVAL;
 	tab = memdup_array_user(u64_to_user_ptr(p.table), p.len, sizeof(*tab));
 	if (IS_ERR(tab))

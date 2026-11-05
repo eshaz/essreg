@@ -326,8 +326,8 @@ are exactly 12 MHz / 11998. The RTC, a 32.768 kHz crystal of its own, reads
 its phase. The Play! 3 is no second clock: its capture runs 48008.015 Hz,
 locked to the USB frames, so it is an outside meter of the chip's phase and
 nothing more. It reads the chip against itself to 470 ppb at 1 s and 11 ppb
-at 128 s, and shows Trim's +10 ppm as +9.998 ppm and no phase jump of over
-about 2 us when the filter turns on or the mode changes.
+at 128 s, and shows Trim's +10 and -10 ppm as +9.99 and -9.996 ppm, and no
+phase jump of over about 2 us when the filter turns on or the mode changes.
 
 chrony's frequency moved by over 2 ppm in a day (28.9 to 31.15), which the
 fit of the steered clock follows within about 20 minutes. Temperature
