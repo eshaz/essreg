@@ -653,6 +653,8 @@ enum et_result c_load_fm(struct et_ctx *c, const struct et_case *k)
 		et_measure(c, name, !load_note(c, "esfm:0x30:581:4:0.3"), "",
 			   t[i].esfm, t[i].esfm);
 		snap_put(c, s);
+		// the last note dies away before PCM 1 reads the idle level
+		c->hal->sleep(c->hal->ctx, 2);
 		engines(c);
 	}
 	if (c->hal->reload(c->hal->ctx, ""))

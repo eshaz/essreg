@@ -566,8 +566,14 @@ enum et_result c_a1play_click(struct et_ctx *c, const struct et_case *k)
 		free(s[0].data);
 	}
 	free(tone);
-	et_measure(c, "the worst click, of the tone's peak", worst, "", 0, 2.5);
+	et_measure(c, "the worst click, of the tone's peak", worst, "", 1, 0);
 	et_measure(c, "the mean", sum / 6, "", 1, 0);
+	if (worst > 1.2 && !c->fails) {
+		snprintf(c->why, sizeof(c->why),
+			 "a pause's release clicks, up to %.1f times the tone",
+			 worst);
+		return ET_KNOWN;
+	}
 	return ET_PASS;
 }
 

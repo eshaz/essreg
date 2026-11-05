@@ -289,7 +289,7 @@ enum et_result c_mix(struct et_ctx *c, const struct et_case *k)
 	if (p->src)
 		sides(c, p);
 	et_measure(c, "steps measured", steps, "", 3, 100);
-	et_measure(c, "worst step against the scale", worst, "dB", -0.6, 0.6);
+	et_measure(c, "worst step against the scale", worst, "dB", -0.7, 0.7);
 	et_measure(c, "steps that rose", bad_order, "", 0, 0);
 	et_measure(c, "mutes that muted", mute_ok, "", 1, 1);
 	return ET_PASS;

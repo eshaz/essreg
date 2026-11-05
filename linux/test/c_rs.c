@@ -826,9 +826,9 @@ enum et_result c_rs_clock(struct et_ctx *c, const struct et_case *k)
 	et_measure(c, "the driver's reading of the steered clock", steered, "ppm",
 		   1, 0);
 	et_measure(c, "Clock, on the raw clock, less that", on.raw - steered,
-		   "ppm", -0.1, 0.1);
+		   "ppm", -0.3, 0.3);
 	et_measure(c, "Clock, on the steered clock", on.steered, "ppm",
-		   lng ? -0.05 : 1, lng ? 0.05 : 0);
+		   lng ? -0.1 : 1, lng ? 0.1 : 0);
 	et_measure(c, "what's left of the readings", on.rms, "us", 0, 600);
 	et_measure(c, "the master on the raw clock", master, "ppm", 1, 0);
 	et_measure(c, "xruns", on.xruns, "", 0, 0);

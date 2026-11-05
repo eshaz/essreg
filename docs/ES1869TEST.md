@@ -321,6 +321,10 @@ Without the driver's settle (`a1c_settle_ms=0`), a recording starts with the
 ADC's input offset decaying, as with ESS's drivers; `a1rec.settle0` measures
 it and reports it as KNOWN.
 
+A release of Audio 1's pause clicks: the largest sample just after it reads
+up to about 3 times the tone's peak through the second card. `a1play.click`
+reports that as KNOWN.
+
 The dual device's two DACs began 1 to 4.5 frames apart on the Armada at 44.1
 kHz and from -15 to +15 at 22050 Hz, on the installed driver and a test
 build alike, not the same at every rate or every start, so no fixed skew
