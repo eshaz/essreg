@@ -62,6 +62,16 @@
  * dmix, whose data changes in place, isn't filtered: its window would
  * cost ten times the filter's share of the CPU at each tick.
  *
+ * a2_treble takes the same way with a table that gives back what the DAC's hold
+ * takes from the top of the band, with or without a change of rate.
+ *
+ * a2_oversample plays the ring at two or three times the stream's rate. The
+ * filter takes a half or a third of a frame a ring frame, the ring holds that
+ * many times the buffer's frames, so the buffer's longest is that much shorter,
+ * and the rest of the file counts in the ring's frames where the DMA is
+ * concerned and in the stream's where the client is. A standing pointer isn't
+ * filtered, so there a stream frame is written that many times over.
+ *
  * The ring holds as many frames as the buffer, and a step down makes more
  * ring frames than stream frames, so a fill stops a little short of a whole
  * lap (es1869_rs_limit()), and the period's timer brings the rest.
@@ -97,6 +107,8 @@
 #define MIRROR_RS_SHORT 512 // what the filter takes at once, about 80 us of it
 #define MIRROR_RS_START 1024 // the stream bytes the filter makes at the start
 #define MIRROR_RS_MIN 256 // the frames a buffer needs for the filter
+#define MIRROR_OVER_RATE 132300 // the highest rate the ring plays cleanly at
+#define MIRROR_OVER_BURST 3 // and Demand 8, which leaves the bus the most
 
 static const struct snd_ratnum a2_clocks[] = {
 	{ .num = ES_CLK_HI, .den_min = 1, .den_max = 128, .den_step = 1 },
@@ -147,8 +159,19 @@ static void mirror_copy(struct es1869 *chip, struct snd_pcm_runtime *rt,
 		snd_pcm_uframes_t r = (a + b - m->rot) % b;
 		snd_pcm_uframes_t n = min3(frames, b - a, b - r);
 
-		es1869_spread(m->ring.area + 2 * r * fb, rt->dma_area + a * fb,
-			      n * fb);
+		if (m->over > 1) {
+			// ahead of the DMA at the ring's rate, each frame again
+			u32 k;
+
+			for (k = 0; k < m->over; k++)
+				es1869_spread(m->ring.area +
+					      2 * (r * m->over + k) * fb,
+					      rt->dma_area + a * fb, fb);
+			n = 1;
+		} else {
+			es1869_spread(m->ring.area + 2 * r * fb,
+				      rt->dma_area + a * fb, n * fb);
+		}
 		from += n;
 		frames -= n;
 	}
@@ -168,19 +191,20 @@ static void mirror_resample(struct es1869 *chip, struct snd_pcm_runtime *rt,
 		.ring = m->ring.area,
 		.buffer = rt->buffer_size,
 		.boundary = rt->boundary,
+		.lap = m->lap,
 		.appl = appl,
 		.rot = &m->rot,
 		.stereo = rt->channels == 2,
 	};
 
-	rs->step = rs->trim +
-		(rs->clock ? rs->base + READ_ONCE(chip->clk_offset) : 0);
+	es1869_rs_pace(rs, rs->trim + (rs->clock ? rs->base +
+				       READ_ONCE(chip->clk_offset) : 0));
 	// after frames that were copied the line begins again at this frame:
 	// those frames took no step
 	if (!rs->lined) {
 		es1869_rs_start(rs, start);
 		rs->w = (start % rt->buffer_size + rt->buffer_size - m->rot) %
-			rt->buffer_size;
+			rt->buffer_size * m->over;
 		rs->since = start;
 		rs->lined = true;
 		m->rs_to = ULONG_MAX;
@@ -200,7 +224,7 @@ static void mirror_resample(struct es1869 *chip, struct snd_pcm_runtime *rt,
 	// covers less than a stream frame, so that the reach alone left a frame
 	// behind that was made as if silence followed
 	if (!m->fill.backlog) {
-		es1869_rs_seek(rs, &s, -(ES_RS_AHEAD + 1));
+		es1869_rs_seek(rs, &s, -(ES_RS_AHEAD + 1) * (long)m->over);
 		m->rs_to = (start + frames) % rt->boundary;
 	}
 	// the line decides where the next fill begins: a run can end a frame
@@ -215,10 +239,9 @@ static snd_pcm_uframes_t mirror_offset(struct es1869 *chip,
 {
 	struct es1869_mirror *m = &chip->mirror;
 	u32 word = m->spread ? 2 : 1;
-	u32 ring = word * frames_to_bytes(rt, rt->buffer_size), pos;
+	u32 ring = word * frames_to_bytes(rt, m->lap), pos;
 	snd_pcm_uframes_t b = rt->buffer_size, off;
 	unsigned long flags;
-	long adj = 0;
 
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	pos = es1869_dma_pos(&chip->hw, chip->dma2, ring) / word;
@@ -226,8 +249,8 @@ static snd_pcm_uframes_t mirror_offset(struct es1869 *chip,
 	off = bytes_to_frames(rt, pos);
 	// before its first fill a stream has no line to read
 	if (m->rs.on && m->rs.lined && !m->fill.standing)
-		adj = es1869_rs_behind(&m->rs, (m->rs.w + b - off) % b) % (long)b;
-	return (off + m->rot + b + adj) % b;
+		return es1869_rs_at(&m->rs, (m->rs.w + m->lap - off) % m->lap, b);
+	return (off / m->over + m->rot) % b;
 }
 
 // that position as an absolute frame: the last hw_ptr and how far the DMA
@@ -264,7 +287,8 @@ static void mirror_fill(struct es1869 *chip, struct snd_pcm_runtime *rt,
 		return;
 	// the filter with no change to make is a copy: step 0 at a whole frame
 	if (m->rs.on && !m->fill.standing &&
-	    (m->rs.frac || m->rs.trim || m->rs.clock || m->rs.treble)) {
+	    (m->rs.frac || m->rs.trim || m->rs.clock || m->rs.treble ||
+	     m->over > 1)) {
 		// with nothing new, the last run's frames would only come again,
 		// over the silence that follows a client that stopped
 		if (m->rs.lined && (start + frames) % rt->boundary == m->rs_to) {
@@ -323,7 +347,7 @@ static void mirror_copy_work(struct work_struct *work)
 		more = m->running;
 		if (more) {
 			mirror_fill(chip, ss->runtime, m->rs.on ?
-				    MIRROR_RS_SHORT : MIRROR_SHORT,
+				    MIRROR_RS_SHORT / m->over : MIRROR_SHORT,
 				    ss->runtime->status->hw_ptr);
 			more = m->fill.backlog;
 			mirror_cost(m, &m->acks, &m->ack_cycles, c0);
@@ -359,7 +383,8 @@ static enum hrtimer_restart mirror_tick(struct hrtimer *t)
 	snd_pcm_stream_lock_irqsave(ss, flags);
 	c0 = get_cycles();
 	mirror_fill(chip, ss->runtime,
-		    m->rs.on && !m->fill.standing ? MIRROR_RS_SHORT : MIRROR_BUDGET,
+		    m->rs.on && !m->fill.standing ? MIRROR_RS_SHORT / m->over :
+						    MIRROR_BUDGET,
 		    mirror_hw(ss->runtime, mirror_offset(chip, ss->runtime)));
 	if (m->fill.standing)
 		us = es1869_standing_us(ss->runtime, MIRROR_BUDGET);
@@ -417,7 +442,7 @@ static enum hrtimer_restart mirror_period(struct hrtimer *t)
 static void mirror_silence(struct es1869 *chip, struct snd_pcm_runtime *rt)
 {
 	const u8 *p = snd_pcm_format_silence_64(rt->format);
-	u32 n = frames_to_bytes(rt, rt->buffer_size), i;
+	u32 n = frames_to_bytes(rt, chip->mirror.lap), i;
 	u8 low = p ? p[0] : 0, high = p ? p[1] : 0;
 	u8 *w = chip->mirror.ring.area;
 
@@ -435,7 +460,7 @@ static void mirror_silence(struct es1869 *chip, struct snd_pcm_runtime *rt)
 static void rs_ring_silence(struct es1869 *chip, struct snd_pcm_runtime *rt)
 {
 	struct es1869_mirror *m = &chip->mirror;
-	u32 fb = 2 * frames_to_bytes(rt, 1), ring = rt->buffer_size * fb;
+	u32 fb = 2 * frames_to_bytes(rt, 1), ring = m->lap * fb;
 	u32 from = m->rs_quiet, to, n;
 	unsigned long flags;
 
@@ -510,8 +535,8 @@ static void mirror_drain(struct snd_pcm_substream *ss)
 
 	m->silent_to = rt->control->appl_ptr;
 	m->draining = true;
-	es1869_drain_silence(ss, rt->status->hw_ptr, ES_FIFO_A2, &m->silent_to,
-			     a2_drain_fill);
+	es1869_drain_silence(ss, rt->status->hw_ptr, ES_FIFO_A2 / m->over,
+			     &m->silent_to, a2_drain_fill);
 }
 
 // --- the stream ----------------------------------------------------------------
@@ -576,8 +601,9 @@ static int a2_open(struct snd_pcm_substream *ss)
 	rt->hw = a2_hw;
 	if (m->spread) {
 		rt->hw.info |= SNDRV_PCM_INFO_SYNC_APPLPTR | SNDRV_PCM_INFO_PAUSE;
-		rt->hw.buffer_bytes_max = m->ring.bytes / 2;
-		rt->hw.period_bytes_max = m->ring.bytes / 2;
+		rt->hw.buffer_bytes_max = m->ring.bytes / 2 /
+					  (es1869_val(ES_S_a2_oversample) + 1);
+		rt->hw.period_bytes_max = rt->hw.buffer_bytes_max;
 	} else if (es1869_val(ES_S_a2_pause)) {
 		rt->hw.info |= SNDRV_PCM_INFO_PAUSE;
 	}
@@ -631,10 +657,31 @@ static void rs_table(struct es1869 *chip)
 {
 	struct es1869_rs *rs = &chip->mirror.rs;
 
-	if (!rs->tab && es1869_val(ES_S_a2_resample))
+	if (!rs->tab && (es1869_val(ES_S_a2_resample) ||
+			 es1869_val(ES_S_a2_oversample)))
 		rs->tab = rs_table_new(chip, false);
 	if (!rs->flat && es1869_val(ES_S_a2_treble))
 		rs->flat = rs_table_new(chip, true);
+}
+
+// the ring frames to a stream frame: what a2_oversample asks for, where a
+// divisor of the stream's own gives that rate exactly, the DMA can carry it
+// and the ring has the room
+static u32 rs_over(struct es1869 *chip, struct snd_pcm_runtime *rt, u32 num,
+		   u32 den, bool slaved)
+{
+	struct es1869_mirror *m = &chip->mirror;
+	u32 over = es1869_val(ES_S_a2_oversample) + 1;
+
+	if (!m->spread || slaved || !m->rs.tab ||
+	    rt->format != SNDRV_PCM_FORMAT_S16_LE ||
+	    rt->buffer_size < MIRROR_RS_MIN)
+		return 1;
+	while (over > 1 && (den % over || num / den * over > MIRROR_OVER_RATE ||
+			    2 * frames_to_bytes(rt, rt->buffer_size) * over >
+			    m->ring.bytes))
+		over--;
+	return over;
 }
 
 // the settings as the stream takes them, under its lock, from a prepare, a
@@ -647,8 +694,8 @@ static void rs_apply(struct es1869 *chip, struct snd_pcm_runtime *rt)
 	struct es1869_rs *rs = &m->rs;
 	u32 mode = es1869_val(ES_S_a2_resample);
 	bool treble = es1869_val(ES_S_a2_treble) && rs->flat;
-	bool want = (mode ? treble || rs->tab : treble) && m->spread &&
-		    rt->format == SNDRV_PCM_FORMAT_S16_LE &&
+	bool want = (mode || m->over > 1 ? treble || rs->tab : treble) &&
+		    m->spread && rt->format == SNDRV_PCM_FORMAT_S16_LE &&
 		    rt->buffer_size >= MIRROR_RS_MIN;
 	u32 clk = want && mode == 2 ? m->clk_period : 0;
 
@@ -670,7 +717,7 @@ static void rs_apply(struct es1869 *chip, struct snd_pcm_runtime *rt)
 		return;
 	}
 	rs->lined = false;
-	rs->step = rs->trim;
+	es1869_rs_pace(rs, rs->trim);
 	if (m->running) {
 		queue_work(system_highpri_wq, &m->copy_work);
 		hrtimer_start(&m->period, ns_to_ktime(mirror_period_ns(rt)),
@@ -721,6 +768,15 @@ static int a2_prepare(struct snd_pcm_substream *ss)
 	es1869_stream_rate(rt, slaved, &num, &den);
 	m->clk_period = es1869_clock_period(num, den, rt->period_size);
 	chip->clk_a2 = 0;
+	rs_table(chip);
+	m->over = rs_over(chip, rt, num, den, slaved);
+	m->rs.over = m->over;
+	m->lap = rt->buffer_size * m->over;
+	den /= m->over;
+	s.period *= m->over;
+	s.dma_bytes *= m->over;
+	if (m->over > 1)
+		s.burst = MIRROR_OVER_BURST;
 	if (es1869_val(ES_S_irq_trace))
 		dev_info(chip->dev, "Audio 2: DMA %d at %#x, %u bytes, period %u\n",
 			 s.ch, s.dma_phys, s.dma_bytes, s.period);
@@ -741,7 +797,6 @@ static int a2_prepare(struct snd_pcm_substream *ss)
 		m->rs.seed = 0x2545F491;
 		m->rs.last[0] = m->rs.last[1] = 0;
 		m->rs.base = es1869_clock_base(num);
-		rs_table(chip);
 	}
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	if (slaved) {
@@ -905,9 +960,10 @@ static snd_pcm_uframes_t a2_pointer(struct snd_pcm_substream *ss)
 	snd_pcm_uframes_t off = mirror_offset(chip, rt);
 
 	if (m->draining)
-		es1869_drain_silence(ss, mirror_hw(rt, off), ES_FIFO_A2,
+		es1869_drain_silence(ss, mirror_hw(rt, off), ES_FIFO_A2 / m->over,
 				     &m->silent_to, a2_drain_fill);
-	return es1869_play_pointer(rt, off, ES_FIFO_A2, m->draining, &m->last);
+	return es1869_play_pointer(rt, off, ES_FIFO_A2 / m->over, m->draining,
+				   &m->last);
 }
 
 // the core has just read the pointer for hw_ptr, so the 8237 needn't be read
@@ -983,6 +1039,8 @@ int es1869_mirror_init(struct es1869 *chip)
 	hrtimer_setup(&m->period, mirror_period, CLOCK_MONOTONIC,
 		      HRTIMER_MODE_REL_HARD);
 	INIT_WORK(&m->copy_work, mirror_copy_work);
+	m->over = 1;
+	m->rs.over = 1;
 	m->spread = chip->dma2 >= 4;
 	if (chip->dma2 < 0)
 		return 0;

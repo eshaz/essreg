@@ -171,6 +171,10 @@ The cases reach the chip four ways:
     in chunks that the fills cut as they come, so a frame that differs by 1
     fails it. `.down`, `.mono`, `.30`, `.48` and `.two` are the other steps,
     formats and a client polling two periods.
+  * `rs.over.2` and `.3` do the same with `a2_oversample`, with the ring at
+    2x and 3x, where the dig path can carry it. `rs.over.drain` and
+    `rs.over.runout` are those two cases at 2x, and `cpu.over.2` and `.3`
+    read the driver's share of the CPU there.
   * `rs.band` measures tones up to 20 kHz at 30 ppm, the step that the
     Armada's crystal takes, and `rs.band.48` at 48 kHz's 252 ppm: the level
     within 0.01 dB, THD+N under -85 dB and the worst spur under -90 dB. The

@@ -41,7 +41,8 @@ class Job(ctypes.Structure):
                 ("dst", ctypes.POINTER(ctypes.c_uint8)),
                 ("frames", ctypes.c_uint32), ("room", ctypes.c_uint32),
                 ("used", ctypes.c_uint32), ("frac", ctypes.c_uint32),
-                ("step", ctypes.c_int32), ("stereo", ctypes.c_bool),
+                ("whole", ctypes.c_uint32), ("step", ctypes.c_uint32),
+                ("over", ctypes.c_uint32), ("stereo", ctypes.c_bool),
                 ("dither", ctypes.c_bool), ("seed", ctypes.c_uint32),
                 ("last", ctypes.c_int32 * 2)]
 
@@ -82,7 +83,9 @@ class Filter:
         j.frames = n
         j.room = room
         j.frac = frac & 0xFFFFFFFF
-        j.step = step
+        j.whole = ((1 << 32) + step) >> 32
+        j.step = ((1 << 32) + step) & 0xFFFFFFFF
+        j.over = 1
         j.stereo = False
         j.dither = dither
         j.seed = 12345

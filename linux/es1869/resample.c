@@ -46,6 +46,11 @@
  * centre word has a bit less there, and only that word's shift differs, set
  * once a run. The gain near 20 kHz is 3 dB, which a loud enough top end clips.
  *
+ * The ring can also run at two or three times the stream's rate, which the same
+ * filter serves by taking a half or a third of a frame a ring frame. Each of
+ * those places then has its own outer words, held as before, so that a ring
+ * frame costs what a frame does at the stream's own rate.
+ *
  * es1869_rs_run_c() and es1869_rs_run_mmx() give the same bytes.
  *
  * The clock: each interrupt of a stream is a number of the master's ticks at
@@ -269,12 +274,13 @@ static inline void rs_copy_word(s16 *to, const s16 *from)
 #endif
 
 // the channels of a run of n frames a sample, two and three on, in copies that
-// lie on 8 bytes, each frame's taps in one of them. MMX is the quick way here,
-// and the caller holds the FPU for it
+// lie on 8 bytes, each frame's taps in one of them, whole words of the frames a
+// run reads and no more than the window holds. MMX is the quick way here, and
+// the caller holds the FPU for it
 void es1869_rs_shift(struct es1869_rs *rs, struct es1869_rs_job *j, u32 n,
 		     bool stereo)
 {
-	u32 want = (n + ES_RS_TAPS + 4) / 4, c, k, i;
+	u32 want = (n + ES_RS_TAPS + 3) / 4, c, k, i;
 
 	for (c = 0; c < (stereo ? 2 : 1); c++) {
 		j->ch[c] = rs->ch[c];
@@ -331,15 +337,9 @@ static inline void rs_round(struct es1869_rs_job *j, s32 *rnd)
 
 static inline void rs_next(struct es1869_rs_job *j, u32 *i)
 {
-	u32 f = j->frac + (u32)j->step;
+	u32 f = j->frac + j->step;
 
-	*i += 1;
-	if (j->step >= 0) {
-		if (f < j->frac)
-			*i += 1;
-	} else if (f > j->frac) {
-		*i -= 1;
-	}
+	*i += j->whole + (f < j->frac);
 	j->frac = f;
 }
 
@@ -417,19 +417,21 @@ static inline s32 rs_clip(s32 v)
 
 u32 es1869_rs_run_c(struct es1869_rs_job *j)
 {
-	s16 c[ES_RS_TAPS];
-	u32 i = 0, o = 0, held = 0;
+	s16 rows[ES_RS_OVER][ES_RS_TAPS];
+	u32 held[ES_RS_OVER] = { 0 };
+	u32 i = 0, o = 0, ph = 0;
 	u8 *d = j->dst;
 
 	while (i < j->frames && o < j->room) {
 		u32 at = rs_held(j->frac);
+		s16 *c = rows[ph];
 		s32 rnd[2], v;
 
-		if (at != held) {
+		if (at != held[ph]) {
 			const s16 *row = rs_place(j->tab, at);
 			u32 f = rs_blend_bits(at);
 
-			held = at;
+			held[ph] = at;
 			rs_blend_c(c, row, f, 0, RS_INNER);
 			rs_blend_c(c, row, f, RS_OUTER, ES_RS_TAPS);
 		}
@@ -451,6 +453,8 @@ u32 es1869_rs_run_c(struct es1869_rs_job *j)
 			d += 4;
 		}
 		o++;
+		if (++ph == j->over)
+			ph = 0;
 		rs_next(j, &i);
 	}
 	j->used = i;
@@ -575,17 +579,19 @@ static inline const s16 *rs_taps(const struct es1869_rs_job *j, unsigned int c,
 // the caller holds the FPU, as the kernel has it (kernel_fpu_begin())
 u32 es1869_rs_run_mmx(struct es1869_rs_job *j)
 {
-	s16 c[ES_RS_TAPS] __aligned(8);
-	u32 i = 0, o = 0, held = 0;
+	s16 rows[ES_RS_OVER][ES_RS_TAPS] __aligned(8);
+	u32 held[ES_RS_OVER] = { 0 };
+	u32 i = 0, o = 0, ph = 0;
 	u8 *d = j->dst;
 
 	asm volatile("movd %0,%%mm6" : : "r" (j->centre));
 	while (i < j->frames && o < j->room) {
 		u32 at = rs_held(j->frac);
+		s16 *c = rows[ph];
 		s32 rnd[2] __aligned(8);
 
-		if (at != held) {
-			held = at;
+		if (at != held[ph]) {
+			held[ph] = at;
 			rs_blend_outer(c, rs_place(j->tab, at), rs_blend_bits(at));
 		}
 		rs_blend_inner(c, rs_place(j->tab, j->frac),
@@ -602,6 +608,8 @@ u32 es1869_rs_run_mmx(struct es1869_rs_job *j)
 			d += 4;
 		}
 		o++;
+		if (++ph == j->over)
+			ph = 0;
 		rs_next(j, &i);
 	}
 	asm volatile("emms");
@@ -623,23 +631,39 @@ void es1869_rs_start(struct es1869_rs *rs, unsigned long pos)
 	rs->pos = pos;
 }
 
-// the line moved d ring frames along: the stream's frame there is d of them
-// and the steps over them
+// what a ring frame takes, from the change of rate and the ring frames to a
+// stream frame
+void es1869_rs_pace(struct es1869_rs *rs, s32 step)
+{
+	rs->step = step;
+	rs->adv = div_u64((1ULL << 32) + step, rs->over);
+}
+
+// the first ring frame of a stream frame's lap: pos and w lie on the line, and
+// rot is what a copy needs, which puts a stream frame at over times its place
+static void rs_rot(struct es1869_rs *rs, const struct es1869_rs_stream *s)
+{
+	unsigned long b = s->buffer;
+
+	*s->rot = (rs->pos % b + b - (rs->w / rs->over) % b) % b;
+}
+
+// the line moved d ring frames along
 void es1869_rs_seek(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 		    long d)
 {
-	unsigned long b = s->buffer, bound = s->boundary;
-	s64 q = (s64)rs->frac + (s64)d * rs->step;
-	long carry = (long)(q >> 32), dm = d % (long)b, cm = carry % (long)b;
+	unsigned long lap = s->lap, bound = s->boundary;
+	s64 q = (s64)rs->frac + (s64)d * (s64)rs->adv;
+	long moved = (long)(q >> 32);
 
 	rs->frac = (u32)q;
-	rs->w = (rs->w + b + dm) % b;
-	*s->rot = (*s->rot + b + cm) % b;
-	rs->pos = (rs->pos + bound + (d + carry) % (long)bound) % bound;
-	if (d < 0 && (u32)-d >= rs->since) {
+	rs->w = (rs->w + lap + d % (long)lap) % lap;
+	rs->pos = (rs->pos + bound + moved % (long)bound) % bound;
+	rs_rot(rs, s);
+	if (moved < 0 && (u32)-moved >= rs->since) {
 		rs->since = 0;
 	} else {
-		s64 v = (s64)rs->since + d;
+		s64 v = (s64)rs->since + moved;
 
 		rs->since = v > RS_SINCE ? RS_SINCE : v;
 	}
@@ -686,15 +710,16 @@ static void rs_window(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 static u32 rs_chunk(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 		    u32 n)
 {
-	unsigned long b = s->buffer;
 	struct es1869_rs_job j = {
 		.tab = rs->treble ? rs->flat : rs->tab,
 		.centre = rs->treble ? RS_CENTRE_FLAT - 14 : RS_CENTRE - 14,
 		.dst = s->ring + 2 * rs->w * (s->stereo ? 4 : 2),
 		.frames = n,
-		.room = b - rs->w,
+		.room = s->lap - rs->w,
 		.frac = rs->frac,
-		.step = rs->step,
+		.whole = rs->adv >> 32,
+		.step = (u32)rs->adv,
+		.over = rs->over,
 		.stereo = s->stereo,
 		.dither = rs->dither,
 		.seed = rs->seed,
@@ -718,9 +743,9 @@ static u32 rs_chunk(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 	rs->seed = j.seed;
 	rs->last[0] = j.last[0];
 	rs->last[1] = j.last[1];
-	*s->rot = (*s->rot + b + j.used % b - out % b) % b;
-	rs->w = (rs->w + out) % b;
+	rs->w = (rs->w + out) % s->lap;
 	rs->pos = (rs->pos + j.used) % s->boundary;
+	rs_rot(rs, s);
 	rs->since = rs->since + j.used > RS_SINCE ? RS_SINCE : rs->since + j.used;
 	return j.used;
 }
@@ -736,9 +761,10 @@ void es1869_rs_fill(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 	if ((unsigned long)d > bound / 2)
 		d -= (long)bound;
 	if (d < -1 || d > 1)
-		es1869_rs_seek(rs, s, d);
+		es1869_rs_seek(rs, s, d * (long)rs->over);
 	while (frames) {
-		u32 n = frames < ES_RS_CHUNK ? frames : ES_RS_CHUNK;
+		u32 most = ES_RS_CHUNK / rs->over;
+		u32 n = frames < most ? frames : most;
 		u32 used = rs_chunk(rs, s, n);
 
 		if (!used)
@@ -763,13 +789,15 @@ unsigned long es1869_rs_limit(unsigned long to, unsigned long hw,
 	return (hw + most) % boundary;
 }
 
-// how far along the line a ring frame a behind the next to be written lies
-// from the frame there would be with no step, in whole frames
-long es1869_rs_behind(const struct es1869_rs *rs, unsigned long a)
+// the frame in the buffer that the line has at the ring frame a behind the
+// next to be written
+unsigned long es1869_rs_at(const struct es1869_rs *rs, unsigned long a,
+			   unsigned long buffer)
 {
-	s64 q = (s64)rs->frac - (s64)a * rs->step;
+	s64 q = (s64)rs->frac - (s64)a * (s64)rs->adv;
+	long back = (long)(q >> 32);
 
-	return (long)(q >> 32);
+	return (rs->pos % buffer + buffer + back % (long)buffer) % buffer;
 }
 
 // --- the clock -----------------------------------------------------------------

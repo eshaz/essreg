@@ -16,6 +16,7 @@ struct sim_rs_part {
 	int on;
 	int dither;
 	int treble;
+	int over; // ring frames to a stream frame, 0 for 1
 };
 
 long sim_rs_trim(int item);
@@ -25,6 +26,8 @@ short *sim_rs_stream(const short *src, unsigned long frames,
 short *sim_rs_parts(const short *src, unsigned long frames,
 		    unsigned int channels, const struct sim_rs_part *parts,
 		    int n, unsigned long *made);
+short *sim_rs_over(const short *src, unsigned long frames, unsigned int channels,
+		   long ppb, int over, unsigned long *made);
 // what the filter costs on this CPU, in cycles a frame, by MMX or C, or 0
 double sim_rs_cycles(unsigned int channels, int mmx);
 

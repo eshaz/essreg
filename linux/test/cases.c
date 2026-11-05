@@ -34,6 +34,7 @@ FN(c_dig_clock)
 FN(c_rs_exact)
 FN(c_rs_band)
 FN(c_rs_treble)
+FN(c_cpu_over)
 FN(c_rs_imd)
 FN(c_rs_quiet)
 FN(c_rs_dither)
@@ -169,6 +170,12 @@ const struct et_case et_cases[] = {
 	CASE("rs.exact.48", N, c_rs_exact, 4, "the same, at 48 kHz's -252 ppm")
 	CASE("rs.exact.two", N, c_rs_exact, 5,
 	     "the same, a client polling two periods")
+	CASE("rs.over.2", N, c_rs_exact, 6,
+	     "the ring at 2x the stream's rate, every frame against the C code")
+	CASE("rs.over.3", N, c_rs_exact, 7, "the same at 3x")
+	CASE("rs.over.drain", N, c_rs_drain, 1, "a drain with the ring at 2x")
+	CASE("rs.over.runout", N, c_rs_runout, 1,
+	     "a client that stops writing, the ring at 2x")
 	CASE("rs.band", N, c_rs_band, 0,
 	     "tones to 20 kHz at 30 ppm: level, THD+N and the worst spur")
 	CASE("rs.band.48", N, c_rs_band, 1, "the same at 48 kHz, -252 ppm")
@@ -214,6 +221,8 @@ const struct et_case et_cases[] = {
 	CASE("cpu.rs.48", N, c_cpu_rs, 1, "the same at 48 kHz")
 	CASE("cpu.rs.mono", N, c_cpu_rs, 2, "the same, 44.1 kHz mono")
 	CASE("cpu.rs.96", N, c_cpu_rs, 3, "the same at 96 kHz")
+	CASE("cpu.over.2", N, c_cpu_over, 1, "the driver's share with the ring at 2x")
+	CASE("cpu.over.3", N, c_cpu_over, 2, "and at 3x")
 	CASE("dig.runout", N, c_dig_runout, 0,
 	     "an application that stops writing: the core's silence reaches the ring")
 	CASE("dig.long", N, c_dig_long, 0,

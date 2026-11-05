@@ -308,7 +308,13 @@ static const struct et_stream *sim_resampled(const struct et_stream *a2,
 	parts[0].dither = sim_setting("a2_resample_dither");
 	parts[0].treble = sim_setting("a2_treble") &&
 			  !(sim.faults & SIM_RS_TREBLE);
-	any = parts[0].on && (parts[0].ppb || mode == 2 || parts[0].treble);
+	if (a2->fmt.rate == 44100 && !(sim.faults & SIM_RS_OVER))
+		parts[0].over = sim_setting("a2_oversample") + 1;
+	else
+		parts[0].over = 1;
+	parts[0].on |= parts[0].over > 1;
+	any = parts[0].on && (parts[0].ppb || mode == 2 || parts[0].treble ||
+			      parts[0].over > 1);
 	for (i = 0; i < n && np < 8 && !(sim.faults & SIM_RS_LIVE); i++) {
 		if (s[i].role != ET_CTL)
 			continue;
@@ -326,6 +332,7 @@ static const struct et_stream *sim_resampled(const struct et_stream *a2,
 	out = *a2;
 	made = sim_rs_parts(a2->data, a2->frames, a2->fmt.channels, parts, np,
 			    &out.frames);
+	out.fmt.rate *= parts[0].over;
 	if (sim.faults & (SIM_RS_SEAM | SIM_RS_IMAGE)) {
 		unsigned int ch = a2->fmt.channels;
 		unsigned long k;

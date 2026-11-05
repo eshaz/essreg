@@ -36,13 +36,16 @@ short *sim_rs_parts(const short *src, unsigned long frames,
 		    int n, unsigned long *made)
 {
 	static s16 ch[2][ES_RS_WINDOW];
-	static u8 ring[8 * (ES_RS_CHUNK + 8)];
-	unsigned long pos = 0, o = 0, cap = frames + frames / 128 + 256;
+	static u8 ring[8 * (ES_RS_OVER * ES_RS_CHUNK + 8)];
+	unsigned long pos = 0, o = 0, cap;
+	unsigned int over = parts[0].over ? parts[0].over : 1;
 	struct es1869_rs_job j;
 	short *data;
 	unsigned int c;
 	int at = 0;
+	u64 adv;
 
+	cap = (frames + frames / 128 + 256) * over;
 	data = calloc(cap, 2 * channels);
 	if (!data)
 		abort();
@@ -51,7 +54,8 @@ short *sim_rs_parts(const short *src, unsigned long frames,
 	j.ch[1] = ch[1];
 	j.stereo = channels == 2;
 	j.seed = 0x12345;
-	while (pos < frames && o + ES_RS_CHUNK + 8 < cap) {
+	j.over = over;
+	while (pos < frames && o + over * ES_RS_CHUNK + 8 < cap) {
 		unsigned long i, chunk = ES_RS_CHUNK, end = frames;
 		u32 out;
 
@@ -70,7 +74,9 @@ short *sim_rs_parts(const short *src, unsigned long frames,
 			pos += chunk;
 			continue;
 		}
-		j.step = es1869_clock_q32(parts[at].ppb);
+		adv = ((1ULL << 32) + es1869_clock_q32(parts[at].ppb)) / over;
+		j.whole = adv >> 32;
+		j.step = (u32)adv;
 		j.dither = parts[at].dither;
 		j.tab = rs_tab(parts[at].treble);
 		j.centre = parts[at].treble ? 1 : 2;
@@ -84,7 +90,7 @@ short *sim_rs_parts(const short *src, unsigned long frames,
 		}
 		j.dst = ring;
 		j.frames = chunk;
-		j.room = ES_RS_CHUNK + 8;
+		j.room = over * ES_RS_CHUNK + 8;
 		out = es1869_rs_run_c(&j);
 		for (i = 0; i < out * channels; i++)
 			data[o * channels + i] = ring[4 * i] | ring[4 * i + 2] << 8;
@@ -102,13 +108,22 @@ short *sim_rs_stream(const short *src, unsigned long frames,
 		     unsigned int channels, long ppb, int sign_768,
 		     unsigned long *made)
 {
-	struct sim_rs_part part = { 0, ppb, 1, 0, 0 };
+	struct sim_rs_part part = { 0, ppb, 1, 0, 0, 0 };
 
 	if (!ppb && !sign_768)
 		return NULL;
 	if (sign_768)
 		part.ppb += (long)((double)sign_768 *
 				   es1869_clock_base(768000) * 1e9 / 4294967296.0);
+	return sim_rs_parts(src, frames, channels, &part, 1, made);
+}
+
+// the same with the ring at over times the stream's rate
+short *sim_rs_over(const short *src, unsigned long frames, unsigned int channels,
+		   long ppb, int over, unsigned long *made)
+{
+	struct sim_rs_part part = { 0, ppb, 1, 0, 0, over };
+
 	return sim_rs_parts(src, frames, channels, &part, 1, made);
 }
 
@@ -134,10 +149,12 @@ double sim_rs_cycles(unsigned int channels, int mmx)
 	}
 	j.tab = rs_tab(0);
 	j.centre = 2;
+	j.over = 1;
 	j.dst = ring;
 	j.frames = 4096;
 	j.room = 4096 + 8;
 	j.stereo = channels == 2;
+	j.whole = 1;
 	j.step = es1869_clock_q32(30000);
 	for (pass = 0; pass < 20; pass++) {
 		unsigned long long t;

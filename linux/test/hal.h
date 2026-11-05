@@ -138,5 +138,6 @@ int et_klog_fault(const char *msg);
 #define SIM_RS_LIVE 0x8000000 // a change under a stream waits for its end
 #define SIM_RS_REAL_TIME 0x10000000 // the Clock mode misses the steered clock
 #define SIM_RS_TREBLE 0x20000000 // the hold's correction does nothing
+#define SIM_RS_OVER 0x40000000 // the ring stays at the stream's rate
 
 #endif

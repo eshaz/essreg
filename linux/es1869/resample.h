@@ -20,6 +20,12 @@
 #define ES_RS_CHUNK 256 // the stream frames of a run, at most
 #define ES_RS_WINDOW (ES_RS_CHUNK + ES_RS_TAPS + 2) // the frames it may read
 #define ES_RS_ROOM 64 // the frames kept clear ahead of the DMA, at the least
+#define ES_RS_OVER 3 // the most ring frames to a stream frame
+
+// a run's last frame reads the taps from there on, so its copies need no more
+// than the window, in the words es1869_rs_shift copies
+_Static_assert((ES_RS_CHUNK + ES_RS_TAPS + 3) / 4 * 4 <= ES_RS_WINDOW,
+	       "es1869_rs_shift would run past the window");
 
 #if defined(__i386__) || defined(__x86_64__)
 #define ES1869_RS_MMX
@@ -36,7 +42,9 @@ struct es1869_rs_job {
 	u32 room; // the ring frames to write, at most
 	u32 used; // comes back: the stream frames gone through
 	u32 frac; // where the frame falls between two stream frames, 32 bits
-	s32 step; // what a ring frame takes over a stream frame, 32 bits
+	u32 whole; // the stream frames a ring frame takes, whole
+	u32 step; // and past those, 32 bits
+	u32 over; // the ring frames to a stream frame
 	bool stereo;
 	bool dither; // the 16-bit rounding with triangular noise of 1 LSB
 	u32 seed; // the noise's state
@@ -59,6 +67,8 @@ struct es1869_rs {
 	s32 trim; // a2_trim_ppb in the step's 32 bits
 	s32 base; // what the stream's clock is off by, in the same
 	s32 step; // what a ring frame takes over a stream frame, in the same
+	u32 over; // the ring frames to a stream frame
+	u64 adv; // the stream frames a ring frame takes, 32 bits of fraction
 	unsigned long w; // the next ring frame to write
 	unsigned long pos; // the stream's frame that falls there
 	u32 since; // the stream's frames before pos, as far as they matter
@@ -73,6 +83,7 @@ struct es1869_rs_stream {
 	const void *src; // the application's buffer
 	u8 *ring; // the ring, each byte in the low byte of a word
 	unsigned long buffer, boundary; // in frames, as the PCM core has them
+	unsigned long lap; // the ring's frames, over times the buffer's
 	unsigned long appl; // the first frame not yet written
 	unsigned long *rot; // the stream's frame at the ring's start
 	bool stereo;
@@ -88,11 +99,13 @@ u32 es1869_rs_run_c(struct es1869_rs_job *j);
 u32 es1869_rs_run_mmx(struct es1869_rs_job *j);
 #endif
 void es1869_rs_start(struct es1869_rs *rs, unsigned long pos);
+void es1869_rs_pace(struct es1869_rs *rs, s32 step);
 void es1869_rs_seek(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 		    long d);
 void es1869_rs_fill(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 		    unsigned long start, unsigned long frames);
-long es1869_rs_behind(const struct es1869_rs *rs, unsigned long a);
+unsigned long es1869_rs_at(const struct es1869_rs *rs, unsigned long a,
+			   unsigned long buffer);
 unsigned long es1869_rs_limit(unsigned long to, unsigned long hw,
 			      unsigned long buffer, unsigned long boundary);
 

@@ -51,9 +51,17 @@ class Job(ctypes.Structure):
                 ("dst", ctypes.POINTER(ctypes.c_uint8)),
                 ("frames", ctypes.c_uint32), ("room", ctypes.c_uint32),
                 ("used", ctypes.c_uint32), ("frac", ctypes.c_uint32),
-                ("step", ctypes.c_int32), ("stereo", ctypes.c_bool),
+                ("whole", ctypes.c_uint32), ("step", ctypes.c_uint32),
+                ("over", ctypes.c_uint32), ("stereo", ctypes.c_bool),
                 ("dither", ctypes.c_bool), ("seed", ctypes.c_uint32),
                 ("last", ctypes.c_int32 * 2)]
+
+    def pace(self, step, over=1):
+        """what a ring frame takes, as the driver sets it"""
+        adv = ((1 << 32) + step) // over
+        self.whole = adv >> 32
+        self.step = adv & 0xFFFFFFFF
+        self.over = over
 
 
 class Fit(ctypes.Structure):
@@ -81,6 +89,7 @@ class RS(ctypes.Structure):
                 ("lined", ctypes.c_bool),
                 ("frac", ctypes.c_uint32), ("trim", ctypes.c_int32),
                 ("base", ctypes.c_int32), ("step", ctypes.c_int32),
+                ("over", ctypes.c_uint32), ("adv", ctypes.c_uint64),
                 ("w", ctypes.c_ulong), ("pos", ctypes.c_ulong),
                 ("since", ctypes.c_uint32), ("seed", ctypes.c_uint32),
                 ("last", ctypes.c_int32 * 2),
@@ -91,7 +100,7 @@ class RS(ctypes.Structure):
 class Stream(ctypes.Structure):
     _fields_ = [("src", ctypes.c_void_p), ("ring", ctypes.c_void_p),
                 ("buffer", ctypes.c_ulong), ("boundary", ctypes.c_ulong),
-                ("appl", ctypes.c_ulong),
+                ("lap", ctypes.c_ulong), ("appl", ctypes.c_ulong),
                 ("rot", ctypes.POINTER(ctypes.c_ulong)),
                 ("stereo", ctypes.c_bool), ("mmx", ctypes.c_bool)]
 
@@ -140,6 +149,13 @@ def library():
         lib.es1869_rs_seek.argtypes = [ctypes.POINTER(RS),
                                        ctypes.POINTER(Stream), ctypes.c_long]
         lib.es1869_rs_seek.restype = None
+        lib.es1869_rs_shift.argtypes = [ctypes.POINTER(RS), ctypes.POINTER(Job),
+                                        ctypes.c_uint32, ctypes.c_bool]
+        lib.es1869_rs_shift.restype = None
+        lib.es1869_rs_pace.argtypes = [ctypes.POINTER(RS), ctypes.c_int32]
+        lib.es1869_rs_pace.restype = None
+        lib.es1869_rs_at.argtypes = [ctypes.POINTER(RS), ul, ul]
+        lib.es1869_rs_at.restype = ul
         lib.es1869_clock_init.argtypes = [ctypes.POINTER(Clock)]
         lib.es1869_clock_init.restype = None
         lib.es1869_clock_stretch.argtypes = [ctypes.POINTER(Clock)]
@@ -220,7 +236,7 @@ def run(x, y, frames, frac, step, stereo=True, mmx=False, dither=False,
     j.frames = frames
     j.room = room
     j.frac = frac & 0xFFFFFFFF
-    j.step = step
+    j.pace(step)
     j.stereo = stereo
     j.dither = dither
     j.seed = seed
@@ -230,12 +246,12 @@ def run(x, y, frames, frac, step, stereo=True, mmx=False, dither=False,
 
 
 def through(x, step, y=None, frac=0, mmx=False, dither=False, seed=12345,
-            flat=False):
+            flat=False, over=1):
     """arrays through one long run, all but the last TAPS + 2 frames; the
     ring frames as arrays, the first at x[BEHIND] and frac past it"""
     lib = library()
     n = len(x) - TAPS - 2
-    room = n + n // 256 + 64
+    room = over * n + n // 256 + 64
     stereo = y is not None
     out = np.zeros(room * (8 if stereo else 4), dtype=np.uint8)
     a = np.asarray(x, dtype=np.int16)
@@ -250,7 +266,7 @@ def through(x, step, y=None, frac=0, mmx=False, dither=False, seed=12345,
     j.frames = n
     j.room = room
     j.frac = frac & 0xFFFFFFFF
-    j.step = step
+    j.pace(step, over)
     j.stereo = stereo
     j.dither = dither
     j.seed = seed
@@ -455,6 +471,7 @@ class RunTest(unittest.TestCase):
         j = Job()
         j.tab = ctypes.cast(table(), s16p)
         j.centre = 2
+        j.pace(0)
         j.ch[0] = j.ch[1] = ctypes.cast(a, s16p)
         j.dst = ctypes.cast(out, ctypes.POINTER(ctypes.c_uint8))
         j.frames = 256
@@ -676,6 +693,102 @@ class QualityTest(unittest.TestCase):
 
 
 @unittest.skipUnless(np is not None and shutil.which("gcc"), "needs numpy, gcc")
+class ShiftTest(unittest.TestCase):
+    """what follows the window in the driver's struct: a full chunk's copies
+    wrote 4 bytes past it, over the field after, the cause of a kernel panic"""
+
+    def tearDown(self):
+        # the copies use MMX, and a run of no frames ends with its EMMS, which
+        # the driver's caller also leaves to the run
+        if X86:
+            j = Job()
+            j.over = 1
+            library().es1869_rs_run_mmx(ctypes.byref(j))
+
+    def test_stays_in_the_window(self):
+        class Guarded(ctypes.Structure):
+            _fields_ = [("rs", RS), ("guard", ctypes.c_uint32 * 16)]
+
+        g = Guarded()
+        for i in range(16):
+            g.guard[i] = 0xA5A5A5A5
+        for c in range(2):
+            for i in range(256 + TAPS + 2):
+                g.rs.ch[c][i] = 1000 + i
+        j = Job()
+        for n in (1, 4, 255, 256):
+            library().es1869_rs_shift(ctypes.byref(g.rs), ctypes.byref(j), n,
+                                      True)
+            self.assertEqual(list(g.guard), [0xA5A5A5A5] * 16, n)
+
+    def test_every_tap_of_a_full_chunk_is_there(self):
+        """the last frame's taps lie in the copy it reads"""
+        rs = RS()
+        for i in range(256 + TAPS + 2):
+            rs.ch[0][i] = rs.ch[1][i] = i + 1
+        j = Job()
+        library().es1869_rs_shift(ctypes.byref(rs), ctypes.byref(j), 256, True)
+        for k in (1, 2, 3):
+            for t in range(TAPS):
+                self.assertEqual(rs.odd[1][k - 1][252 + t], 252 + t + k + 1)
+
+
+@unittest.skipUnless(np is not None and shutil.which("gcc"), "needs numpy, gcc")
+class OverTest(unittest.TestCase):
+    """the ring at two and three times the stream: tones where they belong,
+    nothing where their images would be, and the same bytes from MMX"""
+
+    def tone(self, f, over, eps=0.0, mmx=False, n=1 << 16):
+        t = np.arange(n + 200)
+        x = np.round(20000 * np.sin(2 * np.pi * f * t / FS))
+        y = through(x, q32(eps), mmx=mmx, over=over)
+        return y[1024:-1024].astype(float)
+
+    def test_tones_and_images(self):
+        for over in (2, 3):
+            for f in (997.3, 10000.9, 19000.1, 20000.3):
+                y = self.tone(f, over)
+                n = len(y)
+                t = np.arange(n) / (FS * over) * (2 * np.pi * f)
+                b = np.stack([np.cos(t), np.sin(t), np.ones(n)], 1)
+                co = np.linalg.lstsq(b, y, rcond=None)[0]
+                self.assertLess(abs(20 * np.log10(np.hypot(co[0], co[1]) /
+                                                  20000)), 0.01, (over, f))
+                # what's left, up to the ring's Nyquist, images included
+                r = y - b @ co
+                w = np.blackman(n) ** 2
+                a = np.abs(np.fft.rfft(r * w)) / (w.sum() / 2)
+                self.assertLess(20 * np.log10(a.max() / 20000), -86.0,
+                                (over, f))
+
+    def test_step_stays_true(self):
+        """a change of rate on top: the tone moves by it, no more"""
+        y = self.tone(10000.9, 2, eps=30e-6)
+        f = 10000.9 * (1 + 30e-6) * 2 / 2
+        t = np.arange(len(y)) / (2 * FS) * (2 * np.pi * f)
+        b = np.stack([np.cos(t), np.sin(t), np.ones(len(y))], 1)
+        co = np.linalg.lstsq(b, y, rcond=None)[0]
+        r = y - b @ co
+        self.assertLess(20 * np.log10(r.std() / 14142), -80.0)
+
+    def test_mmx_is_the_c_run(self):
+        if not X86:
+            self.skipTest("x86 only")
+        rng = np.random.default_rng(6)
+        x = np.pad(rng.integers(-20000, 20000, 2000), (40, 40))
+        for over in (2, 3):
+            for eps in (0.0, 30e-6, -252e-6):
+                c = through(x, q32(eps), over=over)
+                m = through(x, q32(eps), over=over, mmx=True)
+                self.assertTrue(np.array_equal(c, m), (over, eps))
+
+    def test_cost_of_a_held_phase(self):
+        """the outer words of each place outlast a frame at a small step"""
+        y = self.tone(997.3, 3, eps=30e-6, mmx=X86)
+        self.assertGreater(len(y), 1000)
+
+
+@unittest.skipUnless(np is not None and shutil.which("gcc"), "needs numpy, gcc")
 class TrebleTest(unittest.TestCase):
     """the table with the DAC's hold taken back: flat with the hold, at the
     same cost, and no less sound than the plain one for what it is"""
@@ -742,7 +855,7 @@ class FillTest(unittest.TestCase):
     AHEAD = 34
 
     def stream(self, eps, limit=True, frames=40000, exact=False, first=0,
-               rewind=0, budget=256):
+               rewind=0, budget=256, over=1):
         """frames read off the line by more than 8 of 16 bits, or with exact
         those that differ at all from one long run through the filter. The
         stream's first frame is first, across the boundary if near it, and
@@ -753,17 +866,18 @@ class FillTest(unittest.TestCase):
         b, period = self.BUFFER, self.PERIOD
         bound = b << 16
         src = (ctypes.c_int16 * (2 * b))()
-        ring = (ctypes.c_uint8 * (8 * b))()
+        ring = (ctypes.c_uint8 * (8 * b * over))()
         rot = ctypes.c_ulong(0)
         rs = RS()
         rs.tab = ctypes.cast(table(), s16p)
-        rs.step = int(round(eps * 2 ** 32))
+        rs.over = over
+        lib.es1869_rs_pace(ctypes.byref(rs), int(round(eps * 2 ** 32)))
         rs.pos = first % bound
         plan = Fill(buffer=b, boundary=bound, guard=4, lead=1764, slack=16,
                     filled=first % bound, seen=first % bound)
         st = Stream(src=ctypes.addressof(src), ring=ctypes.addressof(ring),
-                    buffer=b, boundary=bound, rot=ctypes.pointer(rot),
-                    stereo=True)
+                    buffer=b, boundary=bound, lap=b * over,
+                    rot=ctypes.pointer(rot), stereo=True)
         tone = 20000 * np.sin(2 * np.pi * 997.0 / 48000 *
                               np.arange(frames + 3 * b))
         state = {"appl": first, "hw": first}
@@ -791,7 +905,7 @@ class FillTest(unittest.TestCase):
                 last = not plan.backlog
                 if last:
                     lib.es1869_rs_seek(ctypes.byref(rs), ctypes.byref(st),
-                                       -self.AHEAD - 1)
+                                       (-self.AHEAD - 1) * over)
                 plan.filled = rs.pos
                 if last:
                     return
@@ -800,20 +914,26 @@ class FillTest(unittest.TestCase):
         fill()
         got = np.ctypeslib.as_array(ring)
         done, bad = 0, 0
-        pos = np.arange(frames * 2) * (1 + eps)
+        pos = np.arange(frames * 2 * over) * (1 + eps) / over
         want = 20000 * np.sin(2 * np.pi * 997.0 / 48000 * pos)
         if exact:
             whole = np.concatenate([np.zeros(BEHIND), np.rint(tone)])
-            want = through(whole, rs.step)
+            want = through(whole, rs.step, over=over)
+        period *= over
+        frames *= over
         while done + period < frames:
-            at = np.arange(done, done + period) % b
+            at = np.arange(done, done + period) % (b * over)
             v = (got[8 * at].astype(np.int32) |
                  got[8 * at + 2].astype(np.int32) << 8)
             v = np.where(v >= 32768, v - 65536, v)
             off = np.abs(v - want[done:done + period])
+            # between frames, a stream's sudden start rings for the filter's
+            # reach, which isn't on the line of a tone that was always there
+            if over > 1 and not exact and done < TAPS * over:
+                off[:] = 0
             bad += int(np.sum(off > (0 if exact else 8)))
             done += period
-            state["hw"] = first + int(done * (1 + eps))
+            state["hw"] = first + int(done * (1 + eps) / over)
             write(b - (state["appl"] - state["hw"]))
             fill()
             if rewind and done % (10 * period) == 0:
@@ -861,6 +981,29 @@ class FillTest(unittest.TestCase):
         on what the DMA has yet to play"""
         self.assertGreater(self.stream(-1000e-6, limit=False), 100)
         self.assertEqual(self.stream(1000e-6, limit=False), 0)
+
+    def test_ring_at_twice_and_three_times_the_stream(self):
+        for over in (2, 3):
+            for eps in (0.0, 30e-6, -252e-6):
+                self.assertEqual(self.stream(eps, over=over), 0, (over, eps))
+                self.assertEqual(self.stream(eps, exact=True, over=over), 0,
+                                 (over, eps))
+
+    def test_the_line_reads_back(self):
+        """the frame of the stream at a ring frame, as the pointer asks"""
+        lib = library()
+        for over, eps in ((1, 0.0), (1, 1e-3), (1, -1e-3), (2, 0.0),
+                          (2, 30e-6), (3, -252e-6)):
+            rs = RS()
+            rs.over = over
+            lib.es1869_rs_pace(ctypes.byref(rs), int(round(eps * 2 ** 32)))
+            rs.pos = 100000
+            rs.frac = 0x40000000
+            b = 16384
+            for a in (0, 1, 7, 1000, 12000):
+                got = lib.es1869_rs_at(ctypes.byref(rs), a, b)
+                want = int(np.floor(100000.25 - a * (1 + eps) / over)) % b
+                self.assertEqual(got, want, (over, eps, a))
 
     def test_limit(self):
         lib = library()

@@ -68,6 +68,8 @@ static double es_step(long ppb)
 	return floor((double)ppb * 4294967296.0 / 1e9) / 4294967296.0;
 }
 
+static int rs_ring_over = 1; // the ring frames to a stream frame
+
 // the mode, and the change in ppb in Trim
 static int rs_mode(struct et_ctx *c, int mode, long ppb)
 {
@@ -75,7 +77,8 @@ static int rs_mode(struct et_ctx *c, int mode, long ppb)
 	    et_param_set(c, "a2_trim_ppb", ppb) ||
 	    et_param_set(c, "a2_resample", mode) ||
 	    et_param_set(c, "a2_resample_dither", 0) ||
-	    et_param_set(c, "a2_treble", 0))
+	    et_param_set(c, "a2_treble", 0) ||
+	    et_param_set(c, "a2_oversample", rs_ring_over - 1))
 		return -1;
 	return 0;
 }
@@ -88,7 +91,8 @@ static enum et_result rs_dig(struct et_ctx *c, const struct et_fmt *f,
 			     int nmore, short **rec, unsigned long *nrec)
 {
 	struct et_stream s[8];
-	unsigned long n = (unsigned long)((0.3 + (double)frames / ET_FM_RATE +
+	unsigned long n = (unsigned long)((0.3 + (double)frames * rs_ring_over /
+					   ET_FM_RATE +
 					   (tune ? tune->pause_for : 0) + 0.6) *
 					  ET_FM_RATE);
 	int i;
@@ -207,10 +211,12 @@ enum et_result c_rs_exact(struct et_ctx *c, const struct et_case *k)
 		unsigned int channels, rate;
 		long ppb;
 		int polled;
+		unsigned int over;
 	} t[] = {
-		{ 2, 44100, 1000000, 0 }, { 2, 44100, -1000000, 0 },
-		{ 1, 44100, 1000000, 0 }, { 2, 44100, 30000, 0 },
-		{ 2, 48000, -251953, 0 }, { 2, 44100, 1000000, 1 },
+		{ 2, 44100, 1000000, 0, 1 }, { 2, 44100, -1000000, 0, 1 },
+		{ 1, 44100, 1000000, 0, 1 }, { 2, 44100, 30000, 0, 1 },
+		{ 2, 48000, -251953, 0, 1 }, { 2, 44100, 1000000, 1, 1 },
+		{ 2, 44100, 30000, 0, 2 }, { 2, 44100, 30000, 0, 3 },
 	};
 	struct et_fmt f = { ET_S16, t[k->arg].channels, t[k->arg].rate };
 	unsigned long n = 4 * f.rate, made, nrec = 0, a = 0, b = 0, i, j, want;
@@ -227,12 +233,15 @@ enum et_result c_rs_exact(struct et_ctx *c, const struct et_case *k)
 		tune.buffer = 4096;
 		tune.period = 2048;
 	}
+	rs_ring_over = t[k->arg].over;
 	if (rs_mode(c, RS_TRIM, t[k->arg].ppb)) {
+		rs_ring_over = 1;
 		free(d);
 		return ET_ERROR;
 	}
-	ref = sim_rs_stream(d, n, f.channels, t[k->arg].ppb, 0, &made);
+	ref = sim_rs_over(d, n, f.channels, t[k->arg].ppb, t[k->arg].over, &made);
 	r = rs_dig(c, &f, d, n, &tune, NULL, 0, &rec, &nrec);
+	rs_ring_over = 1;
 	if (r != ET_PASS)
 		goto out;
 	rs_keep(c, 0, &et_fm_fmt, rec, nrec);
@@ -243,7 +252,8 @@ enum et_result c_rs_exact(struct et_ctx *c, const struct et_case *k)
 	}
 	// a start can lose frames, and a stop the FIFO, and the frames past the
 	// last are the drain's
-	want = made > RS_FIFO + RS_AHEAD ? made - RS_FIFO - RS_AHEAD : 0;
+	want = made > RS_FIFO + RS_AHEAD * t[k->arg].over ?
+		       made - RS_FIFO - RS_AHEAD * t[k->arg].over : 0;
 	skip = rs_lost(&f, ref, want, rec, a, nrec);
 	if (skip < 0) {
 		et_fail(c, "the recording doesn't begin with the stream");
@@ -683,13 +693,16 @@ enum et_result c_rs_drain(struct et_ctx *c, const struct et_case *k)
 	short *rec = NULL;
 	void *d = et_tone(&f, n, 997, 997, 20000);
 	enum et_result r;
+	int over = k->arg + 1;
 
-	(void)k;
+	rs_ring_over = over;
 	if (rs_mode(c, RS_TRIM, ppb)) {
+		rs_ring_over = 1;
 		free(d);
 		return ET_ERROR;
 	}
 	r = rs_dig(c, &f, d, n, NULL, NULL, 0, &rec, &nrec);
+	rs_ring_over = 1;
 	free(d);
 	if (r != ET_PASS)
 		return r;
@@ -699,8 +712,8 @@ enum et_result c_rs_drain(struct et_ctx *c, const struct et_case *k)
 		return ET_ERROR;
 	}
 	et_measure(c, "the frames short of the stream",
-		   n / (1 + es_step(ppb)) - (double)(b - a + 1), "",
-		   -RS_AHEAD - 2, RS_FIFO + 2);
+		   over * n / (1 + es_step(ppb)) - (double)(b - a + 1), "",
+		   -(RS_AHEAD * over) - 2, RS_FIFO + 2);
 	free(rec);
 	return ET_PASS;
 }
@@ -717,17 +730,20 @@ enum et_result c_rs_runout(struct et_ctx *c, const struct et_case *k)
 	short *rec = NULL;
 	void *d = et_tone(&f, n, 997, 997, 20000);
 	enum et_result r;
+	int over = k->arg + 1;
 
-	(void)k;
 	memset(&tune, 0, sizeof(tune));
 	tune.flags = ET_RUNOUT;
-	tune.buffer = 8192;
+	tune.buffer = 8192 / over;
 	tune.period = 1024;
+	rs_ring_over = over;
 	if (rs_mode(c, RS_TRIM, ppb)) {
+		rs_ring_over = 1;
 		free(d);
 		return ET_ERROR;
 	}
 	r = rs_dig(c, &f, d, n, &tune, NULL, 0, &rec, &nrec);
+	rs_ring_over = 1;
 	free(d);
 	if (r != ET_PASS)
 		return r;
@@ -736,7 +752,8 @@ enum et_result c_rs_runout(struct et_ctx *c, const struct et_case *k)
 		et_fail(c, "no tone came back");
 		return ET_ERROR;
 	}
-	end = a + (unsigned long)(n / (1 + es_step(ppb))) + RS_AHEAD + RS_FIFO;
+	end = a + (unsigned long)(over * n / (1 + es_step(ppb))) + RS_AHEAD * over +
+	      RS_FIFO;
 	for (i = end; i < nrec; i++)
 		ghosts += rec[2 * i] != ET_FM_IDLE || rec[2 * i + 1] != ET_FM_IDLE;
 	et_measure(c, "the frames past the tone that aren't silent", ghosts, "", 0,
@@ -939,8 +956,8 @@ static int rs_share(struct et_ctx *c, const struct et_fmt *f, int mode, double h
 		return -1;
 	}
 	s = et_play(ET_A2, f, tone, n, 0);
-	s.period = 2048;
-	s.buffer = 8192;
+	s.period = rs_ring_over > 2 ? 1024 : 2048;
+	s.buffer = rs_ring_over > 2 ? 4096 : 8192;
 	err = et_run(c, &s, 1);
 	free(tone);
 	if (err || et_cost(c, &cyc1, &irq1, &tick1) < 0)
@@ -967,6 +984,30 @@ enum et_result c_rs_bench(struct et_ctx *c, const struct et_case *k)
 		et_measure(c, "MMX, stereo at 44.1 kHz, of the CPU",
 			   st * 44100 / hz * 100, "%", 0, 6);
 	et_measure(c, "the C code's cost over MMX's", cc / st, "x", 1, 0);
+	return ET_PASS;
+}
+
+// cpu.over: the driver's share of the CPU with the ring at 2x or 3x, at the
+// stream's own rate and with the Clock mode on top
+enum et_result c_cpu_over(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	double hz = c->hal->cpu_hz(c->hal->ctx), share[2];
+
+	et_mix_quiet(c);
+	et_mix_dig(c, 0);
+	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
+	if (hz <= 0)
+		return ET_SKIP;
+	rs_ring_over = k->arg + 1;
+	if (rs_share(c, &f, RS_OFF, hz, &share[0]) ||
+	    rs_share(c, &f, RS_CLOCK, hz, &share[1])) {
+		rs_ring_over = 1;
+		return ET_ERROR;
+	}
+	rs_ring_over = 1;
+	et_measure(c, "the driver's own cycles", share[0], "%", 0, 5 * (k->arg + 1));
+	et_measure(c, "and in Clock", share[1], "%", 0, 5 * (k->arg + 1));
 	return ET_PASS;
 }
 

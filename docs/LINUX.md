@@ -274,6 +274,21 @@ up. A fill holds interrupts off for about 80 us, and for 125 us at the worst
 seen, while the machine's own worst timer delay is over a millisecond with
 the filter or without it.
 
+`a2_oversample` ("Audio 2 Output Rate") plays a 16-bit stream at two or
+three times its rate, through the same filter, from the next prepare on,
+with or without a change of rate on top. The DAC then holds each sample for
+a half or a third as long, so that its images move up by as much, and
+nothing else in the chip has to change: a 44.1 kHz stream plays at 88.2 or
+132.3 kHz. It applies where a divisor of the stream's own gives the rate
+exactly, so 48 kHz takes 2x and no more, and up to 132.3 kHz. The ring keeps
+its size, so the longest buffer is a half or a third as long: 8192 frames at
+2x and 5461 at 3x. Audio 2's transfers turn to Demand 8, which leaves the
+bus the most. 3x takes up so much of the ISA bus that Audio 1 can't record
+at the same time, and a client whose pointer stands, as under dmix, gets
+each frame written again without the filter. At 2x every frame of the DMA
+matches the filter's C code on the chip. The driver takes 6.1 % of the
+Celeron at 44.1 kHz stereo at 2x, and 9.7 % at 3x.
+
 With its stages off, the DAC holds each sample for a whole sample period,
 which takes 0.75 dB off 10 kHz, 2 dB off 16 kHz and 3.2 dB off 20 kHz at
 44.1 kHz. `a2_treble` ("Audio 2 Treble Correction") takes a stream through a
@@ -749,6 +764,12 @@ saved state wins over a parameter. The defaults are the Kconfig options
 * `a2_resample_dither` ("Audio 2 Rate Dither Playback Switch"): 0 to 1,
   default 0. The rate correction's rounding to 16 bits with triangular noise
   of 1 LSB: 3 dB more noise for spurs at about -100 dBFS.
+* `a2_oversample` ("Audio 2 Output Rate"): 0 1x, 1 2x, 2 3x, default 1x.
+  Audio 2's 16-bit streams on DMA 5 played at this many times their rate
+  through the rate filter, where a divisor gives that exactly, at the next
+  prepare: no images, less droop, the buffer a half or a third as long, more
+  of the ISA bus and CPU. 3x can't run while Audio 1 records. It takes
+  effect at the next prepare.
 * `a2_treble` ("Audio 2 Treble Correction Playback Switch"): 0 to 1,
   default 0. Audio 2 through the filter with the DAC's hold taken back: flat
   to 20 kHz within 0.15 dB at 44.1 kHz, with the DAC's stages off, for 3 dB
