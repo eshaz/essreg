@@ -31,6 +31,14 @@
  * are as fine as the worst signal allows without a sum leaving 32 bits. The
  * first row, whose 1/2 doesn't fit in 16 bits, has a gain of -0.0001 dB.
  *
+ * Two things are worked out ahead, since this is the driver's only heavy work.
+ * A taps' word read across a cache line costs the Celeron half a sum again, and
+ * three frames in four are read that way, so each run has the channels in
+ * four copies, a sample apart, and a frame takes the one that lies on 8 bytes.
+ * And the outer words of a blend hold from one frame to the next, at the middle
+ * of a place 2^-12 of a frame wide: they are small, and their error is under the
+ * 16-bit noise at any step, which at 30 ppm leaves them 8 frames unchanged.
+ *
  * es1869_rs_run_c() and es1869_rs_run_mmx() give the same bytes.
  *
  * The clock: each interrupt of a stream is a number of the master's ticks at
@@ -211,6 +219,41 @@ void es1869_rs_split(s16 *l, s16 *r, const void *src, u32 frames, bool stereo)
 	}
 }
 
+#ifdef ES1869_RS_MMX
+static inline void rs_copy_word(s16 *to, const s16 *from)
+{
+	asm volatile("movq (%1),%%mm0\n\t"
+		     "movq %%mm0,(%0)\n\t"
+		     : : "r" (to), "r" (from) : "memory");
+}
+#else
+static inline void rs_copy_word(s16 *to, const s16 *from)
+{
+	memcpy(to, from, 8);
+}
+#endif
+
+// the channels of a run of n frames a sample, two and three on, in copies that
+// lie on 8 bytes, each frame's taps in one of them. MMX is the quick way here,
+// and the caller holds the FPU for it
+void es1869_rs_shift(struct es1869_rs *rs, struct es1869_rs_job *j, u32 n,
+		     bool stereo)
+{
+	u32 want = (n + ES_RS_TAPS + 4) / 4, c, k, i;
+
+	for (c = 0; c < (stereo ? 2 : 1); c++) {
+		j->ch[c] = rs->ch[c];
+		for (k = 0; k < 3; k++) {
+			const s16 *from = rs->ch[c] + k + 1;
+			s16 *to = rs->odd[c][k];
+
+			j->odd[c][k] = to;
+			for (i = 0; i < want; i++, from += 4, to += 4)
+				rs_copy_word(to, from);
+		}
+	}
+}
+
 // the 15 bits that follow the row's place
 static inline u32 rs_blend_bits(u32 frac)
 {
@@ -218,6 +261,9 @@ static inline u32 rs_blend_bits(u32 frac)
 }
 
 #define RS_HALF (1 << 13) // the 1/2 that the taps around the place gave up
+#define RS_HELD (1U << 20) // the width in frac of a place of the outer words
+#define RS_INNER 16 // the taps that take every frame's own place start here
+#define RS_OUTER 52 // and end here
 
 static inline const s16 *rs_place(const s16 *tab, u32 frac)
 {
@@ -262,11 +308,18 @@ static inline void rs_next(struct es1869_rs_job *j, u32 *i)
 	j->frac = f;
 }
 
-static void rs_blend_c(s16 *c, const s16 *row, s32 f)
+// where the outer words' blend stands for a frame at frac
+static inline u32 rs_held(u32 frac)
+{
+	return (frac & ~(RS_HELD - 1)) | (RS_HELD / 2);
+}
+
+static void rs_blend_c(s16 *c, const s16 *row, s32 f, unsigned int from,
+		       unsigned int to)
 {
 	unsigned int i;
 
-	for (i = 0; i < ES_RS_TAPS; i++)
+	for (i = from; i < to; i++)
 		c[i] = row[i] + ((row[ES_RS_TAPS + i] * f) >> 16);
 }
 
@@ -329,14 +382,24 @@ static inline s32 rs_clip(s32 v)
 
 u32 es1869_rs_run_c(struct es1869_rs_job *j)
 {
-	u32 i = 0, o = 0;
+	s16 c[ES_RS_TAPS];
+	u32 i = 0, o = 0, held = 0;
 	u8 *d = j->dst;
 
 	while (i < j->frames && o < j->room) {
-		s16 c[ES_RS_TAPS];
+		u32 at = rs_held(j->frac);
 		s32 rnd[2], v;
 
-		rs_blend_c(c, rs_place(j->tab, j->frac), rs_blend_bits(j->frac));
+		if (at != held) {
+			const s16 *row = rs_place(j->tab, at);
+			u32 f = rs_blend_bits(at);
+
+			held = at;
+			rs_blend_c(c, row, f, 0, RS_INNER);
+			rs_blend_c(c, row, f, RS_OUTER, ES_RS_TAPS);
+		}
+		rs_blend_c(c, rs_place(j->tab, j->frac), rs_blend_bits(j->frac),
+			   RS_INNER, RS_OUTER);
 		rs_round(j, rnd);
 		v = rs_clip(rs_sum_c(j->ch[0] + i, c) + rnd[0]);
 		d[0] = v;
@@ -372,19 +435,26 @@ u32 es1869_rs_run_c(struct es1869_rs_job *j)
 	"movq %%mm0," w "(%0)\n\t"
 
 // the row of the place: mm7 the fraction in each lane
-static inline void rs_blend_mmx(s16 *c, const s16 *row, u32 f)
+static inline void rs_blend_inner(s16 *c, const s16 *row, u32 f)
+{
+	asm volatile("movd %2,%%mm7\n\t"
+		     "punpckldq %%mm7,%%mm7\n\t"
+		     RS_BLEND("32", "168") RS_BLEND("40", "176")
+		     RS_BLEND("48", "184") RS_BLEND("56", "192")
+		     RS_BLEND("64", "200") RS_BLEND("72", "208")
+		     RS_BLEND("80", "216") RS_BLEND("88", "224")
+		     RS_BLEND("96", "232")
+		     : : "r" (c), "r" (row), "r" (f | f << 16) : "memory");
+}
+
+static inline void rs_blend_outer(s16 *c, const s16 *row, u32 f)
 {
 	asm volatile("movd %2,%%mm7\n\t"
 		     "punpckldq %%mm7,%%mm7\n\t"
 		     RS_BLEND("0", "136") RS_BLEND("8", "144")
 		     RS_BLEND("16", "152") RS_BLEND("24", "160")
-		     RS_BLEND("32", "168") RS_BLEND("40", "176")
-		     RS_BLEND("48", "184") RS_BLEND("56", "192")
-		     RS_BLEND("64", "200") RS_BLEND("72", "208")
-		     RS_BLEND("80", "216") RS_BLEND("88", "224")
-		     RS_BLEND("96", "232") RS_BLEND("104", "240")
-		     RS_BLEND("112", "248") RS_BLEND("120", "256")
-		     RS_BLEND("128", "264")
+		     RS_BLEND("104", "240") RS_BLEND("112", "248")
+		     RS_BLEND("120", "256") RS_BLEND("128", "264")
 		     : : "r" (c), "r" (row), "r" (f | f << 16) : "memory");
 }
 
@@ -458,23 +528,37 @@ static inline void rs_out_mono(u8 *d, const s32 *rnd)
 		     : "=m" (*(u32 *)d) : "m" (*(const u32 *)rnd));
 }
 
+// a frame's taps on 8 bytes: the copy of the channel that has them there
+static inline const s16 *rs_taps(const struct es1869_rs_job *j, unsigned int c,
+				 u32 i)
+{
+	u32 k = i & 3;
+
+	return (k ? j->odd[c][k - 1] : j->ch[c]) + i - k;
+}
+
 // the caller holds the FPU, as the kernel has it (kernel_fpu_begin())
 u32 es1869_rs_run_mmx(struct es1869_rs_job *j)
 {
-	u32 i = 0, o = 0;
+	s16 c[ES_RS_TAPS] __aligned(8);
+	u32 i = 0, o = 0, held = 0;
 	u8 *d = j->dst;
 
 	while (i < j->frames && o < j->room) {
-		s16 c[ES_RS_TAPS] __aligned(8);
+		u32 at = rs_held(j->frac);
 		s32 rnd[2] __aligned(8);
 
-		rs_blend_mmx(c, rs_place(j->tab, j->frac),
-			     rs_blend_bits(j->frac));
+		if (at != held) {
+			held = at;
+			rs_blend_outer(c, rs_place(j->tab, at), rs_blend_bits(at));
+		}
+		rs_blend_inner(c, rs_place(j->tab, j->frac),
+			       rs_blend_bits(j->frac));
 		rs_round(j, rnd);
-		rs_sum_mmx(j->ch[0] + i, c);
+		rs_sum_mmx(rs_taps(j, 0, i), c);
 		if (j->stereo) {
 			asm volatile("movq %%mm0,%%mm5" : : );
-			rs_sum_mmx(j->ch[1] + i, c);
+			rs_sum_mmx(rs_taps(j, 1, i), c);
 			rs_out_stereo(d, rnd);
 			d += 8;
 		} else {
@@ -569,7 +653,6 @@ static u32 rs_chunk(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 	unsigned long b = s->buffer;
 	struct es1869_rs_job j = {
 		.tab = rs->tab,
-		.ch = { rs->ch[0], rs->ch[1] },
 		.dst = s->ring + 2 * rs->w * (s->stereo ? 4 : 2),
 		.frames = n,
 		.room = b - rs->w,
@@ -584,11 +667,16 @@ static u32 rs_chunk(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 
 	rs_window(rs, s, n);
 #ifdef ES1869_RS_MMX
-	if (s->mmx)
+	if (s->mmx) {
+		es1869_rs_shift(rs, &j, n, s->stereo);
 		out = es1869_rs_run_mmx(&j);
-	else
+	} else
 #endif
+	{
+		j.ch[0] = rs->ch[0];
+		j.ch[1] = rs->ch[1];
 		out = es1869_rs_run_c(&j);
+	}
 	rs->frac = j.frac;
 	rs->seed = j.seed;
 	rs->last[0] = j.last[0];

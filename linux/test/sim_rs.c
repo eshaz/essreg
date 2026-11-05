@@ -114,21 +114,24 @@ short *sim_rs_stream(const short *src, unsigned long frames,
 double sim_rs_cycles(unsigned int channels, int mmx)
 {
 #if defined(__i386__) || defined(__x86_64__)
-	static s16 ch[2][4096 + ES_RS_TAPS + 2];
+	static s16 ch[2][4][4096 + ES_RS_TAPS + 8] __aligned(8);
 	static u8 ring[16 * 4096];
 	struct es1869_rs_job j;
 	unsigned long long best = ~0ULL;
-	unsigned int i;
+	unsigned int i, c, k;
 	int pass;
 
-	for (i = 0; i < 4096 + ES_RS_TAPS + 2; i++) {
-		ch[0][i] = (s16)(i * 2654435761U >> 16) / 4;
-		ch[1][i] = (s16)(i * 2246822519U >> 16) / 4;
-	}
 	memset(&j, 0, sizeof(j));
+	for (c = 0; c < 2; c++) {
+		for (k = 0; k < 4; k++)
+			for (i = 0; i < 4096 + ES_RS_TAPS + 2; i++)
+				ch[c][k][i] = (s16)((i + k) * (c ? 2246822519U :
+							       2654435761U) >> 16) / 4;
+		j.ch[c] = ch[c][0];
+		for (k = 0; k < 3; k++)
+			j.odd[c][k] = ch[c][k + 1];
+	}
 	j.tab = rs_tab();
-	j.ch[0] = ch[0];
-	j.ch[1] = ch[1];
 	j.dst = ring;
 	j.frames = 4096;
 	j.room = 4096 + 8;

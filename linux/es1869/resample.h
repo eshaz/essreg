@@ -29,6 +29,7 @@
 struct es1869_rs_job {
 	const s16 *tab; // es1869_rs_table's
 	const s16 *ch[2]; // the channels, from the first frame's first tap
+	const s16 *odd[2][3]; // and from their 2nd to 4th sample, for MMX
 	u8 *dst; // the ring: each byte in the low byte of a word
 	u32 frames; // the stream frames to go through
 	u32 room; // the ring frames to write, at most
@@ -60,7 +61,8 @@ struct es1869_rs {
 	u32 since; // the stream's frames before pos, as far as they matter
 	u32 seed; // the dither's state
 	s32 last[2];
-	s16 ch[2][ES_RS_WINDOW]; // the frames around the run, by channel
+	s16 ch[2][ES_RS_WINDOW] __aligned(8); // the frames around the run
+	s16 odd[2][3][ES_RS_WINDOW] __aligned(8); // the same a sample on, each
 };
 
 // what a fill works on
@@ -76,6 +78,8 @@ struct es1869_rs_stream {
 
 void es1869_rs_table(s16 *tab);
 void es1869_rs_split(s16 *l, s16 *r, const void *src, u32 frames, bool stereo);
+void es1869_rs_shift(struct es1869_rs *rs, struct es1869_rs_job *j, u32 n,
+		     bool stereo);
 u32 es1869_rs_run_c(struct es1869_rs_job *j);
 #ifdef ES1869_RS_MMX
 u32 es1869_rs_run_mmx(struct es1869_rs_job *j);

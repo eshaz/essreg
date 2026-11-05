@@ -36,7 +36,7 @@ BAND = (20.0, 20000.0)
 
 class Job(ctypes.Structure):
     s16p = ctypes.POINTER(ctypes.c_int16)
-    _fields_ = [("tab", s16p), ("ch", s16p * 2),
+    _fields_ = [("tab", s16p), ("ch", s16p * 2), ("odd", (s16p * 3) * 2),
                 ("dst", ctypes.POINTER(ctypes.c_uint8)),
                 ("frames", ctypes.c_uint32), ("room", ctypes.c_uint32),
                 ("used", ctypes.c_uint32), ("frac", ctypes.c_uint32),

@@ -46,7 +46,7 @@ s16p = ctypes.POINTER(ctypes.c_int16)
 
 
 class Job(ctypes.Structure):
-    _fields_ = [("tab", s16p), ("ch", s16p * 2),
+    _fields_ = [("tab", s16p), ("ch", s16p * 2), ("odd", (s16p * 3) * 2),
                 ("dst", ctypes.POINTER(ctypes.c_uint8)),
                 ("frames", ctypes.c_uint32), ("room", ctypes.c_uint32),
                 ("used", ctypes.c_uint32), ("frac", ctypes.c_uint32),
@@ -82,7 +82,8 @@ class RS(ctypes.Structure):
                 ("w", ctypes.c_ulong), ("pos", ctypes.c_ulong),
                 ("since", ctypes.c_uint32), ("seed", ctypes.c_uint32),
                 ("last", ctypes.c_int32 * 2),
-                ("ch", (ctypes.c_int16 * (256 + TAPS + 2)) * 2)]
+                ("ch", (ctypes.c_int16 * (256 + TAPS + 2)) * 2),
+                ("odd", ((ctypes.c_int16 * (256 + TAPS + 2)) * 3) * 2)]
 
 
 class Stream(ctypes.Structure):
@@ -187,18 +188,31 @@ def row_taps(rows, i):
     return v
 
 
+def shifted(j, chans):
+    """the channels' copies a sample, two and three on, which MMX reads; what
+    has to stay alive as long as the job"""
+    keep = []
+    for c, a in enumerate(chans):
+        for k in range(3):
+            o = np.concatenate([a[k + 1:], np.zeros(8, dtype=np.int16)])
+            j.odd[c][k] = o.ctypes.data_as(s16p)
+            keep.append(o)
+    return keep
+
+
 def run(x, y, frames, frac, step, stereo=True, mmx=False, dither=False,
         seed=12345):
     """frames of the stream through one call; returns bytes, used, frac"""
     lib = library()
     room = frames + 8
     out = (ctypes.c_uint8 * (room * 8))()
-    a = (ctypes.c_int16 * len(x))(*[int(v) for v in x])
-    b = (ctypes.c_int16 * len(y))(*[int(v) for v in y])
+    a = np.array(x, dtype=np.int16)
+    b = np.array(y, dtype=np.int16)
     j = Job()
     j.tab = ctypes.cast(table(), s16p)
-    j.ch[0] = ctypes.cast(a, s16p)
-    j.ch[1] = ctypes.cast(b, s16p)
+    j.ch[0] = a.ctypes.data_as(s16p)
+    j.ch[1] = b.ctypes.data_as(s16p)
+    alive = shifted(j, (a, b))
     j.dst = ctypes.cast(out, ctypes.POINTER(ctypes.c_uint8))
     j.frames = frames
     j.room = room
@@ -208,6 +222,7 @@ def run(x, y, frames, frac, step, stereo=True, mmx=False, dither=False,
     j.dither = dither
     j.seed = seed
     n = (lib.es1869_rs_run_mmx if mmx else lib.es1869_rs_run_c)(ctypes.byref(j))
+    del alive
     return bytes(out[:n * (8 if stereo else 4)]), j.used, j.frac
 
 
@@ -225,6 +240,7 @@ def through(x, step, y=None, frac=0, mmx=False, dither=False, seed=12345):
     j.tab = ctypes.cast(table(), s16p)
     j.ch[0] = a.ctypes.data_as(s16p)
     j.ch[1] = b.ctypes.data_as(s16p)
+    alive = shifted(j, (a, b)) if mmx else None
     j.dst = out.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8))
     j.frames = n
     j.room = room
@@ -235,6 +251,7 @@ def through(x, step, y=None, frac=0, mmx=False, dither=False, seed=12345):
     j.seed = seed
     run_it = lib.es1869_rs_run_mmx if mmx and X86 else lib.es1869_rs_run_c
     m = run_it(ctypes.byref(j))
+    del alive
     v = samples(out[:m * (8 if stereo else 4)].tobytes(), stereo)
     return v if stereo else v[0]
 
