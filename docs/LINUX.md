@@ -151,10 +151,18 @@ and `a1p_max_rate`), and `rate_limit=0` lifts them:
 * Audio 1's playback up to 48 kHz, which the second card's microphone input
   can't judge above.
 
-From 153.6 kHz on, DMA 5 delivers no more than about 572,000 transfers a
-second, and the chip then plays slower instead of skipping: at 198.45 kHz a
-441 Hz tone came out at 318 Hz. The rates of the 768 kHz clock come out 252
-ppm above those of the 793.8 kHz clock.
+What limits the top is the ISA bus. Audio 2 takes one byte a DMA cycle, and
+on silence DMA 5 moves at most about 770,000 bytes a second with the chip's
+demand of 8 (`a2_burst=3`), 757,000 with 4 and 740,000 with 2. Past that the
+chip plays slower instead of skipping, as 16-bit stereo does at 198.45 kHz,
+which asks for 794,000. A real stream has less room. With the Play! 3 on the
+same bridge, 16-bit stereo was clean at 132.3 kHz, showed stalls as
+sidebands at -34 dB at 158.76 kHz, and ran 0.65 % flat at 192 kHz. Audio 1
+shares the bus: 88.2 kHz held while it recorded, with one take of eight
+stalling, and 132.3 kHz broke while it recorded at 52.92 kHz. Mono and 8-bit
+stereo have more room, and 198.45 kHz runs clean in both on silence. The
+rates of the 768 kHz clock come out 252 ppm above those of the 793.8 kHz
+clock.
 
 The mixer's dB scales are the data sheet's. Measured on the Armada through
 the chip's own record paths, Audio 2's playback level (7Ch) and record level
@@ -253,12 +261,18 @@ same as on the host within 0.01 dB. Through the analog path, heard by Audio
 in turn, THD+N reads -61.6, -52.7 and -43.7 dB at 1, 10 and 16 kHz, within
 0.06 dB, and the level stays within 0.002 dB.
 
-It takes 4.6 % of the Armada's 400 MHz Celeron at 44.1 kHz stereo, by the
-driver's own cycle counts, against 0.3 % with it off: 3.4 % in mono, 5.1 %
-at 48 kHz and 10.2 % at 96 kHz. A frame costs 240 cycles in MMX, and 710 in
-C where the kernel can't take the FPU. A fill holds interrupts off for about
-80 us, and for up to 300 us at the worst seen, while the machine's own worst
-timer delay is over a millisecond with the filter or without it.
+It takes 3.1 % of the Armada's 400 MHz Celeron at 44.1 kHz stereo and 3.8 %
+at 48 kHz, by the driver's own cycle counts, against 0.3 % with it off. A
+frame costs 190 cycles in MMX, 119 in mono, and 625 in C where the kernel
+can't take the FPU. Two things took a fifth off: each channel is kept in
+four copies a sample apart, so that a frame's taps lie on 8 bytes and no
+word crosses a cache line, and the 32 outer taps are blended at the middle
+of a place 2^-12 of a frame wide and held while the fraction stays there,
+which is about 8 frames at 30 ppm. That is a pure function of the fraction,
+so the C and the MMX code still make the same bytes however a stream is cut
+up. A fill holds interrupts off for about 80 us, and for 125 us at the worst
+seen, while the machine's own worst timer delay is over a millisecond with
+the filter or without it.
 
 A stream's period no longer matches the ring's, so a timer wakes the client
 on the stream's own period boundaries, and the chip's interrupts stay as the
@@ -304,21 +318,25 @@ moving.
 
 Of the machine's clocks, only the RTC is an oscillator of its own that
 software can read. The ES1869's master, the CPU's time stamp counter, the
-PCI bus (the RTL8169's timer counts it, not the card's crystal) and most
-likely the USB host's frames all run off the board's 14.318 MHz crystal: the
-TSC and the bus move with the raw clock to 2 ppb over 8 minutes. The RTC, a
-32.768 kHz crystal of its own, reads -8 to -12 ppm against the raw clock and
-moves with temperature, but read through the kernel it holds only about 0.4
-ppm over half an hour, and the kernel's 11-minute write sets its phase. The
-Play! 3 has a clock of its own, which wanders within a recording.
+PCI bus (the RTL8169's timer counts it, not the card's crystal) and the USB
+host's frames all run off the board's crystal: the TSC and the bus move with
+the raw clock to 2 ppb over 8 minutes across 40 degrees, and the USB frames
+are exactly 12 MHz / 11998. The RTC, a 32.768 kHz crystal of its own, reads
+-8 to -12 ppm against the raw clock, and the kernel's 11-minute write sets
+its phase. The Play! 3 is no second clock: its capture runs 48008.015 Hz,
+locked to the USB frames, so it is an outside meter of the chip's phase and
+nothing more. It reads the chip against itself to 470 ppb at 1 s and 11 ppb
+at 128 s, and shows Trim's +10 ppm as +9.998 ppm and no phase jump of over
+about 2 us when the filter turns on or the mode changes.
 
-The crystal moves by up to 0.9 ppm in a day, as chrony sees it, which the
-fit of the steered clock follows within about 20 minutes. It seems to follow
-the board's temperature with a lag of an hour or more: a CPU load of half an
-hour moved it by under 0.1 ppm, and a whole afternoon cooling moved it by
-0.9. chrony's `tempcomp` directive can apply a map of temperature to
-frequency, which the Clock mode would inherit with no change here, but no
-map is in use yet.
+chrony's frequency moved by over 2 ppm in a day (28.9 to 31.15), which the
+fit of the steered clock follows within about 20 minutes. Temperature
+doesn't explain it: the frequency fell 0.9 ppm over an hour with every
+thermometer flat, and a CPU load of half an hour moved it by under 0.1 ppm.
+It may be the path to the servers and not the crystal, and the RTC, read
+every second, is the check of that. chrony's `tempcomp` directive could
+apply a map of temperature to frequency, which the Clock mode would inherit
+with no change here, but the data don't support one so far.
 
 A correction of the rate is not one of jitter. Jitter is in the DAC's clock
 at the moment of each conversion, after all of this, and no change to the
@@ -338,8 +356,14 @@ the kernel, with interrupts off, of a sample's length, 40 a second, measured
 0.9 to 1.8 us rms of timing noise and THD+N of -48, -21 and -11 dB at 1, 10
 and 16 kHz, where plain playback and the filter both read 13 to 21 ns and
 -61, -52 and -46 dB in the same session. Perfect pulses would still leave
-about 220 ns, so the driver doesn't use them. The filter clock (72h) moves a
-low-pass corner and has no part in the timing.
+about 220 ns, so the driver doesn't use them. Nor can the clock make a rate
+that no divisor gives, such as 176.4 kHz from 793.8 kHz / 4.5, by turning
+between /4 and /5: that takes a write a sample, and a write of index and
+data costs 3.1 us of the ISA bus and more with the lock around it, where a
+sample lasts 5.67 us. The filter clock (72h) moves a low-pass corner and has
+no part in the timing:
+[AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-filters-measured) has what it does
+under a stream.
 
 ## CPU and latency
 
@@ -459,6 +483,17 @@ sources in `src/`, with its register access through the driver's register
 hwdep instead of the ports: `make -C linux/tools/essreg`, then `essreg a`
 for every value or `essreg r=regs.txt` for a dump. Reads work as root;
 writes also need the module's `regs_write=1`.
+
+`linux/tools/clockcmp.c` compares the machine's clocks with the raw one.
+`linux/tools/modlab.c` moves a rate or a filter clock under a running
+stream, through the register hwdep's ES1869_IOCTL_PATTERN, which writes a
+table of 70h, 72h, A1h or A2h at even times of the cycle counter, with
+`regs_write=1`. The cycle counter is on the chip's crystal, so a pattern
+stays in phase with the samples. `linux/tools/iotime.c` times the chip's
+ports. A port takes 1.53 us on the ISA bus, the chip's or the game port's,
+against 0.72 us for one the bridge answers itself. Index and data take 3.1
+us as two OUTs and 2.3 us as one 16-bit OUT at the index, which reaches both
+ports and can't be split by an interrupt, and data alone 1.6 us.
 
 ## The test suite
 

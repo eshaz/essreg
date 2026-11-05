@@ -72,11 +72,33 @@ struct es1869_regs_info {
 	__u32 pad2;
 };
 
+// a table of registers written at even times, one entry a step, and over
+// again: what a rate or a filter clock does when it moves under a stream
+struct es1869_reg_pattern {
+	__u64 table; // a pointer to len __u16, register << 8 | value
+	__u64 base; // in cycles of the CPU, the first step; 0 for now, and the
+		    // step after the last on return, to go on in phase
+	__u64 step; // cycles between entries, with 16 bits of fraction
+	__u32 count; // the steps of this call
+	__u32 offset; // the table's entry at the first step, then after the last
+	__u16 len; // ES1869_PATTERN_MAX at most
+	__u8 bank; // ES1869_BANK_MIXER (70h, 72h) or _CTRL (A1h, A2h)
+	__u8 flags; // ES1869_PATTERN_ALONE
+	__u32 writes; // out: the writes made, an entry the same as the last none
+	__u32 skipped; // out: steps that the machine's other work took
+	__u32 late; // out: the latest write, in cycles
+	__u32 longest; // out: the longest write, in cycles
+};
+
+#define ES1869_PATTERN_MAX 4096
+#define ES1869_PATTERN_ALONE 0x01 // no other task runs, a third of a second at most
+
 #define ES1869_IOCTL_PVERSION _IOR('H', 0x60, int)
 #define ES1869_IOCTL_INFO _IOR('H', 0x61, struct es1869_regs_info)
 #define ES1869_IOCTL_READ _IOWR('H', 0x62, struct es1869_reg)
 #define ES1869_IOCTL_WRITE _IOW('H', 0x63, struct es1869_reg)
 #define ES1869_IOCTL_BLOCK_READ _IOWR('H', 0x64, struct es1869_reg_block)
+#define ES1869_IOCTL_PATTERN _IOWR('H', 0x65, struct es1869_reg_pattern)
 
 #define ES1869_ESFM_VERSION 1
 

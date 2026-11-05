@@ -17,7 +17,10 @@
  */
 
 #include <linux/capability.h>
+#include <linux/sched/signal.h>
 #include <linux/security.h>
+#include <linux/slab.h>
+#include <linux/timex.h>
 #include <linux/uaccess.h>
 #include <sound/hwdep.h>
 
@@ -140,6 +143,118 @@ static int reg_write(struct es1869 *chip, const struct es1869_reg *r)
 	return err;
 }
 
+// only the rates and the filter clocks move: the rest of the chip keeps still
+static bool pattern_reg(u8 bank, u8 reg)
+{
+	if (bank == ES1869_BANK_MIXER)
+		return reg == 0x70 || reg == 0x72;
+	return bank == ES1869_BANK_CTRL && (reg == 0xA1 || reg == 0xA2);
+}
+
+/*
+ * The CPU spins between the writes with interrupts on, so the streams go on;
+ * a step that the machine's other work took is dropped, and the entry that
+ * time calls for is written, which keeps the pattern in phase with the
+ * cycle counter, the crystal of the chip's own clocks.
+ */
+static int reg_pattern(struct es1869 *chip, struct es1869_reg_pattern *p,
+		       const u16 *tab)
+{
+	struct es1869_hw *hw = &chip->hw;
+	u64 at = p->base ? p->base : get_cycles();
+	u32 frac = 0, step_frac = p->step & 0xFFFF;
+	u64 step = p->step >> 16;
+	bool alone = p->flags & ES1869_PATTERN_ALONE;
+	unsigned long flags;
+	u32 i = 0, off = p->offset % p->len;
+	int last = -1, err = 0;
+
+	p->writes = p->skipped = p->late = p->longest = 0;
+	while (i < p->count && !err) {
+		u64 now = get_cycles(), t;
+		int e;
+
+		if ((s64)(now - at) < 0) {
+			if (!alone) {
+				cond_resched();
+				if (signal_pending(current))
+					err = -EINTR;
+			}
+			cpu_relax();
+			continue;
+		}
+		if (now - at > p->late)
+			p->late = now - at;
+		// the entry of this moment, then the next step
+		for (;;) {
+			e = tab[off];
+			if (++off == p->len)
+				off = 0;
+			i++;
+			frac += step_frac;
+			at += step + (frac >> 16);
+			frac &= 0xFFFF;
+			if ((s64)(now - at) < 0 || i >= p->count)
+				break;
+			p->skipped++;
+		}
+		if (e == last)
+			continue;
+		last = e;
+		t = get_cycles();
+		spin_lock_irqsave(&chip->reg_lock, flags);
+		if (p->bank == ES1869_BANK_MIXER)
+			es1869_mix_write(hw, e >> 8, e & 0xFF);
+		else
+			err = es1869_ctrl_write(hw, e >> 8, e & 0xFF);
+		spin_unlock_irqrestore(&chip->reg_lock, flags);
+		t = get_cycles() - t;
+		if (t > p->longest)
+			p->longest = t;
+		p->writes++;
+		if (!alone)
+			cond_resched();
+	}
+	p->base = at;
+	p->offset = off;
+	return err;
+}
+
+static int regs_pattern(struct es1869 *chip, void __user *argp)
+{
+	struct es1869_reg_pattern p;
+	u16 *tab;
+	int err, i;
+
+	if (!es1869_val(ES_S_regs_write) || !capable(CAP_SYS_RAWIO))
+		return -EPERM;
+	if (security_locked_down(LOCKDOWN_IOPORT))
+		return -EPERM;
+	if (copy_from_user(&p, argp, sizeof(p)))
+		return -EFAULT;
+	if (!p.len || p.len > ES1869_PATTERN_MAX || !p.count ||
+	    p.step >> 16 < 16)
+		return -EINVAL;
+	// alone it holds the machine, for what the streams' buffers last on a
+	// machine of 400 MHz
+	if ((p.flags & ES1869_PATTERN_ALONE) &&
+	    (p.step >> 16) * p.count > 1ULL << 27)
+		return -EINVAL;
+	tab = memdup_array_user(u64_to_user_ptr(p.table), p.len, sizeof(*tab));
+	if (IS_ERR(tab))
+		return PTR_ERR(tab);
+	err = 0;
+	for (i = 0; i < p.len && !err; i++)
+		if (!pattern_reg(p.bank, tab[i] >> 8))
+			err = -EINVAL;
+	if (!err)
+		err = reg_pattern(chip, &p, tab);
+	kfree(tab);
+	if (copy_to_user(argp, &p, sizeof(p)))
+		return -EFAULT;
+	return err;
+}
+
 static void fill_info(struct es1869 *chip, struct es1869_regs_info *info)
 {
 	struct es1869_hw *hw = &chip->hw;
@@ -221,6 +336,8 @@ static int regs_ioctl(struct snd_hwdep *hw, struct file *file,
 			err = -EFAULT;
 		kfree(blk);
 		return err;
+	case ES1869_IOCTL_PATTERN:
+		return regs_pattern(chip, argp);
 	}
 	return -ENOIOCTLCMD;
 }

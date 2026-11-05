@@ -181,6 +181,58 @@ is also the ADC's filter when Audio 1 records. The rebuilt drivers keep it
 bypassed at all times, for playback and recording
 ([AUDIO1.md](AUDIO1.md#the-filter-of-the-audio-1-codec)).
 
+### The filters, measured
+
+Audio 1 records Audio 2 through the record mixer, on one clock, so the two
+can be compared tone by tone under one stream while a register moves. The
+Audio 2 filter (72h) and the Audio 1 filter (A2h, which is also the ADC's)
+read the same to 0.1 dB. Over the corner *fc*, the clock divided by 82, the
+shape doesn't depend on the clock, down to 682 Hz at least:
+
+| f / fc    | Level (dB) |
+|-----------|------------|
+| up to 0.3 | 0          |
+| 0.64      | -1.1       |
+| 0.89      | +1.3       |
+| 1.05      | -7.6       |
+| 1.48      | -35        |
+| 1.82      | -58        |
+
+So this is no gentle low-pass. Six poles and four zeros fit it within 0.02
+dB: over *fc*, the poles lie at -0.432 +- 0.364j, -0.080 +- 0.938j and
+-0.682 +- 0.783j, and a zero near +-1.86j. The pair at 0.94 has a Q of 5.9,
+which is its resonance: a step rings there, falling by about a third a
+cycle. The group delay is 0.71 cycles of *fc* in the passband and 2.3 at the
+peak. ESS's FDh, corner 29 kHz, takes 2.4 dB out at 14.5 kHz, in the audible
+band.
+
+The clock is 7,144,200 Hz over 256 - x, which is the 793.8 kHz clock times
+9, and not the data sheet's 7.16 MHz. Almost nothing stands in front of the
+filter, so that it samples what comes in: a 30 kHz tone at 96 kHz past a
+clock of 29767.5 Hz comes out at 240 Hz, 9 dB under the tone. That is a
+mixer, and it gives the clock to the Hz. Since the clock is 162 times 44.1
+kHz, the divisors 3, 6, 9, 18, 27, 54, 81 and 162 lie on whole multiples of
+that rate, and of no rate of the 768 kHz clock. On one of those, the clock's
+own aliases fall on DC. On others they fall in the band: a recording at 44.1
+kHz through divisor 5 has a line at 8820 Hz at -92 dBFS, and with a tone
+there are products of it up to -74 dBFS. FDh, ESS's value at 44.1 kHz, is on
+one, and at 48 kHz it isn't.
+
+The clock can be moved under a stream, by 72h directly and by A2h through
+the DSP, which took 26 to 90 us a write with no error. A step takes effect
+at once. The capacitors keep their charge and the poles move with the clock:
+a sampling scope of a tone through steps of 72h matches that model to -31
+and -34 dB, and what follows a step is the filter's own ringing, with no
+slew of the register's. Turned faster than the audio, it acts as a filter
+between its two corners, with sidebands around the tone: between FDh and FBh
+under 15 kHz, they are 6 dB down below 7 kHz of swing, 15 dB at 50 kHz and
+30 dB at 120 kHz. With nothing going in it makes nothing: on silence, a
+swing at any speed stays under -95 dBFS. It adds noise, though: a recording
+through FDh has about 2 dB more than one past the filter, and the noise
+rises as the clock falls, 13 dB at divisor 162. A change of A1h under a
+recording takes effect within a few samples, with no transient of the ADC's
+own.
+
 ### Measuring the DAC on the card
 
 1. Play a WAV file of white noise at 44.1 kHz, 16-bit stereo, in a loop. You
