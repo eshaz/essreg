@@ -45,7 +45,8 @@
 #define RS_CTL_DITHER "Audio 2 Rate Dither Playback Switch"
 #define RS_THDN_BAND -85.0 // dB, to 20 kHz
 #define RS_SPUR_BAND -90.0
-#define RS_TREBLE_FLAT 0.2 // dB, the hold taken back to 20 kHz
+#define RS_TREBLE_FLAT 0.2 // dB, the DAC's response taken back to 20 kHz
+#define RS_DAC_LAST 0.062 // of the last sample, in what the DAC puts out
 
 enum { RS_OFF, RS_TRIM, RS_CLOCK };
 
@@ -383,9 +384,9 @@ enum et_result c_rs_band(struct et_ctx *c, const struct et_case *k)
 	return ET_PASS;
 }
 
-// rs.treble: the DAC's hold taken back, in the samples, on the dig path: each
-// tone comes up by what the hold takes from it, on its own or at a step, and
-// the correction adds nothing but its gain
+// rs.treble: the DAC's response taken back, in the samples, on the dig path:
+// each tone comes up by what the hold and the last sample's share take from
+// it, on its own or at a step, and the correction adds nothing but its gain
 enum et_result c_rs_treble(struct et_ctx *c, const struct et_case *k)
 {
 	static const double hz[] = { 997, 5000.7, 10000.9, 15000.1, 18000.3,
@@ -399,15 +400,19 @@ enum et_result c_rs_treble(struct et_ctx *c, const struct et_case *k)
 	    et_param_set(c, "a2_treble", 1))
 		return ET_ERROR;
 	for (i = 0; i < sizeof(hz) / sizeof(hz[0]); i++) {
-		double x = M_PI * hz[i] / f.rate, hold = 20 * log10(sin(x) / x);
+		double x = M_PI * hz[i] / f.rate;
+		double dac = 20 * log10(sin(x) / x *
+					sqrt(1 + 2 * RS_DAC_LAST * cos(2 * x) +
+					     RS_DAC_LAST * RS_DAC_LAST) /
+					(1 + RS_DAC_LAST));
 		struct rs_tone o;
 		enum et_result r;
 
 		r = rs_tone(c, &f, hz[i], 20000, ppb, RS_BAND_FRAMES, &o);
 		if (r != ET_PASS)
 			return r;
-		snprintf(name, sizeof(name), "level over the hold at %.0f Hz", hz[i]);
-		et_measure(c, name, o.db + hold, "dB", -RS_TREBLE_FLAT, RS_TREBLE_FLAT);
+		snprintf(name, sizeof(name), "level over the DAC at %.0f Hz", hz[i]);
+		et_measure(c, name, o.db + dac, "dB", -RS_TREBLE_FLAT, RS_TREBLE_FLAT);
 		snprintf(name, sizeof(name), "THD+N at %.0f Hz", hz[i]);
 		et_measure(c, name, o.thdn, "dB", -200, RS_THDN_BAND);
 		snprintf(name, sizeof(name), "glitches at %.0f Hz", hz[i]);

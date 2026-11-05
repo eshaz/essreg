@@ -290,15 +290,20 @@ matches the filter's C code on the chip. The driver takes 6.1 % of the
 Celeron at 44.1 kHz stereo at 2x, and 9.7 % at 3x.
 
 With its stages off, the DAC holds each sample for a whole sample period,
-which takes 0.75 dB off 10 kHz, 2 dB off 16 kHz and 3.2 dB off 20 kHz at
-44.1 kHz. `a2_treble` ("Audio 2 Treble Correction") takes a stream through a
+and each sample keeps about 6 % of the one before
+([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter)).
+At 44.1 kHz that takes 1.2 dB off 10 kHz, 2.8 dB off 16 kHz and 4.2 dB off
+20 kHz. `a2_treble` ("Audio 2 Treble Correction") takes a stream through a
 second table of the filter, with or without a change of rate, that gives
 that back. Seven taps folded into the filter's own do it, so a frame costs
 what it did. Read back from the chip's data path at 44.1 kHz, tones stay
-within 0.15 dB of the level the hold calls for up to 20 kHz, with THD+N of
--89 dB or better. The gain near 20 kHz is 3 dB, so a stream that is that
-loud up there clips, and the correction only fits a DAC with its stages off
-(`audio2_oversampling=0`, `audio2_filter=0`).
+within 0.15 dB of the level that response calls for up to 20 kHz, with THD+N
+of -90 dB or better. At the jack, through a recorder, a 44.1 kHz stream
+stays within -0.12 and +0.21 dB of the DAC at 132.3 kHz up to 19.4 kHz. The
+gain near 20 kHz is 4 dB, so a stream that is that loud up there clips, and
+the correction only fits a DAC with its stages off (`audio2_oversampling=0`,
+`audio2_filter=0`). It is for a stream at 1x: `a2_oversample` above that
+leaves it out, with 1.2 dB left to lose at 20 kHz at 2x and 0.5 dB at 3x.
 
 A stream's period no longer matches the ring's, so a timer wakes the client
 on the stream's own period boundaries, and the chip's interrupts stay as the
@@ -771,9 +776,9 @@ saved state wins over a parameter. The defaults are the Kconfig options
   of the ISA bus and CPU. 3x can't run while Audio 1 records. It takes
   effect at the next prepare.
 * `a2_treble` ("Audio 2 Treble Correction Playback Switch"): 0 to 1,
-  default 0. Audio 2 through the filter with the DAC's hold taken back: flat
-  to 20 kHz within 0.15 dB at 44.1 kHz, with the DAC's stages off, for 3 dB
-  less headroom there.
+  default 0. Audio 2 through the filter with the DAC's own response taken
+  back, at 1x: flat to 20 kHz within 0.15 dB at 44.1 kHz, with the DAC's
+  stages off, for 4 dB less headroom there.
 * `a1p_max_rate`: 3101 to 793800, default 48000. Audio 1 playback's highest
   rate (Hz). It takes effect at the next prepare.
 * `a1c_max_rate`: 3101 to 793800, default 52920. Audio 1 recording's highest

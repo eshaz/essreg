@@ -775,12 +775,12 @@ config SND_ES1869_DEFAULT_A2_TREBLE
 	range 0 1
 	default 0
 	help
-	  Audio 2 through the filter with the DAC's hold taken back:
-	  flat to 20 kHz within 0.15 dB at 44.1 kHz, with the DAC's
-	  stages off, for 3 dB less headroom there. The ALSA control
-	  "Audio 2 Treble Correction Playback Switch". The module
-	  parameter a2_treble sets it at load and at runtime, through
-	  /sys/module/snd_es1869/parameters/a2_treble.
+	  Audio 2 through the filter with the DAC's own response taken
+	  back, at 1x: flat to 20 kHz within 0.15 dB at 44.1 kHz, with
+	  the DAC's stages off, for 4 dB less headroom there. The ALSA
+	  control "Audio 2 Treble Correction Playback Switch". The
+	  module parameter a2_treble sets it at load and at runtime,
+	  through /sys/module/snd_es1869/parameters/a2_treble.
 
 config SND_ES1869_DEFAULT_A1P_MAX_RATE
 	int "a1p_max_rate"

@@ -172,7 +172,8 @@ The cases reach the chip four ways:
     fails it. `.down`, `.mono`, `.30`, `.48` and `.two` are the other steps,
     formats and a client polling two periods.
   * `rs.over.2` and `.3` do the same with `a2_oversample`, with the ring at
-    2x and 3x, where the dig path can carry it. `rs.over.drain` and
+    2x from 44.1 kHz and 3x from 22.05 kHz, since the dig path's recording
+    takes as much of the bus as the stream. `rs.over.drain` and
     `rs.over.runout` are those two cases at 2x, and `cpu.over.2` and `.3`
     read the driver's share of the CPU there.
   * `rs.band` measures tones up to 20 kHz at 30 ppm, the step that the
@@ -180,8 +181,9 @@ The cases reach the chip four ways:
     within 0.01 dB, THD+N under -85 dB and the worst spur under -90 dB. The
     top of the band is where a short filter shows.
   * `rs.treble` turns on `a2_treble` and reads tones up to 20 kHz: each
-    comes up by what the DAC's hold takes from it, within 0.2 dB, with the
-    same THD+N limit. `.30` does it at a step of 30 ppm.
+    comes up by what the DAC's hold and its share of the last sample take
+    from it, within 0.2 dB, with the same THD+N limit. `.30` does it at a
+    step of 30 ppm.
   * `rs.imd.ccif` plays 19 and 20 kHz and `rs.imd.smpte` 60 Hz under 7 kHz,
     and reads what falls between the tones, under -92 dBFS.
   * `rs.quiet` keeps a tone's level at -60 dBFS within 0.1 dB, over the

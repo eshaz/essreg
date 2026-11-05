@@ -77,7 +77,7 @@ static const u8 rs_scale[ES_RS_TAPS / 4] = {
 
 #define RS_FINE 24 // the finest scale, on which a row's sum is taken
 #define RS_CENTRE 16 // the centre word's
-#define RS_CENTRE_FLAT 15 // and with the correction of the hold
+#define RS_CENTRE_FLAT 15 // and with the correction of the DAC
 #define RS_WORD_CENTRE (ES_RS_TAPS / 8) // which word that is
 
 // --- the table, in integers ----------------------------------------------------
@@ -152,12 +152,13 @@ static s64 rs_sinc(const s64 *series, s64 s, int m, unsigned int i)
 	return q30_mul(h, kaiser(series, d));
 }
 
-// a tap of the filter with the hold's correction: the sinc at the tap, and at
-// the frames around it. These taps, over the rate, fit 1 / sinc(f) up to 0.45
+// a tap of the filter with the DAC's response taken back: the sinc at the tap,
+// and at the frames around it. The DAC holds a sample and keeps 0.062 of the
+// last one, and these taps, over the rate, fit the inverse of that up to 0.45
 // of the rate; what they sum to with the centre's is 1
 static s64 rs_flat(const s64 *series, s64 s, int m, unsigned int i)
 {
-	static const s32 side[] = { -107760000, 29640000, -10600000 };
+	static const s32 side[] = { -157010000, 37290000, -12550000 };
 	s64 centre = Q30, v = 0;
 	unsigned int k;
 

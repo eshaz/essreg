@@ -693,7 +693,7 @@ static void rs_apply(struct es1869 *chip, struct snd_pcm_runtime *rt)
 	struct es1869_mirror *m = &chip->mirror;
 	struct es1869_rs *rs = &m->rs;
 	u32 mode = es1869_val(ES_S_a2_resample);
-	bool treble = es1869_val(ES_S_a2_treble) && rs->flat;
+	bool treble = es1869_val(ES_S_a2_treble) && rs->flat && m->over == 1;
 	bool want = (mode || m->over > 1 ? treble || rs->tab : treble) &&
 		    m->spread && rt->format == SNDRV_PCM_FORMAT_S16_LE &&
 		    rt->buffer_size >= MIRROR_RS_MIN;

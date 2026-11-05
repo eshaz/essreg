@@ -320,9 +320,9 @@ static const struct et_stream *sim_resampled(const struct et_stream *a2,
 	memset(parts, 0, sizeof(parts));
 	parts[0].ppb = sim_rs_ppb(mode, item, a2, &parts[0].on);
 	parts[0].dither = sim_setting("a2_resample_dither");
-	parts[0].treble = sim_setting("a2_treble") &&
-			  !(sim.faults & SIM_RS_TREBLE);
 	parts[0].over = sim_rs_ring(a2->fmt.rate);
+	parts[0].treble = sim_setting("a2_treble") && parts[0].over == 1 &&
+			  !(sim.faults & SIM_RS_TREBLE);
 	parts[0].on |= parts[0].over > 1;
 	any = parts[0].on && (parts[0].ppb || mode == 2 || parts[0].treble ||
 			      parts[0].over > 1);

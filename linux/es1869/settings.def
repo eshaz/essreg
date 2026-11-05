@@ -270,7 +270,7 @@ ES1869_SET(a2_oversample, A2_OVERSAMPLE, S_ENUM, B_NONE, 0, 0, 0, 0, 2, 0,
 	   "Audio 2's 16-bit streams on DMA 5 played at this many times their rate through the rate filter, where a divisor gives that exactly, at the next prepare: no images, less droop, the buffer a half or a third as long, more of the ISA bus and CPU. 3x can't run while Audio 1 records")
 ES1869_SET(a2_treble, A2_TREBLE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
 	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Treble Correction Playback Switch", "",
-	   "Audio 2 through the filter with the DAC's hold taken back: flat to 20 kHz within 0.15 dB at 44.1 kHz, with the DAC's stages off, for 3 dB less headroom there")
+	   "Audio 2 through the filter with the DAC's own response taken back, at 1x: flat to 20 kHz within 0.15 dB at 44.1 kHz, with the DAC's stages off, for 4 dB less headroom there")
 
 /* rates (the highest ones come from es1869test's rate.max) */
 ES1869_SET(a1p_max_rate, A1P_MAX_RATE, S_INT, B_NONE, 0, 0, 0, 3101, 793800, 48000,

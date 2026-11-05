@@ -788,9 +788,12 @@ class OverTest(unittest.TestCase):
         self.assertGreater(len(y), 1000)
 
 
+DAC_LAST = 0.062  # the share of the last sample in what the DAC puts out
+
+
 @unittest.skipUnless(np is not None and shutil.which("gcc"), "needs numpy, gcc")
 class TrebleTest(unittest.TestCase):
-    """the table with the DAC's hold taken back: flat with the hold, at the
+    """the table with the DAC's response taken back: flat with it, at the
     same cost, and no less sound than the plain one for what it is"""
 
     def level(self, f, eps=30e-6, mmx=False):
@@ -804,10 +807,12 @@ class TrebleTest(unittest.TestCase):
         co = np.linalg.lstsq(b, y.astype(float), rcond=None)[0]
         r = y - b @ co
         db = 20 * np.log10(np.hypot(co[0], co[1]) / 20000)
-        hold = 20 * np.log10(np.sinc(f / FS))
-        return db + hold, 20 * np.log10(r.std() / (np.hypot(co[0], co[1]) / 2 ** 0.5))
+        w = 2 * np.pi * f / FS
+        dac = abs(1 + DAC_LAST * np.exp(-1j * w)) / (1 + DAC_LAST)
+        dac = 20 * np.log10(np.sinc(f / FS) * dac)
+        return db + dac, 20 * np.log10(r.std() / (np.hypot(co[0], co[1]) / 2 ** 0.5))
 
-    def test_flat_with_the_hold(self):
+    def test_flat_with_the_dac(self):
         for f in (100.1, 997.3, 5000.7, 10000.9, 15000.1, 18000.3, 20000.3):
             db, _ = self.level(f)
             self.assertLess(abs(db), 0.16, f"{f} Hz")
