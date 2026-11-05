@@ -233,6 +233,50 @@ rises as the clock falls, 13 dB at divisor 162. A change of A1h under a
 recording takes effect within a few samples, with no transient of the ADC's
 own.
 
+### What adds noise
+
+Audio 1 recorded the chip's own output (record source AOUT, Capture
+Volume 15) with nothing playing, once for each mixer setting, with
+everything else at a quiet state. That state reads -64.6 dBFS over 20 Hz to
+20 kHz, -66.6 dBA, and most of it comes from the record side: it doesn't
+move with the master, from 0 to 63. So a setting that shows nothing here
+adds less than that floor.
+
+| Setting | Noise added | What it is | Quietest |
+|---|---|---|---|
+| Aux volume | 5 dB at 8, 14 dB at 15 | A comb at 11025, 5512 and 16538 Hz | 0 |
+| Aux in the record mixer, 15 | 19 dB | The same comb | 0 |
+| Mic Boost (+26 dB) | 13 dB | Hiss, hum at 120 Hz, any line on the jack | Off |
+| Mic in the record mixer, 15 | 11 dB | Hiss, 750 Hz and its harmonics | 0 |
+| FM in the record mixer, 15 | 8 dB | Hiss, with 15625 and 5512 Hz | 0 |
+| 3-D, level 32 and 63 | 3 and 6 dB | Hiss, and 15625 Hz 7 dB higher | Off |
+| CD in the record mixer, 15 | 4 dB | Hiss | 0 |
+| Mic volume 15 | 3 dB | Hiss, 750 Hz | 0 |
+| FM volume 15 | 2 dB | Hiss (none at 8) | 8 or less |
+| Audio 2's filter, with the DAC running | 2 dB | Hiss | Off |
+| Line in the record mixer, 15 | 1 dB | Lines at 11025 and 4378 Hz | 0 |
+
+The master, both PCM volumes, Line, CD and Mono at any level, the beep,
+Video, ES689 and the 4x stage add under 1 dB. Capture Volume scales
+everything it gets, from -80 dBFS at 0 to -64.6 at 15, and the record
+sources differ: CD reads -74, Line -69, the record mixer -68, Master -67.5,
+Mic -65 and AOUT -64.6 dBFS.
+
+A line at 15625 Hz, -84 dBFS here, runs through almost every take. The comb
+at 5512 Hz is a fraction of the recording's 44.1 kHz. The 750 Hz line came
+with the Zoom H2n on USB, whose own buzz has that frequency at 48 kHz, so it
+reaches the chip's mic path through the machine's ground.
+
+Record Monitor with AOUT as the record source closes a loop: the recording
+reads -8 dBFS of low-frequency oscillation around 30 Hz with nothing
+playing.
+
+The noise can also read the filter. With no signal at all, the spectrum of a
+second and a half of a recording's noise, over the same thing with the
+filter off, finds the corner of A2h to within 1 to 5 % from about 1.6 to 11
+kHz. Above that the filter's top lies past what the record side's noise
+shows.
+
 ### Measuring the DAC on the card
 
 1. Play a WAV file of white noise at 44.1 kHz, 16-bit stereo, in a loop. You
