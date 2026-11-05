@@ -172,7 +172,7 @@ const struct et_case et_cases[] = {
 	     "the same, a client polling two periods")
 	CASE("rs.over.2", N, c_rs_exact, 6,
 	     "the ring at 2x the stream's rate, every frame against the C code")
-	CASE("rs.over.3", N, c_rs_exact, 7, "the same at 3x")
+	CASE("rs.over.3", N, c_rs_exact, 7, "the same at 3x, from 22050 Hz")
 	CASE("rs.over.drain", N, c_rs_drain, 1, "a drain with the ring at 2x")
 	CASE("rs.over.runout", N, c_rs_runout, 1,
 	     "a client that stops writing, the ring at 2x")

@@ -349,7 +349,9 @@ int es1869_a2_rate(u32 num, u32 den, u8 *r70)
 
 // A2h or 72h: 256 minus the divisor of 7.16 MHz that puts the
 // switched-capacitor filter's corner, its clock / 82, at corner/1000 of
-// half the rate; ESS writes FDh from 44.1 kHz up
+// half the rate; ESS writes FDh from 44.1 kHz up. The clock is really
+// 7,144,200 Hz, 0.2 % lower, and ESS's figure stays so that the registers
+// are ESS's
 u8 es1869_filter(u32 rate, u16 corner)
 {
 	u64 num = (u64)7160000 * 2000;

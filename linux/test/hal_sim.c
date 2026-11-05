@@ -289,6 +289,20 @@ static long sim_rs_ppb(long mode, long item, const struct et_stream *a2,
 	return ppb;
 }
 
+// the ring frames to a stream frame, by the driver's rule: a divisor of the
+// stream's own gives the rate, up to 132.3 kHz
+static unsigned int sim_rs_ring(unsigned int rate)
+{
+	unsigned int den = (rate % 8000 ? 793800 : 768000) / rate;
+	unsigned int over = sim_setting("a2_oversample") + 1;
+
+	if (sim.faults & SIM_RS_OVER)
+		return 1;
+	while (over > 1 && (den % over || rate * over > 132300))
+		over--;
+	return over;
+}
+
 // the stream as the driver's filter leaves it, with the run's control writes
 // taking effect at their times
 static const struct et_stream *sim_resampled(const struct et_stream *a2,
@@ -308,10 +322,7 @@ static const struct et_stream *sim_resampled(const struct et_stream *a2,
 	parts[0].dither = sim_setting("a2_resample_dither");
 	parts[0].treble = sim_setting("a2_treble") &&
 			  !(sim.faults & SIM_RS_TREBLE);
-	if (a2->fmt.rate == 44100 && !(sim.faults & SIM_RS_OVER))
-		parts[0].over = sim_setting("a2_oversample") + 1;
-	else
-		parts[0].over = 1;
+	parts[0].over = sim_rs_ring(a2->fmt.rate);
 	parts[0].on |= parts[0].over > 1;
 	any = parts[0].on && (parts[0].ppb || mode == 2 || parts[0].treble ||
 			      parts[0].over > 1);

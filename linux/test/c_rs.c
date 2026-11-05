@@ -205,6 +205,8 @@ static void *rs_signal(const struct et_fmt *f, unsigned long frames)
 // rs.exact: every frame that the DMA took against the same filter's C code
 // here, which also means the MMX code against the C code, under real
 // interrupts, across every chunk, seam and fill of the driver
+// 3x from 22050 Hz: the recording takes as much of the bus as the stream, and
+// 132.3 kHz twice over is more than the ISA bus carries
 enum et_result c_rs_exact(struct et_ctx *c, const struct et_case *k)
 {
 	static const struct {
@@ -216,7 +218,7 @@ enum et_result c_rs_exact(struct et_ctx *c, const struct et_case *k)
 		{ 2, 44100, 1000000, 0, 1 }, { 2, 44100, -1000000, 0, 1 },
 		{ 1, 44100, 1000000, 0, 1 }, { 2, 44100, 30000, 0, 1 },
 		{ 2, 48000, -251953, 0, 1 }, { 2, 44100, 1000000, 1, 1 },
-		{ 2, 44100, 30000, 0, 2 }, { 2, 44100, 30000, 0, 3 },
+		{ 2, 44100, 30000, 0, 2 }, { 2, 22050, 30000, 0, 3 },
 	};
 	struct et_fmt f = { ET_S16, t[k->arg].channels, t[k->arg].rate };
 	unsigned long n = 4 * f.rate, made, nrec = 0, a = 0, b = 0, i, j, want;
@@ -232,6 +234,10 @@ enum et_result c_rs_exact(struct et_ctx *c, const struct et_case *k)
 		tune.flags = ET_MMAP | ET_POLLED;
 		tune.buffer = 4096;
 		tune.period = 2048;
+	}
+	if (t[k->arg].over > 2) {
+		tune.buffer = 4096;
+		tune.period = 1024;
 	}
 	rs_ring_over = t[k->arg].over;
 	if (rs_mode(c, RS_TRIM, t[k->arg].ppb)) {

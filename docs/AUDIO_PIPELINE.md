@@ -233,6 +233,21 @@ rises as the clock falls, 13 dB at divisor 162. A change of A1h under a
 recording takes effect within a few samples, with no transient of the ADC's
 own.
 
+Since it samples what comes in, the filter can also show what the DAC sends
+above the band, which a recording can't. With the ADC's filter on, a clock
+beside an image folds it down to where the filter passes it. A 10,000.9 Hz
+tone in a 44.1 kHz stream, with the DAC's stages off, reads as follows, the
+DAC at 1x, 2x and 3x of the stream through the driver's `a2_oversample`:
+
+| Image             | 1x (dBFS) | 2x (dBFS) | 3x (dBFS) |
+|-------------------|-----------|-----------|-----------|
+| 34.1 kHz, A2h 2Fh | -33       | none      | none      |
+| 78.2 kHz, A2h A5h | -65       | -64       | none      |
+
+None means that nothing stands at the frequency the image folds to, with the
+floor at -96 to -109 dBFS. So 2x takes the first image down by about 70 dB
+and leaves the next one where it was, and 3x takes that too.
+
 ### What adds noise
 
 Audio 1 recorded the chip's own output (record source AOUT, Capture
