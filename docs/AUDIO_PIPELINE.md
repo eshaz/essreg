@@ -242,19 +242,19 @@ everything else at a quiet state. That state reads -64.6 dBFS over 20 Hz to
 move with the master, from 0 to 63. So a setting that shows nothing here
 adds less than that floor.
 
-| Setting | Noise added | What it is | Quietest |
-|---|---|---|---|
-| Aux volume | 5 dB at 8, 14 dB at 15 | A comb at 11025, 5512 and 16538 Hz | 0 |
-| Aux in the record mixer, 15 | 19 dB | The same comb | 0 |
-| Mic Boost (+26 dB) | 13 dB | Hiss, hum at 120 Hz, any line on the jack | Off |
-| Mic in the record mixer, 15 | 11 dB | Hiss, 750 Hz and its harmonics | 0 |
-| FM in the record mixer, 15 | 8 dB | Hiss, with 15625 and 5512 Hz | 0 |
-| 3-D, level 32 and 63 | 3 and 6 dB | Hiss, and 15625 Hz 7 dB higher | Off |
-| CD in the record mixer, 15 | 4 dB | Hiss | 0 |
-| Mic volume 15 | 3 dB | Hiss, 750 Hz | 0 |
-| FM volume 15 | 2 dB | Hiss (none at 8) | 8 or less |
-| Audio 2's filter, with the DAC running | 2 dB | Hiss | Off |
-| Line in the record mixer, 15 | 1 dB | Lines at 11025 and 4378 Hz | 0 |
+| Setting              | Adds (dB) | What it is             | Quietest  |
+|----------------------|-----------|------------------------|-----------|
+| Aux volume, 8 and 15 | 5, 14     | Comb on 5512 Hz        | 0         |
+| Aux recording, 15    | 19        | The same comb          | 0         |
+| Mic Boost (+26 dB)   | 13        | Hiss, hum at 120 Hz    | Off       |
+| Mic recording, 15    | 11        | Hiss, 750 Hz           | 0         |
+| FM recording, 15     | 8         | Hiss, 15625 Hz         | 0         |
+| 3-D, level 32 and 63 | 3, 6      | Hiss, 15625 Hz up 7 dB | Off       |
+| CD recording, 15     | 4         | Hiss                   | 0         |
+| Mic volume, 15       | 3         | Hiss, 750 Hz           | 0         |
+| FM volume, 15        | 2         | Hiss, none at 8        | 8 or less |
+| Audio 2's filter     | 2         | Hiss, playing          | Off       |
+| Line recording, 15   | 1         | 11025 and 4378 Hz      | 0         |
 
 The master, both PCM volumes, Line, CD and Mono at any level, the beep,
 Video, ES689 and the 4x stage add under 1 dB. Capture Volume scales
