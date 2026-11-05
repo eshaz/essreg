@@ -253,6 +253,13 @@ same as on the host within 0.01 dB. Through the analog path, heard by Audio
 in turn, THD+N reads -61.6, -52.7 and -43.7 dB at 1, 10 and 16 kHz, within
 0.06 dB, and the level stays within 0.002 dB.
 
+It takes 4.6 % of the Armada's 400 MHz Celeron at 44.1 kHz stereo, by the
+driver's own cycle counts, against 0.3 % with it off: 3.4 % in mono, 5.1 %
+at 48 kHz and 10.2 % at 96 kHz. A frame costs 240 cycles in MMX, and 710 in
+C where the kernel can't take the FPU. A fill holds interrupts off for about
+80 us, and for up to 300 us at the worst seen, while the machine's own worst
+timer delay is over a millisecond with the filter or without it.
+
 A stream's period no longer matches the ring's, so a timer wakes the client
 on the stream's own period boundaries, and the chip's interrupts stay as the
 net under it. The ring holds as many frames as the buffer, and a step down
@@ -285,9 +292,33 @@ The Clock mode follows a chain of two measures, which
 
 The two are measured apart and nothing feeds back from the filter into them,
 so the correction can't hunt. A new stream starts from what the last one
-measured. With chronyd running, a 48 kHz stream in the Clock mode read +29.5
-ppm against the raw clock, over 12 s, while chrony had that clock 29.48 ppm
-slow of real time.
+measured. The very first stream after a load has no slopes yet, and takes
+about a minute to settle within 0.2 ppm.
+
+Over half an hour with chronyd running, a stream in the Clock mode held to
+the steered clock within 0.08 ppm at 44.1 kHz, with the CPU under full load,
+and 0.05 ppm at 48 kHz, about 0.2 ms an hour. The same streams with the
+correction off ran 28.9 ppm slow and 223 ppm fast. Over a single minute a
+stream follows the driver's slope within 0.3 ppm, since both fits are still
+moving.
+
+Of the machine's clocks, only the RTC is an oscillator of its own that
+software can read. The ES1869's master, the CPU's time stamp counter, the
+PCI bus (the RTL8169's timer counts it, not the card's crystal) and most
+likely the USB host's frames all run off the board's 14.318 MHz crystal: the
+TSC and the bus move with the raw clock to 2 ppb over 8 minutes. The RTC, a
+32.768 kHz crystal of its own, reads -8 to -12 ppm against the raw clock and
+moves with temperature, but read through the kernel it holds only about 0.4
+ppm over half an hour, and the kernel's 11-minute write sets its phase. The
+Play! 3 has a clock of its own, which wanders within a recording.
+
+The crystal moves by up to 0.9 ppm in a day, as chrony sees it, which the
+fit of the steered clock follows within about 20 minutes. It seems to follow
+the board's temperature with a lag of an hour or more: a CPU load of half an
+hour moved it by under 0.1 ppm, and a whole afternoon cooling moved it by
+0.9. chrony's `tempcomp` directive can apply a map of temperature to
+frequency, which the Clock mode would inherit with no change here, but no
+map is in use yet.
 
 A correction of the rate is not one of jitter. Jitter is in the DAC's clock
 at the moment of each conversion, after all of this, and no change to the
