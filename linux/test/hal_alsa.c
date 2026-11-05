@@ -1090,6 +1090,7 @@ static void alsa_ask_press(void *ctx, int button)
 	static const char *const names[] = {
 		"Volume Up", "Volume Down",
 		"Mute, or Volume Up and Down together",
+		"the suspend button, wait for it to sleep, then wake it",
 	};
 
 	(void)ctx;

@@ -380,6 +380,60 @@ enum et_result c_pm_stream(struct et_ctx *c, const struct et_case *k)
 	return ET_PASS;
 }
 
+// pm.real: a real suspend to RAM through a stream, with someone at the machine
+// to press the button: never in a run that nobody watches. The stream stops
+// once, goes on after the resume, and its last second is in order. The
+// command only marks the run for the simulated machine: here the button
+// is the suspend
+enum et_result c_pm_real(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	unsigned long frames = 45 * 49716, nrec = 50 * ET_FM_RATE, last;
+	struct et_stream s[3];
+	void *pat;
+	long tail;
+	int i;
+
+	(void)k;
+	if (et_mix_quiet(c) || et_mix_dig(c, 1))
+		return ET_ERROR;
+	pat = et_dig_pattern(&f, frames, 43);
+	s[0] = et_rec(ET_FMC, &et_fm_fmt, nrec, 0);
+	s[1] = et_play(ET_A2, &f, pat, frames, 0.3);
+	memset(&s[2], 0, sizeof(s[2]));
+	s[2].role = ET_CMD;
+	s[2].cmd = "sleep 1 # --suspend";
+	s[2].timeout = 5;
+	for (i = 0; i < 2; i++)
+		s[i].timeout = 180;
+	c->hal->ask_press(c->hal->ctx, ET_BTN_SUSPEND);
+	if (et_run(c, s, 3) && (s[0].err || s[1].err)) {
+		et_fail(c, "the streams after the resume: %s, %s",
+			s[0].err ? strerror(-s[0].err) : "ok",
+			s[1].err ? strerror(-s[1].err) : "ok");
+		et_mix_dig(c, 0);
+		free(s[0].data);
+		free(pat);
+		return ET_FAIL;
+	}
+	et_mix_dig(c, 0);
+	et_measure(c, "the recording's stops", s[0].xruns, "", 1, 3);
+	et_measure(c, "the playback's stops", s[1].xruns, "", 1, 3);
+	for (last = s[0].done; last > 0; last--) {
+		const short *r = (const short *)s[0].data + 2 * (last - 1);
+
+		if (r[0] != ET_FM_IDLE || r[1] != ET_FM_IDLE)
+			break;
+	}
+	tail = et_dig_tail(&f, pat, frames, s[0].data, last, ET_FM_RATE);
+	et_measure(c, "the pattern's last second in order, after the resume",
+		   tail, "frames", ET_FM_RATE, ET_FM_RATE);
+	free(s[0].data);
+	free(pat);
+	engines(c);
+	return ET_PASS;
+}
+
 // pm.fm: the FM through a suspend: the OPL3's and the native ESFM's notes both
 // sound after it, at their levels, and so does the MPU-401 take a byte
 enum et_result c_pm_fm(struct et_ctx *c, const struct et_case *k)

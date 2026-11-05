@@ -89,6 +89,7 @@ struct et_hal {
 #define ET_BTN_UP 0
 #define ET_BTN_DOWN 1
 #define ET_BTN_MUTE 2
+#define ET_BTN_SUSPEND 3
 
 #define ET_DB_MUTE (-9999999)
 

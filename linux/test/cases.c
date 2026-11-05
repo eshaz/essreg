@@ -91,6 +91,7 @@ FN(c_pm_a1)
 FN(c_load_cycle)
 FN(c_load_fm)
 FN(c_pm_fm)
+FN(c_pm_real)
 FN(c_pwr_save)
 FN(c_pwr_self)
 FN(c_stress_reopen)
@@ -363,6 +364,8 @@ const struct et_case et_cases[] = {
 	     "a stream through a suspend goes on once prepared again")
 	CASE("pm.a1", DESTR | R, c_pm_a1, 0,
 	     "a suspend with Audio 1 playing: it goes on, on the mixer")
+	CASE("pm.real", DESTR | ET_INTER, c_pm_real, 0,
+	     "a real suspend to RAM through a stream, someone pressing the button")
 	CASE("pm.fm", DESTR, c_pm_fm, 0,
 	     "the OPL3 and the native ESFM sound after a suspend")
 	CASE("pwr.partial", ET_ROOT | N, c_pwr_save, 0,

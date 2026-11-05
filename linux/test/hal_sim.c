@@ -977,6 +977,8 @@ static void sim_ask_press(void *ctx, int button)
 	int ch;
 
 	(void)ctx;
+	if (button == ET_BTN_SUSPEND)
+		return;
 	sim.irqs[2]++;
 	sim.now += 1;
 	if (ctl("Hardware Master Volume Split", 0, 0)) {

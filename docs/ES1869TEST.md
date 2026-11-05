@@ -281,7 +281,9 @@ The cases reach the chip four ways:
   which libphy doesn't accept as it does ENOENT (the Armada kit's patch 0008
   does). So run `pm` at the machine, not over its network. `pm.fm` plays a
   note through the OPL3 and through the native ESFM before and after a
-  suspend.
+  suspend. `pm.real` (with `-i`) is a real suspend to RAM: someone presses
+  the suspend button while a stream plays and wakes the machine again, and
+  the stream goes on and every engine works.
 * `pwr`: `pwr_save` puts the idle chip down, partly (`pwr.partial`) or fully
   (`pwr.full`), as the proc file says, and Audio 2's next stream wakes it,
   every frame exact. `pwr.self` does the same after the chip's own
