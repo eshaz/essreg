@@ -23,7 +23,10 @@ are in `linux/test/`, under the GPL version 3 or later.
   and a cable from the ES1869's output to its input. The suite finds the
   first other card with a capture device, or takes `--rec2 DEVICE`. A cable
   into a mono microphone input carries the left side, which is all the cases
-  need.
+  need. The card has to be quiet, since the cases find a tone by its rise
+  over the noise, 18 dB and more. A Zoom H2n on USB power, whose own buzz
+  reads -32 dBFS against a tone at -23, passes `cal.rec2` and `cal.linear`
+  and fails nearly all the rest, which says nothing about the driver.
 * Root, for the cases that write the module's parameters (`params.*`),
   suspend the machine (`pm`) or reload the driver (`load`).
 * aplaymidi and snd-es1869-esfm with its bank, for `midi.esfm`; WildMidi for
