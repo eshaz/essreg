@@ -510,6 +510,49 @@ on the Armada with every step as [TESTING.md](TESTING.md#g3-general-midi)
 describes it. Like ESS's driver, it plays 6 to 9 cents flat of A4 = 440 Hz
 ([ESFM_ENGINE.md](ESFM_ENGINE.md#6-pitch)).
 
+The MPU-401 is raw MIDI device 0, in UART mode, and a byte coming in raises
+the chip's interrupt. The driver opens and sends through it, but no byte has
+yet been seen to cross a cable in either direction on the Armada.
+
+### A parallel port MIDI interface
+
+The Armada's parallel port is off in its BIOS, and an interface that takes
+its power from the port stays dead until it is on. ACPI turns it on from
+Linux, until the next boot, on PNP0401's node, found with `grep -l PNP0401
+/sys/bus/pnp/devices/*/id`:
+
+```
+echo disable > resources
+echo clear > resources
+echo "set io 0x378-0x37f io 0x778-0x77a irq 7 dma 3" > resources
+echo activate > resources
+```
+
+The node reads active with no resources while the port is off, and the
+kernel ignores `clear` and `set` on an active node, so `disable` comes
+first. `activate` fills in a DMA channel of its own if none is set, and DMA
+3 is free. parport_pc must stay out of it: its own probe activates the port
+with its own choice of resources, which is why the laptop blacklists it, and
+it can't share the port with snd-mtpav.
+
+A MOTU PC-MIDI Flyer, two inputs and two outputs, answers the protocol of
+the MIDI Timepiece AV. `modprobe snd-mtpav port=0x378 irq=7 hwports=2`
+drives it: a byte played into input B comes up exactly on subdevice 4,
+`hw:CARD=port,0,4`, "MTP computer", since the Flyer sends no port number
+ahead of it. Its interrupt line works, and it also ticks every 16.38 ms, the
+overflow of a 16-bit timer at 4 MHz, so the unit is a microcontroller. It
+takes bytes for its outputs at MIDI's own speed, about 3,000 a second, with
+a pulse of the interrupt line after each, so it does send them. On the
+Armada no value of the port number after 0xF5, of all 256, brought a byte
+out at the MPU-401's input or a CH345 USB adapter's. Neither of those inputs
+has been shown to work on its own, and an output fed by a laptop's parallel
+port may drive too little current, so this is still open. A loop of one MIDI
+cable from a device's output to its input would settle each of them.
+
+`linux/tools/flyer.c` talks to such a unit from user space by port I/O, as
+root, with no driver and no interrupt: it reads the lines, sends and
+receives, and times how fast a unit takes bytes.
+
 ## Tools
 
 `linux/tools/essreg` builds essreg, the register utility, from its own
@@ -519,15 +562,19 @@ for every value or `essreg r=regs.txt` for a dump. Reads work as root;
 writes also need the module's `regs_write=1`.
 
 `linux/tools/clockcmp.c` compares the machine's clocks with the raw one.
-`linux/tools/modlab.c` moves a rate or a filter clock under a running
-stream, through the register hwdep's ES1869_IOCTL_PATTERN, which writes a
-table of 70h, 72h, A1h or A2h at even times of the cycle counter, with
-`regs_write=1`. The cycle counter is on the chip's crystal, so a pattern
-stays in phase with the samples. `linux/tools/iotime.c` times the chip's
-ports. A port takes 1.53 us on the ISA bus, the chip's or the game port's,
-against 0.72 us for one the bridge answers itself. Index and data take 3.1
-us as two OUTs and 2.3 us as one 16-bit OUT at the index, which reaches both
-ports and can't be split by an interrupt, and data alone 1.6 us.
+`linux/tools/pcmclock.c` follows any card's sample clock against the raw,
+steered and real-time clocks, and `linux/tools/phaselog.c` reads a tone from
+Audio 2 at another card's capture, which sets the two cards' clocks against
+each other with no timer of the machine's in the way. `linux/tools/modlab.c`
+moves a rate or a filter clock under a running stream, through the register
+hwdep's ES1869_IOCTL_PATTERN, which writes a table of 70h, 72h, A1h or A2h
+at even times of the cycle counter, with `regs_write=1`. The cycle counter
+is on the chip's crystal, so a pattern stays in phase with the samples.
+`linux/tools/iotime.c` times the chip's ports. A port takes 1.53 us on the
+ISA bus, the chip's or the game port's, against 0.72 us for one the bridge
+answers itself. Index and data take 3.1 us as two OUTs and 2.3 us as one
+16-bit OUT at the index, which reaches both ports and can't be split by an
+interrupt, and data alone 1.6 us.
 
 ## The test suite
 
