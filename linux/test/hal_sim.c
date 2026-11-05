@@ -280,7 +280,7 @@ static long sim_rs_ppb(long mode, long item, const struct et_stream *a2,
 {
 	long ppb = sim_setting("a2_trim_ppb") + sim_rs_trim(item);
 
-	*on = mode != 0;
+	*on = mode != 0 || sim_setting("a2_treble");
 	if (mode == 2) {
 		ppb -= SIM_MASTER_PPB;
 		if (a2->fmt.rate % 8000 == 0)
@@ -306,7 +306,9 @@ static const struct et_stream *sim_resampled(const struct et_stream *a2,
 	memset(parts, 0, sizeof(parts));
 	parts[0].ppb = sim_rs_ppb(mode, item, a2, &parts[0].on);
 	parts[0].dither = sim_setting("a2_resample_dither");
-	any = parts[0].on && (parts[0].ppb || mode == 2);
+	parts[0].treble = sim_setting("a2_treble") &&
+			  !(sim.faults & SIM_RS_TREBLE);
+	any = parts[0].on && (parts[0].ppb || mode == 2 || parts[0].treble);
 	for (i = 0; i < n && np < 8 && !(sim.faults & SIM_RS_LIVE); i++) {
 		if (s[i].role != ET_CTL)
 			continue;
@@ -315,6 +317,7 @@ static const struct et_stream *sim_resampled(const struct et_stream *a2,
 						 a2_rate(a2));
 		parts[np].ppb = sim_rs_ppb(mode, item, a2, &parts[np].on);
 		parts[np].dither = parts[0].dither;
+		parts[np].treble = parts[0].treble;
 		any |= parts[np].on;
 		np++;
 	}

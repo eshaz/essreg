@@ -175,6 +175,9 @@ The cases reach the chip four ways:
     Armada's crystal takes, and `rs.band.48` at 48 kHz's 252 ppm: the level
     within 0.01 dB, THD+N under -85 dB and the worst spur under -90 dB. The
     top of the band is where a short filter shows.
+  * `rs.treble` turns on `a2_treble` and reads tones up to 20 kHz: each
+    comes up by what the DAC's hold takes from it, within 0.2 dB, with the
+    same THD+N limit. `.30` does it at a step of 30 ppm.
   * `rs.imd.ccif` plays 19 and 20 kHz and `rs.imd.smpte` 60 Hz under 7 kHz,
     and reads what falls between the tones, under -92 dBFS.
   * `rs.quiet` keeps a tone's level at -60 dBFS within 0.1 dB, over the

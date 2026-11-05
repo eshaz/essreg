@@ -264,7 +264,7 @@ static void mirror_fill(struct es1869 *chip, struct snd_pcm_runtime *rt,
 		return;
 	// the filter with no change to make is a copy: step 0 at a whole frame
 	if (m->rs.on && !m->fill.standing &&
-	    (m->rs.frac || m->rs.trim || m->rs.clock)) {
+	    (m->rs.frac || m->rs.trim || m->rs.clock || m->rs.treble)) {
 		// with nothing new, the last run's frames would only come again,
 		// over the silence that follows a client that stopped
 		if (m->rs.lined && (start + frames) % rt->boundary == m->rs_to) {
@@ -613,21 +613,28 @@ static void rs_free(void *tab)
 	kvfree(tab);
 }
 
-// the filter's table, made once, when the settings first ask for it
+// a table of the filter
+static s16 *rs_table_new(struct es1869 *chip, bool flat)
+{
+	s16 *tab = kvmalloc_array(ES_RS_TABLE, sizeof(s16), GFP_KERNEL);
+
+	if (!tab || devm_add_action_or_reset(chip->card->dev, rs_free, tab)) {
+		dev_err(chip->dev, "no memory for the rate correction: off\n");
+		return NULL;
+	}
+	es1869_rs_table(tab, flat);
+	return tab;
+}
+
+// the filter's tables, each made once, when the settings first ask for it
 static void rs_table(struct es1869 *chip)
 {
 	struct es1869_rs *rs = &chip->mirror.rs;
-	s16 *tab;
 
-	if (rs->tab || !es1869_val(ES_S_a2_resample))
-		return;
-	tab = kvmalloc_array(ES_RS_TABLE, sizeof(s16), GFP_KERNEL);
-	if (!tab || devm_add_action_or_reset(chip->card->dev, rs_free, tab)) {
-		dev_err(chip->dev, "no memory for the rate correction: off\n");
-		return;
-	}
-	es1869_rs_table(tab);
-	rs->tab = tab;
+	if (!rs->tab && es1869_val(ES_S_a2_resample))
+		rs->tab = rs_table_new(chip, false);
+	if (!rs->flat && es1869_val(ES_S_a2_treble))
+		rs->flat = rs_table_new(chip, true);
 }
 
 // the settings as the stream takes them, under its lock, from a prepare, a
@@ -639,12 +646,14 @@ static void rs_apply(struct es1869 *chip, struct snd_pcm_runtime *rt)
 	struct es1869_mirror *m = &chip->mirror;
 	struct es1869_rs *rs = &m->rs;
 	u32 mode = es1869_val(ES_S_a2_resample);
-	bool want = mode && rs->tab && m->spread &&
+	bool treble = es1869_val(ES_S_a2_treble) && rs->flat;
+	bool want = (mode ? treble || rs->tab : treble) && m->spread &&
 		    rt->format == SNDRV_PCM_FORMAT_S16_LE &&
 		    rt->buffer_size >= MIRROR_RS_MIN;
 	u32 clk = want && mode == 2 ? m->clk_period : 0;
 
 	rs->dither = es1869_val(ES_S_a2_resample_dither);
+	rs->treble = treble;
 	rs->trim = es1869_clock_q32(es1869_trim_ppb(es1869_val(ES_S_a2_trim)) +
 				    es1869_val(ES_S_a2_trim_ppb));
 	rs->clock = mode == 2;

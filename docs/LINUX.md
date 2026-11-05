@@ -274,6 +274,17 @@ up. A fill holds interrupts off for about 80 us, and for 125 us at the worst
 seen, while the machine's own worst timer delay is over a millisecond with
 the filter or without it.
 
+With its stages off, the DAC holds each sample for a whole sample period,
+which takes 0.75 dB off 10 kHz, 2 dB off 16 kHz and 3.2 dB off 20 kHz at
+44.1 kHz. `a2_treble` ("Audio 2 Treble Correction") takes a stream through a
+second table of the filter, with or without a change of rate, that gives
+that back. Seven taps folded into the filter's own do it, so a frame costs
+what it did. Read back from the chip's data path at 44.1 kHz, tones stay
+within 0.15 dB of the level the hold calls for up to 20 kHz, with THD+N of
+-89 dB or better. The gain near 20 kHz is 3 dB, so a stream that is that
+loud up there clips, and the correction only fits a DAC with its stages off
+(`audio2_oversampling=0`, `audio2_filter=0`).
+
 A stream's period no longer matches the ring's, so a timer wakes the client
 on the stream's own period boundaries, and the chip's interrupts stay as the
 net under it. The ring holds as many frames as the buffer, and a step down
@@ -738,6 +749,10 @@ saved state wins over a parameter. The defaults are the Kconfig options
 * `a2_resample_dither` ("Audio 2 Rate Dither Playback Switch"): 0 to 1,
   default 0. The rate correction's rounding to 16 bits with triangular noise
   of 1 LSB: 3 dB more noise for spurs at about -100 dBFS.
+* `a2_treble` ("Audio 2 Treble Correction Playback Switch"): 0 to 1,
+  default 0. Audio 2 through the filter with the DAC's hold taken back: flat
+  to 20 kHz within 0.15 dB at 44.1 kHz, with the DAC's stages off, for 3 dB
+  less headroom there.
 * `a1p_max_rate`: 3101 to 793800, default 48000. Audio 1 playback's highest
   rate (Hz). It takes effect at the next prepare.
 * `a1c_max_rate`: 3101 to 793800, default 52920. Audio 1 recording's highest

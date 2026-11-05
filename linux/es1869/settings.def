@@ -264,6 +264,9 @@ ES1869_SET(a2_trim_ppb, A2_TRIM_PPB, S_INT, B_NONE, 0, 0, 0, -2000000, 2000000, 
 ES1869_SET(a2_resample_dither, A2_RESAMPLE_DITHER, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
 	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Rate Dither Playback Switch", "",
 	   "the rate correction's rounding to 16 bits with triangular noise of 1 LSB: 3 dB more noise for spurs at about -100 dBFS")
+ES1869_SET(a2_treble, A2_TREBLE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
+	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Treble Correction Playback Switch", "",
+	   "Audio 2 through the filter with the DAC's hold taken back: flat to 20 kHz within 0.15 dB at 44.1 kHz, with the DAC's stages off, for 3 dB less headroom there")
 
 /* rates (the highest ones come from es1869test's rate.max) */
 ES1869_SET(a1p_max_rate, A1P_MAX_RATE, S_INT, B_NONE, 0, 0, 0, 3101, 793800, 48000,

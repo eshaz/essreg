@@ -28,6 +28,7 @@
 // one run through the filter
 struct es1869_rs_job {
 	const s16 *tab; // es1869_rs_table's
+	u32 centre; // what brings the centre word to the sum's scale, in bits
 	const s16 *ch[2]; // the channels, from the first frame's first tap
 	const s16 *odd[2][3]; // and from their 2nd to 4th sample, for MMX
 	u8 *dst; // the ring: each byte in the low byte of a word
@@ -47,6 +48,8 @@ struct es1869_rs_job {
 // in the buffer
 struct es1869_rs {
 	s16 *tab; // the filter, made for the first stream that uses it
+	s16 *flat; // and with the DAC's hold corrected, when that's asked for
+	bool treble; // the stream goes through that one
 	bool on; // this stream goes through it
 	bool mmx; // the CPU has MMX
 	bool clock; // it follows the chip's clock (a2_resample 2)
@@ -76,7 +79,7 @@ struct es1869_rs_stream {
 	bool mmx; // the caller holds the FPU
 };
 
-void es1869_rs_table(s16 *tab);
+void es1869_rs_table(s16 *tab, bool flat);
 void es1869_rs_split(s16 *l, s16 *r, const void *src, u32 frames, bool stereo);
 void es1869_rs_shift(struct es1869_rs *rs, struct es1869_rs_job *j, u32 n,
 		     bool stereo);

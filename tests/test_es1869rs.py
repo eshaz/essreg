@@ -46,7 +46,8 @@ s16p = ctypes.POINTER(ctypes.c_int16)
 
 
 class Job(ctypes.Structure):
-    _fields_ = [("tab", s16p), ("ch", s16p * 2), ("odd", (s16p * 3) * 2),
+    _fields_ = [("tab", s16p), ("centre", ctypes.c_uint32),
+                ("ch", s16p * 2), ("odd", (s16p * 3) * 2),
                 ("dst", ctypes.POINTER(ctypes.c_uint8)),
                 ("frames", ctypes.c_uint32), ("room", ctypes.c_uint32),
                 ("used", ctypes.c_uint32), ("frac", ctypes.c_uint32),
@@ -74,7 +75,8 @@ class Clock(ctypes.Structure):
 
 
 class RS(ctypes.Structure):
-    _fields_ = [("tab", s16p), ("on", ctypes.c_bool), ("mmx", ctypes.c_bool),
+    _fields_ = [("tab", s16p), ("flat", s16p), ("treble", ctypes.c_bool),
+                ("on", ctypes.c_bool), ("mmx", ctypes.c_bool),
                 ("clock", ctypes.c_bool), ("dither", ctypes.c_bool),
                 ("lined", ctypes.c_bool),
                 ("frac", ctypes.c_uint32), ("trim", ctypes.c_int32),
@@ -116,7 +118,7 @@ def library():
                         os.path.join(DRV, "hw.c")],
                        check=True, capture_output=True)
         lib = ctypes.CDLL(out)
-        lib.es1869_rs_table.argtypes = [s16p]
+        lib.es1869_rs_table.argtypes = [s16p, ctypes.c_bool]
         lib.es1869_rs_table.restype = None
         lib.es1869_rs_run_c.argtypes = [ctypes.POINTER(Job)]
         lib.es1869_rs_run_c.restype = ctypes.c_uint32
@@ -164,12 +166,12 @@ def library():
     return _LIB["lib"]
 
 
-def table():
-    if "tab" not in _LIB:
+def table(flat=False):
+    if ("tab", flat) not in _LIB:
         tab = (ctypes.c_int16 * TABLE)()
-        library().es1869_rs_table(tab)
-        _LIB["tab"] = tab
-    return _LIB["tab"]
+        library().es1869_rs_table(tab, flat)
+        _LIB["tab", flat] = tab
+    return _LIB["tab", flat]
 
 
 def ideal_row(i):
@@ -201,7 +203,7 @@ def shifted(j, chans):
 
 
 def run(x, y, frames, frac, step, stereo=True, mmx=False, dither=False,
-        seed=12345):
+        seed=12345, flat=False):
     """frames of the stream through one call; returns bytes, used, frac"""
     lib = library()
     room = frames + 8
@@ -209,7 +211,8 @@ def run(x, y, frames, frac, step, stereo=True, mmx=False, dither=False,
     a = np.array(x, dtype=np.int16)
     b = np.array(y, dtype=np.int16)
     j = Job()
-    j.tab = ctypes.cast(table(), s16p)
+    j.tab = ctypes.cast(table(flat), s16p)
+    j.centre = 1 if flat else 2
     j.ch[0] = a.ctypes.data_as(s16p)
     j.ch[1] = b.ctypes.data_as(s16p)
     alive = shifted(j, (a, b))
@@ -226,7 +229,8 @@ def run(x, y, frames, frac, step, stereo=True, mmx=False, dither=False,
     return bytes(out[:n * (8 if stereo else 4)]), j.used, j.frac
 
 
-def through(x, step, y=None, frac=0, mmx=False, dither=False, seed=12345):
+def through(x, step, y=None, frac=0, mmx=False, dither=False, seed=12345,
+            flat=False):
     """arrays through one long run, all but the last TAPS + 2 frames; the
     ring frames as arrays, the first at x[BEHIND] and frac past it"""
     lib = library()
@@ -237,7 +241,8 @@ def through(x, step, y=None, frac=0, mmx=False, dither=False, seed=12345):
     a = np.asarray(x, dtype=np.int16)
     b = np.asarray(y if stereo else x, dtype=np.int16)
     j = Job()
-    j.tab = ctypes.cast(table(), s16p)
+    j.tab = ctypes.cast(table(flat), s16p)
+    j.centre = 1 if flat else 2
     j.ch[0] = a.ctypes.data_as(s16p)
     j.ch[1] = b.ctypes.data_as(s16p)
     alive = shifted(j, (a, b)) if mmx else None
@@ -281,6 +286,11 @@ def analyse(y, f):
     w = np.abs(np.fft.rfft(r * np.blackman(n))) / (n * 0.42) * 2
     return (20 * np.log10(np.sqrt(np.mean(r ** 2)) / (a / np.sqrt(2))),
             20 * np.log10(np.max(w[3:]) / a))
+
+
+def q32(eps):
+    """a step as a fraction, as the job takes it"""
+    return int(round(eps * 2 ** 32))
 
 
 def exact(eps):
@@ -444,6 +454,7 @@ class RunTest(unittest.TestCase):
         a = (ctypes.c_int16 * len(x))(*[int(v) for v in x])
         j = Job()
         j.tab = ctypes.cast(table(), s16p)
+        j.centre = 2
         j.ch[0] = j.ch[1] = ctypes.cast(a, s16p)
         j.dst = ctypes.cast(out, ctypes.POINTER(ctypes.c_uint8))
         j.frames = 256
@@ -662,6 +673,63 @@ class QualityTest(unittest.TestCase):
 
         self.assertLess(20 * np.log10(noise(True) / noise(False)), 6.0)
         self.assertGreater(noise(True), noise(False))
+
+
+@unittest.skipUnless(np is not None and shutil.which("gcc"), "needs numpy, gcc")
+class TrebleTest(unittest.TestCase):
+    """the table with the DAC's hold taken back: flat with the hold, at the
+    same cost, and no less sound than the plain one for what it is"""
+
+    def level(self, f, eps=30e-6, mmx=False):
+        n = 1 << 17
+        t = np.arange(n + 200)
+        x = np.round(20000 * np.sin(2 * np.pi * f * t / FS))
+        y = through(x, q32(eps), flat=True, mmx=mmx)
+        y = y[1024:-1024]
+        k = np.arange(len(y)) * (1 + exact(eps)) * 2 * np.pi * f / FS
+        b = np.stack([np.cos(k), np.sin(k), np.ones(len(y))], 1)
+        co = np.linalg.lstsq(b, y.astype(float), rcond=None)[0]
+        r = y - b @ co
+        db = 20 * np.log10(np.hypot(co[0], co[1]) / 20000)
+        hold = 20 * np.log10(np.sinc(f / FS))
+        return db + hold, 20 * np.log10(r.std() / (np.hypot(co[0], co[1]) / 2 ** 0.5))
+
+    def test_flat_with_the_hold(self):
+        for f in (100.1, 997.3, 5000.7, 10000.9, 15000.1, 18000.3, 20000.3):
+            db, _ = self.level(f)
+            self.assertLess(abs(db), 0.16, f"{f} Hz")
+
+    def test_clean(self):
+        for f in (997.3, 10000.9, 20000.3):
+            _, thdn = self.level(f)
+            self.assertLess(thdn, -84.0, f"{f} Hz")
+
+    def test_gain_is_one(self):
+        rows = np.array(table(True), dtype=np.int64).reshape(ROWS, STRIDE)
+        scale = list(SCALE)
+        for n in range(32, 36):
+            scale[n] = 15
+        scale = 2.0 ** np.array(scale)
+        for i in range(0, ROWS, 7):
+            total = float((rows[i, :TAPS] / scale).sum()) + 1
+            self.assertAlmostEqual(total, 1.0, places=3)
+
+    def test_fits_its_words(self):
+        """no tap met the 16 bits, which would be a clamp and a click"""
+        rows = np.array(table(True), dtype=np.int16).reshape(ROWS, STRIDE)
+        self.assertLess(int(np.abs(rows.astype(int)[:, :TAPS]).max()), 32760)
+
+    def test_mmx_is_the_c_run(self):
+        if not X86:
+            self.skipTest("x86 only")
+        rng = np.random.default_rng(5)
+        x = rng.integers(-20000, 20000, 256 + TAPS + 8)
+        y = rng.integers(-20000, 20000, 256 + TAPS + 8)
+        for eps in (0, 30e-6, -252e-6, 1e-3):
+            for stereo in (True, False):
+                c = run(x, y, 256, 12345, q32(eps), stereo, flat=True)
+                m = run(x, y, 256, 12345, q32(eps), stereo, mmx=True, flat=True)
+                self.assertEqual(c, m)
 
 
 @unittest.skipUnless(np is not None and shutil.which("gcc"), "needs numpy, gcc")

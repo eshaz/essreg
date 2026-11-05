@@ -15,6 +15,7 @@ struct sim_rs_part {
 	long ppb;
 	int on;
 	int dither;
+	int treble;
 };
 
 long sim_rs_trim(int item);

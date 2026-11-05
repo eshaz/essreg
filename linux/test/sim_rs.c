@@ -18,17 +18,17 @@ long sim_rs_trim(int item)
 	return es1869_trim_ppb(item);
 }
 
-static s16 *rs_tab(void)
+static s16 *rs_tab(int flat)
 {
-	static s16 *tab;
+	static s16 *tab[2];
 
-	if (!tab) {
-		tab = malloc(ES_RS_TABLE * sizeof(*tab));
-		if (!tab)
+	if (!tab[flat]) {
+		tab[flat] = malloc(ES_RS_TABLE * sizeof(*tab[flat]));
+		if (!tab[flat])
 			abort();
-		es1869_rs_table(tab);
+		es1869_rs_table(tab[flat], flat);
 	}
-	return tab;
+	return tab[flat];
 }
 
 short *sim_rs_parts(const short *src, unsigned long frames,
@@ -47,7 +47,6 @@ short *sim_rs_parts(const short *src, unsigned long frames,
 	if (!data)
 		abort();
 	memset(&j, 0, sizeof(j));
-	j.tab = rs_tab();
 	j.ch[0] = ch[0];
 	j.ch[1] = ch[1];
 	j.stereo = channels == 2;
@@ -73,6 +72,8 @@ short *sim_rs_parts(const short *src, unsigned long frames,
 		}
 		j.step = es1869_clock_q32(parts[at].ppb);
 		j.dither = parts[at].dither;
+		j.tab = rs_tab(parts[at].treble);
+		j.centre = parts[at].treble ? 1 : 2;
 		// the frames around the run, silence before and after the stream
 		for (i = 0; i < ES_RS_WINDOW; i++) {
 			long f = (long)(pos + i) - ES_RS_BEHIND;
@@ -101,7 +102,7 @@ short *sim_rs_stream(const short *src, unsigned long frames,
 		     unsigned int channels, long ppb, int sign_768,
 		     unsigned long *made)
 {
-	struct sim_rs_part part = { 0, ppb, 1, 0 };
+	struct sim_rs_part part = { 0, ppb, 1, 0, 0 };
 
 	if (!ppb && !sign_768)
 		return NULL;
@@ -131,7 +132,8 @@ double sim_rs_cycles(unsigned int channels, int mmx)
 		for (k = 0; k < 3; k++)
 			j.odd[c][k] = ch[c][k + 1];
 	}
-	j.tab = rs_tab();
+	j.tab = rs_tab(0);
+	j.centre = 2;
 	j.dst = ring;
 	j.frames = 4096;
 	j.room = 4096 + 8;

@@ -45,6 +45,7 @@
 #define RS_CTL_DITHER "Audio 2 Rate Dither Playback Switch"
 #define RS_THDN_BAND -85.0 // dB, to 20 kHz
 #define RS_SPUR_BAND -90.0
+#define RS_TREBLE_FLAT 0.2 // dB, the hold taken back to 20 kHz
 
 enum { RS_OFF, RS_TRIM, RS_CLOCK };
 
@@ -73,7 +74,8 @@ static int rs_mode(struct et_ctx *c, int mode, long ppb)
 	if (et_param_set(c, "a2_trim", RS_TRIM_ZERO) ||
 	    et_param_set(c, "a2_trim_ppb", ppb) ||
 	    et_param_set(c, "a2_resample", mode) ||
-	    et_param_set(c, "a2_resample_dither", 0))
+	    et_param_set(c, "a2_resample_dither", 0) ||
+	    et_param_set(c, "a2_treble", 0))
 		return -1;
 	return 0;
 }
@@ -359,6 +361,39 @@ enum et_result c_rs_band(struct et_ctx *c, const struct et_case *k)
 		et_measure(c, name, o.thdn, "dB", -200, RS_THDN_BAND);
 		snprintf(name, sizeof(name), "worst spur at %.0f Hz", hz[i]);
 		et_measure(c, name, o.spur, "dB", -200, RS_SPUR_BAND);
+		snprintf(name, sizeof(name), "glitches at %.0f Hz", hz[i]);
+		et_measure(c, name, o.glitches, "", 0, 0);
+	}
+	return ET_PASS;
+}
+
+// rs.treble: the DAC's hold taken back, in the samples, on the dig path: each
+// tone comes up by what the hold takes from it, on its own or at a step, and
+// the correction adds nothing but its gain
+enum et_result c_rs_treble(struct et_ctx *c, const struct et_case *k)
+{
+	static const double hz[] = { 997, 5000.7, 10000.9, 15000.1, 18000.3,
+				     20000.3 };
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	long ppb = k->arg ? 30000 : 0;
+	char name[64];
+	unsigned int i;
+
+	if (rs_mode(c, k->arg ? RS_TRIM : RS_OFF, ppb) ||
+	    et_param_set(c, "a2_treble", 1))
+		return ET_ERROR;
+	for (i = 0; i < sizeof(hz) / sizeof(hz[0]); i++) {
+		double x = M_PI * hz[i] / f.rate, hold = 20 * log10(sin(x) / x);
+		struct rs_tone o;
+		enum et_result r;
+
+		r = rs_tone(c, &f, hz[i], 20000, ppb, RS_BAND_FRAMES, &o);
+		if (r != ET_PASS)
+			return r;
+		snprintf(name, sizeof(name), "level over the hold at %.0f Hz", hz[i]);
+		et_measure(c, name, o.db + hold, "dB", -RS_TREBLE_FLAT, RS_TREBLE_FLAT);
+		snprintf(name, sizeof(name), "THD+N at %.0f Hz", hz[i]);
+		et_measure(c, name, o.thdn, "dB", -200, RS_THDN_BAND);
 		snprintf(name, sizeof(name), "glitches at %.0f Hz", hz[i]);
 		et_measure(c, name, o.glitches, "", 0, 0);
 	}
