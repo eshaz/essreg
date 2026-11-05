@@ -649,7 +649,7 @@ static int sim_run(void *ctx, struct et_stream *s, int n)
 			if (x->max_stamps) {
 				long mode = sim_setting("a2_resample");
 				double off = mode == 2 ?
-					(sim.faults & SIM_RS_REAL_TIME ? 1e-6 : 0) :
+					(sim.faults & SIM_RS_REAL_TIME ? 5e-6 : 0) :
 					SIM_MASTER_PPB * 1e-9 +
 					(x->fmt.rate % 8000 ? 0 : 251.95e-6);
 

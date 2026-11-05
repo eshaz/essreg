@@ -793,9 +793,9 @@ static enum et_result rs_timed(struct et_ctx *c, unsigned int rate,
 // rs.clock: the stream's rate in the Off mode, the control, and in Clock, past
 // its first 40 s, which are the fits' on a young line. In a minute a stream
 // follows what the driver has fitted of the steered clock over a quarter of an
-// hour, not the daemon's slews of that minute, so what it is held to is that
-// slope on the raw clock. Half an hour averages the slews, and there it is
-// held to the steered clock itself, which is real time
+// hour, not the daemon's slews of that minute, which reach 1.7 ppm, so a minute
+// is held only to about that. Half an hour averages the slews, and there it
+// is held to the steered clock itself, which is real time
 enum et_result c_rs_clock(struct et_ctx *c, const struct et_case *k)
 {
 	unsigned int rate = k->arg & 1 ? 48000 : 44100;
@@ -826,7 +826,7 @@ enum et_result c_rs_clock(struct et_ctx *c, const struct et_case *k)
 	et_measure(c, "the driver's reading of the steered clock", steered, "ppm",
 		   1, 0);
 	et_measure(c, "Clock, on the raw clock, less that", on.raw - steered,
-		   "ppm", -0.3, 0.3);
+		   "ppm", -2, 2);
 	et_measure(c, "Clock, on the steered clock", on.steered, "ppm",
 		   lng ? -0.1 : 1, lng ? 0.1 : 0);
 	et_measure(c, "what's left of the readings", on.rms, "us", 0, 600);

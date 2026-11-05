@@ -706,7 +706,7 @@ class FillTest(unittest.TestCase):
                 last = not plan.backlog
                 if last:
                     lib.es1869_rs_seek(ctypes.byref(rs), ctypes.byref(st),
-                                       -self.AHEAD)
+                                       -self.AHEAD - 1)
                 plan.filled = rs.pos
                 if last:
                     return

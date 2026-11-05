@@ -195,11 +195,13 @@ static void mirror_resample(struct es1869 *chip, struct snd_pcm_runtime *rt,
 		kernel_fpu_end();
 #endif
 	m->rs_quiet = rs->w * 2 * frames_to_bytes(rt, 1);
+	// a frame more than the filter reaches: on a step down a ring frame
+	// covers less than a stream frame, so that the reach alone left a frame
+	// behind that was made as if silence followed
 	if (!m->fill.backlog)
-		es1869_rs_seek(rs, &s, -ES_RS_AHEAD);
+		es1869_rs_seek(rs, &s, -(ES_RS_AHEAD + 1));
 	// the line decides where the next fill begins: a run can end a frame
-	// past the plan, and those fills add up, which left frames behind that
-	// were made as if silence followed
+	// past the plan, and those fills add up
 	m->fill.filled = rs->pos;
 }
 

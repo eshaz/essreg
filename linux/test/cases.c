@@ -189,9 +189,9 @@ const struct et_case et_cases[] = {
 	CASE("rs.runout", N, c_rs_runout, 0,
 	     "a client that stops writing hears silence, not the ring's old frames")
 	CASE("rs.clock.44", N, c_rs_clock, 0,
-	     "44.1 kHz for a minute: within 0.3 ppm of the slope the driver fitted")
+	     "44.1 kHz for a minute: within 2 ppm of the slope the driver fitted")
 	CASE("rs.clock.48", N, c_rs_clock, 1,
-	     "48 kHz for a minute: within 0.3 ppm of the slope the driver fitted")
+	     "48 kHz for a minute: within 2 ppm of the slope the driver fitted")
 	CASE("rs.clock.long44", ET_OPTIN | N, c_rs_clock, 2,
 	     "44.1 kHz for half an hour: within 0.1 ppm of the steered clock")
 	CASE("rs.clock.long48", ET_OPTIN | N, c_rs_clock, 3,
