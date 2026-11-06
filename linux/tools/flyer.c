@@ -18,6 +18,8 @@
  *   flyer [-p PORT] trace BYTE...     each byte, then the status lines' changes
  *                                     for 2 ms: a byte going out on MIDI holds
  *                                     the unit busy for about 320 us
+ *   flyer [-p PORT] ask BYTE...       the bytes as they are, then whatever the
+ *                                     unit sends back in 300 ms
  *   flyer [-p PORT] rate OUT N        N bytes as fast as the unit takes them: a
  *                                     unit that sends them takes 3125 a second
  *   flyer [-p PORT] sweep             a note after 0xF5 p for all 256 p: the
@@ -295,6 +297,28 @@ static int trace(int argc, char **argv)
 	return 0;
 }
 
+static int ask(int argc, char **argv)
+{
+	double end;
+	int i, n = 0;
+
+	outb(C_WRITE, base + CONTROL);
+	while (inb(base + STATUS) & S_BYTE)
+		get();
+	for (i = 0; i < argc; i++)
+		put(strtoul(argv[i], NULL, 16));
+	outb(0xFF, base + DATA);
+	end = now() + 0.3;
+	printf("back:");
+	while (now() < end)
+		if (inb(base + STATUS) & S_BYTE) {
+			printf(" %02x", get());
+			n++;
+		}
+	printf(" (%d)\n", n);
+	return 0;
+}
+
 static int rate(int out, int n)
 {
 	double t0;
@@ -394,7 +418,8 @@ int main(int argc, char **argv)
 	if (a >= argc) {
 		fprintf(stderr, "usage: flyer [-p PORT] look | raw TOKEN... | init"
 				" | send OUT BYTE... | recv SECONDS | watch SECONDS"
-				" | trace BYTE... | rate OUT N | sweep | try [US]\n");
+				" | trace BYTE... | ask BYTE... | rate OUT N | sweep"
+				" | try [US]\n");
 		return 1;
 	}
 	if (ioperm(base, 3, 1) || ioperm(base + ECR, 1, 1)) {
@@ -409,6 +434,8 @@ int main(int argc, char **argv)
 		return init();
 	if (!strcmp(argv[a], "send") && argc - a >= 2)
 		return send(argc - a - 1, argv + a + 1);
+	if (!strcmp(argv[a], "ask") && argc - a >= 2)
+		return ask(argc - a - 1, argv + a + 1);
 	if (!strcmp(argv[a], "rate") && argc - a >= 3)
 		return rate(atoi(argv[a + 1]), atoi(argv[a + 2]));
 	if (!strcmp(argv[a], "sweep"))
