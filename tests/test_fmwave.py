@@ -3,7 +3,7 @@
 # Licensed under GPL Version 3.0
 """Test the FM recording device of build/ES1869.DRV (src/es1869/fmwave.asm,
 fmdac.asm): wave-in device 1, "ESS AudioDrive FM Digital", which records
-the FM synthesizer through mixer 7Fh bit 4 at 49716 Hz, and the playback
+the FM synthesizer through mixer 7Fh bit 4 at 49820 Hz, and the playback
 device 0 named after the Audio 2 DAC.
 
 The driver runs in tests/drvemu.py against a model of the chip.
@@ -66,7 +66,7 @@ class FMRecordTest(A1Case):
         e = self.emu()
         caps = self.caps(e, 1)
         self.assertEqual(caps[6:38], b"ESS AudioDrive FM Digital (220)\0")
-        # no standard format: 49716 Hz only, in stereo
+        # no standard format: 49820 Hz, in stereo
         self.assertEqual(struct.unpack_from("<IH", caps, 0x26), (0, 2))
         # device 0 is ESS's recording device, as it was: ESS's code copies
         # the name's 32 bytes from its stack, what follows the NUL too
@@ -90,14 +90,25 @@ class FMRecordTest(A1Case):
         self.assertEqual(e.open_in(dev_id=2)[0], MMSYSERR_BADDEVICEID)
 
     def test_only_the_music_dac_format(self):
+        """16-bit stereo at the music DAC's rate as measured, 49820 Hz, or
+        as the data sheet gives it, 49716 Hz"""
         e = self.emu()
-        for kw in (dict(rate=44100), dict(rate=48000), dict(channels=1),
+        for kw in (dict(rate=44100), dict(rate=48000), dict(rate=49819),
+                   dict(rate=49716 + 0x10000), dict(channels=1),
                    dict(bits=8)):
             with self.subTest(**kw):
                 self.assertEqual(e.open_in(**kw)[0], WAVERR_BADFORMAT)
-        self.assertEqual(e.open_in(flags=WAVE_FORMAT_QUERY)[0], 0)
+        for rate in (49820, 49716):
+            self.assertEqual(e.open_in(rate=rate, flags=WAVE_FORMAT_QUERY)[0],
+                             0)
         self.assertEqual(e.dev8(FM_STATE), 0)
         self.assertEqual(e.chip.log, [])
+
+    def test_opens_at_the_measured_rate(self):
+        e = self.emu()
+        r, user = e.open_in(rate=49820)
+        self.assertEqual(r, 0)
+        self.assertEqual(e.dev8(FM_STATE), FMF_OPEN)
 
     def test_open_and_close(self):
         e = self.emu()

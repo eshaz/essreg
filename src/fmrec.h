@@ -5,10 +5,13 @@
  *
  * Notes:
  *
- * The music DAC runs at the FM synthesizer's rate, 14.31818 MHz / 288 =
- * 49,716 Hz. Mixer 7Fh bit 4 records its data on Audio 1 at that rate,
- * whatever A1h says (DS p.65). esfmrec saves those samples as they come,
- * so the WAV file says 49,716 Hz.
+ * The music DAC runs at the FM synthesizer's rate, which the data sheet
+ * gives as 14.31818 MHz / 288 = 49,716 Hz, and which Linux's driver
+ * measured on the laptop as 49,819.5 Hz, steady over 90 minutes: the
+ * chip's 23.814 MHz master over 478. Mixer 7Fh bit 4 records its data on
+ * Audio 1 at that rate, whatever A1h says (DS p.65). esfmrec saves those
+ * samples as they come, so the WAV file says 49,820 Hz, and plays at the
+ * FM's pitch.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -20,7 +23,7 @@
 
 #include "esstypes.h"
 
-#define FMREC_RATE 49716UL     // the music DAC's rate, 14.31818 MHz / 288
+#define FMREC_RATE 49820UL     // the music DAC's rate, 49,819.5 Hz measured
 #define FMREC_HEADER 44        // bytes of the WAV header
 #define FMREC_PART_SECS 9900UL // a file's most: 2 h 45 min, under 2 GB
 

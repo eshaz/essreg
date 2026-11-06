@@ -345,9 +345,10 @@ the file is replaced anyway, the panel says so in a tip under *Close*.
 
 esfmrec records the FM synthesizer digitally to a WAV file. It records the
 samples that the chip makes, before any analog stage, at the music DAC's own
-rate of 49,716 Hz in 16-bit stereo. Nothing is resampled, converted or
-corrected, and the volume settings don't change the samples. It records the
-FM of Windows programs, and of DOS games in a DOS box, while they go on
+rate of 49,820 Hz in 16-bit stereo, as measured on the chip (the data sheet
+says 49,716 Hz, which plays 3.6 cents flat). Nothing is resampled, converted
+or corrected, and the volume settings don't change the samples. It records
+the FM of Windows programs, and of DOS games in a DOS box, while they go on
 playing.
 
 `esfmrec` starts recording to `FMREC001.WAV` next to esfmrec.exe, and to
@@ -407,7 +408,7 @@ file       the WAV file, FMREC001.WAV and up if left out
 ```
 
 The log has a line for each file that gives its length and, if the samples
-came in slower than 49,716 Hz, says that ESS's driver lost some. Problems go
+came in slower than 49,820 Hz, says that ESS's driver lost some. Problems go
 to the log too.
 
 esfmrec is a 16-bit program and takes 8.3 names, so for a folder with a long
@@ -562,12 +563,12 @@ device is named after its DAC too: "ESS AudioDrive Audio 2".
 what ESS's driver and the data sheet say about Audio 1.
 
 The second change is a second recording device, "ESS AudioDrive FM Digital",
-which records the FM synthesizer's own samples at 49,716 Hz, 16-bit stereo,
-as esfmrec does. A program that lets you type in the sample rate can record
-from it. The chip has a single ADC, on Audio 1, so the two recording devices
-take turns, and neither can record while the Audio 1 device plays.
-`FMRecordDevice=0` under `[ES1869.DRV]` removes it
-([docs/AUDIO1.md](docs/AUDIO1.md#the-fm-recording-device)).
+which records the FM synthesizer's own samples at 49,820 Hz, 16-bit stereo,
+as esfmrec does, or at 49,716 Hz, the data sheet's rate. A program that lets
+you type in the sample rate can record from it. The chip has a single ADC,
+on Audio 1, so the two recording devices take turns, and neither can record
+while the Audio 1 device plays. `FMRecordDevice=0` under `[ES1869.DRV]`
+removes it ([docs/AUDIO1.md](docs/AUDIO1.md#the-fm-recording-device)).
 
 The third change concerns the Audio 2 DAC, which plays Windows' wave output.
 It now plays the samples as they are, without 4x oversampling and with the
@@ -625,7 +626,7 @@ Type `exit` to go back to Windows. To go back to ESS's driver, copy
   is 1 when something didn't work, such as a bad value or a dump that
   couldn't be written, for use in batch files.
 * Check out `fmd=1`, which makes the chip record the FM digitally at its own
-  rate, 49,716 Hz! In Windows, `esfmrec` (above) records it to a file.
+  rate, 49,820 Hz! In Windows, `esfmrec` (above) records it to a file.
   * [Examples!](digital_recording)
 * `tf` shows the Type F DMA timing of an Intel PIIX4, the PCI-to-ISA bridge
   of laptops such as the Compaq Armada 1500c, and whether it is on for Audio

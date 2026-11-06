@@ -63,6 +63,7 @@ import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FM_HZ = 49820               # esfmrec's rate (fmrec.h)
 OW2 = os.environ.get("OW2", "")
 
 
@@ -526,12 +527,12 @@ class WineTest(unittest.TestCase):
     def test_esfmrec(self):
         self.wine("esfmrec.exe", "/sim", "/t=2", "/q", "FM.WAV")
         data = read(self.path("FM.WAV"))
-        # 2 s at 49,716 Hz, 16-bit stereo, after a 44-byte header
+        # 2 s at 49,820 Hz, 16-bit stereo, after a 44-byte header
         self.assertEqual(data[:4], b"RIFF")
         self.assertEqual(struct.unpack("<IHHIIHH", data[16:36]),
-                         (16, 1, 2, 49716, 49716 * 4, 4, 16))
-        self.assertEqual(struct.unpack("<I", data[40:44])[0], 2 * 49716 * 4)
-        self.assertEqual(len(data), 44 + 2 * 49716 * 4)
+                         (16, 1, 2, FM_HZ, FM_HZ * 4, 4, 16))
+        self.assertEqual(struct.unpack("<I", data[40:44])[0], 2 * FM_HZ * 4)
+        self.assertEqual(len(data), 44 + 2 * FM_HZ * 4)
         pcm = struct.unpack("<%dh" % ((len(data) - 44) // 2), data[44:])
         left, right = pcm[0::2], pcm[1::2]
         rising = lambda s: sum(a < 0 <= b for a, b in zip(s, s[1:]))  # noqa
@@ -539,11 +540,11 @@ class WineTest(unittest.TestCase):
         self.assertLessEqual(abs(rising(right) - 1000), 1)   # 500 Hz
         self.assertEqual(max(map(abs, left)), 16383)          # -6 dB
         log = read(self.path("ESFMREC.LOG")).decode()
-        self.assertIn("FM.WAV: 2.0 s, 397728 bytes at 49716 Hz", log)
+        self.assertIn("FM.WAV: 2.0 s, 398560 bytes at 49820 Hz", log)
         # /raw: the same samples without the header
         self.wine("esfmrec.exe", "/sim", "/t=1", "/raw", "/q", "FM.PCM")
         raw = read(self.path("FM.PCM"))
-        self.assertEqual(len(raw), 49716 * 4)
+        self.assertEqual(len(raw), FM_HZ * 4)
         self.assertEqual(raw[:4000], data[44:4044])
 
     def wav_lengths(self, name):
@@ -566,7 +567,7 @@ class WineTest(unittest.TestCase):
         rec.wait(timeout=60)
         self.assertTrue(os.path.exists(self.path("ESFMSIM.RST")))
         size, riff, data = self.wav_lengths("KILL.WAV")
-        self.assertGreaterEqual(data, 5 * 49716 * 4)
+        self.assertGreaterEqual(data, 5 * FM_HZ * 4)
         self.assertLess(data, size - 44)
         # the next start repairs the header and removes the marker
         self.wine("esfmrec.exe", "/sim", "/t=1", "/q", "/log=KILL.LOG",
@@ -602,7 +603,7 @@ class WineTest(unittest.TestCase):
         pcm = b""
         for name in ("SP.WAV", "SP_2.WAV", "SP_3.WAV"):
             data = read(self.path(name))
-            self.assertEqual(len(data), 44 + 49716 * 4)
+            self.assertEqual(len(data), 44 + FM_HZ * 4)
             pcm += data[44:]
         self.assertFalse(os.path.exists(self.path("SP_4.WAV")))
         # the tone runs on across the files

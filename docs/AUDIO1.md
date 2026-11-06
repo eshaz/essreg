@@ -332,14 +332,17 @@ With `FMRecordDevice=1`, the default, `build/ES1869.DRV` has a second
 recording device, "ESS AudioDrive FM Digital (220)", next to ESS's "ESS
 AudioDrive Record (220)". It records the FM synthesizer as the chip makes
 it, the way esfmrec does. Mixer register 7Fh bit 4 sends the music DAC's
-samples to Audio 1's DMA in place of the ADC's, at the music DAC's own rate
-of 49,716 Hz, whatever rate Audio 1 is programmed for (DS p.65). Nothing
-analog is involved, so the volume settings don't change what is recorded.
+samples to Audio 1's DMA in place of the ADC's, at the music DAC's own rate,
+whatever rate Audio 1 is programmed for (DS p.65). The data sheet gives that
+rate as 14.31818 MHz / 288 = 49,716 Hz, but Linux's driver measured 49,819.5
+Hz on the laptop, steady over 90 minutes, so a file that says 49,716 Hz
+plays 3.6 cents flat. Nothing analog is involved, so the volume settings
+don't change what is recorded.
 
-The device therefore accepts a single format, 16-bit stereo PCM at 49,716
-Hz, and its capabilities list no standard format. A program that lets you
-type in the sample rate can record from it, but one that offers only the
-standard rates can't, because the device refuses them.
+The device therefore accepts a single format, 16-bit stereo PCM at 49,820
+Hz, or at 49,716 Hz as before, and its capabilities list no standard format.
+A program that lets you type in the sample rate can record from it, but one
+that offers only the standard rates can't, because the device refuses them.
 
 Under the new device, the driver opens ESS's recording device 0 at 48,000
 Hz, with copies of the program's WAVEOPENDESC and format that give that

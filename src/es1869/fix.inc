@@ -131,7 +131,8 @@ FMS_DCDRIFT     equ 0x01        ; DEV_FLAGS bit 0, ESS's DC drift removal
 FMS_I2S         equ 0x02        ; 7Fh bit 0, as ESS's code last left it
 FMS_DREC        equ 0x04        ; 7Fh bit 4 was set
 
-FM_RATE         equ 49716       ; the music DAC's rate, the recording's
+FM_RATE         equ 49820       ; the music DAC's rate, 49,819.5 Hz measured
+FM_RATE_DS      equ 49716       ; the data sheet's, which the device takes too
 FM_OPEN_RATE    equ 48000       ; what ESS's open is given for it
 
 A1_MAGIC        equ 0xA1A1      ; the high word of the instance (dwUser)

@@ -799,8 +799,8 @@ key does at 1, and the sentence that begins "With 0" says what happens at 0:
   refused (`WAVERR_BADFORMAT`).
 * **FMRecordDevice** (default 1). The driver adds a second recording device,
   "ESS AudioDrive FM Digital", which records the FM synthesizer's samples at
-  49,716 Hz, 16-bit stereo, through mixer 7Fh bit 4. With 0, there is one
-  recording device, as with ESS's driver.
+  49,820 Hz (or 49,716 Hz), 16-bit stereo, through mixer 7Fh bit 4. With 0,
+  there is one recording device, as with ESS's driver.
 * **Audio2Oversampling** (default 0). The Audio 2 DAC uses ESS's 4x
   oversampling (mixer 71h bit 4), which also bypasses the filter. With 0,
   the DAC plays the samples as they are.

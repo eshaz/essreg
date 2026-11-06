@@ -7,10 +7,12 @@
 ; (6:0FF2).  With FMRecordDevice=1, wave-in device 1, "ESS AudioDrive FM
 ; Digital", records the FM synthesizer's samples as the chip makes them.
 ; Mixer 7Fh bit 4 sends the music DAC's samples to Audio 1's DMA in place
-; of the ADC's, at the music DAC's rate of 49716 Hz whatever rate Audio 1
-; is programmed for (DS p.65), as esfmrec records them.
+; of the ADC's, at the music DAC's rate whatever rate Audio 1 is
+; programmed for (DS p.65), as esfmrec records them: 49,819.5 Hz, as
+; Linux's driver measured it on the laptop, where the data sheet says 49716.
 ;
-; So device 1 takes 16-bit stereo at 49716 Hz only, and opens ESS's
+; So device 1 takes 16-bit stereo at 49820 Hz, the rate that keeps the FM's
+; pitch, or at 49716 Hz, as it did before, and opens ESS's
 ; device 0 at 48000 Hz under it, with copies of the program's
 ; WAVEOPENDESC and format in the device structure.  Every other message
 ; of device 1 goes to ESS's code as device 0's: the two devices share
@@ -132,7 +134,7 @@ es_wid_message:
 .size:  les     bx,[es:bx+4]
         cmp     cx,CAPS_FORMATS + 4
         jb      .ok
-        xor     ax,ax                   ; no standard format: 49716 Hz only
+        xor     ax,ax                   ; no standard format: 49820 Hz
         mov     [es:bx+CAPS_FORMATS],ax
         mov     [es:bx+CAPS_FORMATS+2],ax
         cmp     cx,CAPS_CHANNELS + 2
@@ -161,8 +163,10 @@ es_wid_message:
         cmp     word [es:bx+WF_CHANNELS],2
         jne     .ret
         cmp     word [es:bx+WF_RATE],FM_RATE
+        je      .rate
+        cmp     word [es:bx+WF_RATE],FM_RATE_DS
         jne     .ret
-        cmp     word [es:bx+WF_RATE+2],0
+.rate:  cmp     word [es:bx+WF_RATE+2],0
         jne     .ret
         cmp     word [es:bx+WF_ALIGN],4
         jne     .ret

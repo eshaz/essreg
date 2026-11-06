@@ -160,8 +160,8 @@ void fmrec_tone(s16 *pcm, u16 frames, u32 *phase) {
   for (i = 0; i < frames; i++) {
     pcm[2 * i] = (s16)(sine(phase[0]) / 2);
     pcm[2 * i + 1] = (s16)(sine(phase[1]) / 2);
-    // 2^32 * 1000 / 49716 for 1 kHz; u32 is wider than 32 bits on a host
-    phase[0] = (phase[0] + 86390041UL) & 0xFFFFFFFFUL;
-    phase[1] = (phase[1] + 43195021UL) & 0xFFFFFFFFUL;
+    // 2^32 * 1000 / 49820 for 1 kHz; u32 is wider than 32 bits on a host
+    phase[0] = (phase[0] + 86209701UL) & 0xFFFFFFFFUL;
+    phase[1] = (phase[1] + 43104850UL) & 0xFFFFFFFFUL;
   }
 }

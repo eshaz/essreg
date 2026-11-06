@@ -660,7 +660,7 @@ See [AUDIO1.md](AUDIO1.md#the-fm-recording-device). These steps need
 sample rate, such as Cool Edit or GoldWave.
 
 1. Play a MIDI file in Media Player. In the editor, record from "ESS
-   AudioDrive FM Digital (220)" at 49,716 Hz, 16-bit stereo, for a minute.
+   AudioDrive FM Digital (220)" at 49,820 Hz, 16-bit stereo, for a minute.
    * The recording has the music, at its pitch and speed, without clicks or
      gaps.
    * Moving the Synth or FM volume in the Windows mixer doesn't change the
@@ -992,10 +992,10 @@ Copy `build\esfmrec.exe` to `C:\ESSREG`.
 
 1. Play a MIDI file in Media Player and start `C:\ESSREG\esfmrec.exe`.
    * The window counts up, and the peaks follow the music.
-   * After a minute, the rate line says "measured" within a few Hz of 49,716
+   * After a minute, the rate line says "measured" within a few Hz of 49,820
      Hz.
    * Click *Stop*, then play `FMREC001.WAV`, on another computer if Windows
-     can't play 49,716 Hz. The music plays at its pitch and speed, without
+     can't play 49,820 Hz. The music plays at its pitch and speed, without
      clicks or gaps.
 2. Record again, and while esfmrec records, try the following.
    * Play a WAV file. It plays as usual.

@@ -28,8 +28,8 @@ static void test_header(void) {
   CHECK_EQ(get32(h + 16), 16);
   CHECK_EQ(h[20] | h[21] << 8, 1);
   CHECK_EQ(h[22] | h[23] << 8, 2);
-  CHECK_EQ(get32(h + 24), 49716);
-  CHECK_EQ(get32(h + 28), 49716 * 4);
+  CHECK_EQ(get32(h + 24), 49820);
+  CHECK_EQ(get32(h + 28), 49820 * 4);
   CHECK_EQ(h[32] | h[33] << 8, 4);
   CHECK_EQ(h[34] | h[35] << 8, 16);
   CHECK(!memcmp(h + 36, "data", 4));
@@ -127,7 +127,7 @@ static void test_tone(void) {
                phase);
   CHECK(abs(crossings(pcm, FMREC_RATE, 0) - 1000) <= 1);
   CHECK(abs(crossings(pcm, FMREC_RATE, 1) - 500) <= 1);
-  fmrec_peaks(pcm, 49716, &l, &r);
+  fmrec_peaks(pcm, FMREC_RATE, &l, &r);
   CHECK(l >= 16380 && l <= 16384);
   CHECK(r >= 16380 && r <= 16384);
 }

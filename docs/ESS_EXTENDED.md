@@ -571,8 +571,9 @@ select the source. ES1869.DRV records in this order (6:28A4-6:2A09): a FIFO
 reset, B9h, A4h and A5h, A8h, B1h, B2h, then B7h once with 90h or 98h plus
 24h for 16 bits, and B8h with its bits 3:0 all set, which turns the CODEC to
 the ADC and starts the DMA in one write. With mixer 7Fh bit 4 set, Audio 1
-records the music DAC's samples at 49716 Hz, whatever its own rate (DS p.65,
-AUDIO1.md).
+records the music DAC's samples at its rate, whatever its own (DS p.65,
+AUDIO1.md): 49,716 Hz by the data sheet, and 49,819.5 Hz as the Linux report
+measured it.
 
 ## Audio 2
 
