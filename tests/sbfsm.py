@@ -26,6 +26,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sbfronts import TSRCard  # noqa: E402
 
 DSP_POLLS = 0x400
+COUNT_AGREE = 32            # two readings of a moving channel this close
+COUNT_TRIES = 4             # agree; readings at most (ch8_read)
 MIX_LEN = 24
 VERSION = (4, 5)
 
@@ -1033,6 +1035,22 @@ class Front:
         lo = self.chip_in(port)
         return lo | self.chip_in(port) << 8
 
+    def ch8_read(self, port):
+        """register `port` of an 8-bit channel that moves, its address or
+        count: read, after the flip-flop's clear, until two readings agree
+        within COUNT_AGREE, COUNT_TRIES at most, the last kept, since a
+        byte can come between the low and the high byte's read and the
+        reading is then 256 off"""
+        self.chip_out(0x0C, 0)
+        x = self.word_in(port)
+        for _i in range(COUNT_TRIES - 1):
+            old = x
+            self.chip_out(0x0C, 0)
+            x = self.word_in(port)
+            if (x - old + COUNT_AGREE) & 0xFFFF <= 2 * COUNT_AGREE:
+                break
+        return x
+
     def dma_port(self, port):
         if port > 0xFF:
             return False
@@ -1054,8 +1072,7 @@ class Front:
             return v
         if not self.vbits & V_FF:
             return self.vhigh
-        self.chip_out(0x0C, 0)
-        x = self.word_in((self.mchan << 1) + reg)
+        x = self.ch8_read((self.mchan << 1) + reg)
         if reg:
             if x != 0xFFFF:
                 x >>= 1

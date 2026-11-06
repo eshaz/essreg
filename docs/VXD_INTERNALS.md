@@ -555,11 +555,13 @@ the 16-bit channel masks the DAC's. VDMAD tells the front when the program
 reads the channel's count (`VDMAD_Set_Channel_Callbacks`), and the front
 answers with the DAC channel's count in words (`VDMAD_Get_Phys_Count` and
 `VDMAD_Set_Virt_Count`, `ESSREG_S16_Position`), also at the end of each
-block, so a program that polls the position sees it move. Mixer 81h picks
-the 16-bit channel: the one `SoundBlaster16DMA` names, or none, when the
-program plays 16-bit sound through the 8-bit channel, which it programs
-itself. Another channel only reads back, because the VxD has just the one
-from VDMAD.
+block, so a program that polls the position sees it move. Since 1.26 it
+reads that count until two readings agree within 32 bytes
+(`ESSREG_Phys_Count`), as a reading taken while a byte comes between the
+count's low and high byte is 256 off. Mixer 81h picks the 16-bit channel:
+the one `SoundBlaster16DMA` names, or none, when the program plays 16-bit
+sound through the 8-bit channel, which it programs itself. Another channel
+only reads back, because the VxD has just the one from VDMAD.
 
 ESS's hardware interrupt procedure requests the owner VM's interrupt without
 acknowledging the chip. The program's handler reads 82h, which the front
@@ -794,7 +796,7 @@ it by hand:
    `ES1869VX.ORG` in the same directory, the name essinst uses too.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
 3. Restart Windows. essctl's *Device information* page now shows "Register
-   API: version 1.25".
+   API: version 1.26".
 
 If sound stops working, run `essinst /restore`. If Windows doesn't start,
 restart, press F8 at "Starting Windows 95", choose *Command prompt only*,

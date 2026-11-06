@@ -89,7 +89,10 @@ class DMA8237:
         """arm one torn reading on each channel: the high byte of its next
         count reads one less, or of its next address one more, as when the
         low byte wrapped between a program's two reads (a byte comes every
-        2.5 us on a fast word channel, as long as a reading takes)"""
+        2.5 us on a fast word channel, as long as a reading takes). It
+        comes at a reading whose low byte is 10h or more from its wrap, so
+        that the next reading can't tear by itself the same way: on the
+        machine a wrap tears one reading, the next one is whole"""
         self.tear_armed = set(chans)
 
     @staticmethod
@@ -164,7 +167,9 @@ class DMA8237:
                 shift = 8 if self.ff[hi] else 0
                 self.ff[hi] ^= 1
                 v = ((c.count if reg & 1 else c.addr) >> shift) & 0xFF
-                if shift and c.n in self.tear_armed:
+                low = (c.count if reg & 1 else c.addr) & 0xFF
+                if shift and c.n in self.tear_armed and \
+                        (low >= 0x10 if reg & 1 else low <= 0xEF):
                     self.tear_armed.discard(c.n)
                     v = (v - 1 if reg & 1 else v + 1) & 0xFF
                     self.torn.append((c.n, bool(reg & 1), v))

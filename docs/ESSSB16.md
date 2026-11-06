@@ -23,10 +23,12 @@ Blaster 16 does, DSP version 4.05 with the CT1745 mixer, command for command
   16-bit sound takes two bytes a sample on an 8-bit channel. When the game
   programs its 16-bit channel, the `H` of `BLASTER`, `esssb16` carries the
   programming over to Audio 2's channel, in bytes, and the count that the
-  game reads moves with the sound. Where Audio 2 has no 8-bit channel of its
-  own, 16-bit sound plays on Audio 1, one transfer at a time. A game that
-  picks the 8-bit channel for 16-bit sound through mixer 81h, as a Sound
-  Blaster 16 allows, programs that channel itself.
+  game reads moves with the sound. Since 1.5 `esssb16` reads that channel's
+  count until two readings agree, since one read while a byte comes between
+  its low and high byte is 256 off. Where Audio 2 has no 8-bit channel of
+  its own, 16-bit sound plays on Audio 1, one transfer at a time. A game
+  that picks the 8-bit channel for 16-bit sound through mixer 81h, as a
+  Sound Blaster 16 allows, programs that channel itself.
 * Each start of Audio 1 keeps its DMA channel masked for a moment: the chip
   loses a byte that comes right at its start, and 16-bit sound would play a
   byte off, as noise

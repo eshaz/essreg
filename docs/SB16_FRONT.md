@@ -35,6 +35,14 @@ them through the game's handler, which reads mixer 82h and acknowledges, and
 the VxD also sets the count that the game reads at the interrupt's end
 (`ESSREG_S16_Position`).
 
+Both fronts take the count that a game reads of its 16-bit channel from the
+8-bit channel that carries the transfer, which moves: a byte can come
+between the reads of the count's low and high byte, and the reading is then
+256 bytes, 128 of the game's words, off. So they read it until two readings
+agree within 32, four at most, and keep the last (`ch8_read` in the TSR and
+the reference, `ESSREG_Phys_Count` in the VxD). The scene `position16_torn`
+tears one reading of the 8-bit channels before each of the game's reads.
+
 ## The operations
 
 The front programs the chip with these operations, which ESS_EXTENDED.md

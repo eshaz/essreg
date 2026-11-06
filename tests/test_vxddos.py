@@ -1095,8 +1095,13 @@ class SoundBlaster16Test(VxDBuilds, unittest.TestCase):
         m.dma16(VM_DOS, self.PLAY)
         self.assertEqual(m.emu.dma_states[-1][:2], (DMA1, VM_DOS))
         self.assertEqual(m.emu.dma_default, [(DMA1, VM_DOS)])
-        m.emu.dma_count = 0x0801 + 0x123
+        # four looks at a count that moves 123h a look, more than the 32
+        # that two may differ by, and the front keeps the last
+        m.emu.dma_count = 0x0801 + 4 * 0x123
         self.assertEqual(m.dma16_count(VM_DOS), 0x0802)
+        m.emu.dma_count, m.emu.dma_step = 0x0801 + 2 * 0x10, 0x10
+        self.assertEqual(m.dma16_count(VM_DOS), 0x0802)     # two agree
+        m.emu.dma_step = 0x123
         # Windows' own reads of its count change nothing
         n = len(m.emu.dma_default)
         m.emu.current_vm = VM_SYS

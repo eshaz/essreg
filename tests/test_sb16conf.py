@@ -189,6 +189,7 @@ class EMM386Test(Conformance, unittest.TestCase):
     without the DMA controller's traps"""
 
     known = {**Conformance.known, "position16": {"moving"},
+             "position16_torn": {"moving"},
              "mix16": {"back", "mixed"}, "mix16_again": {"back", "mixed"},
              "dsmi": {"back", "mixed"}, "abs_setup": {"hung"},
              "abs_game": {"back", "runaway"},

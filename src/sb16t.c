@@ -271,17 +271,28 @@ static void dma_set(u8 ch, u32 addr, u16 bytes, u8 mode) {
   dma_prog(ch, addr, bytes, mode, 1);
 }
 
-// the channel's count, as games read it: the bytes (or words) left, less one
+// the channel's count, as games read it: the bytes (or words) left, less
+// one, read until two readings agree within COUNT_AGREE, COUNT_TRIES at
+// most, as the fronts read a channel that moves: a byte can come between
+// the low and the high byte's read, and the reading is then 256 off
+#define COUNT_AGREE 32
+#define COUNT_TRIES 4
 static u16 dma_left(u8 ch) {
   u16 ff = ch >= 4 ? 0xD8 : 0x0C;
   u16 cp = ch >= 4 ? (u16)(0xC2 + 4 * (ch - 4)) : (u16)(2 * ch + 1);
-  u16 v;
+  u16 v = 0, old;
+  int i;
 
-  H->lock();
-  H->outb(ff, 0);
-  v = H->inb(cp);
-  v |= (u16)H->inb(cp) << 8;
-  H->unlock();
+  for (i = 0; i < COUNT_TRIES; i++) {
+    old = v;
+    H->lock();
+    H->outb(ff, 0);
+    v = H->inb(cp);
+    v |= (u16)H->inb(cp) << 8;
+    H->unlock();
+    if (i && (u16)(v - old + COUNT_AGREE) <= 2 * COUNT_AGREE)
+      break;
+  }
   return v;
 }
 

@@ -390,6 +390,43 @@ def position16(card):
     return {"moving": moving >= 6}
 
 
+def tear(card):
+    """one torn reading armed on each of the card's 8-bit channels
+    (dma8237.tear): the next read of a count or address that a front
+    makes of them comes out 256 off, as when a byte comes between the
+    low and the high byte's read"""
+    chip = getattr(card, "chip", None)
+    dmac = getattr(chip, "dmac", None)
+    (dmac if dmac is not None else card.dma).tear()
+
+
+@scene
+def position16_torn(card):
+    """a game that reads its 16-bit channel's count every 200 us while it
+    plays, with the next read of the card's 8-bit channels torn each time:
+    the count moves on by its few words, never 128"""
+    prepare(card)
+    reset(card)
+    block = 2048
+    data = words(samples16(2 * block))
+    ring = len(data) // 2                   # the channel's words
+    card.poke(BUF, data)
+    program_dma(card, 5, BUF, len(data))
+    write(card, 0x41, 0xAC, 0x44, 0xB6, 0x30, (block - 1) & 0xFF,
+          (block - 1) >> 8)
+    card.wait(5000)
+    last, jumps, moved = dma_count(card, 5), 0, 0
+    for _ in range(40):
+        card.wait(200)
+        tear(card)
+        count = dma_count(card, 5)
+        step = (last - count) % ring
+        jumps += step > 64
+        moved += step
+        last = count
+    return {"jumps": jumps, "moving": moved > 0}
+
+
 def _mix16(card, again_us=None):
     """a game that mixes up to the position it reads from the 16-bit
     channel's count, as Pinball Fantasies' driver does: a buffer of two

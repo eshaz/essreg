@@ -85,7 +85,9 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0125
+ESSREG_VERSION          equ 0x0126
+ESSREG_COUNT_AGREE      equ 32          ; two readings of a moving channel
+ESSREG_COUNT_TRIES      equ 4           ; this close agree; readings at most
 ESSREG_FEATURES         equ 0xFFFF      ; mixer, controller, ports, config,
                                         ; PnP, mixer block, owner info,
                                         ; DOS FM, DOS mixer restore, settings,
@@ -5903,7 +5905,7 @@ ESSREG_S16_Position:
         je      .out
         pushad
         call    ESSREG_S16_To_Handle
-        VxDCall VDMAD_Get_Phys_Count    ; ECX = bytes left - 1
+        call    ESSREG_Phys_Count       ; ECX = bytes left - 1
         inc     ecx
         call    ESSREG_S16_Handle
         or      eax,eax
@@ -5911,6 +5913,31 @@ ESSREG_S16_Position:
         VxDCall VDMAD_Set_Virt_Count    ; in bytes: words - 1 to the VM
 .done:  popad
 .out:   ret
+
+; ECX = the count of VDMAD channel EAX, which moves: VDMAD_Get_Phys_Count
+; until two readings agree within ESSREG_COUNT_AGREE,
+; ESSREG_COUNT_TRIES at most, the last kept, as esssb16's ch8_read reads
+; the 8237, since a byte can come between the count's low and high byte
+; and the reading is then 256 off
+ESSREG_Phys_Count:
+        push    edx
+        push    esi
+        VxDCall VDMAD_Get_Phys_Count
+        mov     esi,ESSREG_COUNT_TRIES - 1
+.again: mov     edx,ecx
+        VxDCall VDMAD_Get_Phys_Count
+        push    ecx
+        sub     ecx,edx
+        add     ecx,ESSREG_COUNT_AGREE
+        and     ecx,0xFFFF
+        cmp     ecx,2 * ESSREG_COUNT_AGREE
+        pop     ecx
+        jbe     .out
+        dec     esi
+        jnz     .again
+.out:   pop     esi
+        pop     edx
+        ret
 
 ; EAX = the VDMAD handle of the front's 16-bit channel, EDI = ADI, 0 if
 ; none; .any: of the channel SoundBlaster16DMA names, whether the program

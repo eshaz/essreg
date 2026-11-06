@@ -436,7 +436,8 @@ class VxDEmu:
         self.lists = {}
         self.trap_off = set()      # (vm, port) with trapping disabled
         self.messages = []
-        self.dma_count = 0x2B10         # VDMAD_Get_Phys_Count's next answer
+        self.dma_count = 0x2B10         # VDMAD_Get_Phys_Count's last answer
+        self.dma_step = 0x123           # and how far it goes at each look
         # VDMAD_Get_Virt_State's mode (DL) for each DMA handle, masked if
         # not set, its region (ESI, ECX) and extended mode (DH), and the
         # calls passed on to VDMAD_Default_Handler
@@ -684,7 +685,7 @@ class VxDEmu:
             pass
         elif svc == SVC_VDMAD_GET_PHYS_COUNT:
             # a transfer that plays: the count goes down on every look
-            self.dma_count = (self.dma_count - 0x123) & 0xFFFF
+            self.dma_count = (self.dma_count - self.dma_step) & 0xFFFF
             uc.reg_write(UC_X86_REG_ECX, self.dma_count)
         elif svc == SVC_VDMAD_GET_VIRT_STATE:
             handle = uc.reg_read(UC_X86_REG_EAX)

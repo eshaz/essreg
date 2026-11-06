@@ -72,6 +72,8 @@
 
 VERSION         equ 0x0405      ; the DSP version the front answers
 DSP_POLLS       equ 0x400       ; polls for the chip
+COUNT_AGREE     equ 32          ; two readings of a moving channel this close
+COUNT_TRIES     equ 4           ; agree; readings at most (ch8_read)
 MIX_LEN         equ 24          ; the Sound Blaster 16's mixer registers 30h-47h
 COPYRIGHT_LEN   equ 45          ; E3h's string with its 0
 HOST_PARAS      equ 0x20        ; the DPMI host's data at most: HDPMI's
@@ -2284,15 +2286,10 @@ dma_in:
         test    byte [V(vbits)],V_FF
         jz      .high
         push    dx                      ; the card's channel: the bytes it
-        mov     dx,0x0C                 ; moved, halved
-        call    chip_out
-        movzx   dx,byte [V(mchan)]
+        movzx   dx,byte [V(mchan)]      ; moved, halved
         shl     dx,1
         add     dl,bl
-        call    chip_in
-        mov     ah,al
-        call    chip_in
-        xchg    al,ah
+        call    ch8_read
         pop     dx
         or      bl,bl
         jz      .addr
@@ -2309,6 +2306,38 @@ dma_in:
         ret
 .high:  mov     al,[V(vhigh)]
 .ret:   ret
+
+; AX = register DX of an 8-bit channel that moves, its address or count:
+; read, after the flip-flop's clear, until two readings agree within
+; COUNT_AGREE, COUNT_TRIES at most, the last kept, since a byte can come
+; between the low and the high byte's read and the reading is then 256
+; off. Keeps BX and DX
+ch8_read:
+        push    cx
+        push    si
+        call    .pair
+        mov     cx,COUNT_TRIES - 1
+.again: mov     si,ax
+        call    .pair
+        push    ax
+        sub     ax,si
+        add     ax,COUNT_AGREE
+        cmp     ax,2 * COUNT_AGREE
+        pop     ax
+        jbe     .out
+        loop    .again
+.out:   pop     si
+        pop     cx
+        ret
+.pair:  push    dx
+        mov     dx,0x0C
+        call    chip_out
+        pop     dx
+        call    chip_in
+        mov     ah,al
+        call    chip_in
+        xchg    al,ah
+        ret
 
 ; AL written to port DX of the game's 16-bit channel: to the controller as
 ; it is, and the front follows the channel's programming while this path
@@ -4536,7 +4565,7 @@ emm_device:     db "EMMXXXX0", 0
 emm_device2:    db "EMMQXXX0", 0
 blaster_name:   db "BLASTER=", 0
 
-banner:         db "esssb16 1.4: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
+banner:         db "esssb16 1.5: a Sound Blaster 16 for DOS games on the ES1869", 13, 10, "$"
 usage:          db "usage: esssb16 [/A220] [/H5|/H6|/H7|/H0] [/20|/21|/23|/2-] [/S] [/F0|/F1]", 13, 10
                 db "       [/O0|/O1] [/3]", 13, 10
                 db "  /A  the card's base, else BLASTER's A (220)", 13, 10
