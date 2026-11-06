@@ -870,6 +870,20 @@ class ExeTest(unittest.TestCase):
         self.assertNotIn("restart before", d.output)    # no window, no trap
         self.assertNotIn("window: removed", lines)
 
+    def test_pci_bus(self):
+        """the laptop's bus 0 through the 32-bit accesses of CF8h and CFCh
+        (dosrun keeps their width): its bridges, as essprobe lists them"""
+        from pcicfg import laptop
+        card = ChipCard(pci=laptop())
+        d, code = self.dos(card, "/A /T /C:env.machine")
+        self.assertEqual(code, 0, d.output)
+        res = results(self.report(d))
+        self.assertIn("pci bus 0: 0:8086:7192/0600 7:8086:7110/0601 "
+                      "17:104C:AC1C/0607",
+                      [t for _r, t in res["env.machine"]])
+        self.assertEqual(card.pci.writes(), [])     # it only reads
+        self.assertEqual(card.pci.addr, 0)          # and puts CF8h back
+
     def test_under_emm386(self):
         """/A /T under EMM386: V86 mode, EMMQXXX0's version, the window on
         Audio_Base+Dh, the 8237 seen past EMM386's translation, which

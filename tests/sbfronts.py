@@ -313,6 +313,14 @@ class VGA:
             self.write_at = (self.write_at + 1) % 768
 
 
+# the Armada's MPU-401 as its BIOS leaves it (sb16test's chip.config and
+# Linux's report): part of LDN 1 at 330h (64h/65h), its interrupt shared
+# with audio's (card 25h bit 0 clear, 27h and 28h at the audio IRQ), and
+# Config_Base+5 = 01h, +7 = 0Fh; an int key is a Config_Base port
+LAPTOP_MPU = {(1, 0x64): 0x03, (1, 0x65): 0x30, (None, 0x25): 0x80,
+              5: 0x01, 7: 0x0F}
+
+
 class ChipCard(Card):
     """the chip itself, without a front, for a program that drives it as
     essprobe does: the chip model with the DMA controllers and their
@@ -322,11 +330,21 @@ class ChipCard(Card):
     controllers, which phys_in() and phys_out() reach past it"""
 
     def __init__(self, irq=5, dma8=1, dma2=5, pins=(1, 5, 15, 15),
-                 emm386=None):
+                 emm386=None, pci=None, mpu=None, mpu_regs=None):
         super().__init__()
+        self.pci = pci
         self.chip = TSRChip(irq, dma8, dma2)
         self.chip.pnp[(None, 0x23)] = pins[0] | pins[1] << 4
         self.chip.pnp[(None, 0x24)] = pins[2] | pins[3] << 4
+        if mpu is not None:             # the MPU-401 as the BIOS left it
+            self.chip.mpu = mpu
+            regs = dict(LAPTOP_MPU, **{(None, 0x27): irq, (None, 0x28): irq})
+            regs.update(mpu_regs or {})
+            for key, v in regs.items():
+                if isinstance(key, int):
+                    self.chip.cfg_ports[key] = v
+                else:
+                    self.chip.pnp[key] = v
         self.dma = self.chip.dmac       # dosrun gives it the program's memory
         self.memory = self.dma.memory
         self.vga = VGA(self.chip.clock)
@@ -574,7 +592,12 @@ class VDMAD:
             p.masked = False
         elif svc == vxdemu.SVC_VDMAD_GET_PHYS_COUNT:
             self.card.chip.catch_up()
-            uc.reg_write(UC_X86_REG_ECX, p.count)
+            count = p.count
+            if n in self.phys.tear_armed:   # dma8237.tear(): 256 low once
+                self.phys.tear_armed.discard(n)
+                count = (count - 0x100) & 0xFFFF
+                self.phys.torn.append((n, True, count >> 8))
+            uc.reg_write(UC_X86_REG_ECX, count)
         elif svc == vxdemu.SVC_VDMAD_GET_VIRT_COUNT:
             self._sync(n)
             uc.reg_write(UC_X86_REG_ECX, ((c.count + 1) & 0x1FFFF) * unit)

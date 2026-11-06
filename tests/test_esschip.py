@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dma8237 import DMA8237  # noqa: E402
 from esschip import ES1869Audio, a1_hz, a2_hz, decode  # noqa: E402
 from vxdemu import FakeES1869  # noqa: E402
+from mpu401 import ACK_US, BYTE_US, FIFO, MPU401  # noqa: E402
 from sbgame import program_dma, words, samples16  # noqa: E402
 from test_sb16 import adpcm_decode  # noqa: E402
 
@@ -408,6 +409,147 @@ class Audio2Test(unittest.TestCase):
         chip.outb(BASE + 5, 0x00)
         self.assertEqual((chip.mixer[0x7A], chip.mixer[0x14],
                           chip.mixer[0x38]), (0x47, 0x88, 0x00))
+
+
+MPU = 0x330
+
+
+class MpuTest(unittest.TestCase):
+    """the MPU-401 behind the chip (mpu401): the laptop's configuration,
+    its acknowledges, UART mode with a loopback cable, and its interrupt's
+    gates (DS p.17-18, 23, 42)"""
+
+    def chip(self, loop=True, **pnp):
+        c = Chip()
+        c.mpu = MPU401(loop=loop)
+        c.pnp.update({(1, 0x64): 0x03, (1, 0x65): 0x30, (None, 0x25): 0x80,
+                      (None, 0x28): 5})
+        c.pnp.update({(None if k[0] == "c" else 1, int(k[1:], 16)): v
+                      for k, v in pnp.items()})
+        c.cfg_ports[7] = 0x0F
+        c.mixer[0x64] = 0x40
+        return c
+
+    def read(self, c):
+        """status bit 7 clear, then the byte"""
+        self.assertEqual(c.inb(MPU + 1) & 0x80, 0)
+        return c.inb(MPU)
+
+    def test_reset_acknowledges_in_smart_mode(self):
+        c = self.chip()
+        self.assertEqual(c.inb(MPU + 1) & 0xC0, 0x80)  # idle: no data, room
+        c.outb(MPU + 1, 0xFF)
+        self.assertEqual(c.inb(MPU + 1) & 0x80, 0x80)
+        run(c, ACK_US)
+        self.assertEqual(self.read(c), 0xFE)
+        self.assertEqual(c.inb(MPU + 1) & 0x80, 0x80)
+
+    def test_uart_mode_and_back(self):
+        c = self.chip()
+        c.outb(MPU + 1, 0x3F)
+        run(c, ACK_US)
+        self.assertEqual(self.read(c), 0xFE)
+        c.outb(MPU + 1, 0x3F)               # ignored in UART mode
+        c.outb(MPU + 1, 0xFF)               # back to Smart mode, no answer
+        run(c, 50)
+        self.assertEqual(c.inb(MPU + 1) & 0x80, 0x80)
+        c.outb(MPU + 1, 0xFF)               # in Smart mode: FEh
+        run(c, ACK_US)
+        self.assertEqual(self.read(c), 0xFE)
+
+    def test_loopback_takes_a_byte_time(self):
+        c = self.chip()
+        c.outb(MPU + 1, 0x3F)
+        run(c, ACK_US)
+        self.read(c)
+        c.outb(MPU, 0x90)
+        c.outb(MPU, 0x3C)
+        run(c, BYTE_US - 3)
+        self.assertEqual(c.inb(MPU + 1) & 0x80, 0x80)
+        run(c, 3)
+        self.assertEqual(self.read(c), 0x90)
+        run(c, BYTE_US)
+        self.assertEqual(self.read(c), 0x3C)
+        self.assertEqual([b for _t, b in c.mpu.sent], [0x90, 0x3C])
+
+    def test_no_cable_nothing_comes_back(self):
+        c = self.chip(loop=False)
+        c.outb(MPU + 1, 0x3F)
+        run(c, ACK_US)
+        self.read(c)
+        c.outb(MPU, 0x90)
+        run(c, 2 * BYTE_US)
+        self.assertEqual(c.inb(MPU + 1) & 0x80, 0x80)
+        self.assertEqual([b for _t, b in c.mpu.sent], [0x90])
+
+    def test_input_fifo_holds_eight(self):
+        c = self.chip()
+        c.mpu.feed(range(FIFO + 2), c.clock.us)
+        run(c, (FIFO + 3) * BYTE_US)
+        self.assertEqual(c.mpu.overruns, 2)
+        self.assertEqual([self.read(c) for _ in range(FIFO)], list(range(8)))
+
+    def test_output_fifo_holds_eight_behind_the_wire(self):
+        c = self.chip()
+        c.outb(MPU + 1, 0x3F)
+        run(c, ACK_US)
+        self.read(c)
+        for b in range(FIFO + 1):           # one on the wire, eight behind
+            c.outb(MPU, b)
+        self.assertEqual(c.inb(MPU + 1) & 0x40, 0x40)
+        c.outb(MPU, 0x55)                   # no room: lost
+        self.assertEqual(c.mpu.tx_lost, 1)
+        run(c, BYTE_US)
+        self.assertEqual(c.inb(MPU + 1) & 0x40, 0)
+
+    def test_each_byte_an_edge(self):
+        c = self.chip()
+        c.mpu.feed([0x90, 0x40, 0x7F], c.clock.us)
+        run(c, 4 * BYTE_US)
+        edges = len(c.irq_edges)
+        self.assertEqual(c.inb(0x256) & 0x08, 0x08)
+        for _ in range(3):
+            c.inb(MPU)
+            run(c, 2)
+        self.assertEqual(len(c.irq_edges) - edges, 2)  # after each read
+        self.assertEqual(c.inb(0x256) & 0x08, 0)
+
+    def test_gates(self):
+        """64h bit 6 gates the request into Config_Base+6 bit 3 and the
+        pin; +7 bit 3 gates only the pin; 28h names the IRQ"""
+        for mixer64, imr, irq28, status, edge in (
+                (0x40, 0x0F, 5, 0x08, True), (0x00, 0x0F, 5, 0, False),
+                (0x40, 0x07, 5, 0x08, False), (0x40, 0x0F, 7, 0x08, False)):
+            c = self.chip(c28=irq28)
+            c.mixer[0x64], c.cfg_ports[7] = mixer64, imr
+            c.mpu.feed([0xF8], c.clock.us)
+            run(c, 2 * BYTE_US)
+            self.assertEqual(c.inb(0x256) & 0x08, status)
+            self.assertEqual(bool(c.irq_edges), edge, (mixer64, imr, irq28))
+
+    def test_not_accessible(self):
+        for pnp in ({"l64": 0, "l65": 0}, {"c25": 0x81}):
+            c = self.chip(**pnp)
+            c.outb(MPU + 1, 0xFF)
+            run(c, ACK_US)
+            self.assertEqual(c.inb(MPU + 1), 0xFF, pnp)
+            self.assertEqual(c.mpu.ignored, [])
+
+
+class TearTest(unittest.TestCase):
+    """dma8237.tear(): one reading of the count or the address torn by the
+    low byte's wrap between the two reads"""
+
+    def test_one_torn_reading(self):
+        c = Chip()
+        program_dma(Card(c), 1, BUF, 0x1234)
+        c.dmac.tear((1,))
+        c.outb(0x0C, 0)
+        self.assertEqual(c.inb(0x03) | c.inb(0x03) << 8, 0x1233 - 0x100)
+        self.assertEqual(c.inb(0x03) | c.inb(0x03) << 8, 0x1233)
+        c.dmac.tear((1,))
+        self.assertEqual(c.inb(0x02) | c.inb(0x02) << 8, 0x100)
+        self.assertEqual(len(c.dmac.torn), 2)
 
 
 if __name__ == "__main__":

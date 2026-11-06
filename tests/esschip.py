@@ -173,6 +173,7 @@ class ES1869Audio:
         self.midi = None            # None, "read" or "uart"
         self.midi_out = []
         self.midi_in = []           # bytes the MIDI input gets
+        self.mpu = None             # an MPU401 (mpu401), when a test wants
         self.played = []            # Audio 1's DAC: frames heard
         self.muted = []             # Audio 1 frames with D1h off
         self.played2 = []           # Audio 2's DAC
@@ -244,6 +245,8 @@ class ES1869Audio:
             self._a1_step()
             self._fw_step()
         self._a2_step()
+        if self.mpu is not None:
+            self.mpu.step(self.clock.us)
         self._line()
 
     # --- the interrupt line --------------------------------------------------
@@ -256,10 +259,33 @@ class ES1869Audio:
         r = self.mixer[0x7A]
         return bool(r & 0x80 and r & 0x40)
 
+    def mpu_base(self):
+        """where the MPU-401 answers: LDN 1's 64h/65h (DS p.31-32) while
+        it is part of the audio device (card register 25h bit 0 clear);
+        None without one, or at 0, where it isn't accessible"""
+        if self.mpu is None or self.pnp.get((None, 0x25), 0) & 1:
+            return None
+        base = (self.pnp.get((1, 0x64), 0) & 0x0F) << 8 | \
+            self.pnp.get((1, 0x65), 0) & 0xFC
+        return base or None
+
+    def mpu_request(self):
+        """the MPU-401's request ANDed with mixer 64h bit 6: Config_Base+6
+        bit 3 (DS p.17), which Config_Base+7 doesn't change"""
+        return self.mpu_base() is not None and \
+            self.mpu.request(self.clock.us) and \
+            bool(self.mixer[0x64] & 0x40)
+
     def _line(self):
         line = (self.a1_request() and self.pnp.get((1, 0x70)) ==
                 self.game_irq) or \
             (self.a2_request() and self.pnp.get((1, 0x72)) == self.game_irq)
+        # the MPU-401's pin: card register 28h, masked by Config_Base+7
+        # bit 3 (the mask is modelled for the MPU-401 alone)
+        if not line and self.mpu is not None and self.mpu_request() and \
+                self.cfg_ports[7] & 0x08 and \
+                self.pnp.get((None, 0x28)) == self.game_irq:
+            line = True
         if line and not self.irq_line:
             self.irq_edges.append(self.clock.us)
         self.irq_line = line
@@ -615,13 +641,26 @@ class ES1869Audio:
             return self.a1.fifo.pop(0) if self.a1.fifo else 0xFF
         if self.cfg and port == self.cfg + 6:
             return (0x01 if self.a1_request() else 0) | \
-                (0x02 if self.a2_request() else 0)
+                (0x02 if self.a2_request() else 0) | \
+                (0x08 if self.mpu is not None and self.mpu_request() else 0)
+        mpu = self.mpu_base()
+        if mpu is not None and mpu <= port <= mpu + 1:
+            v = self.mpu.inb(port - mpu, self.clock.us)
+            self._line()
+            return v
         return super()._inb(port)
 
     def outb(self, port, v):
         self.catch_up()
         off = port - self.base
         v &= 0xFF
+        mpu = self.mpu_base()
+        if mpu is not None and mpu <= port <= mpu + 1:
+            self.clock.advance(1)
+            self.log.append(("out", port, v))
+            self.mpu.outb(port - mpu, v, self.clock.us)
+            self._line()
+            return
         if off == 6:
             self.clock.advance(1)
             self.log.append(("out", port, v))

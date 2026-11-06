@@ -82,6 +82,15 @@ class DMA8237:
         self.bad = []                   # (channel, mode): no data moved
         self.trace = None               # sbops: each channel's programming
         self.served = {}                # as its cycles first move data
+        self.tear_armed = set()         # tear(): channels whose next read
+        self.torn = []                  # tears, (channel, count?, high)
+
+    def tear(self, chans=(0, 1, 2, 3)):
+        """arm one torn reading on each channel: the high byte of its next
+        count reads one less, or of its next address one more, as when the
+        low byte wrapped between a program's two reads (a byte comes every
+        2.5 us on a fast word channel, as long as a reading takes)"""
+        self.tear_armed = set(chans)
 
     @staticmethod
     def register(port):
@@ -155,6 +164,10 @@ class DMA8237:
                 shift = 8 if self.ff[hi] else 0
                 self.ff[hi] ^= 1
                 v = ((c.count if reg & 1 else c.addr) >> shift) & 0xFF
+                if shift and c.n in self.tear_armed:
+                    self.tear_armed.discard(c.n)
+                    v = (v - 1 if reg & 1 else v + 1) & 0xFF
+                    self.torn.append((c.n, bool(reg & 1), v))
             elif reg == 8:              # status: TC bits, cleared by the read
                 v = 0
                 for i, c in enumerate(self.ch[first:first + 4]):

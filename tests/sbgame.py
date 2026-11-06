@@ -35,6 +35,7 @@ class Card:
     """the game's side of a card; subclasses give the ports and time"""
 
     isr = None                  # the game's interrupt handler: isr(card)
+    pci = None                  # a pcicfg.PciBus at CF8h-CFFh, if any
 
     def __init__(self):
         self.edges = 0          # rising edges seen
@@ -96,8 +97,9 @@ class Card:
 class ModelCard(Card):
     """a real Sound Blaster 16 and the PC's DMA controllers"""
 
-    def __init__(self, irq=5, dma8=1, dma16=5, **kw):
+    def __init__(self, irq=5, dma8=1, dma16=5, pci=None, **kw):
         super().__init__()
+        self.pci = pci
         self.memory = Memory(0x1000000)
         self.dma = DMA8237(self.memory)
         self.clock = Clock(1000000)

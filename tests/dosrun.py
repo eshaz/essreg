@@ -237,6 +237,12 @@ class Dos(Cpu):
             self.uc.emu_stop()
 
     def _in(self, uc, port, size, _user):
+        pci = getattr(self.card, "pci", None)
+        if pci is not None and pci.handles(port):   # the size a program asks
+            self.card.wait(1)
+            v = pci.read(port, size)
+            self._after_io()
+            return v
         if 0x40 <= port <= 0x43:
             self.card.wait(PIT_US)
             if port == 0x40:
@@ -262,6 +268,12 @@ class Dos(Cpu):
         return v
 
     def _out(self, uc, port, size, value, _user):
+        pci = getattr(self.card, "pci", None)
+        if pci is not None and pci.handles(port):
+            self.card.wait(1)
+            pci.write(port, size, value)
+            self._after_io()
+            return
         value &= 0xFF
         if 0x40 <= port <= 0x43:
             self.card.wait(PIT_US)
