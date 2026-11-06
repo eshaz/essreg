@@ -551,7 +551,7 @@ static const struct {
     {ESFM_OPT_PEDAL, "PedalRelease"},    {ESFM_OPT_VIBRATO, "Vibrato"},
     {ESFM_OPT_TUNING, "Tuning"},         {ESFM_OPT_CC121, "ResetControllers"},
     {ESFM_OPT_LIVE_PAN, "LivePan"},      {ESFM_OPT_SYSEX, "SysEx"},
-    {ESFM_OPT_RUNNING, "RunningStatus"},
+    {ESFM_OPT_RUNNING, "RunningStatus"}, {ESFM_OPT_SIDES, "TrueSides"},
 };
 
 static void settings_text(const struct esfm_diag *d, const char *nl, char *buf,

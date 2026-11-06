@@ -866,6 +866,12 @@ its default and by what the key does at 1, and the sentence that begins
   `esfm_patch_banks/bnk_com_better_square_wave.bin`. With 0, the built-in
   bank is ESS's own `bnk_com.bin`, which the driver also carries (resource
   1235).
+* **TrueSides** (default 1). A channel panned left sounds on the left. The
+  chip plays bit 4 of an operator's register 6 on the right output and bit 5
+  on the left, the other way round from ESS's driver, so the driver swaps
+  the two bits in each write that sends an operator to one side only, a
+  patch's own side included ([ESFM_GM.md](ESFM_GM.md#pan)). With 0, the
+  driver writes ESS's bits, and a channel panned left sounds on the right.
 
 With every key at 0, the driver writes to the chip's ports exactly as ESS's
 driver does, which `SettingsTest` in `tests/test_esfmdrv.py` checks by

@@ -36,7 +36,11 @@ L1_003E:
         loop L1_003E                                    ; 0042
 
 L1_0044:
+%if ESFM_FIX
+        call fix_fm_value       ; the same 3 bytes: ESS's tables at 0062h and
+%else                           ; 0082h are read by their offsets
         mov al,[bp+0x6]                                 ; 0044
+%endif
         sub_ ah,ah                                      ; 0047
         mov dx,[bp-0x4]                                 ; 0049
         inc dx                                          ; 004C

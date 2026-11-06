@@ -431,6 +431,33 @@ fix_vib0:
 .out:
         ret
 
+; fm_write's value into AL, [BP+6], for register [BP+8], in place of
+; ESS's MOV: in an operator's register 6 (000h-23Fh, the low three bits 6)
+; bits 4 and 5 swapped, with TrueSides. The chip plays bit 4 on the right
+; output and bit 5 on the left, as Linux's driver measured, digitally and
+; at the output, and ESS's pan takes bit 4 for left, so a channel panned
+; left sounded on the right. Both bits or neither stay as they are. Keeps
+; every register but AL
+fix_fm_value:
+        mov     al,[bp+0x6]
+        test    word [fix_opts],OPT_SIDES
+        jz      .out
+        push    bx
+        mov     bx,[bp+0x8]
+        cmp     bx,0x240
+        jae     .done
+        and     bl,7
+        cmp     bl,6
+        jne     .done
+        mov     bl,al
+        and     bl,0x30
+        jz      .done
+        cmp     bl,0x30
+        je      .done
+        xor     al,0x30
+.done:  pop     bx
+.out:   ret
+
 ; register 6 of an operator (AL, the patch's byte) with the channel's pan,
 ; as program_operator sets it, and vibrato depth
 ; SI = dev, DI = channel

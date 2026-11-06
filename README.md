@@ -511,6 +511,8 @@ one queues the messages instead, and it fixes more:
   and coarse tuning, the bend range in cents, master volume, GM, GS and XG
   resets, and controller 121 as GM defines it
   ([docs/ESFM_GM.md](docs/ESFM_GM.md)).
+* A channel panned left plays on the left. ESS's driver plays it on the
+  right, because the chip's sides are the other way round from ESS's bits.
 * Running status in `midiOutLongMsg` buffers no longer mixes up notes. It
   carries on across buffers, and a clock or active sensing byte no longer
   breaks it.

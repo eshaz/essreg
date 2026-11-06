@@ -328,10 +328,10 @@ class WineTest(unittest.TestCase):
         try:
             with open(ini, "ab") as f:
                 f.write(b"\r\n[ESFM.DRV]\r\nVibrato=0\r\nSysEx=0\r\n"
-                        b"BetterSquareWave=0\r\n")
+                        b"TrueSides=0\r\nBetterSquareWave=0\r\n")
             text = self.driver_dump(self.fixed_driver())
             self.assertIn("Settings: from SYSTEM.INI, off: Vibrato, SysEx, "
-                          "ESS's bank", text)
+                          "TrueSides, ESS's bank", text)
             ess = read(os.path.join(ROOT, "esfm_patch_banks", "bnk_com.bin"))
             self.assertEqual(read(self.path("BEFORE.BIN"))[:len(ess)], ess)
         finally:

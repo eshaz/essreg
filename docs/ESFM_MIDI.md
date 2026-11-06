@@ -216,7 +216,8 @@ next buffer, as if all the bytes had come one after the other, while
 [`src/esfm/esfmgm.asm`](../src/esfm/esfmgm.asm) also adds what General MIDI
 asks for and ESS's code doesn't do: modulation, channel pressure, tuning,
 the bend range in cents, master volume, and controller 121 as RP-015 defines
-it. [ESFM_GM.md](ESFM_GM.md) describes these changes.
+it, and it puts the notes panned left on the chip's left output, which ESS's
+driver plays on the right. [ESFM_GM.md](ESFM_GM.md) describes these changes.
 
 [`src/esfm/esfmfile.asm`](../src/esfm/esfmfile.asm) lets the driver play a
 patch bank straight from a file named in `SYSTEM.INI`. The driver reads the

@@ -74,8 +74,9 @@ OPT_LIVE_PAN    equ 0x0040      ; LivePan
 OPT_SYSEX       equ 0x0080      ; SysEx
 OPT_RUNNING     equ 0x0100      ; RunningStatus
 OPT_SQUARE      equ 0x0200      ; BetterSquareWave: the built-in bank
+OPT_SIDES       equ 0x0400      ; TrueSides: left on the left output
 OPT_READ        equ 0x8000      ; SYSTEM.INI was read
-OPT_DEFAULT     equ 0x03FF
+OPT_DEFAULT     equ 0x07FF
 
 ; ESFM_FIX: General MIDI state (esfmgm.asm), after ESS's fields.  The fixed
 ; driver allocates DEV_FIX_SIZE bytes for each device

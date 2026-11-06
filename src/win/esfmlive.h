@@ -109,6 +109,7 @@ struct esfm_diag {
 #define ESFM_OPT_SYSEX 0x0080    // SysEx
 #define ESFM_OPT_RUNNING 0x0100  // RunningStatus
 #define ESFM_OPT_SQUARE 0x0200   // BetterSquareWave: the built-in bank
+#define ESFM_OPT_SIDES 0x0400    // TrueSides: left on the left output
 #define ESFM_OPT_READ 0x8000     // read from SYSTEM.INI (at DRV_ENABLE)
 
 // file_state: what the last MODM_OPEN found

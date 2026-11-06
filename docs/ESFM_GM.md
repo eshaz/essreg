@@ -8,8 +8,8 @@ assembled into the fixed driver only. ESS's code is unchanged apart from the
 calls into the new code, which are under `%if ESFM_FIX` in
 [`src/esfm/seg1.asm`](../src/esfm/seg1.asm). Each part can be turned off in
 `SYSTEM.INI`, and ESS's code then handles it as before. The keys are
-`Vibrato`, `Tuning`, `ResetControllers`, `LivePan`, `SysEx` and
-`RunningStatus` under `[ESFM.DRV]`
+`Vibrato`, `Tuning`, `ResetControllers`, `LivePan`, `SysEx`, `RunningStatus`
+and `TrueSides` under `[ESFM.DRV]`
 ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv)).
 
 ## At a glance
@@ -26,8 +26,9 @@ Each item names what GM Level 1 asks for, and then what ESS's `ESFM.DRV` and
 * **Controller 1, modulation.** ESS's driver: ignored. `build/ESFM.DRV`:
   vibrato.
 * **Controllers 7 and 11, volume and expression.** Both drivers: yes.
-* **Controller 10, pan.** ESS's driver: the next notes, in 3 positions.
-  `build/ESFM.DRV`: the sounding notes too, in 3 positions.
+* **Controller 10, pan.** ESS's driver: the next notes, in 3 positions, with
+  left and right the other way round. `build/ESFM.DRV`: the sounding notes
+  too, in 3 positions, on the sides they name.
 * **Controller 64, sustain.** ESS's driver: yes. `build/ESFM.DRV`: yes, and
   a program change lets it up.
 * **Controller 121, reset all controllers.** ESS's driver: also resets
@@ -126,6 +127,20 @@ and 81-127 right. Controllers 10 (pan) and 8 (balance, which does the same
 here) also move the notes that are sounding. A value within the position the
 channel already has writes nothing, so a pan sweep rewrites the notes 3
 times rather than 128.
+
+ESS's driver sets bit 4 of an operator's register 6 for left and bit 5 for
+right, but the chip plays bit 4 on the right output and bit 5 on the left,
+as bit 4 of C0h-C8h, an OPL3's left, also plays on the right. The Linux
+driver's session measured this on the Armada 1500c's ES1869, in the chip's
+digital output and at its line out. So with ESS's driver a channel panned
+left sounds on the right. `build/ESFM.DRV` swaps the two bits in every write
+that sends an operator to one side only
+([`src/esfm/esfmgm.asm`](../src/esfm/esfmgm.asm), `fix_fm_value`), so a
+patch's own sides turn round with them, and `TrueSides=0` writes ESS's bits.
+The swap is in the driver's register write, which ESS's code reaches with
+the same three bytes it had (seg1:0044), so its tables keep their offsets. A
+DOS program's FM, in a Windows DOS box or through esssb16, still reaches the
+chip as the program wrote it, so an OPL3 game's left plays on the right.
 
 ## Running status
 

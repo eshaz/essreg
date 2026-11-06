@@ -910,7 +910,8 @@ class GMTest(unittest.TestCase):
         reg6 = self.regs(emu, voices, 6)
         outs = [r & 0x30 for r in reg6]
         self.assertIn(0x30, outs)               # the patch sounds on both
-        for value, side in ((0, 0x10), (127, 0x20)):
+        # the chip's left output is register 6 bit 5 (TrueSides)
+        for value, side in ((0, 0x20), (127, 0x10)):
             emu.data(cc(0, 10, value))
             self.assertEqual([r & 0x30 for r in self.regs(emu, voices, 6)],
                              [side if o else 0 for o in outs])
@@ -1296,9 +1297,9 @@ class BankFileTest(unittest.TestCase):
 # SYSTEM.INI [ESFM.DRV] keys, in the order of their fix_opts bits
 SETTINGS = ["QueueWhileBusy", "SilenceOnClose", "PedalRelease", "Vibrato",
             "Tuning", "ResetControllers", "LivePan", "SysEx",
-            "RunningStatus", "BetterSquareWave"]
+            "RunningStatus", "BetterSquareWave", "TrueSides"]
 OPT = {k: 1 << i for i, k in enumerate(SETTINGS)}
-OPT_DEFAULT, OPT_READ = 0x03FF, 0x8000
+OPT_DEFAULT, OPT_READ = 0x07FF, 0x8000
 GM_ON = bytes([0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7])
 
 
@@ -1316,9 +1317,10 @@ class SettingsTest(unittest.TestCase):
         return e
 
     def off(self, *keys):
-        """keys at 0, and ESS's bank, as ESS's driver plays"""
+        """keys at 0, and ESS's bank and sides, as ESS's driver plays"""
         ini = {k: "0" for k in keys}
         ini["BetterSquareWave"] = "0"
+        ini["TrueSides"] = "0"
         return ini
 
     # -- reading -----------------------------------------------------------
@@ -1434,6 +1436,33 @@ class SettingsTest(unittest.TestCase):
 
     def test_live_pan(self):
         self.compare("LivePan", self.regs_after(cc(0, 10, 0x7F), cc(0, 8, 0)))
+
+    def test_true_sides(self):
+        """a note panned hard left: register 6 bit 5 on the chip, its left
+        output, where ESS's driver sets bit 4, the right. A patch's own
+        side turns too: the note before the pan keeps the patch's sides,
+        one operator on each. LivePan is off on both sides, since it would
+        pan the sounding note as well."""
+        scenario = self.regs_after(cc(0, 10, 0))
+        stock = scenario(self.started("stock"))
+        off = scenario(self.started(ini=self.off("TrueSides", "LivePan")))
+        on = scenario(self.started(ini={"BetterSquareWave": "0",
+                                        "LivePan": "0"}))
+        self.assertEqual(off, stock)
+        diffs = [(i, a, b) for i, (a, b) in enumerate(zip(stock, on))
+                 if a != b]
+        for i, a, b in diffs:
+            # an operator's register 6, one side swapped for the other
+            self.assertEqual((i < 0x240, i & 7, a ^ b), (True, 6, 0x30), i)
+            self.assertIn(a & 0x30, (0x10, 0x20), i)
+        # the new note's voices: all on the left, where ESS's are right
+        left = [(a & 0x30, b & 0x30) for i, a, b in diffs
+                if (i >> 5) in (12, 13)]
+        self.assertEqual(len(left), 8)
+        self.assertEqual(set(left), {(0x10, 0x20)})
+        # the note before the pan: the patch's own sides, swapped
+        self.assertIn((0x20, 0x10), [(a & 0x30, b & 0x30)
+                                     for i, a, b in diffs])
 
     def test_sysex(self):
         def reset_with_pedal(e):
