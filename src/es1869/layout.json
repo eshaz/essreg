@@ -1,0 +1,374 @@
+{
+  "module": "ES1869",
+  "stub": "stub.bin",
+  "align": 4,
+  "resource_align": 4,
+  "first_item": 736,
+  "header": {
+    "linker_ver": 5,
+    "linker_rev": 60,
+    "flags": 33537,
+    "autodata": 7,
+    "heap": 2048,
+    "stack": 0,
+    "sssp": 0,
+    "entry": [
+      1,
+      "L1_1ED4"
+    ],
+    "target_os": 2,
+    "other_flags": 8,
+    "swap_min": 0,
+    "expected_ver": 1024
+  },
+  "segments": [
+    {
+      "index": 1,
+      "flags": 3392,
+      "minalloc": "length"
+    },
+    {
+      "index": 2,
+      "flags": 3392,
+      "minalloc": "length"
+    },
+    {
+      "index": 3,
+      "flags": 7504,
+      "minalloc": "length"
+    },
+    {
+      "index": 4,
+      "flags": 7504,
+      "minalloc": "length"
+    },
+    {
+      "index": 5,
+      "flags": 7504,
+      "minalloc": "length"
+    },
+    {
+      "index": 6,
+      "flags": 7504,
+      "minalloc": "length"
+    },
+    {
+      "index": 7,
+      "flags": 3425,
+      "minalloc": "length"
+    }
+  ],
+  "resources": [
+    {
+      "type": 5,
+      "entries": [
+        {
+          "id": 10,
+          "flags": 7216,
+          "file": "res_5_10.bin"
+        }
+      ]
+    },
+    {
+      "type": 6,
+      "entries": [
+        {
+          "id": 1,
+          "flags": 7216,
+          "file": "res_6_1.bin"
+        },
+        {
+          "id": 2,
+          "flags": 7216,
+          "file": "res_6_2.bin"
+        },
+        {
+          "id": 3,
+          "flags": 7216,
+          "file": "res_6_3.bin"
+        },
+        {
+          "id": 4,
+          "flags": 7216,
+          "file": "res_6_4.bin"
+        },
+        {
+          "id": 5,
+          "flags": 7216,
+          "file": "res_6_5.bin"
+        },
+        {
+          "id": 6,
+          "flags": 7216,
+          "file": "res_6_6.bin"
+        },
+        {
+          "id": 7,
+          "flags": 7216,
+          "file": "res_6_7.bin"
+        },
+        {
+          "id": 13,
+          "flags": 7216,
+          "file": "res_6_13.bin"
+        },
+        {
+          "id": 14,
+          "flags": 7216,
+          "file": "res_6_14.bin"
+        },
+        {
+          "id": 8,
+          "flags": 7216,
+          "file": "res_6_8.bin"
+        },
+        {
+          "id": 15,
+          "flags": 7216,
+          "file": "res_6_15.bin"
+        },
+        {
+          "id": 9,
+          "flags": 7216,
+          "file": "res_6_9.bin"
+        },
+        {
+          "id": 16,
+          "flags": 7216,
+          "file": "res_6_16.bin"
+        },
+        {
+          "id": 10,
+          "flags": 7216,
+          "file": "res_6_10.bin"
+        }
+      ]
+    },
+    {
+      "type": 16,
+      "entries": [
+        {
+          "id": 1,
+          "flags": 3120,
+          "file": "res_16_1.bin"
+        }
+      ]
+    }
+  ],
+  "resident_names": [
+    [
+      "ES1869",
+      0
+    ],
+    [
+      "WEP",
+      1
+    ],
+    [
+      "MXDMESSAGE",
+      6
+    ],
+    [
+      "AUXMESSAGE",
+      5
+    ],
+    [
+      "DRIVERPROC",
+      2
+    ],
+    [
+      "___EXPORTEDSTUB",
+      7
+    ],
+    [
+      "WODMESSAGE",
+      3
+    ],
+    [
+      "WIDMESSAGE",
+      4
+    ]
+  ],
+  "nonresident_names": [
+    [
+      "wave,aux,mixer:ES1869 AudioDrive Driver",
+      0
+    ]
+  ],
+  "modules": [
+    "KERNEL",
+    "USER",
+    "MMSYSTEM"
+  ],
+  "entry_bundles": [
+    {
+      "count": 1,
+      "segment": 2,
+      "movable": false,
+      "entries": [
+        {
+          "ordinal": 1,
+          "flags": 3,
+          "symbol": "L2_0000"
+        }
+      ]
+    },
+    {
+      "count": 5,
+      "segment": 255,
+      "movable": true,
+      "entries": [
+        {
+          "ordinal": 2,
+          "flags": 3,
+          "segment": 4,
+          "symbol": "L4_02DA"
+        },
+        {
+          "ordinal": 3,
+          "flags": 3,
+          "segment": 6,
+          "symbol": "L6_18E4"
+        },
+        {
+          "ordinal": 4,
+          "flags": 3,
+          "segment": 6,
+          "symbol": "L6_0FF2"
+        },
+        {
+          "ordinal": 5,
+          "flags": 3,
+          "segment": 6,
+          "symbol": "L6_1D1C"
+        },
+        {
+          "ordinal": 6,
+          "flags": 3,
+          "segment": 5,
+          "symbol": "L5_1BA4"
+        }
+      ]
+    },
+    {
+      "count": 1,
+      "segment": 1,
+      "movable": false,
+      "entries": [
+        {
+          "ordinal": 7,
+          "flags": 3,
+          "symbol": "L1_22F4"
+        }
+      ]
+    }
+  ],
+  "symbols": [
+    "L2_0000",
+    "L4_02DA",
+    "L6_18E4",
+    "L6_0FF2",
+    "L6_1D1C",
+    "L5_1BA4",
+    "L1_22F4",
+    "L1_1ED4"
+  ],
+  "order": [
+    {
+      "item": "seg1",
+      "offset": 736
+    },
+    {
+      "item": "seg2",
+      "offset": 10784
+    },
+    {
+      "item": "seg3",
+      "offset": 10912
+    },
+    {
+      "item": "seg4",
+      "offset": 31776
+    },
+    {
+      "item": "seg5",
+      "offset": 32736
+    },
+    {
+      "item": "seg6",
+      "offset": 58752
+    },
+    {
+      "item": "seg7",
+      "offset": 71200
+    },
+    {
+      "item": "res:5:10",
+      "offset": 74304
+    },
+    {
+      "item": "res:6:1",
+      "offset": 74480
+    },
+    {
+      "item": "res:6:2",
+      "offset": 74640
+    },
+    {
+      "item": "res:6:3",
+      "offset": 75216
+    },
+    {
+      "item": "res:6:4",
+      "offset": 75296
+    },
+    {
+      "item": "res:6:5",
+      "offset": 75344
+    },
+    {
+      "item": "res:6:6",
+      "offset": 75392
+    },
+    {
+      "item": "res:6:7",
+      "offset": 75488
+    },
+    {
+      "item": "res:6:13",
+      "offset": 75760
+    },
+    {
+      "item": "res:6:14",
+      "offset": 75872
+    },
+    {
+      "item": "res:6:8",
+      "offset": 76064
+    },
+    {
+      "item": "res:6:15",
+      "offset": 76368
+    },
+    {
+      "item": "res:6:9",
+      "offset": 76544
+    },
+    {
+      "item": "res:6:16",
+      "offset": 76816
+    },
+    {
+      "item": "res:6:10",
+      "offset": 76896
+    },
+    {
+      "item": "res:16:1",
+      "offset": 76960
+    }
+  ],
+  "gangload": {
+    "start": 704,
+    "until": "res:5:10"
+  }
+}

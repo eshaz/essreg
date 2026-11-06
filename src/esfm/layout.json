@@ -1,0 +1,205 @@
+{
+  "module": "ESFM",
+  "stub": "stub.bin",
+  "align": 4,
+  "resource_align": 4,
+  "first_item": 512,
+  "header": {
+    "linker_ver": 5,
+    "linker_rev": 60,
+    "flags": 33537,
+    "autodata": 4,
+    "heap": 4096,
+    "stack": 0,
+    "sssp": 0,
+    "entry": [
+      1,
+      "LibEntry"
+    ],
+    "target_os": 2,
+    "other_flags": 8,
+    "swap_min": 0,
+    "expected_ver": 1024
+  },
+  "segments": [
+    {
+      "index": 1,
+      "flags": 3392,
+      "minalloc": "length"
+    },
+    {
+      "index": 2,
+      "flags": 3392,
+      "minalloc": "length"
+    },
+    {
+      "index": 3,
+      "flags": 7440,
+      "minalloc": "length"
+    },
+    {
+      "index": 4,
+      "flags": 3169,
+      "minalloc": "length"
+    }
+  ],
+  "resources": [
+    {
+      "type": 6,
+      "entries": [
+        {
+          "id": 17,
+          "flags": 7216,
+          "file": "res_6_17.bin"
+        },
+        {
+          "id": 18,
+          "flags": 7216,
+          "file": "res_6_18.bin"
+        }
+      ]
+    },
+    {
+      "type": 16,
+      "entries": [
+        {
+          "id": 1,
+          "flags": 3120,
+          "file": "res_16_1.bin"
+        }
+      ]
+    },
+    {
+      "type": 256,
+      "entries": [
+        {
+          "id": 1234,
+          "flags": 7280,
+          "file": "../../esfm_patch_banks/bnk_com.bin"
+        }
+      ]
+    }
+  ],
+  "resident_names": [
+    [
+      "ESFM",
+      0
+    ],
+    [
+      "MODMESSAGE",
+      3
+    ],
+    [
+      "WEP",
+      1
+    ],
+    [
+      "DRIVERPROC",
+      2
+    ],
+    [
+      "___EXPORTEDSTUB",
+      4
+    ]
+  ],
+  "nonresident_names": [
+    [
+      "midi:ESFM Synthesis Driver",
+      0
+    ]
+  ],
+  "modules": [
+    "KERNEL",
+    "USER",
+    "MMSYSTEM"
+  ],
+  "entry_bundles": [
+    {
+      "count": 1,
+      "segment": 2,
+      "movable": false,
+      "entries": [
+        {
+          "ordinal": 1,
+          "flags": 3,
+          "symbol": "WEP"
+        }
+      ]
+    },
+    {
+      "count": 1,
+      "segment": 255,
+      "movable": true,
+      "entries": [
+        {
+          "ordinal": 2,
+          "flags": 3,
+          "segment": 3,
+          "symbol": "DriverProc"
+        }
+      ]
+    },
+    {
+      "count": 2,
+      "segment": 1,
+      "movable": false,
+      "entries": [
+        {
+          "ordinal": 3,
+          "flags": 3,
+          "symbol": "modMessage"
+        },
+        {
+          "ordinal": 4,
+          "flags": 3,
+          "symbol": "___EXPORTEDSTUB"
+        }
+      ]
+    }
+  ],
+  "symbols": [
+    "WEP",
+    "DriverProc",
+    "modMessage",
+    "___EXPORTEDSTUB",
+    "LibEntry"
+  ],
+  "order": [
+    {
+      "item": "seg1",
+      "offset": 512
+    },
+    {
+      "item": "seg2",
+      "offset": 8608
+    },
+    {
+      "item": "seg4",
+      "offset": 8736
+    },
+    {
+      "item": "res:256:1234",
+      "offset": 9216
+    },
+    {
+      "item": "seg3",
+      "offset": 17568
+    },
+    {
+      "item": "res:6:17",
+      "offset": 20320
+    },
+    {
+      "item": "res:6:18",
+      "offset": 20368
+    },
+    {
+      "item": "res:16:1",
+      "offset": 20512
+    }
+  ],
+  "gangload": {
+    "start": 480,
+    "until": "seg3"
+  }
+}

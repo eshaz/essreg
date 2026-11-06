@@ -1,0 +1,27 @@
+# Builds essinst.exe, which puts the rebuilt drivers in place of ESS's and
+# restarts Windows (16-bit Windows, large model).
+#
+# Notes:
+#
+# It uses WIN_CFLAGS of essctl.mk1, so the Makefile includes it after
+# essctl.mk1.
+#
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+
+w_drvinst.obj : src\drvinst.c .AUTODEPEND
+ *wcc src\drvinst.c $(WIN_CFLAGS) -fo=w_drvinst.obj
+
+w_essinst.obj : src\win\essinst.c .AUTODEPEND
+ *wcc src\win\essinst.c $(WIN_CFLAGS) -fo=w_essinst.obj
+
+essinst.res : src\win\essinst.rc src\win\essctl.ico
+ *wrc -q -r -bt=windows -i="$(%watcom)/h;$(%watcom)/h/win;src\win" src\win\essinst.rc -fo=essinst.res
+
+essinst.exe : w_essinst.obj w_drvinst.obj essinst.res nestamp.exe .AUTODEPEND
+ @%write essinst.lk1 FIL w_essinst.obj,w_drvinst.obj
+ @%append essinst.lk1 OPTION DESCRIPTION 'ES1869 Driver Setup'
+ *wlink name essinst sys windows op m op maxe=10 op q op el op stack=8k op heapsize=4k @essinst.lk1
+ *wrc -q -bt=windows essinst.res essinst.exe
+ nestamp essinst.exe

@@ -1,0 +1,42 @@
+; System control messages, passed in EAX to a VxD's Control_Proc.
+;
+; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+;
+; Licensed under GPL Version 3.0
+
+Sys_Critical_Init            equ 0x00
+Device_Init                  equ 0x01
+Init_Complete                equ 0x02
+Sys_VM_Init                  equ 0x03
+Sys_VM_Terminate             equ 0x04
+System_Exit                  equ 0x05
+Sys_Critical_Exit            equ 0x06
+Create_VM                    equ 0x07
+VM_Critical_Init             equ 0x08
+VM_Init                      equ 0x09
+VM_Terminate                 equ 0x0A
+VM_Not_Executeable           equ 0x0B
+Destroy_VM                   equ 0x0C
+VM_Suspend                   equ 0x0D
+VM_Resume                    equ 0x0E
+Set_Device_Focus             equ 0x0F
+Begin_Message_Mode           equ 0x10
+End_Message_Mode             equ 0x11
+Reboot_Processor             equ 0x12
+Query_Destroy                equ 0x13
+Debug_Query                  equ 0x14
+Begin_PM_App                 equ 0x15
+End_PM_App                   equ 0x16
+Device_Reboot_Notify         equ 0x17
+Crit_Reboot_Notify           equ 0x18
+Close_VM_Notify              equ 0x19
+Power_Event                  equ 0x1A
+Sys_Dynamic_Device_Init      equ 0x1B
+Sys_Dynamic_Device_Exit      equ 0x1C
+Create_Thread                equ 0x1D
+Thread_Init                  equ 0x1E
+Terminate_Thread             equ 0x1F
+Thread_Not_Executeable       equ 0x20
+Destroy_Thread               equ 0x21
+PnP_New_DevNode              equ 0x22
+W32_DeviceIoControl          equ 0x23
