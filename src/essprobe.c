@@ -106,6 +106,38 @@ static int dos_esc(void) {
   return stop;
 }
 
+// the PIIX4's MBDMA registers, for the typef cases (piix4.h)
+static int dos_bridge(u8 *r) {
+  u8 dev = piix4_find(&piix4_dos);
+
+  if (dev == PIIX4_NONE)
+    return -1;
+  piix4_mbdma(&piix4_dos, dev, r);
+  return dev;
+}
+
+// /K: the case a report's last run stopped in, its last START line with no
+// result of the same case after it; empty if none
+static void find_hung(const char *name, char *hung) {
+  static char line[270], id[24], word[8];
+  FILE *f = fopen(name, "r");
+
+  hung[0] = 0;
+  if (f == NULL)
+    return;
+  while (fgets(line, sizeof(line), f) != NULL) {
+    if (sscanf(line, "%23s %7s", id, word) != 2)
+      continue;
+    if (!strcmp(word, "START"))
+      strcpy(hung, id);
+    else if (hung[0] && !strcmp(id, hung) &&
+             (!strcmp(word, "PASS") || !strcmp(word, "FAIL") ||
+              !strcmp(word, "INFO") || !strcmp(word, "SKIP")))
+      hung[0] = 0;
+  }
+  fclose(f);
+}
+
 static int dos_ask(const char *id, const char *question, const char *keys) {
   int k;
 
@@ -563,22 +595,25 @@ static void on_break(int sig) {
 }
 
 static void usage(void) {
-  puts("usage: essprobe [/R] [/S] [/A] [/C:names] [/N] [/O:file]\n"
+  puts("usage: essprobe [/R] [/S] [/A] [/C:names] [/N] [/K] [/O:file]\n"
        "  /R  a recorded run: a tone to set the recorder's level, then each\n"
        "      sound after its DTMF marker\n"
        "  /S  the short run: a case of each kind\n"
        "  /A  the cases without a sound only\n"
        "  /C  only the cases whose names start so: groups (env rst a1 a2 both\n"
-       "      h1 h4 stream fix lvl) or cases, comma-separated\n"
+       "      h1 h4 stream fix lvl) or cases, comma-separated; typef, which\n"
+       "      can stop the machine, runs only by its name\n"
        "  /N  no window on the DMA controllers under EMM386\n"
+       "  /K  after a run that stopped the machine: the report's last case\n"
+       "      fails, and the cases after it run, added to the report\n"
        "  /O  the report's file, else ESSPROBE.TXT\n"
        "Run it in real DOS without esssb16, BLASTER set (A). Esc stops.");
 }
 
 int main(int argc, char **argv) {
-  static char only[80];
+  static char only[80], hung[24];
   unsigned opts = 0;
-  int i, failed, restored, nowin = 0;
+  int i, failed, restored, nowin = 0, resume = 0;
   u16 win98;
 
   for (i = 1; i < argc; i++) {
@@ -602,6 +637,9 @@ int main(int argc, char **argv) {
       break;
     case 'N':
       nowin = 1;
+      break;
+    case 'K':
+      resume = 1;
       break;
     case 'C':
       if (a[2] != ':' || !a[3]) {
@@ -652,7 +690,13 @@ int main(int argc, char **argv) {
     puts("not enough memory for the DMA buffers");
     return X_MEMORY;
   }
-  if (!plat_report_open(report_name)) {
+  if (resume) {
+    find_hung(report_name, hung);
+    if (hung[0])
+      printf("%.60s: the last run stopped in %s\n", report_name, hung);
+  }
+  if (!(resume ? plat_report_append(report_name)
+               : plat_report_open(report_name))) {
     printf("can't create %.60s\n", report_name);
     cleanup();
     return X_MEMORY;
@@ -679,6 +723,7 @@ int main(int argc, char **argv) {
     card.flags |= ESP_F_EMM386;
   card.hz = PLAT_PIT_HZ;
   card.env = envp;
+  card.hung = hung[0] ? hung : NULL;
   hal.inb = dos_inb;
   hal.outb = dos_outb;
   hal.now = plat_now;
@@ -694,6 +739,7 @@ int main(int argc, char **argv) {
   hal.say = dos_say;
   hal.esc = dos_esc;
   hal.keep = dos_keep;
+  hal.bridge = dos_bridge;
   if (opts & ESP_O_RECORD)
     puts("A recorded run: a tone to set the recorder's level by, then each "
          "case's\nsound after its DTMF marker. Esc stops at any time.");

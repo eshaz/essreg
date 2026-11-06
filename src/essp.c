@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include "essp.h"
+#include "piix4.h"
 #include "sbtsound.h"
 
 #ifdef ESS_HOST
@@ -726,7 +727,8 @@ enum {
   RUN_STREAM,  // a game's refills behind the count
   RUN_MIRROR,  // the same through a channel carried over, as esssb16 does
   RUN_MASK,    // when a program's mask and unmask reach the 8237's mask
-  RUN_PACE     // the same with esssb16's pace on the game's channel
+  RUN_PACE,    // the same with esssb16's pace on the game's channel
+  RUN_TYPEF    // a recording under the PIIX4's Type F timing
 };
 
 #define E1 0x01 // Audio 1
@@ -767,6 +769,7 @@ struct pc {
   u8 start2;        // Audio 2 started in two steps: 78h bit 1, then bit 0
   u8 pv;            // the pace: 0 as esssb16's, 1 with 74h-76h, 2 with Audio 1
   u16 ms;           // how long it plays
+  u16 masked;       // typef: the channel unmasked this many ms after B8h
   u8 side;          // 0, 'l' or 'r'
   u16 hz1, hz2;     // the tones, 0 for none
   u8 wrong;         // the channel programmed the wrong way round
@@ -988,6 +991,20 @@ static const struct ecase cases[] = {
     {"lvl.unity", "v1=238 m=63 S", "clean"},
     {"lvl.a1top", "v1=255 m=63 S", "clean"},
     {"lvl.a1gain", "v1=255 m=56 S", "clean"},
+    // Audio 1 records 16-bit stereo at 44100 Hz under the PIIX4's Type F
+    // timing, which stopped the Armada under Linux: only when named
+    // (/C:typef), the safest first. m54 is the 8237 in single mode, as DOS
+    // has recorded on the laptop, and m14 in demand mode, as ESS's drivers
+    // and Linux record; b the B9h. hold1 and linux start with the channel
+    // masked, for 1 ms or for 1.5 s as Linux did
+    {"typef.m54_b2", "", "-"},
+    {"typef.m54_b0", "b9=0", "-"},
+    {"typef.m54_b1", "b9=1", "-"},
+    {"typef.m14_b0", "dmd b9=0", "-"},
+    {"typef.m14_b1", "dmd b9=1", "-"},
+    {"typef.m14_b2", "dmd", "-"},
+    {"typef.m14_hold1", "dmd masked=1", "-"},
+    {"typef.m14_linux", "dmd masked=1500", "-"},
 };
 
 u16 esp_cases(void) { return (u16)ESS_ARRAY_SIZE(cases); }
@@ -1041,6 +1058,9 @@ static void spec_base(struct pc *p, const char *id) {
     p->amp = 32767;
     p->after = 1;
     p->late = 100;
+  } else if (!strncmp(id, "typef.", 6)) { // a recording, as Windows starts it
+    p->run = RUN_TYPEF;
+    p->eng = E1;
   }
 }
 
@@ -1052,10 +1072,10 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
   if (IS("S"))
     p->sh = 1;
   else if (IS("run") && v != NULL) {
-    static const char *const runs[] = {"play",   "machine", "card",  "mixer",
-                                       "dma",    "rst",     "reach", "read",
-                                       "ff",     "cross",   "stale", "load",
-                                       "stream", "mirror",  "mask",  "pace"};
+    static const char *const runs[] = {
+        "play",   "machine", "card", "mixer", "dma",   "rst",
+        "reach",  "read",    "ff",   "cross", "stale", "load",
+        "stream", "mirror",  "mask", "pace",  "typef"};
     unsigned i;
     for (i = 0; i < ESS_ARRAY_SIZE(runs); i++)
       if (!strcmp(v, runs[i]))
@@ -1175,6 +1195,8 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
     p->hz2 = (u16)n;
   else if (IS("wrong"))
     p->wrong = 1;
+  else if (IS("masked"))
+    p->masked = (u16)n;
   else
     return 0;
 #undef IS
@@ -2757,11 +2779,151 @@ static void run_stream(const struct ecase *c, const struct pc *p) {
   sound_line(c->id, syms, tm, parts, np, c->expect);
 }
 
+// --- recordings under the PIIX4's Type F timing ------------------------------
+
+#define TF_FILL 0xA5 // what the recording's buffer holds before it
+
+// Type F for Audio 1's channel as the bridge has it, its register into q:
+// 1 on, 0 off, -1 without a PIIX4 or a register that names the channel
+static int typef_of(char *q) {
+  u8 r[2];
+  int i;
+
+  if (H->bridge == NULL || H->bridge(r) < 0) {
+    strcpy(q, "no Intel PIIX4 on PCI bus 0");
+    return -1;
+  }
+  for (i = 0; i < 2; i++)
+    if ((r[i] & PIIX4_CH) == dma1) {
+      sprintf(q, "%02Xh=%02Xh, Type F %s for DMA %u", PIIX4_REG + i, r[i],
+              (r[i] & PIIX4_TYPEF) ? "on" : "off", dma1);
+      return (r[i] & PIIX4_TYPEF) != 0;
+    }
+  sprintf(q, "76h=%02Xh 77h=%02Xh, neither names DMA %u", r[0], r[1], dma1);
+  return -1;
+}
+
+// before the first typef case: the person goes on (Enter) or stops (Esc)
+static int typef_ask(void) {
+  static char tf[48], q[260];
+
+  if (typef_of(tf) > 0)
+    sprintf(q,
+            "%s. Under Linux a recording with Type F on stopped the "
+            "machine until a power cycle. Have nothing unsaved and no "
+            "SMARTDRV write-behind; after a stop, run again with /K. "
+            "Enter: go on",
+            tf);
+  else
+    sprintf(q, "%s: the cases record as a comparison. Enter: go on", tf);
+  return H->ask("typef", q, "\r") != 0;
+}
+
+// typef: Audio 1 records into its buffer as ES1869.DRV starts a recording
+// (6:28A4): the FIFO emptied, B9h, A4h and A5h, A8h, B1h and B2h, B7h
+// once, then B8h = 0Fh with the channel unmasked before it, or, with
+// masked=, that many ms after it, as Linux's driver did. The START line
+// reaches the disk before the start: a report that ends with one names the
+// case that stopped the machine (/K)
+static void run_typef(const struct ecase *c, const struct pc *p) {
+  static u8 buf[256];
+  static char tf[48], line[200];
+  struct eng *e = &en[0];
+  u32 t0, ms = p->ms, hold = p->masked, first;
+  u16 i, j, n, wrote = 0, bad;
+  int r, ok;
+  double got;
+
+  if (dma1 >= 4) {
+    res(c->id, R_SKIP, "Audio 1 is on the 16-bit channel %u", dma1);
+    return;
+  }
+  if (O & ESP_O_TINY) {
+    ms = ms / 8 < 80 ? 80 : ms / 8;
+    if (hold > 8)
+      hold /= 8;
+  }
+  chip_reset(3);
+  ext_on();
+  plan(p);
+  e->frames = most_frames(e->fmt, 0, BUF1_MAX);
+  e->sbytes = (u16)(e->frames * frame_bytes(e->fmt));
+  e->units = e->sbytes;
+  memset(buf, TF_FILL, sizeof(buf));
+  for (i = 0; i < e->sbytes; i = (u16)(i + n)) {
+    n = (u16)(e->sbytes - i);
+    if (n > (u16)sizeof(buf))
+      n = (u16)sizeof(buf);
+    H->poke(e->addr + i, buf, n);
+  }
+  guards_set();
+  reg_w(0xA1, e->r1);
+  reg_w(0xA2, e->r2);
+  fifo_reset();
+  reg_w(0xB9, p->b9);
+  a1_count(p, e);
+  r = reg_r(0xA8);
+  reg_w(0xA8, (u8)(((r < 0 ? 0 : r) & 0xF4) | ((e->fmt & FST) ? 1 : 2)));
+  r = reg_r(0xB1);
+  r = (r < 0 ? 0 : r) | 0x10;
+  reg_w(0xB1, (u8)(p->irq1 ? r | 0x40 : r & ~0x40));
+  r = reg_r(0xB2);
+  reg_w(0xB2, (u8)((r < 0 ? 0 : r) | 0x50));
+  reg_w(0xB7,
+        (u8)(((e->fmt & FST) ? 0x98 : 0x90) + ((e->fmt & F16) ? 0x24 : 0)));
+  dma_set(dma1, e->addr, e->units,
+          (u8)(((p->dmd & 1) ? DMA_DEMAND : DMA_SINGLE) | DMA_AUTO | DMA_WRITE),
+          !hold);
+  typef_of(tf);
+  put("%-20s spec  %s", c->id, c->spec);
+  put("%-20s START %s", c->id, tf);
+  settle = tk(60000UL);
+  eng_first_counts();
+  irq_clear();
+  ack1 = 1;
+  t0 = H->now();
+  reg_w(0xB8, 0x0F);
+  if (hold) {
+    pass_time(hold * 1000UL);
+    dma_mask(dma1, 0);
+  }
+  while (since(t0) < tk((hold + ms) * 1000UL)) {
+    eng_sample(t0);
+    if (!pass_time(1000))
+      break;
+  }
+  eng_stop();
+  for (i = 0; i < e->sbytes; i = (u16)(i + n)) {
+    n = (u16)(e->sbytes - i);
+    if (n > (u16)sizeof(buf))
+      n = (u16)sizeof(buf);
+    H->peek(e->addr + i, buf, n);
+    for (j = 0; j < n; j++)
+      if (buf[j] != TF_FILL)
+        wrote++;
+  }
+  bad = guards_check(&first);
+  got = eng_rate(e);
+  ok = got > 0 && fabs(got - e->rate) <= e->rate * 0.03 && !bad;
+  sprintf(line,
+          "%lu bytes in, %.0f Hz measured, %.0f set, %u irq%s; %u of "
+          "the buffer's %u bytes written",
+          (unsigned long)e->moved, got, e->rate, n1, n1 == 1 ? "" : "s", wrote,
+          e->sbytes);
+  if (bad)
+    sprintf(line + strlen(line),
+            "; %u guard bytes changed, the first at "
+            "%05lXh",
+            bad, (unsigned long)first);
+  res(c->id, ok ? R_PASS : R_FAIL, "%s; %s", line, tf);
+}
+
 // --- the run -----------------------------------------------------------------
 
 static unsigned group_of(const char *id) {
-  static const char *const names[] = {"env", "rst", "a1",     "a2",  "both",
-                                      "h1",  "h4",  "stream", "fix", "lvl"};
+  static const char *const names[] = {"env",  "rst", "a1",   "a2",
+                                      "both", "h1",  "h4",   "stream",
+                                      "fix",  "lvl", "typef"};
   unsigned i, n;
 
   for (i = 0; i < ESS_ARRAY_SIZE(names); i++) {
@@ -2772,16 +2934,18 @@ static unsigned group_of(const char *id) {
   return 0;
 }
 
-static int wanted(const char *id, const char *only) {
+// whether one of only's names starts id, a name least long at least; all
+// of them without names, unless a name is needed
+static int wanted(const char *id, const char *only, unsigned least) {
   const char *s = only, *e;
   unsigned n;
 
   if (only == NULL || !*only)
-    return 1;
+    return !least;
   while (*s) {
     e = strchr(s, ',');
     n = e ? (unsigned)(e - s) : (unsigned)strlen(s);
-    if (n && !strncmp(id, s, n))
+    if (n && n >= least && !strncmp(id, s, n))
       return 1;
     if (!e)
       break;
@@ -2792,12 +2956,16 @@ static int wanted(const char *id, const char *only) {
 
 static int has_sound(const struct ecase *c) { return strcmp(c->expect, "-"); }
 
-// whether the run takes case c: its group, the names asked for, the short
-// and the silent runs
+// whether the run takes case c: its group, the names asked for (an opt-in
+// group's only by a name as long as the group's), the short and the silent
+// runs
 static int in_run(const struct ecase *c, unsigned groups, const char *only) {
   struct pc p;
+  unsigned g = group_of(c->id);
 
-  if (!(group_of(c->id) & groups) || !wanted(c->id, only))
+  if (!(g & groups) ||
+      !wanted(c->id, only,
+              (g & ESP_G_OPTIN) ? (unsigned)(strchr(c->id, '.') - c->id) : 0))
     return 0;
   if ((O & ESP_O_SILENT) && has_sound(c))
     return 0;
@@ -2861,6 +3029,9 @@ static void run_case(const struct ecase *c) {
   case RUN_MASK:
     run_mask(c, &p);
     break;
+  case RUN_TYPEF:
+    run_typef(c, &p);
+    break;
   }
 }
 
@@ -2892,8 +3063,9 @@ static void summary(void) {
 
 int esp_run(const struct esp_hal *hal, const struct esp_card *card,
             unsigned opts, unsigned groups, const char *only) {
-  static const char *const gname[] = {"env", "rst", "a1",     "a2",  "both",
-                                      "h1",  "h4",  "stream", "fix", "lvl"};
+  static const char *const gname[] = {"env",  "rst", "a1",   "a2",
+                                      "both", "h1",  "h4",   "stream",
+                                      "fix",  "lvl", "typef"};
   static const char *const gwhat[] = {
       "the machine and the card",
       "what each reset clears",
@@ -2904,10 +3076,12 @@ int esp_run(const struct esp_hal *hal, const struct esp_card *card,
       "what the engines do to the machine",
       "a game's refills behind the count",
       "which start keeps a 16-bit stream in step",
-      "full scale at the top levels: where the chip clips"};
+      "full scale at the top levels: where the chip clips",
+      "recordings under the PIIX4's Type F timing, which can stop the "
+      "machine"};
   u16 i;
   unsigned g, last_g = 0;
-  int v, loud = 0;
+  int v, loud = 0, asked = 0, skip = 0;
 
   H = hal;
   C = card;
@@ -2948,11 +3122,19 @@ int esp_run(const struct esp_hal *hal, const struct esp_card *card,
   for (i = 0; i < ESS_ARRAY_SIZE(cases); i++)
     if (group_of(cases[i].id) == ESP_G_LVL && in_run(&cases[i], groups, only))
       loud = 1;
+  // after /K: the cases up to the one the last run stopped in are left
+  // out, when that one is in this run
+  if (C->hung != NULL)
+    for (i = 0; i < ESS_ARRAY_SIZE(cases); i++)
+      if (!strcmp(cases[i].id, C->hung) && in_run(&cases[i], groups, only))
+        skip = 1;
   if (O & ESP_O_RECORD)
     record_start(loud);
   for (i = 0; i < ESS_ARRAY_SIZE(cases) && !stop_now; i++) {
     const struct ecase *c = &cases[i];
     if (!in_run(c, groups, only))
+      continue;
+    if (skip && strcmp(c->id, C->hung))
       continue;
     g = group_of(c->id);
     if (g != last_g) {
@@ -2961,6 +3143,20 @@ int esp_run(const struct esp_hal *hal, const struct esp_card *card,
         k++;
       section(gname[k], gwhat[k]);
       last_g = g;
+    }
+    if (skip) {
+      skip = 0;
+      res(c->id, R_FAIL,
+          "the machine stopped in this case; /K went on after "
+          "it");
+      continue;
+    }
+    if (g == ESP_G_TYPEF && !asked) {
+      asked = 1;
+      if (!typef_ask()) {
+        stop_now = 1;
+        break;
+      }
     }
     run_case(c);
   }

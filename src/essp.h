@@ -2,7 +2,9 @@
  * essprobe's measurements of the ES1869 itself, without a front: Audio 1
  * and Audio 2 in each of their modes, both at once, the resets, the DMA
  * controllers behind the memory manager, what the engines do to the rest
- * of the machine, and a game's refills behind the DMA. Each case is a line
+ * of the machine, a game's refills behind the DMA, and recordings under
+ * the PIIX4's Type F DMA timing, which only run when asked for by name
+ * (typef, which can stop the machine). Each case is a line
  * of a table, a spec of keys over its group's base case, so that a line
  * names one combination. The report gives each case's measurements and,
  * in a recorded run, when its DTMF marker and its sound played, which
@@ -47,7 +49,9 @@
 #define ESP_G_STREAM 0x0080 // refills behind the DMA, as games do
 #define ESP_G_FIX 0x0100    // which start keeps a 16-bit stream in step
 #define ESP_G_LVL 0x0200    // full scale at the top levels: where it clips
-#define ESP_G_ALL 0x03FF
+#define ESP_G_TYPEF 0x0400  // recordings under the PIIX4's Type F timing
+#define ESP_G_ALL 0x07FF
+#define ESP_G_OPTIN ESP_G_TYPEF // only when named, as in /C:typef
 
 // esp_card.flags
 #define ESP_F_EMM386 0x01 // a V86 memory manager traps the DMA controllers
@@ -95,6 +99,9 @@ struct esp_hal {
   // the window: n entries on the real ports, past the memory manager;
   // 0 if there is none, NULL without a memory manager
   int (*phys)(struct esp_io *io, u16 n);
+  // an Intel PIIX4's MBDMA registers, 76h and 77h, into r: its device on
+  // PCI bus 0, or -1 without one (piix4.h); NULL without PCI
+  int (*bridge)(u8 *r);
 };
 
 struct esp_card {
@@ -103,10 +110,13 @@ struct esp_card {
   u32 area;               // the DMA area's address, ESP_AREA bytes
   u8 flags;               // ESP_F_*
   const char *const *env; // lines about the machine, NULL at the end
+  const char *hung;       // the case the last run stopped in (/K), or NULL
 };
 
 // runs the cases of the groups (ESP_G_*), or only those whose ids start
-// with one of only's comma-separated names; the number that failed
+// with one of only's comma-separated names, an opt-in group's only when a
+// name is as long as the group's at least; after card->hung, the cases up
+// to it are left out and it fails; the number that failed
 int esp_run(const struct esp_hal *hal, const struct esp_card *card,
             unsigned opts, unsigned groups, const char *only);
 

@@ -52,6 +52,7 @@ int plat_key_ready(void);
 // the report: lines with a newline each, committed after a section's
 // heading, and a warning once if the disk is full
 int plat_report_open(const char *name);
+int plat_report_append(const char *name); // after what the file holds
 void plat_line(const char *text);
 void plat_report_close(void);
 

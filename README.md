@@ -716,7 +716,9 @@ EMM386, what the engines do to the rest of the machine, and a game's refills
 behind the DMA, about a hundred cases. It writes `ESSPROBE.TXT`, to send
 back. `/R` plays each case's sound after a DTMF marker, for a recorder, and
 [`tools/essprec.py`](tools/essprec.py) analyzes the recording;
-[docs/ESSPROBE.md](docs/ESSPROBE.md) has the steps.
+[docs/ESSPROBE.md](docs/ESSPROBE.md) has the steps. `/C:typef` records under
+the PIIX4's Type F DMA timing, which can stop the machine, so it runs only
+when asked for, and `/K` goes on after a case that stopped it.
 
 ## [`esfmpat.exe`](build)
 * Utility to write custom patch banks to the Windows ESFM VxD driver.

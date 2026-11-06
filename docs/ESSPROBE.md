@@ -113,6 +113,19 @@ such as `t2=0` for Audio 2's single transfers.
   full volume FFh and the master's 62, and 1.2 gives EEh and 63
   ([SB16_FRONT.md](SB16_FRONT.md)). `m=` sets the master for the case alone,
   and `amp=` the tone's amplitude. Version 1.8 adds the group.
+* **typef**: recordings under the Intel PIIX4's Type F DMA timing, which
+  stopped the laptop under Linux
+  ([ESS_EXTENDED.md](ESS_EXTENDED.md#type-f-dma-on-the-piix4)). Audio 1
+  records 16-bit stereo at 44100 Hz into its buffer, started as ES1869.DRV
+  starts a recording, with the 8237 in single mode as DOS has recorded on
+  the laptop (`typef.m54_b2`, then B9h 0 and 1), in demand mode as ESS's
+  drivers and Linux record (`typef.m14_b0` to `typef.m14_b2`), and with the
+  channel masked at the start for 1 ms or, as Linux had it, for 1.5 s
+  (`typef.m14_hold1`, `typef.m14_linux`), the safest first. Each case
+  reports the bytes that came in, the rate the count moved at, how much of
+  the buffer was written, the guard bytes around it, and the bridge's
+  register. The group runs only when named, never in a whole run or in
+  `ESSCHECK.BAT`, and asks first. Version 1.9 adds the group.
 
 Every case uses the DMA channels that the card is configured for, Audio 1's
 (PnP 74h) and Audio 2's (75h), since other devices may own the others. An h1
@@ -144,6 +157,11 @@ restart`, and so does the screen. `/N` runs without the window.
 * `esssb16` can load right after a run, since it sets the chip up from the
   power-on state that the probe leaves. Only when EMM386 kept the window's
   trap, restart first, because `esssb16` traps that port too.
+* The typef cases can stop the machine until a power cycle. They run only
+  when named, ask before the first, and write each case's `START` line to
+  the disk before its recording starts, so that the report's last line names
+  the case that stopped the machine. They only read the bridge;
+  `essreg tf=0` changes it.
 
 ## Running it
 
@@ -166,13 +184,32 @@ The options:
 * `/S`: the short run, the cases marked for it in each group.
 * `/A`: the cases without a sound only.
 * `/C:names`: only the cases whose names start so, groups or cases,
-  comma-separated: `/C:h1,a2.wide`.
+  comma-separated: `/C:h1,a2.wide`. The typef cases run only by a name at
+  least as long as the group's, such as `/C:typef` or `/C:typef.m14`.
 * `/N`: no window on the 8237 under EMM386.
+* `/K`: after a run that stopped the machine, the case whose `START` line
+  has no result after it fails, and the cases after it run, added to the
+  same report.
 * `/O:file`: the report's file, else `ESSPROBE.TXT`.
 
 The exit codes are 1 for a bad option, 2 without an ES1869 at the base, 3 in
 a Windows DOS box, 4 with `esssb16` resident, 5 without memory or the
 report's file, and 6 when cases failed.
+
+### The typef group
+
+1. Start the machine straight to DOS with nothing unsaved, and take
+   SMARTDRV's write-behind off (`SMARTDRV /X`), so that each line reaches
+   the disk.
+2. Run `essreg tf`: it shows whether Type F is on for Audio 1's channel.
+3. Run `ESSPROBE /C:typef /O:TYPEF.TXT`, and press Enter at the question.
+4. If the machine stops, power it off and on, let ScanDisk check the disk,
+   and run `ESSPROBE /C:typef /K /O:TYPEF.TXT`. Repeat until the report ends
+   with its summary line.
+5. For a comparison, run `essreg tf=0`, then
+   `ESSPROBE /C:typef /O:TYPEF0.TXT`. Type F stays off until `essreg tf=1`
+   or the next boot.
+6. Send the reports back.
 
 ## A recorded run
 
@@ -215,4 +252,6 @@ passed and failed, which shows what a fault depends on.
 code (`src/essp.c`), with EMM386's DMA translation as `tests/emm386dma.py`
 has it, and the program itself in the DOS emulator; it makes a recording
 from what the model's DACs played and checks that `essprec.py` passes it and
-fails it broken ([TESTING.md](TESTING.md)).
+fails it broken ([TESTING.md](TESTING.md)). The typef cases record on the
+model with the laptop's PCI bus (`tests/pcicfg.py`), and `/K` resumes a
+report in the emulator.

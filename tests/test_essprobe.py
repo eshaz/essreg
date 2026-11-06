@@ -60,10 +60,14 @@ SRC = os.path.join(ROOT, "src")
 EXE = os.path.join(ROOT, "build", "essprobe.exe")
 AREA = 0x40000              # the DMA area, 64 KB in one page
 O_RECORD, O_SHORT, O_SILENT, O_TINY = 0x01, 0x02, 0x04, 0x08
-G_ALL = 0x3FF
+G_ALL = 0x7FF
 IDLE_US = 25                # the time an idle() of the cases takes
 GROUPS = ("env", "rst", "a1", "a2", "both", "h1", "h4", "stream", "fix",
           "lvl")
+OPTIN = ("typef",)          # only when named
+TYPEF = ["typef.m54_b2", "typef.m54_b0", "typef.m54_b1", "typef.m14_b0",
+         "typef.m14_b1", "typef.m14_b2", "typef.m14_hold1",
+         "typef.m14_linux"]
 EXPECTS = {"tone", "left", "right", "dual", "low", "none", "pause", "lpause",
            "glide", "loop", "clean", "any", "-"}
 # the cases that look for what the data sheet doesn't define
@@ -90,6 +94,7 @@ TEXT = ctypes.CFUNCTYPE(None, ctypes.c_char_p)
 ESC = ctypes.CFUNCTYPE(ctypes.c_int)
 KEEP = ctypes.CFUNCTYPE(None, ctypes.POINTER(u8), u16)
 PHYS = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(IO), u16)
+BRIDGE = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(u8))
 
 
 class HAL(ctypes.Structure):
@@ -97,12 +102,13 @@ class HAL(ctypes.Structure):
                 ("poke", MEM), ("peek", MEM), ("lock", VOID),
                 ("unlock", VOID), ("hook", HOOK), ("irq_mask", MASK),
                 ("ask", ASK), ("line", TEXT), ("say", TEXT), ("esc", ESC),
-                ("keep", KEEP), ("phys", PHYS)]
+                ("keep", KEEP), ("phys", PHYS), ("bridge", BRIDGE)]
 
 
 class CARD(ctypes.Structure):
     _fields_ = [("base", u16), ("hz", ul), ("area", ul), ("flags", u8),
-                ("env", ctypes.POINTER(ctypes.c_char_p))]
+                ("env", ctypes.POINTER(ctypes.c_char_p)),
+                ("hung", ctypes.c_char_p)]
 
 
 _LIB = {}
@@ -162,12 +168,15 @@ def snapshot(card):
 
 class Run:
     """the cases on a card; `phys` "direct" gives the window as real mode
-    has it (the ports themselves), "past" past emm386dma, None none"""
+    has it (the ports themselves), "past" past emm386dma, None none; the
+    card's PCI bus (pcicfg) gives the bridge; `hung` as /K gives it, and
+    `keys` answer the questions (Enter, or 0 for Esc)"""
 
     def __init__(self, card, opts=O_TINY, only=None, phys="direct",
-                 groups=G_ALL, timeline=False):
+                 groups=G_ALL, timeline=False, hung=None, keys=13):
         self.card = card
         self.lines, self.errors, self.kept, self.hooked = [], [], [], []
+        self.asked = []
         # (us, frames each DAC had played) where they changed, for a
         # recording; (us, register, value) of the mixer's writes
         self.timeline = [] if timeline else None
@@ -180,11 +189,15 @@ class Run:
                        VOID(self._idle), MEM(self._poke), MEM(self._peek),
                        VOID(lambda: None), VOID(lambda: None),
                        HOOK(self._hook), MASK(lambda m: None),
-                       ASK(lambda i, q, k: 13), TEXT(self._line),
-                       TEXT(lambda s: None), ESC(lambda: 0), KEEP(self._keep),
-                       PHYS(self._phys) if phys else PHYS())
+                       ASK(lambda i, q, k: self._ask(i, q, keys)),
+                       TEXT(self._line), TEXT(lambda s: None),
+                       ESC(lambda: 0), KEEP(self._keep),
+                       PHYS(self._phys) if phys else PHYS(),
+                       BRIDGE(self._bridge) if getattr(card, "pci", None)
+                       else BRIDGE())
         env = (ctypes.c_char_p * 2)(b"machine: the host tests", None)
-        self.info = CARD(0x220, 1000000, AREA, 0, env)
+        self.info = CARD(0x220, 1000000, AREA, 0, env,
+                         hung.encode() if hung else None)
         self.failed = lib.esp_run(ctypes.byref(self.hal),
                                   ctypes.byref(self.info), opts, groups,
                                   only.encode() if only else None)
@@ -264,6 +277,21 @@ class Run:
                     io[i].port, io[i].value)
         return 1
 
+    def _ask(self, cid, question, keys):
+        self.asked.append((cid.decode(), question.decode()))
+        return keys
+
+    @_guard
+    def _bridge(self, r):
+        from pcicfg import PIIX4_ID
+        bus = self.card.pci
+        for dev, d in bus.devices.items():
+            if (int.from_bytes(d.cfg[0:2], "little"),
+                    int.from_bytes(d.cfg[2:4], "little")) == PIIX4_ID:
+                r[0], r[1] = bus.cfg(dev, 0x76), bus.cfg(dev, 0x77)
+                return dev
+        return -1
+
     def text(self, case):
         return " / ".join(d for _r, d in self.results.get(case, []))
 
@@ -286,7 +314,7 @@ class CasesTest(unittest.TestCase):
         ids = [c[0] for c in cases()]
         self.assertEqual(len(ids), len(set(ids)))
         for cid, spec, expect in cases():
-            self.assertIn(cid.split(".")[0], GROUPS, cid)
+            self.assertIn(cid.split(".")[0], GROUPS + OPTIN, cid)
             self.assertIn(expect, EXPECTS, cid)
             self.assertLess(len(cid), 21, cid)
 
@@ -318,7 +346,10 @@ class ModelTest(unittest.TestCase):
         runs on through the pause"""
         ran = set(self.probe.results)
         for cid, _s, _e in cases():
-            self.assertIn(cid, ran)
+            if cid.split(".")[0] in OPTIN:
+                self.assertNotIn(cid, ran)
+            else:
+                self.assertIn(cid, ran)
         fails = [(c, r) for c, rs in self.probe.results.items() for r in rs
                  if r[0] == "FAIL"]
         self.assertEqual(sorted(c for c, _r in fails),
@@ -395,6 +426,104 @@ class ModelTest(unittest.TestCase):
             self.assertRegex(self.probe.text(c), r", \d moved in the pause", c)
         self.assertRegex(self.probe.text("a2.pause_f"),
                          r", \d{4,} moved in the pause")
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class TypefTest(unittest.TestCase):
+    """the typef group on the laptop's bus, which only runs when named:
+    Audio 1 records into its buffer through the channel in write mode, a
+    START line before each start, and the question first"""
+
+    @classmethod
+    def setUpClass(cls):
+        from pcicfg import laptop
+        cls.card = ChipCard(pci=laptop())
+        cls.before = snapshot(cls.card)
+        cls.probe = Run(cls.card, only="typef")
+
+    def test_every_case_passes(self):
+        res = self.probe.results
+        self.assertEqual(self.probe.errors, [])
+        self.assertEqual(sorted(res), sorted(TYPEF))
+        for cid in TYPEF:
+            self.assertEqual([r for r, _d in res[cid]], ["PASS"], cid)
+            text = self.probe.text(cid)
+            self.assertIn("77h=89h, Type F on for DMA 1", text)
+            self.assertRegex(text, r"44\d\d\d Hz measured, 44\d\d\d set")
+            self.assertRegex(text, r"(\d+) of the buffer's \1 bytes written")
+        self.assertEqual(self.card.chip.dmac.bad, [])
+        self.assertEqual(self.card.chip.violations, [])
+        self.assertEqual(self.card.pci.writes(), [])    # it only reads
+        self.assertEqual(snapshot(self.card), self.before)
+
+    def test_start_lines(self):
+        """each case's spec and START reach the report before its result,
+        in the table's order"""
+        order = []
+        for i, line in enumerate(self.probe.lines):
+            w = line.split()
+            if len(w) > 1 and w[1] == "START":
+                self.assertEqual(self.probe.lines[i - 1].split()[:2],
+                                 [w[0], "spec"])
+                self.assertEqual(self.probe.lines[i + 1].split()[:2],
+                                 [w[0], "PASS"])
+                order.append(w[0])
+        self.assertEqual(order, TYPEF)
+
+    def test_asks_once(self):
+        """one question before the first case, which names the setting"""
+        self.assertEqual(len(self.probe.asked), 1)
+        cid, question = self.probe.asked[0]
+        self.assertEqual(cid, "typef")
+        self.assertIn("77h=89h, Type F on for DMA 1", question)
+        self.assertIn("/K", question)
+
+    def test_only_by_name(self):
+        """a whole run, /C:t and /C:typ take none of them, a case's name
+        only its own"""
+        from pcicfg import laptop
+        for only in (None, "t", "typ", "a1.base,ty"):
+            run = Run(ChipCard(pci=laptop()), only=only, opts=O_TINY |
+                      O_SILENT, groups=0x400 if only is None else G_ALL)
+            self.assertFalse([c for c in run.results if c.startswith(
+                "typef")], only)
+            self.assertEqual(run.asked, [], only)
+        run = Run(ChipCard(pci=laptop()), only="typef.m14_b2")
+        self.assertEqual(list(run.results), ["typef.m14_b2"])
+
+    def test_esc(self):
+        """Esc at the question: no case runs"""
+        from pcicfg import laptop
+        run = Run(ChipCard(pci=laptop()), only="typef", keys=0)
+        self.assertEqual(run.results, {})
+        self.assertIn("pass=0 fail=0 info=0 skip=0 (stopped)", run.lines)
+
+    def test_hung(self):
+        """/K after typef.m14_b0 stopped the machine: the cases before it
+        are left out, it fails, and the rest run"""
+        from pcicfg import laptop
+        run = Run(ChipCard(pci=laptop()), only="typef",
+                  hung="typef.m14_b0")
+        self.assertEqual(sorted(run.results), sorted(TYPEF[3:]))
+        self.assertEqual(run.results["typef.m14_b0"],
+                         [("FAIL", "the machine stopped in this case; /K "
+                           "went on after it")])
+        for cid in TYPEF[4:]:
+            self.assertEqual(run.results[cid][0][0], "PASS", cid)
+        self.assertEqual(run.failed, 1)
+
+    def test_type_f_off_or_none(self):
+        """with Type F off the cases record as a comparison, and without
+        a PIIX4 they say so"""
+        from pcicfg import laptop
+        run = Run(ChipCard(pci=laptop(r77=0x09)), only="typef.m14_b2")
+        self.assertIn("77h=09h, Type F off for DMA 1",
+                      run.text("typef.m14_b2"))
+        self.assertIn("as a comparison", run.asked[0][1])
+        run = Run(ChipCard(), only="typef.m14_b2")
+        self.assertIn("no Intel PIIX4 on PCI bus 0",
+                      run.text("typef.m14_b2"))
+        self.assertEqual(run.results["typef.m14_b2"][0][0], "PASS")
 
 
 @unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
@@ -840,9 +969,12 @@ class ExeTest(unittest.TestCase):
         with open(EXE, "rb") as f:
             return f.read()
 
-    def dos(self, card, tail, env="BLASTER=A220 I5 D1 H5 P330 T6", **kw):
+    def dos(self, card, tail, env="BLASTER=A220 I5 D1 H5 P330 T6",
+            files=None, **kw):
         from dosrun import Dos
         d = Dos(self.exe(), card, env=env, **kw)
+        for name, data in (files or {}).items():
+            d.files[name] = bytearray(data)
         code = d.run(tail)
         return d, code
 
@@ -886,6 +1018,35 @@ class ExeTest(unittest.TestCase):
                       "(Type F, DMA 1)", machine)
         self.assertEqual(card.pci.writes(), [])     # it only reads
         self.assertEqual(card.pci.addr, 0)          # and puts CF8h back
+
+    def test_typef_resumed(self):
+        """/C:typef /K after a run that stopped in typef.m14_b1: the old
+        report kept, that case failed, the cases after it run and added,
+        and without a START left /K runs them all"""
+        from pcicfg import laptop
+        old = ("essprobe 1.9: the ES1869 itself, without a front\r\n"
+               "typef.m14_b0         spec  dmd b9=0\r\n"
+               "typef.m14_b0         START 77h=89h, Type F on for DMA 1\r\n"
+               "typef.m14_b0         PASS  65536 bytes in\r\n"
+               "typef.m14_b1         spec  dmd b9=1\r\n"
+               "typef.m14_b1         START 77h=89h, Type F on for DMA 1\r\n")
+        card = ChipCard(pci=laptop())
+        d, code = self.dos(card, "/A /T /C:typef /K", keys="\r",
+                           files={"ESSPROBE.TXT": old.encode()})
+        self.assertEqual(code, 6, d.output)         # X_FAILED
+        self.assertIn("the last run stopped in typef.m14_b1", d.output)
+        lines = self.report(d)
+        self.assertEqual(lines[:6], old.split("\r\n")[:6])
+        res = results(lines[6:])
+        self.assertEqual(sorted(res), sorted(TYPEF[4:]))
+        self.assertEqual(res["typef.m14_b1"][0][0], "FAIL")
+        for cid in TYPEF[5:]:
+            self.assertEqual(res[cid][0][0], "PASS", cid)
+        self.assertEqual(card.pci.writes(), [])
+        d, code = self.dos(ChipCard(pci=laptop()), "/A /T /C:typef /K",
+                           keys="\r")
+        self.assertEqual(code, 0, d.output)
+        self.assertEqual(sorted(results(self.report(d))), sorted(TYPEF))
 
     def test_under_emm386(self):
         """/A /T under EMM386: V86 mode, EMMQXXX0's version, the window on

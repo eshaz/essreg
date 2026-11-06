@@ -152,13 +152,17 @@ int plat_key_ready(void) { return _bios_keybrd(_KEYBRD_READY) != 0; }
 
 // --- the files ---------------------------------------------------------------
 
-int plat_report_open(const char *name) {
+static int report_with(const char *name, int how) {
   strncpy(report_name, name, sizeof(report_name) - 1);
   report_bad = 0;
-  report_fd = open(report_name, O_WRONLY | O_CREAT | O_TRUNC | O_TEXT,
-                   S_IREAD | S_IWRITE);
+  report_fd =
+      open(report_name, O_WRONLY | O_CREAT | how | O_TEXT, S_IREAD | S_IWRITE);
   return report_fd >= 0;
 }
+
+int plat_report_open(const char *name) { return report_with(name, O_TRUNC); }
+
+int plat_report_append(const char *name) { return report_with(name, O_APPEND); }
 
 void plat_line(const char *text) {
   static char buf[260];

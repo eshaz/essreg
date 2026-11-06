@@ -280,7 +280,11 @@ tools/wineshot.sh run ess3d.exe /sim tray
   passes every access unless armed, belongs to DOS while its trap is in, and
   is removed at the end; rebuild `src/essp0.h` after changing it. A new case
   goes in the table with its spec and what the recording should hold, which
-  `tools/essprec.py` measures, and runs in `tests/test_essprobe.py`.
+  `tools/essprec.py` measures, and runs in `tests/test_essprobe.py`. A case
+  that can stop the machine goes in an opt-in group (`ESP_G_OPTIN`, as
+  typef), which runs only when named and asks first, and writes its `START`
+  line before the risk, so that `/K` can go on after it; it only reads the
+  PCI bridge (`esp_hal.bridge`).
 * **Committed binaries.** After changing their sources, rebuild
   `build/ESFM.DRV`, `build/ES1869.VXD`, `build/ES1869.DRV` or
   `build/esssb16.com`, and copy the changed programs from `out/ow2/` to
