@@ -56,6 +56,8 @@ DIST_FILES := LICENSE docs/ES1869TEST.md docs/LINUX.md \
 	linux/tools/essreg/shim/i86.h \
 	linux/tools/es1869ctl/Makefile linux/tools/es1869ctl/es1869ctl.c \
 	linux/tools/a2stall.c \
+	linux/tools/mqengine.c linux/tools/mqengine-up.sh \
+	linux/mqengine/proto.h \
 	linux/es1869/settings.def linux/es1869/settings_kinds.h \
 	linux/es1869/resample.c linux/es1869/resample.h \
 	linux/es1869/hw_compat.h \
