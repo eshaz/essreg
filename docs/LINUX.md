@@ -595,14 +595,42 @@ cable from a device's output to its input would settle each of them.
 root, with no driver and no interrupt: it reads the lines, sends and
 receives, and times how fast a unit takes bytes.
 
-An Opcode MIDIEngine 2port/SE, a Music Quest design with its own power,
-works in one direction so far. `linux/tools/mqengine.c` reaches it the same
-way. Everything played into its input A comes up exactly: 142 bytes in a
-test with every data value and the status bytes. Bytes sent reach its output
-A, but a byte with bit 5 set doesn't come out, whatever the sequence around
-it, the control lines or the pace, which rules out most notes. The
-8Port/SE's drivers show the shape of the protocol, but this unit differs
-from them, and no driver for it has turned up.
+An Opcode MIDIEngine 2Port/SE, a Music Quest design with its own power, has
+a driver of its own, snd-mqengine, in `linux/mqengine/`. Its two inputs and
+two outputs are one raw MIDI device, subdevice 0 for A and 1 for B, and the
+sequencer's client "MIDIEngine 2Port/SE" has a port for each.
+`linux/tools/mqengine-up.sh` turns the parallel port on and loads the
+module, and with `off` takes both away:
+
+```
+make -C linux mqengine
+sudo linux/tools/mqengine-up.sh linux/mqengine/snd-mqengine.ko
+aplaymidi -p "MIDIEngine 2Port/SE:0" song.mid
+sudo linux/tools/mqengine-up.sh off
+```
+
+Where the module is part of the kernel's build, `mqengine-up.sh` alone loads
+it. Its parameters are `port`, 0x378 by default, `irq`, 7 by default or -1
+to poll at each timer tick, `index` and `id`. It takes the port itself, as
+snd-mtpav does, so parport_pc and snd-mtpav have to stay out of it, and it
+refuses to load unless the port answers as the unit does. It handles no
+suspend, so unload it and load it again after one.
+
+On the Armada, 1024 bytes came back exact through a cable from output B to
+input B, by interrupt and polled, also with 1024 bytes coming in on input A
+at the same time, and every event of a 37 s MIDI file came back through the
+sequencer. Output A held 3,857 bytes in a row exact. That was read through a
+MIDISPORT 2x2, which holds bytes that reach it with nothing reading and
+hands them over ahead of newer ones, so an output is best tested through a
+cable to the unit's own input.
+
+The protocol, in `linux/mqengine/proto.h`, comes from Opcode's MQ2PRTSE.DRV.
+D5 at the end of STROBE is the output, whatever bit 5 of the byte is. From
+one byte to the next, either way, the unit needs time that its flags don't
+cover: a gap of 30 us stayed exact and 20 us lost bytes, so the driver
+leaves 60 us. Its output buffer holds about 64 bytes, and it raises its
+interrupt once for each byte in either direction. `linux/tools/mqengine.c`
+reaches the unit without the driver, by port I/O as root.
 
 ## Tools
 

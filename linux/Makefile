@@ -5,7 +5,9 @@
 #
 #   make                  the modules, in es1869/
 #   make clean
-#   make patch            es1869-driver.patch: the driver as sound/isa/es1869
+#   make mqengine         the MIDIEngine's module, in mqengine/
+#   make patch            es1869-driver.patch: the driver as sound/isa/es1869,
+#                         and mqengine-driver.patch: sound/drivers/mqengine
 #   make deploy HOST=...  build on that machine over SSH and copy the result
 #   make dist             es1869test-VERSION.tar.gz: the test suite and the
 #                         Linux essreg with the essreg files they build
@@ -20,13 +22,19 @@ modules:
 	$(MAKE) -C $(KDIR) ARCH=$(ARCH) M=$(CURDIR)/es1869 \
 		CONFIG_SND_ES1869=m CONFIG_SND_ES1869_ESFM=m modules
 
+mqengine:
+	$(MAKE) -C $(KDIR) ARCH=$(ARCH) M=$(CURDIR)/mqengine \
+		CONFIG_SND_MQENGINE=m modules
+
 clean:
 	$(MAKE) -C $(KDIR) ARCH=$(ARCH) M=$(CURDIR)/es1869 clean
+	$(MAKE) -C $(KDIR) ARCH=$(ARCH) M=$(CURDIR)/mqengine clean
 
 # against a kernel source tree, as KSRC (by default the build tree)
 KSRC ?= $(KDIR)
 patch:
 	python3 ../tools/es1869patch.py --ksrc $(KSRC) -o es1869-driver.patch
+	python3 ../tools/mqenginepatch.py --ksrc $(KSRC) -o mqengine-driver.patch
 
 # the sources to HOST over SSH, built there against its running kernel
 deploy:
