@@ -746,6 +746,17 @@ static int load_note(struct et_ctx *c, const char *note)
 	return s.status;
 }
 
+// the parameter off again where udev's restore of a saved state, which wins
+// over a parameter and ran before the suite went on, turned it back on
+static void load_off(struct et_ctx *c, const char *id)
+{
+	char v[16];
+
+	if (c->hal->param_get(c->hal->ctx, id, v, sizeof(v)) >= 0 &&
+	    strcmp(v, "0"))
+		et_param_set(c, id, 0);
+}
+
 // load.fm: opl3=0 and esfm=0 each take one way to the FM away and leave the
 // other, and neither gets in the way of the card
 enum et_result c_load_fm(struct et_ctx *c, const struct et_case *k)
@@ -770,6 +781,7 @@ enum et_result c_load_fm(struct et_ctx *c, const struct et_case *k)
 				strerror(-err));
 			break;
 		}
+		load_off(c, t[i].opl3 ? "esfm" : "opl3");
 		snprintf(name, sizeof(name), "%s: OPL3's note", t[i].params);
 		et_measure(c, name, !load_note(c, "opl3:LR:581:4:0.3"), "",
 			   t[i].opl3, t[i].opl3);

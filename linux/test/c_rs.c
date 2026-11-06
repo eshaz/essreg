@@ -1233,6 +1233,22 @@ static double dac_level(const double *x, long n, double hz, double scale)
 	return an_dbfs(an_tone(x, n, 48000, hz * scale, NULL) / M_SQRT2);
 }
 
+#define DAC_PIECES 4 // of a measure, so that a stall spoils only one
+
+static int dac_cmp(const void *a, const void *b)
+{
+	double u = *(const double *)a, v = *(const double *)b;
+
+	return u < v ? -1 : u > v;
+}
+
+// the middle of DAC_PIECES values, which it sorts
+static double dac_median(double *v)
+{
+	qsort(v, DAC_PIECES, sizeof(v[0]), dac_cmp);
+	return (v[DAC_PIECES / 2 - 1] + v[DAC_PIECES / 2]) / 2;
+}
+
 static int dac_setup(struct et_ctx *c)
 {
 	et_mix_quiet(c);
@@ -1334,7 +1350,8 @@ enum et_result c_dac_over(struct et_ctx *c, const struct et_case *k)
 // dac.over.live: the output rate moved under a playing stream with the buffer
 // MPD asks for, longer than the ring can hold at 3x. A tone at 15 kHz, which
 // the hold takes the most from, has to step up and down with the DAC's rate,
-// with no xrun and in tune, and 70h has to end on the last rate
+// with no xrun and in tune, and 70h has to end on the last rate. A stop of the
+// DAC spoils the piece it falls in, so each reading is the middle of four
 enum et_result c_dac_over_live(struct et_ctx *c, const struct et_case *k)
 {
 	static const struct et_fmt f = { ET_S16, 2, 44100 };
@@ -1346,7 +1363,7 @@ enum et_result c_dac_over_live(struct et_ctx *c, const struct et_case *k)
 	const char *name = "Audio 2 Output Rate";
 	void *d;
 	double *x;
-	int i, r70 = -1, lost = 0;
+	int i, r70 = -1, lost = 0, stalled = 0;
 
 	(void)k;
 	if (dac_setup(c) < 0)
@@ -1387,15 +1404,26 @@ enum et_result c_dac_over_live(struct et_ctx *c, const struct et_case *k)
 		   dac_r70(44100));
 	x = et_chan(&et_rec2_fmt, s[1].data, s[1].done, 0);
 	for (i = 0; i < 4; i++) {
-		long from = (long)((i + 0.25) * each * 48000), len = 48000;
+		long from = (long)((i + 0.25) * each * 48000);
+		long len = 48000 / DAC_PIECES;
+		double v[DAC_PIECES], p[DAC_PIECES];
 		char label[48];
+		int j;
 
-		if (from + len > (long)s[1].done) {
+		if (from + DAC_PIECES * len > (long)s[1].done) {
 			et_fail(c, "the recording ended early");
 			break;
 		}
-		pitch[i] = an_pitch(x + from, len, 48000, hz);
-		level[i] = dac_level(x + from, len, pitch[i] > 0 ? pitch[i] : hz, 1);
+		for (j = 0; j < DAC_PIECES; j++) {
+			const double *y = x + from + j * len;
+
+			p[j] = an_pitch(y, len, 48000, hz);
+			v[j] = dac_level(y, len, p[j] > 0 ? p[j] : hz, 1);
+		}
+		pitch[i] = dac_median(p);
+		level[i] = dac_median(v);
+		for (j = 0; j < DAC_PIECES; j++)
+			stalled += v[j] < level[i] - 1;
 		snprintf(label, sizeof(label), "15 kHz at %dx, part %d", rates[i],
 			 i + 1);
 		et_measure(c, label, level[i], "dBFS", 1, 0);
@@ -1407,23 +1435,16 @@ enum et_result c_dac_over_live(struct et_ctx *c, const struct et_case *k)
 			et_measure(c, label, level[i] - level[0], "dB", want - 0.4,
 				   want + 0.4);
 			snprintf(label, sizeof(label), "pitch, part %d", i + 1);
+			// a piece of a quarter second reads it to about 20 ppm
 			et_measure(c, label,
-				   (pitch[i] / pitch[0] - 1) * 1e6, "ppm", -10, 10);
+				   (pitch[i] / pitch[0] - 1) * 1e6, "ppm", -30, 30);
 		}
 	}
+	et_measure(c, "pieces with a stall of 16", stalled, "", 1, 0);
 	free(x);
 	free(s[1].data);
 	free(d);
 	return ET_PASS;
-}
-
-#define DAC_PIECES 4 // of a take, 0.5 s each, so that a stall spoils only one
-
-static int dac_cmp(const void *a, const void *b)
-{
-	double u = *(const double *)a, v = *(const double *)b;
-
-	return u < v ? -1 : u > v;
 }
 
 // a tone's THD+N through the second card, the median of its pieces, with
@@ -1457,8 +1478,7 @@ static int dac_take(struct et_ctx *c, const struct et_fmt *f, double hz,
 			v[i] = an_thdn(x + i * len, len, 48000, f0 > 0 ? f0 : hz, 100,
 				       20000);
 		}
-		qsort(v, DAC_PIECES, sizeof(v[0]), dac_cmp);
-		*out = (v[DAC_PIECES / 2 - 1] + v[DAC_PIECES / 2]) / 2;
+		*out = dac_median(v);
 		for (i = 0; i < DAC_PIECES; i++)
 			*stalled += v[i] > *out + 10;
 	} else {

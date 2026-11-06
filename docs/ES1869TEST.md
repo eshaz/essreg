@@ -239,12 +239,14 @@ The cases reach the chip four ways:
   the second card's band, and the droop at 9 kHz has to shrink by what the
   DAC's response at the new rate says. `dac.over.live` moves the rate under
   a playing stream with MPD's buffer: 15 kHz has to step with it, in tune,
-  with no xrun. `dac.over.quality` takes THD+N at 997 Hz and 10 kHz, as the
-  median of four pieces of a take, and the quietest of three takes of a
-  silent stream, at each rate, each within 1 dB of the same chain at 1x,
-  since the second card's own distortion sets the numbers. A stall of the
-  DAC spoils one piece, and those are counted apart, since they are the
-  bus's and not the rate filter's.
+  with no xrun, each reading the middle of four pieces, since with the
+  second card capturing the DAC can stop about 5 s into a take.
+  `dac.over.quality` takes THD+N at 997 Hz and 10 kHz, as the median of four
+  pieces of a take, and the quietest of three takes of a silent stream, at
+  each rate, each within 1 dB of the same chain at 1x, since the second
+  card's own distortion sets the numbers. A stall of the DAC spoils one
+  piece, and those are counted apart, since they are the bus's and not the
+  rate filter's.
 * `mix`: each volume's steps against its dB scale: Audio 2's through the
   output before the master, 69h, B4h and the music DAC's 6Bh through the
   record mixer, the master through record source 3 (AOUT) with the record
