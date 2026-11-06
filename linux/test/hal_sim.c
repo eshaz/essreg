@@ -44,6 +44,7 @@ struct sim {
 	char klog[512];
 	double mute_at; // SIM_A1_MUTES: Audio 2 silent 100 ms from here
 	long adc_own; // SIM_MIXER: what the ADC's list holds by itself
+	int r70; // the last rate Audio 2 played at
 };
 
 static struct sim sim;
@@ -166,6 +167,9 @@ static double ctl_gain(const char *name, int index, int ch)
 	return cdb == ET_DB_MUTE ? 0 : pow(10, cdb / 2000.0);
 }
 
+#define DAC_LAST 0.062 // of the last sample, in what the DAC puts out
+#define OVER_LIVE 6 // frames to a stream frame that hold 1x, 2x and 3x
+
 // Audio 2's real rate: slaved to the FM, the FM's; with the data sheet's
 // clocks, the 793.8 kHz family runs 2140 ppm fast
 static double a2_rate(const struct et_stream *s)
@@ -185,6 +189,14 @@ static double a2_out(const struct et_stream *a2, double t, int ch)
 		return 0;
 	if (sim.faults & SIM_A2_SWAP)
 		ch = !ch;
+	if (a2->flags & ET_HOLD) {
+		long i = (long)floor((t - a2->start) * a2_rate(a2));
+
+		if (t < a2->start)
+			return 0;
+		return (sample(a2, i, ch) + DAC_LAST * sample(a2, i - 1, ch)) /
+		       (1 + DAC_LAST);
+	}
 	return at(a2, t, a2_rate(a2), ch);
 }
 
@@ -309,6 +321,56 @@ static unsigned int sim_rs_ring(unsigned int rate)
 	return over;
 }
 
+// what the DAC puts out of a stream whose output rate moves under it, each of
+// its ring's frames held and keeping some of the last, at OVER_LIVE frames to a
+// stream frame; the control writes count unless the rate stays
+static const struct et_stream *sim_over_live(const struct et_stream *a2,
+					     const struct et_stream *s, int n)
+{
+	static struct et_stream out;
+	static short *data;
+	unsigned int ch = a2->fmt.channels;
+	unsigned long len[3], made = a2->frames * OVER_LIVE, i;
+	short *ring[3];
+	int r, c, j;
+
+	for (r = 0; r < 3; r++)
+		ring[r] = sim_rs_over(a2->data, a2->frames, ch, 0, r + 1, &len[r]);
+	free(data);
+	data = malloc(made * ch * sizeof(*data));
+	if (!data)
+		abort();
+	for (i = 0; i < made; i++) {
+		double t = a2->start + (double)i / OVER_LIVE / a2->fmt.rate;
+		unsigned int over = sim_rs_ring(a2->fmt.rate);
+		unsigned long k;
+
+		for (j = 0; j < n; j++) {
+			if (s[j].role == ET_CTL && !strcmp(s[j].cmd, "Audio 2 Output Rate") &&
+			    t >= s[j].start && !(sim.faults & SIM_RS_LIVE) &&
+			    !(sim.faults & SIM_RS_OVER))
+				over = s[j].value + 1;
+		}
+		k = i * over / OVER_LIVE;
+		for (c = 0; c < (int)ch; c++) {
+			long now = k < len[over - 1] ? ring[over - 1][k * ch + c] : 0;
+			long last = k && k <= len[over - 1] ?
+					    ring[over - 1][(k - 1) * ch + c] : 0;
+
+			data[i * ch + c] = (short)((now + DAC_LAST * last) /
+						   (1 + DAC_LAST));
+		}
+	}
+	for (r = 0; r < 3; r++)
+		free(ring[r]);
+	out = *a2;
+	out.flags &= ~ET_HOLD;
+	out.data = data;
+	out.frames = made;
+	out.fmt.rate *= OVER_LIVE;
+	return &out;
+}
+
 // the stream as the driver's filter leaves it, with the run's control writes
 // taking effect at their times
 static const struct et_stream *sim_resampled(const struct et_stream *a2,
@@ -323,6 +385,9 @@ static const struct et_stream *sim_resampled(const struct et_stream *a2,
 
 	if (a2->fmt.format != ET_S16 || (sim.faults & SIM_TRIM))
 		return a2;
+	for (i = 0; i < n; i++)
+		if (s[i].role == ET_CTL && !strcmp(s[i].cmd, "Audio 2 Output Rate"))
+			return sim_over_live(a2, s, n);
 	memset(parts, 0, sizeof(parts));
 	parts[0].ppb = sim_rs_ppb(mode, item, a2, &parts[0].on);
 	parts[0].dither = sim_setting("a2_resample_dither");
@@ -727,6 +792,16 @@ static int sim_run(void *ctx, struct et_stream *s, int n)
 			if (sim.faults & SIM_RESUME)
 				sim.lost52 = 1;
 		}
+	// 70h, from the rate the stream ended on
+	for (i = 0; i < n; i++)
+		if (s[i].role == ET_A2 && s[i].fmt.format == ET_S16) {
+			unsigned int rate = s[i].fmt.rate *
+					    sim_rs_ring(s[i].fmt.rate);
+			unsigned int clock = 793800 % rate ? 768000 : 793800;
+
+			sim.r70 = (clock == 768000 ? 0x80 : 0) |
+				  ((128 - clock / rate) & 0x7F);
+		}
 	for (i = 0; i < n; i++)
 		if (s[i].role == ET_A1P || s[i].role == ET_A2)
 			sim.irqs[s[i].role == ET_A2] +=
@@ -1015,6 +1090,8 @@ static int sim_reg_read(void *ctx, int bank, int reg, int *val)
 					0;
 	if (bank == 0 && reg == 0x3C)
 		*val = beep_reg();
+	if (bank == 0 && reg == 0x70)
+		*val = sim.r70;
 	return 0;
 }
 

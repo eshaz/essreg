@@ -39,6 +39,8 @@ FN(c_rs_imd)
 FN(c_rs_quiet)
 FN(c_rs_dither)
 FN(c_rs_live)
+FN(c_dac_over)
+FN(c_dac_over_live)
 FN(c_rs_pause)
 FN(c_rs_drain)
 FN(c_rs_runout)
@@ -317,6 +319,12 @@ const struct et_case et_cases[] = {
 
 	CASE("dac.fold", N, c_dac_fold, 0,
 	     "the ADC's filter takes the image that moves a tone's level")
+	CASE("dac.over.44", R | N | ET_ROOT, c_dac_over, 0,
+	     "Audio 2 Output Rate clocks the DAC up, on 793.8 kHz's divisors")
+	CASE("dac.over.48", R | N | ET_ROOT, c_dac_over, 1,
+	     "the same on 768 kHz's divisors, which stop at 2x here")
+	CASE("dac.over.live", R | N | ET_ROOT, c_dac_over_live, 0,
+	     "the same under a playing stream with MPD's buffer")
 	CASE("dac.corner.11025", N, c_dac_corner, 0,
 	     "Audio 2's filter corner at 11025 Hz, from the driver's 72h")
 	CASE("dac.corner.22050", N, c_dac_corner, 1, "the same at 22050 Hz")

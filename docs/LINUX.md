@@ -274,20 +274,33 @@ up. A fill holds interrupts off for about 80 us, and for 125 us at the worst
 seen, while the machine's own worst timer delay is over a millisecond with
 the filter or without it.
 
-`a2_oversample` ("Audio 2 Output Rate") plays a 16-bit stream at two or
-three times its rate, through the same filter, from the next prepare on,
-with or without a change of rate on top. The DAC then holds each sample for
-a half or a third as long, so that its images move up by as much, and
-nothing else in the chip has to change: a 44.1 kHz stream plays at 88.2 or
-132.3 kHz. It applies where a divisor of the stream's own gives the rate
-exactly, so 48 kHz takes 2x and no more, and up to 132.3 kHz. The ring keeps
-its size, so the longest buffer is a half or a third as long: 8192 frames at
-2x and 5461 at 3x. Audio 2's transfers turn to Demand 8, which leaves the
-bus the most. 3x takes up so much of the ISA bus that Audio 1 can't record
-at the same time, and a client whose pointer stands, as under dmix, gets
-each frame written again without the filter. At 2x every frame of the DMA
-matches the filter's C code on the chip. The driver takes 6.1 % of the
-Celeron at 44.1 kHz stereo at 2x, and 9.7 % at 3x.
+`a2_oversample` ("Audio 2 Output Rate") clocks the DAC at two or three times
+a 16-bit stream's rate, through the same filter, with or without a change of
+rate on top. The chip's rate register, 70h, holds a divisor of 793.8 kHz or,
+with bit 7, of 768 kHz, and the driver writes the divisor of the higher
+rate: a 44.1 kHz stream plays at 88.2 or 132.3 kHz, and a 48 kHz one at 96
+kHz. It applies where a divisor of the stream's own gives the rate exactly,
+so 48 kHz takes 2x and no more, and up to 132.3 kHz. The DAC then holds each
+sample for a half or a third as long, so that its images move up by as much.
+
+A write takes effect at once under a playing stream, which stops and starts
+afresh as at a pause's release, and that costs what a release costs. A
+paused stream takes it at its release, and a drain goes on as it is. The
+line "Audio 2 DAC" in `/proc/asound/ES1869/es1869`, and es1869ctl's Status
+page, show the rate in force while a stream runs. 70h keeps it after the
+stream.
+
+The ring keeps its size. It holds two or three laps of the buffer where it
+has the room, and otherwise a lap as long as the buffer, as with MPD's 16384
+frames, which is a half or a third of the buffer at the DAC's rate. The fill
+then goes a lap ahead at most, and a timer tops it up four times a lap.
+Audio 2's transfers turn to Demand 8, which leaves the bus the most. 3x
+takes up so much of the ISA bus that Audio 1 can't record at the same time.
+A client whose pointer stands, as under dmix, gets each frame written again
+without the filter, which takes the room for all the laps, so there the rate
+stays as low as the ring allows. At 2x every frame of the DMA matches the
+filter's C code on the chip. The driver takes 6.1 % of the Celeron at 44.1
+kHz stereo at 2x, and 9.7 % at 3x.
 
 With its stages off, the DAC holds each sample for a whole sample period,
 and each sample keeps about 6 % of the one before
@@ -832,12 +845,12 @@ saved state wins over a parameter. The defaults are the Kconfig options
 * `a2_resample_dither` ("Audio 2 Rate Dither Playback Switch"): 0 to 1,
   default 0. The rate correction's rounding to 16 bits with triangular noise
   of 1 LSB: 3 dB more noise for spurs at about -100 dBFS.
-* `a2_oversample` ("Audio 2 Output Rate"): 0 1x, 1 2x, 2 3x, default 1x.
-  Audio 2's 16-bit streams on DMA 5 played at this many times their rate
-  through the rate filter, where a divisor gives that exactly, at the next
-  prepare: no images, less droop, the buffer a half or a third as long, more
-  of the ISA bus and CPU. 3x can't run while Audio 1 records. It takes
-  effect at the next prepare.
+* `a2_oversample` ("Audio 2 Output Rate"): 0 1x, 1 2x, 2 3x, default 1x. The
+  DAC clocked at this many times a 16-bit stream's rate on DMA 5 (70h),
+  through the rate filter, where a divisor of the stream's own gives that
+  exactly: no images, less droop, more of the ISA bus and CPU. A playing
+  stream takes it at once, restarting as at a pause. 3x can't run while
+  Audio 1 records.
 * `a2_treble` ("Audio 2 Treble Correction Playback Switch"): 0 to 1,
   default 0. Audio 2 through the filter with the DAC's own response taken
   back, at 1x: flat to 20 kHz within 0.15 dB at 44.1 kHz, with the DAC's

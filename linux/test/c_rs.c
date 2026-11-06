@@ -1181,3 +1181,238 @@ enum et_result c_rs_analog(struct et_ctx *c, const struct et_case *k)
 		   -0.1, 0.1);
 	return ET_PASS;
 }
+
+// --- the DAC's rate --------------------------------------------------------
+
+#define RS_MPD_PERIOD 4096 // what MPD asks of the card: a buffer of four periods
+#define RS_MPD_BUFFER 16384
+
+// a tone through the DAC at rate, in dB: the sample's hold, and the sample
+// before it, which each sample keeps some of (docs/AUDIO_PIPELINE.md)
+static double dac_db(double hz, double rate)
+{
+	double w = 2 * M_PI * hz / rate, a = RS_DAC_LAST;
+	double hold = sin(w / 2) / (w / 2);
+	double last = sqrt(1 + 2 * a * cos(w) + a * a) / (1 + a);
+
+	return 20 * log10(hold * last);
+}
+
+// 70h for a rate: bit 7 the 768 kHz clock and the rest 128 less its divisor,
+// the two sets of rates. The chip's own clocks, whatever the driver does
+static int dac_r70(unsigned int rate)
+{
+	unsigned int clock = 793800 % rate ? 768000 : 793800;
+
+	return (clock == 768000 ? 0x80 : 0) | ((128 - clock / rate) & 0x7F);
+}
+
+static void *dac_tones(const struct et_fmt *f, unsigned long n,
+		       const double *hz, int tones, double amp)
+{
+	short *d = malloc(n * 2 * sizeof(*d));
+	unsigned long i;
+	int k;
+
+	if (!d)
+		abort();
+	for (i = 0; i < n; i++) {
+		double v = 0;
+
+		for (k = 0; k < tones; k++)
+			v += amp * sin(2 * M_PI * hz[k] * i / f->rate);
+		d[2 * i] = d[2 * i + 1] = (short)lrint(v);
+	}
+	return d;
+}
+
+// the level of a tone, or of where one would be, at its frequency on the
+// second card's clock, which scale gives: its own against the chip's
+static double dac_level(const double *x, long n, double hz, double scale)
+{
+	return an_dbfs(an_tone(x, n, 48000, hz * scale, NULL) / M_SQRT2);
+}
+
+static int dac_setup(struct et_ctx *c)
+{
+	et_mix_quiet(c);
+	et_mix_dig(c, 0);
+	et_ctl_set(c, "Audio 2 Oversampling Playback Switch", 0, 0, 0);
+	et_ctl_set(c, "Audio 2 Filter Playback Switch", 0, 0, 0);
+	return et_mix_out(c, 0, 15);
+}
+
+// dac.over: that "Audio 2 Output Rate" clocks the DAC up, and not only fills
+// the ring. The dig path can't show it, since it runs on the FM's clock. A
+// stream below the second card's Nyquist keeps a tone's image in its band at
+// 1x, so that it has to leave at 2x and 3x; 70h has to hold the divisor of the
+// family's clock, whose bit 7 chooses it; and the treble's droop has to shrink
+// by what the DAC's response at the new rate says
+enum et_result c_dac_over(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct {
+		unsigned int rate;
+		int over[3]; // what each setting gives, by its divisor
+	} t[] = {
+		{ 22050, { 1, 2, 3 } },
+		{ 24000, { 1, 2, 2 } },
+	};
+	static const double hz[3] = { 1000, 5000, 9000 };
+	const unsigned int rate = t[k->arg].rate;
+	const struct et_fmt f = { ET_S16, 2, rate };
+	unsigned long n = 3 * rate;
+	double image = rate - hz[1], first = 0, img1 = 0, droop1 = 0;
+	void *d;
+	int r;
+
+	if (dac_setup(c) < 0)
+		return ET_ERROR;
+	d = dac_tones(&f, n, hz, 3, 4000);
+	for (r = 0; r < 3; r++) {
+		int over = t[k->arg].over[r], r70 = -1;
+		struct et_stream s[2];
+		char name[64];
+		double *x, tone, top, img, droop, scale;
+
+		rs_ring_over = r + 1;
+		if (rs_mode(c, RS_OFF, 0)) {
+			rs_ring_over = 1;
+			free(d);
+			return ET_ERROR;
+		}
+		rs_ring_over = 1;
+		s[0] = et_play(ET_A2, &f, d, n, 0);
+		s[0].flags = ET_HOLD;
+		s[1] = et_rec(ET_REC2, &et_rec2_fmt, 2 * 48000, 0.5);
+		if (et_run(c, s, 2)) {
+			free(s[1].data);
+			free(d);
+			return ET_ERROR;
+		}
+		if (c->hal->reg_read(c->hal->ctx, 0, 0x70, &r70) < 0)
+			r70 = -1;
+		snprintf(name, sizeof(name), "70h asked for %dx", r + 1);
+		et_measure(c, name, r70, "", dac_r70(rate * over),
+			   dac_r70(rate * over));
+		x = et_chan(&et_rec2_fmt, s[1].data, s[1].done, 0);
+		scale = an_pitch(x, s[1].done, 48000, hz[1]) / hz[1];
+		if (!(scale > 0.99 && scale < 1.01)) {
+			et_fail(c, "no tone came back at %dx", over);
+			scale = 1;
+		}
+		first = dac_level(x, s[1].done, hz[0], scale);
+		tone = dac_level(x, s[1].done, hz[1], scale);
+		top = dac_level(x, s[1].done, hz[2], scale);
+		img = dac_level(x, s[1].done, image, scale) - tone;
+		droop = top - first;
+		snprintf(name, sizeof(name), "the image at %.0f Hz, %dx", image,
+			 over);
+		et_measure(c, name, img, "dB", 1, 0);
+		if (!r) {
+			img1 = img;
+			droop1 = droop;
+			et_measure(c, "the image is there at 1x", img, "dB", -30, 0);
+		} else {
+			double want = dac_db(hz[2], rate * over) -
+				      dac_db(hz[0], rate * over) -
+				      (dac_db(hz[2], rate) - dac_db(hz[0], rate));
+
+			snprintf(name, sizeof(name), "the image is gone, %dx",
+				 over);
+			et_measure(c, name, img1 - img, "dB", 20, 200);
+			snprintf(name, sizeof(name), "9 kHz up from 1x, %dx", over);
+			et_measure(c, name, droop - droop1, "dB", want - 0.4,
+				   want + 0.4);
+		}
+		free(x);
+		free(s[1].data);
+	}
+	free(d);
+	return ET_PASS;
+}
+
+// dac.over.live: the output rate moved under a playing stream with the buffer
+// MPD asks for, longer than the ring can hold at 3x. A tone at 15 kHz, which
+// the hold takes the most from, has to step up and down with the DAC's rate,
+// with no xrun and in tune, and 70h has to end on the last rate
+enum et_result c_dac_over_live(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	static const int rates[4] = { 1, 3, 2, 1 };
+	static const double each = 2.0, hz = 15000;
+	double level[4], pitch[4];
+	unsigned long n = (unsigned long)(4 * each * f.rate);
+	struct et_stream s[5];
+	const char *name = "Audio 2 Output Rate";
+	void *d;
+	double *x;
+	int i, r70 = -1, lost = 0;
+
+	(void)k;
+	if (dac_setup(c) < 0)
+		return ET_ERROR;
+	rs_ring_over = 1;
+	if (rs_mode(c, RS_OFF, 0))
+		return ET_ERROR;
+	d = dac_tones(&f, n, &hz, 1, 8000);
+	s[0] = et_play(ET_A2, &f, d, n, 0.3);
+	s[0].period = RS_MPD_PERIOD;
+	s[0].buffer = RS_MPD_BUFFER;
+	s[0].flags = ET_HOLD;
+	s[1] = et_rec(ET_REC2, &et_rec2_fmt, (unsigned long)(4 * each * 48000),
+		      0.3);
+	for (i = 1; i < 4; i++) {
+		struct et_stream *m = &s[i + 1];
+
+		memset(m, 0, sizeof(*m));
+		m->role = ET_CTL;
+		m->cmd = name;
+		m->start = 0.3 + i * each;
+		m->value = rates[i] - 1;
+	}
+	if (et_run(c, s, 5)) {
+		free(s[1].data);
+		free(d);
+		return ET_ERROR;
+	}
+	et_measure(c, "the buffer it got", s[0].buffer_got, "frames",
+		   RS_MPD_BUFFER, RS_MPD_BUFFER);
+	et_measure(c, "xruns", s[0].xruns, "", 0, 0);
+	for (i = 2; i < 5; i++)
+		lost |= s[i].err;
+	et_measure(c, "control writes refused", !!lost, "", 0, 0);
+	if (c->hal->reg_read(c->hal->ctx, 0, 0x70, &r70) < 0)
+		r70 = -1;
+	et_measure(c, "70h at the end, 1x", r70, "", dac_r70(44100),
+		   dac_r70(44100));
+	x = et_chan(&et_rec2_fmt, s[1].data, s[1].done, 0);
+	for (i = 0; i < 4; i++) {
+		long from = (long)((i + 0.25) * each * 48000), len = 48000;
+		char label[48];
+
+		if (from + len > (long)s[1].done) {
+			et_fail(c, "the recording ended early");
+			break;
+		}
+		pitch[i] = an_pitch(x + from, len, 48000, hz);
+		level[i] = dac_level(x + from, len, pitch[i] > 0 ? pitch[i] : hz, 1);
+		snprintf(label, sizeof(label), "15 kHz at %dx, part %d", rates[i],
+			 i + 1);
+		et_measure(c, label, level[i], "dBFS", 1, 0);
+		if (i) {
+			double want = dac_db(hz, 44100.0 * rates[i]) -
+				      dac_db(hz, 44100);
+
+			snprintf(label, sizeof(label), "up from 1x, part %d", i + 1);
+			et_measure(c, label, level[i] - level[0], "dB", want - 0.4,
+				   want + 0.4);
+			snprintf(label, sizeof(label), "pitch, part %d", i + 1);
+			et_measure(c, label,
+				   (pitch[i] / pitch[0] - 1) * 1e6, "ppm", -10, 10);
+		}
+	}
+	free(x);
+	free(s[1].data);
+	free(d);
+	return ET_PASS;
+}

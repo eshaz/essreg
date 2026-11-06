@@ -107,7 +107,8 @@ void es1869_rs_fill(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 unsigned long es1869_rs_at(const struct es1869_rs *rs, unsigned long a,
 			   unsigned long buffer);
 unsigned long es1869_rs_limit(unsigned long to, unsigned long hw,
-			      unsigned long buffer, unsigned long boundary);
+			      unsigned long room, unsigned long buffer,
+			      unsigned long boundary);
 
 // the master clock in Hz, which 30 divides to the 793.8 kHz clock and 31 to
 // what the chip calls 768 kHz, 768193.5 Hz

@@ -706,9 +706,9 @@ static void routing(void)
 
 static void status_page(void)
 {
-	static const char *const keys[] = { "interrupts", "DSP busy",
-					    "stuck sources", "Audio 2 ring",
-					    "clock" };
+	static const char *const keys[] = { "interrupts",	"Audio 2 DAC",
+					    "DSP busy",		"stuck sources",
+					    "Audio 2 ring",	"clock" };
 	time_t now = time(NULL);
 	unsigned long irq[4];
 	unsigned int i;
@@ -726,10 +726,6 @@ static void status_page(void)
 	stream("Recording", "pcm0c/sub0");
 	stream("FM digital", "pcm1c/sub0");
 	stream("Dual", "pcm2p/sub0");
-	if (val("a2_oversample", 0))
-		add(-1, 0,
-		    "  Audio 2 plays at %ld times its stream's rate on the DAC",
-		    val("a2_oversample", 0) + 1);
 	add(-1, 0, " ");
 	routing();
 	add(-1, 0, " ");

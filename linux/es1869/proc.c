@@ -69,6 +69,11 @@ static void es1869_proc_read(struct snd_info_entry *entry,
 	snd_iprintf(buf, "Audio 2 ring: late refills %u, largest %u bytes, longest %u cycles\n",
 		    chip->mirror.fill.late, chip->mirror.max_chunk,
 		    chip->mirror.fill_max);
+	if (chip->a2_running && chip->a2_owner == ES_OWN_A2P)
+		snd_iprintf(buf, "Audio 2 DAC: %u Hz, %u times the stream's rate, a lap of %u frames\n",
+			    chip->mirror.stream.rate_num /
+				    chip->mirror.stream.rate_den,
+			    chip->mirror.over, chip->mirror.lap);
 	// what the driver costs: TSC cycles a call, and the 8237's readings
 	snd_iprintf(buf, "cost: interrupts %u, %llu cycles each; ring ticks %u, %llu cycles each; ring copies %u, %llu cycles each; 8237 readings %u\n",
 		    chip->isr_calls,

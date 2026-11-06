@@ -256,6 +256,7 @@ int es1869_mirror_init(struct es1869 *chip);
 void es1869_a2_irq(struct es1869 *chip, struct snd_pcm_substream **sub);
 unsigned int es1869_a2_tied_rate(struct es1869 *chip);
 void es1869_a2_rate_changed(struct es1869 *chip);
+void es1869_a2_over_changed(struct es1869 *chip);
 
 // regs_hwdep.c
 int es1869_regs_hwdep_new(struct es1869 *chip);

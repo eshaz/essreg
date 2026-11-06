@@ -132,6 +132,25 @@ class SimTest(unittest.TestCase):
                 self.assertEqual(code, 6, out[-1500:])
                 self.assertEqual(results(out).get(case), "FAIL")
 
+    def test_the_dac_cases_hear_a_rate_that_stays(self):
+        """the ring may hold the right frames with the DAC at the old rate:
+        these cases are what shows that it moved, and under a stream"""
+        for fault, case in ((0x40000000, "dac.over.44"),
+                            (0x40000000, "dac.over.48"),
+                            (0x40000000, "dac.over.live"),
+                            (0x8000000, "dac.over.live")):
+            with self.subTest(fault=hex(fault), case=case):
+                code, out = run("--sim=%d" % fault, "-c", case)
+                self.assertEqual(code, 6, out[-1500:])
+                self.assertEqual(results(out).get(case), "FAIL")
+
+    def test_the_mixer_fault_fails_each_of_its_cases(self):
+        for case in ("mix.scale", "mix.adc", "beep.follow"):
+            with self.subTest(case=case):
+                code, out = run("--sim=%d" % 0x80000000, "-c", case)
+                self.assertEqual(code, 6, out[-1500:])
+                self.assertEqual(results(out).get(case), "FAIL")
+
     def test_stock_skips_the_new_drivers_cases(self):
         code, out = run("--sim", "--stock", "-c",
                         "probe.card,dig.fmt.s16,3d.quick,a1play.fmt.s16")

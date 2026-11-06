@@ -774,15 +774,17 @@ void es1869_rs_fill(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 	}
 }
 
-// how far a fill may go, up to the stream's frame to, with the DMA at hw. The
-// ring holds as many frames as the buffer, but a step down makes more ring
-// frames than stream frames, so that a full buffer's last frames would land
-// on what the DMA has yet to play, and those are the frames made as if
-// silence followed. A 256th of the buffer covers any step the settings allow
+// how far a fill may go, up to the stream's frame to, with the DMA at hw. room
+// is the stream's frames the ring holds, the buffer's or a half or a third of
+// them. A step down makes more ring frames than stream frames, so that a full
+// ring's last frames would land on what the DMA has yet to play, and those are
+// the frames made as if silence followed. A 256th covers any step the settings
+// allow
 unsigned long es1869_rs_limit(unsigned long to, unsigned long hw,
-			      unsigned long buffer, unsigned long boundary)
+			      unsigned long room, unsigned long buffer,
+			      unsigned long boundary)
 {
-	unsigned long most = buffer - ES_RS_ROOM - buffer / 256;
+	unsigned long most = room - ES_RS_ROOM - room / 256;
 	unsigned long ahead = (to + boundary - hw) % boundary;
 
 	if (ahead <= most || ahead > buffer + ES_RS_ROOM)

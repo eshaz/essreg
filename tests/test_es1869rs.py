@@ -141,7 +141,7 @@ def library():
         lib.es1869_fill_plan.argtypes = [ctypes.POINTER(Fill), ul, ul, ul,
                                          ctypes.POINTER(ul)]
         lib.es1869_fill_plan.restype = ul
-        lib.es1869_rs_limit.argtypes = [ul, ul, ul, ul]
+        lib.es1869_rs_limit.argtypes = [ul, ul, ul, ul, ul]
         lib.es1869_rs_limit.restype = ul
         lib.es1869_rs_fill.argtypes = [ctypes.POINTER(RS),
                                        ctypes.POINTER(Stream), ul, ul]
@@ -859,19 +859,26 @@ class FillTest(unittest.TestCase):
     PERIOD = 220
     AHEAD = 34
 
+    GUARD = 4096        # bytes past the ring that have to stay as they were
+
     def stream(self, eps, limit=True, frames=40000, exact=False, first=0,
-               rewind=0, budget=256, over=1):
+               rewind=0, budget=256, over=1, lap=None, room=None):
         """frames read off the line by more than 8 of 16 bits, or with exact
         those that differ at all from one long run through the filter. The
         stream's first frame is first, across the boundary if near it, and
         with rewind the client takes that many frames back at each tenth
         period, and writes them again. A fill takes budget frames at a
-        time, and the plan goes on from the line, as the driver's does"""
+        time, and the plan goes on from the line, as the driver's does.
+        lap is the ring's frames, over times the buffer's unless the ring
+        hasn't the room, and room what the fill's limit takes it to hold"""
         lib = library()
         b, period = self.BUFFER, self.PERIOD
+        lap = lap or b * over
+        room = room or lap // over
         bound = b << 16
         src = (ctypes.c_int16 * (2 * b))()
-        ring = (ctypes.c_uint8 * (8 * b * over))()
+        ring = (ctypes.c_uint8 * (8 * lap + self.GUARD))()
+        ctypes.memset(ctypes.addressof(ring) + 8 * lap, 0xA5, self.GUARD)
         rot = ctypes.c_ulong(0)
         rs = RS()
         rs.tab = ctypes.cast(table(), s16p)
@@ -881,7 +888,7 @@ class FillTest(unittest.TestCase):
         plan = Fill(buffer=b, boundary=bound, guard=4, lead=1764, slack=16,
                     filled=first % bound, seen=first % bound)
         st = Stream(src=ctypes.addressof(src), ring=ctypes.addressof(ring),
-                    buffer=b, boundary=bound, lap=b * over,
+                    buffer=b, boundary=bound, lap=lap,
                     rot=ctypes.pointer(rot), stereo=True)
         tone = 20000 * np.sin(2 * np.pi * 997.0 / 48000 *
                               np.arange(frames + 3 * b))
@@ -898,7 +905,8 @@ class FillTest(unittest.TestCase):
             while True:
                 to = state["appl"] % bound
                 if limit:
-                    to = lib.es1869_rs_limit(to, state["hw"] % bound, b, bound)
+                    to = lib.es1869_rs_limit(to, state["hw"] % bound, room, b,
+                                             bound)
                 start = ctypes.c_ulong(0)
                 n = lib.es1869_fill_plan(ctypes.byref(plan), to,
                                          state["hw"] % bound, budget,
@@ -927,7 +935,7 @@ class FillTest(unittest.TestCase):
         period *= over
         frames *= over
         while done + period < frames:
-            at = np.arange(done, done + period) % (b * over)
+            at = np.arange(done, done + period) % lap
             v = (got[8 * at].astype(np.int32) |
                  got[8 * at + 2].astype(np.int32) << 8)
             v = np.where(v >= 32768, v - 65536, v)
@@ -950,6 +958,7 @@ class FillTest(unittest.TestCase):
                 write(rewind)
                 fill()
         self.assertEqual(plan.late, 0)
+        self.assertTrue(np.all(got[8 * lap:] == 0xA5), "past the ring")
         return bad
 
     def test_every_frame_on_the_line(self):
@@ -994,6 +1003,38 @@ class FillTest(unittest.TestCase):
                 self.assertEqual(self.stream(eps, exact=True, over=over), 0,
                                  (over, eps))
 
+    def test_a_lap_shorter_than_the_buffer(self):
+        """a ring without the room for over laps of the buffer: a lap as long
+        as the buffer, so that it holds a half or a third of it. The DMA still
+        reads what one long run would have made, and nothing lands past the
+        ring"""
+        for over in (2, 3):
+            for eps in (0.0, 30e-6, -252e-6, 1000e-6, -1000e-6):
+                self.assertEqual(
+                    self.stream(eps, exact=True, over=over, lap=self.BUFFER),
+                    0, (over, eps))
+
+    def test_a_short_lap_in_short_pieces(self):
+        for over in (2, 3):
+            self.assertEqual(
+                self.stream(1000e-6, exact=True, budget=16, frames=60000,
+                            over=over, lap=self.BUFFER), 0, over)
+
+    def test_a_short_lap_across_the_boundary(self):
+        bound = self.BUFFER << 16
+        for over in (2, 3):
+            self.assertEqual(
+                self.stream(-252e-6, exact=True, first=bound - 20000, over=over,
+                            lap=self.BUFFER), 0, over)
+
+    def test_a_short_lap_needs_the_limit_of_its_room(self):
+        """the fill held to the buffer's frames runs over what the DMA has yet
+        to play, a lap on"""
+        for over in (2, 3):
+            self.assertGreater(
+                self.stream(0.0, exact=True, over=over, lap=self.BUFFER,
+                            room=self.BUFFER), 100, over)
+
     def test_the_line_reads_back(self):
         """the frame of the stream at a ring frame, as the pointer asks"""
         lib = library()
@@ -1014,12 +1055,17 @@ class FillTest(unittest.TestCase):
         lib = library()
         b, bound = 16384, 16384 << 16
         most = b - 64 - b // 256
-        self.assertEqual(lib.es1869_rs_limit(1000, 0, b, bound), 1000)
-        self.assertEqual(lib.es1869_rs_limit(b, 0, b, bound), most)
+        self.assertEqual(lib.es1869_rs_limit(1000, 0, b, b, bound), 1000)
+        self.assertEqual(lib.es1869_rs_limit(b, 0, b, b, bound), most)
         # across the boundary, and with the DMA past the frame
-        self.assertEqual(lib.es1869_rs_limit(b - 100, bound - 100, b, bound),
+        self.assertEqual(lib.es1869_rs_limit(b - 100, bound - 100, b, b, bound),
                          (bound - 100 + most) % bound)
-        self.assertEqual(lib.es1869_rs_limit(100, 200, b, bound), 100)
+        self.assertEqual(lib.es1869_rs_limit(100, 200, b, b, bound), 100)
+        # a ring that holds a third of the buffer, with the buffer full
+        third = b // 3
+        most = third - 64 - third // 256
+        self.assertEqual(lib.es1869_rs_limit(b, 0, third, b, bound), most)
+        self.assertEqual(lib.es1869_rs_limit(1000, 0, third, b, bound), 1000)
 
 
 @unittest.skipUnless(np is not None and shutil.which("gcc"), "needs numpy, gcc")

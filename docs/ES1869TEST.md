@@ -232,6 +232,14 @@ The cases reach the chip four ways:
 * `buf`: Audio 2's delay, its FIFO's term exact and its timing within the
   trigger timestamps' few milliseconds, a drain, and the xruns of a stalled
   reader and writer.
+* `dac.over`: that Audio 2 Output Rate clocks the DAC up, which the `dig`
+  path can't show, since it runs on the FM's clock. Tones at 22050 Hz on
+  793.8 kHz's divisors, and at 24000 Hz on 768 kHz's, go to the second card
+  at each setting: 70h has to hold the divisor, a tone's image has to leave
+  the second card's band, and the droop at 9 kHz has to shrink by what the
+  DAC's response at the new rate says. `dac.over.live` moves the rate under
+  a playing stream with MPD's buffer: 15 kHz has to step with it, in tune,
+  with no xrun.
 * `mix`: each volume's steps against its dB scale: Audio 2's through the
   output before the master, 69h, B4h and the music DAC's 6Bh through the
   record mixer, the master through record source 3 (AOUT) with the record

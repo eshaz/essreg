@@ -326,6 +326,9 @@ void es1869_setting_apply(struct es1869 *chip, int id)
 	case ES_S_esfm_square:
 		es1869_esfm_bank_changed(chip);
 		break;
+	case ES_S_a2_oversample:
+		es1869_a2_over_changed(chip);
+		break;
 	case ES_S_a2_resample:
 	case ES_S_a2_trim:
 	case ES_S_a2_trim_ppb:

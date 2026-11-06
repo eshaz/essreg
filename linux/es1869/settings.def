@@ -266,9 +266,9 @@ ES1869_SET(a2_resample_dither, A2_RESAMPLE_DITHER, S_BOOL, B_NONE, 0, 0, 0, 0, 1
 	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Rate Dither Playback Switch", "",
 	   "the rate correction's rounding to 16 bits with triangular noise of 1 LSB: 3 dB more noise for spurs at about -100 dBFS")
 ES1869_SET(a2_oversample, A2_OVERSAMPLE, S_ENUM, B_NONE, 0, 0, 0, 0, 2, 0,
-	   T_NONE, F_CTL | F_PARAM | F_NEXT, 0, "Audio 2 Output Rate",
+	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Output Rate",
 	   "1x|2x|3x",
-	   "Audio 2's 16-bit streams on DMA 5 played at this many times their rate through the rate filter, where a divisor gives that exactly, at the next prepare: no images, less droop, the buffer a half or a third as long, more of the ISA bus and CPU. 3x can't run while Audio 1 records")
+	   "the DAC clocked at this many times a 16-bit stream's rate on DMA 5 (70h), through the rate filter, where a divisor of the stream's own gives that exactly: no images, less droop, more of the ISA bus and CPU. A playing stream takes it at once, restarting as at a pause. 3x can't run while Audio 1 records")
 ES1869_SET(a2_treble, A2_TREBLE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
 	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Treble Correction Playback Switch", "",
 	   "Audio 2 through the filter with the DAC's own response taken back, at 1x: flat to 20 kHz within 0.15 dB at 44.1 kHz, with the DAC's stages off, for 4 dB less headroom there")

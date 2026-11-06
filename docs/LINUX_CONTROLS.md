@@ -379,11 +379,11 @@ Parameters only:
   noise of 1 LSB: 3 dB more noise for spurs at about -100 dBFS. Parameter
   `a2_resample_dither`.
 * **Audio 2 Output Rate** (`Audio 2 Output Rate`, F3): 0 1x, 1 2x, 2 3x,
-  default 1x. Audio 2's 16-bit streams on DMA 5 played at this many times
-  their rate through the rate filter, where a divisor gives that exactly, at
-  the next prepare: no images, less droop, the buffer a half or a third as
-  long, more of the ISA bus and CPU. 3x can't run while Audio 1 records.
-  Parameter `a2_oversample`. It takes effect at the next prepare.
+  default 1x. The DAC clocked at this many times a 16-bit stream's rate on
+  DMA 5 (70h), through the rate filter, where a divisor of the stream's own
+  gives that exactly: no images, less droop, more of the ISA bus and CPU. A
+  playing stream takes it at once, restarting as at a pause. 3x can't run
+  while Audio 1 records. Parameter `a2_oversample`.
 * **Audio 2 Treble Correction** (`Audio 2 Treble Correction Playback
   Switch`, F3): 0 to 1, default 0. Audio 2 through the filter with the DAC's
   own response taken back, at 1x: flat to 20 kHz within 0.15 dB at 44.1 kHz,
