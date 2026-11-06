@@ -308,13 +308,23 @@ noise of a silent stream is the same. What the higher rates give up is
 margin. The chip's 64-byte FIFO lasts 360 us at 1x of 44.1 kHz stereo, 180
 us at 2x and 120 us at 3x. When the DMA can't reach the chip for that long,
 the DAC stops until it can, and the sound comes that much later: nothing is
-lost, and the stream's position doesn't move. At 3x that came to 5 stalls in
-100 s, of 30 to 450 us, with nothing writing to the disk, and 15 in 80 s
-with a recording going to it, the worst a stretch of about 45 ms of stops
-and starts. 2x stalled 3 times in 80 s, and 1x not in 20 s. The stalls come
-about every 5.1 s, which looks like the kernel's writeback reaching the disk
-on the PIIX4's IDE channel, though that isn't proven. Turning C2 off makes
-no difference.
+lost, and the stream's position doesn't move.
+
+`linux/tools/a2stall.c` finds those stops from the DMA's own position, with
+no second card. At 3x it found none in 30 to 40 s each of quiet, of bursts
+of disk writes, of a disk read at full speed and of a CPU hog. The filter is
+never what runs short: its fill stayed at least 11,572 of the ring's 16,384
+frames ahead of the DMA throughout, 87 ms, which /proc shows as the lead.
+What does stop the DAC is a VX Pocket capturing at 48 kHz, by PIO through
+the CardBus bridge: 2 stops in 40 s at 3x and at 2x, of up to 314 us, and
+none at 1x or with the capture at 8 kHz. So that second card can show stops
+that the DAC doesn't have without it. The IDE channel's PCI latency timer
+stays at 40h: 20h changes nothing, and 10h gave 202 stops in 40 s.
+
+The latency is the client's, since the fill only goes as far as what it
+wrote. At 3x under bursts of disk writes, a buffer of 1024 frames, 23 ms,
+ran clean with 908 ring frames of lead, and one of 512 frames, 12 ms, came
+late three times, by about 5 ms each.
 
 With its stages off, the DAC holds each sample for a whole sample period,
 and each sample keeps about 6 % of the one before
@@ -599,6 +609,11 @@ sources in `src/`, with its register access through the driver's register
 hwdep instead of the ports: `make -C linux/tools/essreg`, then `essreg a`
 for every value or `essreg r=regs.txt` for a dump. Reads work as root;
 writes also need the module's `regs_write=1`.
+
+`linux/tools/a2stall.c` plays silence and finds each stop of Audio 2's DAC
+from its DMA position against the raw clock, with no second card:
+`a2stall 44100 40 4096 16384`, the rate, the seconds, the period and the
+buffer.
 
 `linux/tools/clockcmp.c` compares the machine's clocks with the raw one.
 `linux/tools/pcmclock.c` follows any card's sample clock against the raw,

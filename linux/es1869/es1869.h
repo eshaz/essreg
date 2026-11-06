@@ -95,6 +95,8 @@ struct es1869_mirror {
 	u32 acks; // copies after the application's writes, and theirs
 	u64 ack_cycles;
 	u32 fill_max; // the most cycles a fill held the lock, this stream
+	u32 lead_low; // the fewest ring frames the fill stayed ahead, this stream
+	u32 lead_skip; // readings of the position before that counts
 	bool draining; // a drain's silence goes on past the last frame
 	snd_pcm_uframes_t silent_to; // the absolute frame it has reached
 	struct es1869_rs rs;

@@ -66,9 +66,14 @@ static void es1869_proc_read(struct snd_info_entry *entry,
 	snd_iprintf(buf, "stuck sources %u, taken off the line %02x%s\n",
 		    st.irq_stuck, st.irq_dropped,
 		    chip->hw.storm ? "; a storm took them all off" : "");
-	snd_iprintf(buf, "Audio 2 ring: late refills %u, largest %u bytes, longest %u cycles\n",
+	snd_iprintf(buf, "Audio 2 ring: late refills %u, largest %u bytes, longest %u cycles, ",
 		    chip->mirror.fill.late, chip->mirror.max_chunk,
 		    chip->mirror.fill_max);
+	if (chip->mirror.lead_low != U32_MAX)
+		snd_iprintf(buf, "lead at least %u of %u frames\n",
+			    chip->mirror.lead_low, chip->mirror.lap);
+	else
+		snd_iprintf(buf, "no lead read\n");
 	if (chip->a2_running && chip->a2_owner == ES_OWN_A2P)
 		snd_iprintf(buf, "Audio 2 DAC: %u Hz, %u times the stream's rate, a lap of %u frames\n",
 			    chip->mirror.stream.rate_num /

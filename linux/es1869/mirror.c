@@ -114,6 +114,7 @@
 #define MIRROR_RS_MIN 256 // the frames a buffer needs for the filter
 #define MIRROR_OVER_RATE 132300 // the highest rate the ring plays cleanly at
 #define MIRROR_OVER_BURST 3 // and Demand 8, which leaves the bus the most
+#define MIRROR_LEAD_SKIP 256 // the readings a start takes to fill the ring
 
 static const struct snd_ratnum a2_clocks[] = {
 	{ .num = ES_CLK_HI, .den_min = 1, .den_max = 128, .den_step = 1 },
@@ -253,8 +254,17 @@ static snd_pcm_uframes_t mirror_offset(struct es1869 *chip,
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	off = bytes_to_frames(rt, pos);
 	// before its first fill a stream has no line to read
-	if (m->rs.on && m->rs.lined && !m->fill.standing)
-		return es1869_rs_at(&m->rs, (m->rs.w + m->lap - off) % m->lap, b);
+	if (m->rs.on && m->rs.lined && !m->fill.standing) {
+		u32 lead = (m->rs.w + m->lap - off) % m->lap;
+
+		// how near the DMA came to the frames still to be made, once the
+		// stream has settled
+		if (m->lead_skip)
+			m->lead_skip--;
+		else if (lead < m->lead_low)
+			m->lead_low = lead;
+		return es1869_rs_at(&m->rs, lead, b);
+	}
 	return (off / m->over + m->rot) % b;
 }
 
@@ -887,6 +897,8 @@ static void a2_go(struct es1869 *chip, struct snd_pcm_runtime *rt)
 		rs_apply(chip, rt);
 		m->running = true;
 		m->fill_max = 0;
+		m->lead_low = U32_MAX;
+		m->lead_skip = MIRROR_LEAD_SKIP;
 		mirror_fill(chip, rt, m->rs.on ? MIRROR_RS_START :
 				max_t(u32, MIRROR_BUDGET,
 				      frames_to_bytes(rt, m->fill.lead)),
@@ -1135,6 +1147,7 @@ int es1869_mirror_init(struct es1869 *chip)
 	INIT_WORK(&m->copy_work, mirror_copy_work);
 	m->over = 1;
 	m->rs.over = 1;
+	m->lead_low = U32_MAX;
 	m->spread = chip->dma2 >= 4;
 	if (chip->dma2 < 0)
 		return 0;
