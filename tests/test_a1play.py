@@ -514,6 +514,56 @@ class PlayTest(A1Case):
         self.assertEqual(e.done(), [])
 
 
+class StartTest(A1Case):
+    """Audio 1's channel stays masked over B8h bit 0 and is unmasked once
+    the start settled, 64 reads of Audio_Base+Ch and two sample periods,
+    as the fronts do: the chip loses a byte that comes right after the
+    start's first DMA request (drvemu's RACE_POLLS, fix.win1)"""
+
+    def start(self, rate):
+        e, user = self.opened(rate=rate)
+        e.chip.io.clear()
+        e.write(user, e.header(pattern(e.dev16(A1_BLOCK))))
+        io = e.chip.io
+        dsp = [i for i, x in enumerate(io) if x[:2] == ("out", 0x22C)]
+        go = [i for j, i in enumerate(dsp[1:])
+              if io[dsp[j]][2] == 0xB8 and io[i][2] & 1]
+        unmask = [i for i, x in enumerate(io)
+                  if x == ("out", 0x0A, drvemu.A1_DMA)]
+        self.assertEqual(len(go), 1)
+        self.assertEqual(len(unmask), 1)
+        polls = io[go[0]:unmask[0]].count(("in", 0x22C, None))
+        return e, go[0], unmask[0], polls
+
+    def test_masked_over_the_start(self):
+        for rate in (4000, 22050, 44100, 49000):
+            with self.subTest(rate=rate):
+                e, go, unmask, polls = self.start(rate)
+                self.assertLess(go, unmask)
+                self.assertEqual(polls, 64 + 4000000 // rate)
+                self.assertFalse(e.chip.a1_race)
+                masks = [x for x in e.chip.io[:go] if x[:2] == ("out", 0x0A)
+                         and x[2] & 3 == drvemu.A1_DMA]
+                self.assertEqual(masks[-1][2], 4 | drvemu.A1_DMA)
+
+    def test_restart_settles_too(self):
+        """a pause's end starts the channel the same way"""
+        e, user = self.opened(rate=22050)
+        block = e.dev16(A1_BLOCK)
+        data = pattern(block * 4)
+        e.write(user, e.header(data))
+        e.dma(block)
+        e.interrupt()
+        e.dma(100)                          # whole frames
+        self.assertEqual(e.wod(0, WODM_PAUSE, user), 0)
+        e.chip.io.clear()
+        self.assertEqual(e.wod(0, WODM_RESTART, user), 0)
+        self.assertIn(("out", 0x0A, drvemu.A1_DMA), e.chip.io)
+        self.assertFalse(e.chip.a1_race)
+        self.play(e, 6)
+        self.assertEqual(bytes(e.played[:len(data)]), data)
+
+
 class SharedTest(A1Case):
     def busy_audio2(self, e):
         # wave-out open: Audio 2's user and the wave-out flag (4:0054)
@@ -615,9 +665,13 @@ class DualTest(A1Case):
                 log = [x for x in e.chip.log
                        if x[:2] in (("mixer", 0x78), ("reg", 0xB8))]
                 go = 0x93                           # demand transfers
-                self.assertEqual(log[-3:], [("mixer", 0x78, go & ~1),
+                # Audio 2 starts in one write, after Audio 1's start
+                self.assertEqual(log[-3:], [("reg", 0xB8, 0x04),
                                             ("reg", 0xB8, 0x05),
                                             ("mixer", 0x78, go)])
+                self.assertEqual(
+                    [x for x in e.chip.log if x[:2] == ("mixer", 0x78)],
+                    [("mixer", 0x78, go)])
                 self.play(e, 8)
                 self.assertEqual(len(e.played), len(e.played2))
                 self.assertEqual(bytes(e.played[:len(a)]), a)

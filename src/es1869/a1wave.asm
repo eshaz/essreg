@@ -952,8 +952,10 @@ a1_setup:
         call    a1_mixer_write
 .done:  ret
 
-; the DMA started on the ring, from what wasn't played (a1_ready); in
-; dual playback Audio 2's too, both at once
+; the DMA started on the ring, from what wasn't played (a1_ready), with
+; Audio 1's channel masked until the start settled (a1_settle); in dual
+; playback Audio 2's too, its DAC with one write of 78h as Audio 1's
+; channel is unmasked
 a1_start:
         push    si
         fcall   1, a1_ready
@@ -983,7 +985,8 @@ a1_start:
         pop     ax
         mov     al,CR_COUNT_HI
         call    a1_reg_write
-        ; the 8237, as ESS's record start (6:2799), in the playback mode
+        ; the 8237, as ESS's record start (6:2799), in the playback mode,
+        ; left masked
         pushf
         cli
         xor     dh,dh
@@ -1013,43 +1016,53 @@ a1_start:
         out     dx,al
         mov     al,ah
         out     dx,al
-        mov     al,[si+DEV_DMA_ON]
-        mov     dl,[si+DEV_DMA_MASK]
-        out     dx,al
         or      byte [si+A1_STATE],A1F_RUN
         popf
         test    byte [si+A1_FMT],FMT_DUAL
-        jnz     .dual
-        ; go
-        pop     ax
-        or      al,1
-        mov     ah,al
-        mov     al,CR_CONTROL
-        jmp     a1_reg_write
-        ; Audio 2's DMA on its ring, into its FIFO but not to the DAC yet
-.dual:  call    a1_dma2
-        mov     ah,13h                  ; auto-initialize, DMA, FIFO to DAC
-        test    byte [si+DEV_FLAGS+1],DEMAND_HI
-        jz      .xfer
-        mov     ah,93h                  ; 4-byte demand transfers, as ESS
-.xfer:  push    ax
-        and     ah,~1 & 0FFh
-        mov     al,MX_A2_CONTROL1
-        call    a1_mixer_write
-        ; both go, as close together as the ports allow
-        pop     bx
-        pop     ax
-        pushf
-        cli
-        push    bx
+        jz      .go
+        call    a1_dma2                 ; Audio 2's DMA on its ring
+        ; go, and once the start settled, the channel unmasked
+.go:    pop     ax
         or      al,1
         mov     ah,al
         mov     al,CR_CONTROL
         call    a1_reg_write
-        pop     ax
+        call    a1_settle
+        mov     ah,13h                  ; auto-initialize, DMA, FIFO to DAC
+        test    byte [si+DEV_FLAGS+1],DEMAND_HI
+        jz      .xfer
+        mov     ah,93h                  ; 4-byte demand transfers, as ESS
+.xfer:  pushf
+        cli
+        xor     dh,dh
+        mov     dl,[si+DEV_DMA_MASK]
+        mov     al,[si+DEV_DMA_ON]
+        out     dx,al
+        ; in dual playback Audio 2 goes with it, in one write of 78h
+        test    byte [si+A1_FMT],FMT_DUAL
+        jz      .done
         mov     al,MX_A2_CONTROL1
         call    a1_mixer_write
-        popf
+.done:  popf
+        ret
+
+; Audio 1 started: Audio_Base+Ch read 64 + 4,000,000 / the rate times, at
+; least 32 us and two of its sample periods at an ISA read's half a
+; microsecond, before its channel is unmasked, since the chip loses a byte
+; that comes right after the start's first DMA request (fix.win1 to
+; fix.win3, a byte off each time), as the fronts' settle. The rate is 4000
+; to 49000, so the quotient fits. Clobbers AX, CX and DX
+a1_settle:
+        mov     cx,[si+A1_RATE]
+        mov     dx,003Dh
+        mov     ax,0900h                ; 4,000,000
+        div     cx
+        add     ax,64
+        mov     cx,ax
+        mov     dx,[si+DEV_BASE]
+        add     dx,0Ch
+.poll:  in      al,dx
+        loop    .poll
         ret
 
 ; Audio 2's 8237 channel on its ring, as ESS's playback start programs it

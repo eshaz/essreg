@@ -61,6 +61,12 @@ DEV_OFF = 0x2000            # the device structure in DGROUP
 HEAP_OFF = 0x3000           # LocalAlloc from here
 IF_FLAG = 0x200
 PAGE_PORTS = {0: 0x87, 1: 0x83, 2: 0x81, 3: 0x82, 5: 0x8B, 6: 0x89, 7: 0x8A}
+# Audio 1's playback start loses its first byte when the DMA brings it
+# within RACE_US (tests/esschip.py) of the start's first DMA request: so
+# here when its channel is unmasked at the start (B8h bit 0), or unmasked
+# after fewer reads of Audio_Base+Ch, at half a microsecond each, than
+# that takes (fix.win1, fix.late0)
+RACE_POLLS = 20
 
 WODM_GETNUMDEVS, WODM_GETDEVCAPS, WODM_OPEN, WODM_CLOSE = 3, 4, 5, 6
 WODM_PREPARE, WODM_UNPREPARE, WODM_WRITE, WODM_PAUSE = 7, 8, 9, 10
@@ -125,6 +131,9 @@ class Chip:
                          "page": 0, "pos": 0} for ch in (0, 1, 2, 3, 5, 6, 7)}
         self.ff = {0: 0, 1: 0}
         self.dma_log = []
+        self.io = []                    # every access: ("in"/"out", port, v)
+        self.a1_race = False            # Audio 1's next byte is lost
+        self.a1_polls = None            # +Ch reads since a masked start
 
     def _dsp_byte(self, v):
         if self.pending is not None:
@@ -133,6 +142,12 @@ class Chip:
             if 0xA0 <= cmd <= 0xBF:
                 if not self.ext:
                     self.ext_errors.append((cmd, v))
+                if cmd == 0xB8 and v & 1 and not self.regs[0xB8] & 1 and \
+                        not v & 0x08:   # a playback start
+                    if self.dma[A1_DMA]["mask"]:
+                        self.a1_polls = 0
+                    else:
+                        self.a1_race = True
                 self.regs[cmd] = v
                 self.log.append(("reg", cmd, v))
             elif cmd == 0xC0:
@@ -155,6 +170,7 @@ class Chip:
 
     def out(self, port, v):
         b = self.base
+        self.io.append(("out", port, v))
         if port == b + 4:
             self.index = v
         elif port == b + 5:
@@ -176,11 +192,14 @@ class Chip:
 
     def inp(self, port):
         b = self.base
+        self.io.append(("in", port, None))
         if port == b + 5:
             return self.mixer[self.index]
         if port == b + 0xA:
             return self.readq.pop(0) if self.readq else 0xFF
         if port == b + 0xC:
+            if self.a1_polls is not None:
+                self.a1_polls += 1
             return 0x01 if self.a1_irq else 0x00
         if port == b + 0xE:
             self.a1_irq = False
@@ -201,6 +220,10 @@ class Chip:
             ch = base + (v & 3)
             if ch in self.dma:
                 self.dma[ch]["mask"] = bool(v & 4)
+            if ch == A1_DMA and not v & 4 and self.a1_polls is not None:
+                if self.a1_polls < RACE_POLLS:
+                    self.a1_race = True
+                self.a1_polls = None
         elif reg == 0x0B:
             ch = base + (v & 3)
             if ch in self.dma:
@@ -728,7 +751,10 @@ class DrvEmu:
                 base = (d["page"] << 16) | d["addr"]
             pos = d["pos"] * 2 if ch >= 4 else d["pos"]
             for _i in range(n):
-                out.append(self.rd(base + pos, 1)[0])
+                if ch == A1_DMA and self.chip.a1_race:
+                    self.chip.a1_race = False   # the chip drops it
+                else:
+                    out.append(self.rd(base + pos, 1)[0])
                 pos += 1
                 if pos >= size:
                     pos = 0

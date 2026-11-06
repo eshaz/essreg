@@ -155,11 +155,16 @@ B9h (as ESS's recording sets it), B6h and B7h, B1h and B2h, and mixer
 register 71h bit 2, and sends DSP command D1h.
 
 The DMA plays a ring of two blocks in the Audio 1 DMA buffer, in
-auto-initialize mode, and the chip interrupts once per block. A block is as
-long as ESS's recording block, 1/16 s, and never more than half the buffer.
-ESS's interrupt handler calls the player through the slot for user 1 in
-`isr_srv_table`, since the player is Audio 1's user 1. The player reads the
-DMA position (VxD function 0004), returns the headers that the DMA has
+auto-initialize mode, and the chip interrupts once per block. At each start
+and restart the channel stays masked over B8h bit 0 and is unmasked once the
+start settled, after 64 reads of Audio_Base+Ch and two sample periods, as
+the fronts do, because the chip loses a byte that comes right after the
+start's first DMA request, and the whole sound then plays a byte off
+([ESS_EXTENDED.md](ESS_EXTENDED.md#a-16-bit-stream-a-byte-off)). A block is
+as long as ESS's recording block, 1/16 s, and never more than half the
+buffer. ESS's interrupt handler calls the player through the slot for user 1
+in `isr_srv_table`, since the player is Audio 1's user 1. The player reads
+the DMA position (VxD function 0004), returns the headers that the DMA has
 played past with `WOM_DONE`, and copies queued data into the free part of
 the ring. A buffer that a program writes while the device is playing goes
 into the ring at once, as ESS's write does for Audio 2 (6:2FC1), in pieces
@@ -219,18 +224,21 @@ Audio 2 DAC, and both DACs run from Audio 1's clock.
 To get one clock, the player takes Audio 2 as well, as its user 2, and
 clears mixer register 71h bit 1, which makes the Audio 2 DAC run at Audio
 1's sample rate and filter clock (DS p.64). Both DACs then convert each
-frame at the same tick. The player turns 4x oversampling off and sets Audio
-2's filter the same way as Audio 1's (`Audio1Filter`). When the device
-closes, it sets 71h bit 1 again, and Audio 2 returns to its own rate.
+frame at the same tick, but not from the same frame: with the same start,
+Linux's driver measured them 1 to 6 frames apart at 44.1 kHz on the laptop,
+which is what `dualwav.py`'s delays below are for. The player turns 4x
+oversampling off and sets Audio 2's filter the same way as Audio 1's
+(`Audio1Filter`). When the device closes, it sets 71h bit 1 again, and Audio
+2 returns to its own rate.
 
-The two DMAs play rings of the same size and start together. Audio 2's DMA
-first fills Audio 2's FIFO while 78h bit 0 is clear. Then, with interrupts
-off, Audio 1 starts (B8h bit 0) and Audio 2's FIFO is connected to its DAC
-(78h bit 0) immediately afterwards. Audio 1's interrupt refills both rings.
-A pause stops both DMAs, and a restart starts both again from where Audio
-1's DMA stopped, with the same start sequence. The frames that the two FIFOs
-held at the pause, up to 256 bytes in Audio 1's, are not played, and the
-DACs stay in step.
+The two DMAs play rings of the same size and start together. Audio 1 starts
+(B8h bit 0) with its channel masked, and once the start settled, with
+interrupts off, its channel is unmasked and Audio 2 starts with one write of
+78h, its DMA and its FIFO to the DAC at once, as Linux's dual start does.
+Audio 1's interrupt refills both rings. A pause stops both DMAs, and a
+restart starts both again from where Audio 1's DMA stopped, with the same
+start sequence. The frames that the two FIFOs held at the pause, up to 256
+bytes in Audio 1's, are not played, and the DACs stay in step.
 
 A program writes the stream to device 1 as 4-channel PCM with 8 or 16 bits,
 at 4000 to 49000 Hz. Programs that use the wave mapper, such as Media
@@ -387,7 +395,8 @@ what Linux's `es18xx` driver (playback2) does, and then what
   silence Audio 2.
 * **Direction.** The data sheet calls for B8h bit 3 = 0 (DAC) and bit 2 = 1
   (auto-initialize). Linux writes B8h = 05h at the start. `build/ES1869.DRV`
-  sets B8h bits 3:0 to 0100b, then bit 0.
+  sets B8h bits 3:0 to 0100b, then bit 0, and like Linux unmasks the DMA
+  channel only after the start settled.
 * **Channels.** The data sheet calls for A8h bits 1:0 = 10 for mono or 01
   for stereo. Linux does the same. `build/ES1869.DRV` does the same with a
   read-modify-write.

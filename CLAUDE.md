@@ -198,6 +198,10 @@ tools/wineshot.sh run ess3d.exe /sim tray
   * ESS's routines that it calls clobber AX, BX, CX, DX and ES, so keep what
     is needed across them. `tests/test_a1play.py` compares what the DMA
     takes with what the program wrote.
+  * Its start holds the channel masked over B8h bit 0 and unmasks it once
+    the start settled (`a1_settle`), as the fronts do; `tests/drvemu.py`
+    loses the start's first byte otherwise (`RACE_POLLS`). Dual playback
+    starts Audio 2 with one write of 78h as Audio 1's channel is unmasked.
 * **VxD extension hooks.** ESS's code changes only under `%if ESSREG_EXT`,
   with instructions of the same length and never an added one, so ESS's code
   keeps its addresses. `EssCodeTest` (`tests/test_vxdext.py`) checks this,
