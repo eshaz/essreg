@@ -302,6 +302,20 @@ stays as low as the ring allows. At 2x every frame of the DMA matches the
 filter's C code on the chip. The driver takes 6.1 % of the Celeron at 44.1
 kHz stereo at 2x, and 9.7 % at 3x.
 
+Measured through a VX Pocket on the Armada, steady playback is as clean at
+2x and 3x as at 1x: THD+N stays within 0.5 dB at 997 Hz and 10 kHz, and the
+noise of a silent stream is the same. What the higher rates give up is
+margin. The chip's 64-byte FIFO lasts 360 us at 1x of 44.1 kHz stereo, 180
+us at 2x and 120 us at 3x. When the DMA can't reach the chip for that long,
+the DAC stops until it can, and the sound comes that much later: nothing is
+lost, and the stream's position doesn't move. At 3x that came to 5 stalls in
+100 s, of 30 to 450 us, with nothing writing to the disk, and 15 in 80 s
+with a recording going to it, the worst a stretch of about 45 ms of stops
+and starts. 2x stalled 3 times in 80 s, and 1x not in 20 s. The stalls come
+about every 5.1 s, which looks like the kernel's writeback reaching the disk
+on the PIIX4's IDE channel, though that isn't proven. Turning C2 off makes
+no difference.
+
 With its stages off, the DAC holds each sample for a whole sample period,
 and each sample keeps about 6 % of the one before
 ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter)).

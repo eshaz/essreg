@@ -35,7 +35,7 @@
 #define SIM_MASTER_PPB 880 // the master clock against the raw system clock
 
 struct sim {
-	unsigned int faults;
+	unsigned long long faults;
 	double now;
 	long val[256][2];
 	int lost52; // SIM_RESUME: 52h at 0 in the chip since a resume
@@ -415,6 +415,15 @@ static const struct et_stream *sim_resampled(const struct et_stream *a2,
 	made = sim_rs_parts(a2->data, a2->frames, a2->fmt.channels, parts, np,
 			    &out.frames);
 	out.fmt.rate *= parts[0].over;
+	if ((sim.faults & SIM_RS_NOISE) && parts[0].over > 1) {
+		unsigned int seed = 1, ch = a2->fmt.channels;
+		unsigned long k;
+
+		for (k = 0; k < out.frames * ch; k++) {
+			seed = seed * 1103515245 + 12345;
+			made[k] += (short)(seed >> 22 & 255) - 128;
+		}
+	}
 	if (sim.faults & (SIM_RS_SEAM | SIM_RS_IMAGE)) {
 		unsigned int ch = a2->fmt.channels;
 		unsigned long k;
@@ -1257,7 +1266,7 @@ static void sim_sleep(void *ctx, double s)
 	sim.now += s;
 }
 
-struct et_hal *et_hal_sim(unsigned int faults)
+struct et_hal *et_hal_sim(unsigned long long faults)
 {
 	static struct et_hal h = {
 		.name = "simulated",

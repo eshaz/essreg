@@ -41,6 +41,7 @@ FN(c_rs_dither)
 FN(c_rs_live)
 FN(c_dac_over)
 FN(c_dac_over_live)
+FN(c_dac_quality)
 FN(c_rs_pause)
 FN(c_rs_drain)
 FN(c_rs_runout)
@@ -325,6 +326,8 @@ const struct et_case et_cases[] = {
 	     "the same on 768 kHz's divisors, which stop at 2x here")
 	CASE("dac.over.live", R | N | ET_ROOT, c_dac_over_live, 0,
 	     "the same under a playing stream with MPD's buffer")
+	CASE("dac.over.quality", R | N | ET_ROOT, c_dac_quality, 0,
+	     "distortion and noise at each rate, against the same chain at 1x")
 	CASE("dac.corner.11025", N, c_dac_corner, 0,
 	     "Audio 2's filter corner at 11025 Hz, from the driver's 72h")
 	CASE("dac.corner.22050", N, c_dac_corner, 1, "the same at 22050 Hz")

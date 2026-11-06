@@ -99,7 +99,7 @@ struct et_hal {
 #define ET_DB_MUTE (-9999999)
 
 struct et_hal *et_hal_alsa(const char *rec2);
-struct et_hal *et_hal_sim(unsigned int faults);
+struct et_hal *et_hal_sim(unsigned long long faults);
 // the command that loads the driver again, its parameters appended; NULL
 // for modprobe
 void et_hal_alsa_reload_cmd(const char *cmd);
@@ -144,6 +144,7 @@ int et_klog_fault(const char *msg);
 #define SIM_RS_REAL_TIME 0x10000000 // the Clock mode misses the steered clock
 #define SIM_RS_TREBLE 0x20000000 // the hold's correction does nothing
 #define SIM_RS_OVER 0x40000000 // the ring stays at the stream's rate
+#define SIM_RS_NOISE 0x100000000ULL // the ring gets noise above 1x
 #define SIM_MIXER 0x80000000u // the record level's scale moves with the source,
 			      // the ADC's list holds its own value, and the
 			      // PC speaker doesn't hear the master

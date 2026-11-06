@@ -404,7 +404,7 @@ int main(int argc, char **argv)
 	struct et_ctx c = { .outdir = ".", .max_out = -20 };
 	const char *rec2 = NULL;
 	int sim = 0, restore = 0, list = 0, need_rec2 = 0, opt, i;
-	unsigned int faults = 0;
+	unsigned long long faults = 0;
 	int compared, moved;
 	int counts[5] = { 0 };
 	struct utsname un;
@@ -452,7 +452,7 @@ int main(int argc, char **argv)
 			break;
 		case 's':
 			sim = 1;
-			faults = optarg ? strtoul(optarg, NULL, 0) : 0;
+			faults = optarg ? strtoull(optarg, NULL, 0) : 0;
 			break;
 		case 'R':
 			restore = 1;

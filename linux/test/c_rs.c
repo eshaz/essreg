@@ -1416,3 +1416,119 @@ enum et_result c_dac_over_live(struct et_ctx *c, const struct et_case *k)
 	free(d);
 	return ET_PASS;
 }
+
+#define DAC_PIECES 4 // of a take, 0.5 s each, so that a stall spoils only one
+
+static int dac_cmp(const void *a, const void *b)
+{
+	double u = *(const double *)a, v = *(const double *)b;
+
+	return u < v ? -1 : u > v;
+}
+
+// a tone's THD+N through the second card, the median of its pieces, with
+// how many are over 10 dB worse in *stalled, or with hz 0 what a silent
+// stream leaves, in dB and dBFS. The DAC stops when the DMA can't reach it for
+// as long as its FIFO lasts, and a tone that comes late fits no one sine
+static int dac_take(struct et_ctx *c, const struct et_fmt *f, double hz,
+		    double *out, int *stalled)
+{
+	unsigned long n = 3 * f->rate;
+	void *d = dac_tones(f, n, &hz, hz > 0, 8000);
+	struct et_stream s[2];
+	double *x, v[DAC_PIECES];
+	int i;
+
+	s[0] = et_play(ET_A2, f, d, n, 0);
+	s[0].flags = ET_HOLD;
+	s[1] = et_rec(ET_REC2, &et_rec2_fmt, 2 * 48000, 0.5);
+	if (et_run(c, s, 2)) {
+		free(s[1].data);
+		free(d);
+		return -1;
+	}
+	x = et_chan(&et_rec2_fmt, s[1].data, s[1].done, 0);
+	if (hz > 0) {
+		long len = s[1].done / DAC_PIECES;
+
+		for (i = 0; i < DAC_PIECES; i++) {
+			double f0 = an_pitch(x + i * len, len, 48000, hz);
+
+			v[i] = an_thdn(x + i * len, len, 48000, f0 > 0 ? f0 : hz, 100,
+				       20000);
+		}
+		qsort(v, DAC_PIECES, sizeof(v[0]), dac_cmp);
+		*out = (v[DAC_PIECES / 2 - 1] + v[DAC_PIECES / 2]) / 2;
+		for (i = 0; i < DAC_PIECES; i++)
+			*stalled += v[i] > *out + 10;
+	} else {
+		*out = an_dbfs(an_rms(x, s[1].done, 1));
+	}
+	if (s[0].xruns || s[1].xruns)
+		et_note(c, "%.0f Hz: xruns %u playing, %u recording", hz, s[0].xruns,
+			s[1].xruns);
+	free(x);
+	free(s[1].data);
+	free(d);
+	return 0;
+}
+
+// dac.over.quality: what the higher rates do to the sound. The second card's
+// own distortion sets the numbers, so they count against the same chain at 1x:
+// each rate has to be as clean as that, within 1 dB. The noise moves from take
+// to take at any rate, so it is the quietest of three takes. A stall doesn't
+// count against the rate here: it is the bus's, and it is reported apart
+enum et_result c_dac_quality(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	static const struct {
+		const char *name;
+		double hz;
+		int takes;
+	} t[3] = {
+		{ "THD+N at 997 Hz", 997, 1 },
+		{ "THD+N at 10 kHz", 10000, 1 },
+		{ "noise of a silent stream", 0, 3 },
+	};
+	double base[3] = { 0, 0, 0 };
+	int r, i, take;
+
+	(void)k;
+	if (dac_setup(c) < 0)
+		return ET_ERROR;
+	for (r = 0; r < 3; r++) {
+		char name[64];
+		int stalled = 0;
+
+		rs_ring_over = r + 1;
+		if (rs_mode(c, RS_OFF, 0)) {
+			rs_ring_over = 1;
+			return ET_ERROR;
+		}
+		rs_ring_over = 1;
+		for (i = 0; i < 3; i++) {
+			double v = 200;
+
+			for (take = 0; take < t[i].takes; take++) {
+				double w;
+
+				if (dac_take(c, &f, t[i].hz, &w, &stalled))
+					return ET_ERROR;
+				if (w < v)
+					v = w;
+			}
+			snprintf(name, sizeof(name), "%s, %dx", t[i].name, r + 1);
+			et_measure(c, name, v, i == 2 ? "dBFS" : "dB", 1, 0);
+			if (!r) {
+				base[i] = v;
+			} else {
+				snprintf(name, sizeof(name), "%s, %dx against 1x",
+					 t[i].name, r + 1);
+				et_measure(c, name, v - base[i], "dB", -40, 1);
+			}
+		}
+		snprintf(name, sizeof(name), "pieces with a stall of 8, %dx", r + 1);
+		et_measure(c, name, stalled, "", 1, 0);
+	}
+	return ET_PASS;
+}
