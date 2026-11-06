@@ -338,7 +338,8 @@ class ChipCard(Card):
         self.chip.pnp[(None, 0x24)] = pins[2] | pins[3] << 4
         if mpu is not None:             # the MPU-401 as the BIOS left it
             self.chip.mpu = mpu
-            regs = dict(LAPTOP_MPU, **{(None, 0x27): irq, (None, 0x28): irq})
+            regs = dict(LAPTOP_MPU)
+            regs[(None, 0x27)] = regs[(None, 0x28)] = irq
             regs.update(mpu_regs or {})
             for key, v in regs.items():
                 if isinstance(key, int):

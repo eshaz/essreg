@@ -2,9 +2,9 @@
  * essprobe's measurements of the ES1869 itself, without a front: Audio 1
  * and Audio 2 in each of their modes, both at once, the resets, the DMA
  * controllers behind the memory manager, what the engines do to the rest
- * of the machine, a game's refills behind the DMA, and recordings under
- * the PIIX4's Type F DMA timing, which only run when asked for by name
- * (typef, which can stop the machine). Each case is a line
+ * of the machine, a game's refills behind the DMA, the MPU-401, and
+ * recordings under the PIIX4's Type F DMA timing, which only run when
+ * asked for by name (typef, which can stop the machine). Each case is a line
  * of a table, a spec of keys over its group's base case, so that a line
  * names one combination. The report gives each case's measurements and,
  * in a recorded run, when its DTMF marker and its sound played, which
@@ -50,7 +50,8 @@
 #define ESP_G_FIX 0x0100    // which start keeps a 16-bit stream in step
 #define ESP_G_LVL 0x0200    // full scale at the top levels: where it clips
 #define ESP_G_TYPEF 0x0400  // recordings under the PIIX4's Type F timing
-#define ESP_G_ALL 0x07FF
+#define ESP_G_MPU 0x0800    // the MPU-401: its setup, interrupt and a loop
+#define ESP_G_ALL 0x0FFF
 #define ESP_G_OPTIN ESP_G_TYPEF // only when named, as in /C:typef
 
 // esp_card.flags

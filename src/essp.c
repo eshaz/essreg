@@ -658,6 +658,13 @@ static volatile u32 t2a, t2b;  // and of Audio 2's
 static volatile u8 ack1, ack2; // the handler acknowledges them
 static volatile u16 nother;    // the card's line, from neither
 static volatile u8 irq_ready;  // the handler may touch the chip
+static u16 mpu;                // the MPU-401's base (LDN 1 64h, 65h), 0: off
+static volatile u16 nmpu;      // the MPU-401's interrupts (Config_Base+6
+static volatile u8 mpu_st;     // bit 3), +6 at the first of them, and after
+static volatile u8 mpu_after;  // the handler read the bytes
+static volatile u32 mpu_ta, mpu_tb; // the first and the last of them
+static volatile u8 mpu_in[96];      // the bytes the handler read
+static volatile u16 mpu_n;
 
 void esp_irq(void) {
   u8 st, idx, v;
@@ -689,7 +696,23 @@ void esp_irq(void) {
     }
     H->outb((u16)(B + 4), idx);
   }
-  if (!(st & 0x03))
+  // the MPU-401's request: its bytes read until it has none, so that the
+  // shared line drops (Config_Base+6 bit 3, through mixer 64h bit 6)
+  if ((st & 0x08) && mpu) {
+    if (!nmpu) {
+      mpu_st = st;
+      mpu_ta = t;
+    }
+    mpu_tb = t;
+    nmpu++;
+    for (idx = 0; idx < 16 && !(H->inb((u16)(mpu + 1)) & 0x80); idx++) {
+      v = H->inb(mpu);
+      if (mpu_n < sizeof(mpu_in))
+        mpu_in[mpu_n++] = v;
+    }
+    mpu_after = H->inb((u16)(cfg + 6));
+  }
+  if (!(st & 0x0B))
     nother++;
 }
 
@@ -697,6 +720,9 @@ static void irq_clear(void) {
   H->lock();
   n1 = n2 = nother = 0;
   t1a = t1b = t2a = t2b = 0;
+  nmpu = mpu_n = 0;
+  mpu_st = mpu_after = 0;
+  mpu_ta = mpu_tb = 0;
   H->unlock();
 }
 
@@ -728,7 +754,8 @@ enum {
   RUN_MIRROR,  // the same through a channel carried over, as esssb16 does
   RUN_MASK,    // when a program's mask and unmask reach the 8237's mask
   RUN_PACE,    // the same with esssb16's pace on the game's channel
-  RUN_TYPEF    // a recording under the PIIX4's Type F timing
+  RUN_TYPEF,   // a recording under the PIIX4's Type F timing
+  RUN_MPU      // the MPU-401 (k: what of it)
 };
 
 #define E1 0x01 // Audio 1
@@ -991,6 +1018,19 @@ static const struct ecase cases[] = {
     {"lvl.unity", "v1=238 m=63 S", "clean"},
     {"lvl.a1top", "v1=255 m=63 S", "clean"},
     {"lvl.a1gain", "v1=255 m=56 S", "clean"},
+    // the MPU-401 at its base in LDN 1 (64h, 65h), never turned on: its
+    // setup, the acknowledges of FFh and 3Fh, its interrupt with Linux's
+    // settings (28h, mixer 64h bit 6, Config_Base+7 bit 3) and with each
+    // mask off, then MIDI out to MIDI in through a loopback cable, polled
+    // and by interrupt
+    {"mpu.cfg", "run=mpu k=0 S", "-"},
+    {"mpu.reset", "run=mpu k=1", "-"},
+    {"mpu.uart", "run=mpu k=2", "-"},
+    {"mpu.irq", "run=mpu k=3", "-"},
+    {"mpu.irq_64off", "run=mpu k=4", "-"},
+    {"mpu.irq_7off", "run=mpu k=5", "-"},
+    {"mpu.loop", "run=mpu k=6", "-"},
+    {"mpu.loopi", "run=mpu k=7", "-"},
     // Audio 1 records 16-bit stereo at 44100 Hz under the PIIX4's Type F
     // timing, which stopped the Armada under Linux: only when named
     // (/C:typef), the safest first. m54 is the 8237 in single mode, as DOS
@@ -1075,7 +1115,7 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
     static const char *const runs[] = {
         "play",   "machine", "card", "mixer", "dma",   "rst",
         "reach",  "read",    "ff",   "cross", "stale", "load",
-        "stream", "mirror",  "mask", "pace",  "typef"};
+        "stream", "mirror",  "mask", "pace",  "typef", "mpu"};
     unsigned i;
     for (i = 0; i < ESS_ARRAY_SIZE(runs); i++)
       if (!strcmp(v, runs[i]))
@@ -1951,6 +1991,11 @@ static int find_card(void) {
     irq = (u8)(v & 0x0F);
     dma1 = (u8)(pnp_r(1, 0x74) & 0x07);
     dma2 = (u8)(pnp_r(1, 0x75) & 0x07);
+    // the MPU-401's base, if the BIOS gave it one in LDN 1 (card 25h bit 0
+    // clear: no LDN of its own)
+    mpu = 0;
+    if (!(pnp_r(0xFF, 0x25) & 0x01))
+      mpu = (u16)(((pnp_r(1, 0x64) & 0x0F) << 8) | (pnp_r(1, 0x65) & 0xFC));
     for (i = 0; i < 2; i++) {
       v = pnp_r(0xFF, (u8)(0x23 + i));
       pins[2 * i] = (u8)(v & 0x0F);
@@ -1973,8 +2018,8 @@ static void run_machine(const struct ecase *c) {
 static void run_card(const struct ecase *c) {
   static const u8 card_regs[] = {0x20, 0x21, 0x22, 0x23, 0x24,
                                  0x25, 0x26, 0x27, 0x28};
-  static const u8 ldn_regs[] = {0x30, 0x60, 0x61, 0x62, 0x63, 0x70,
-                                0x71, 0x72, 0x73, 0x74, 0x75};
+  static const u8 ldn_regs[] = {0x30, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65,
+                                0x70, 0x71, 0x72, 0x73, 0x74, 0x75};
   int e7a, e7b, va, vb;
   char *q;
   u16 i;
@@ -2918,12 +2963,320 @@ static void run_typef(const struct ecase *c, const struct pc *p) {
   res(c->id, ok ? R_PASS : R_FAIL, "%s; %s", line, tf);
 }
 
+// --- the MPU-401
+// ---------------------------------------------------------------
+
+#define MPU_ACK 0xFE
+
+// MIDI out for the loop: note on and off on channel 16, with running
+// status, then a SysEx of the non-commercial ID 7Dh with 64 data bytes
+static const u8 mpu_msg[] = {
+    0x9F, 0x3C, 0x40, 0x3E, 0x40, 0x8F, 0x3C, 0x00, 0x3E, 0x00, 0xF0,
+    0x7D, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+    0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14,
+    0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
+    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A,
+    0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35,
+    0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0xF7};
+
+static u8 mpu_status(void) { return H->inb((u16)(mpu + 1)); }
+
+// the bytes that wait, read: how many
+static u16 mpu_drain(void) {
+  u16 n = 0;
+
+  while (n < 64 && !(mpu_status() & 0x80)) {
+    H->inb(mpu);
+    n++;
+  }
+  return n;
+}
+
+// a command to base+1 once it takes one, then its acknowledge: the us
+// until FEh came, or -1 without it in 20 ms; polls gets the status reads
+// it took, as Linux's driver counts them (10,000 at most)
+static long mpu_cmd(u8 cmd, u16 *polls) {
+  u32 t0 = H->now(), lim = tk(20000);
+  u16 n = 0;
+
+  while (mpu_status() & 0x40)
+    if (since(t0) > lim)
+      return -1;
+  H->outb((u16)(mpu + 1), cmd);
+  t0 = H->now();
+  for (;;) {
+    if (n < 0xFFFF)
+      n++;
+    if (!(mpu_status() & 0x80) && H->inb(mpu) == MPU_ACK)
+      break;
+    if (since(t0) > lim) {
+      *polls = n;
+      return -1;
+    }
+  }
+  *polls = n;
+  return (long)us_of(since(t0));
+}
+
+// Smart mode, as the MPU-401 starts: FFh, which UART mode doesn't
+// acknowledge, then FFh again, which Smart mode does
+static long mpu_smart(void) {
+  u16 polls;
+
+  mpu_drain();
+  mpu_cmd(0xFF, &polls);
+  mpu_drain();
+  return mpu_cmd(0xFF, &polls);
+}
+
+// Linux's settings for the MPU-401's interrupt: card 28h at the audio IRQ,
+// mixer 64h bit 6 and Config_Base+7 bit 3 on (or off where asked); old
+// gets what was there
+static void mpu_irq_on(int m64, int m7, u8 *old) {
+  old[0] = (u8)pnp_r(0xFF, 0x28);
+  old[1] = mix_r(0x64);
+  old[2] = cfg_r(7);
+  if ((old[0] & 0x0F) != irq)
+    pnp_w(0x28, irq);
+  mix_w(0x64, (u8)(m64 ? old[1] | 0x40 : old[1] & ~0x40));
+  cfg_w(7, (u8)(m7 ? old[2] | 0x08 : old[2] & ~0x08));
+}
+
+// the same put back, the bytes that wait read first
+static void mpu_irq_back(const u8 *old) {
+  mix_w(0x64, (u8)(old[1] & ~0x40));
+  mpu_drain();
+  cfg_w(7, old[2]);
+  mix_w(0x64, old[1]);
+  if ((old[0] & 0x0F) != irq)
+    pnp_w(0x28, old[0]);
+}
+
+// how the loop went, into q: 0 nothing came back, 1 all of it in order,
+// 2 something else
+static int mpu_compare(char *q, const volatile u8 *in, u16 n) {
+  u16 i;
+
+  if (!n) {
+    strcpy(q, "nothing came back: no loopback cable, or MIDI out doesn't "
+              "leave the machine");
+    return 0;
+  }
+  for (i = 0; i < n && i < sizeof(mpu_msg); i++)
+    if (in[i] != mpu_msg[i])
+      break;
+  if (i == n && n == sizeof(mpu_msg)) {
+    sprintf(q, "all %u bytes came back in order", n);
+    return 1;
+  }
+  sprintf(q, "%u of %u bytes came back, the first %u in order", n,
+          (u16)sizeof(mpu_msg), i);
+  if (i < n)
+    sprintf(q + strlen(q), ", then %02X for %02X", in[i],
+            i < sizeof(mpu_msg) ? mpu_msg[i] : 0);
+  return 2;
+}
+
+// the MPU-401's setup as found, with what es18xx makes of it
+static void mpu_cfg(const struct ecase *c) {
+  int v25 = pnp_r(0xFF, 0x25);
+
+  res(c->id, R_INFO,
+      "Config_Base %Xh (mixer 40h's third and fourth reads); card 25h=%02X "
+      "(MPU-401 %s), 27h=%02X, 28h=%02X (its IRQ)",
+      cfg, v25, (v25 & 1) ? "in LDN 3" : "in LDN 1, on the audio IRQ",
+      pnp_r(0xFF, 0x27), pnp_r(0xFF, 0x28));
+  res(c->id, R_INFO,
+      "ldn1 30h=%02X 64h=%02X 65h=%02X (MPU-401 at %Xh) 70h=%02X; mixer "
+      "64h=%02X (bit 6, its IRQ mask: %s); config +5=%02X +6=%02X +7=%02X "
+      "(bit 3, its IRQ mask: %s); status %02X",
+      pnp_r(1, 0x30), pnp_r(1, 0x64), pnp_r(1, 0x65), mpu, pnp_r(1, 0x70),
+      mix_r(0x64), (mix_r(0x64) & 0x40) ? "on" : "off", cfg_r(5), cfg_r(6),
+      cfg_r(7), (cfg_r(7) & 0x08) ? "on" : "off", mpu ? mpu_status() : 0xFF);
+}
+
+// k=1: FFh in Smart mode, and its acknowledge; k=2: 3Fh, UART mode
+static void mpu_ack(const struct ecase *c, u8 cmd) {
+  long us;
+  u16 polls = 0;
+
+  mpu_smart();
+  us = mpu_cmd(cmd, &polls);
+  if (cmd == 0x3F)
+    mpu_smart();
+  if (us < 0)
+    res(c->id, R_FAIL, "%02Xh: no acknowledge in 20 ms (%u status reads)", cmd,
+        polls);
+  else
+    res(c->id, polls <= 10000 ? R_PASS : R_FAIL,
+        "%02Xh: FEh after %ld us, %u status read%s (Linux reads 10,000 at "
+        "most)",
+        cmd, us, polls, polls == 1 ? "" : "s");
+}
+
+// k=3, 4, 5: FFh's acknowledge as the request, with both masks on, 64h
+// bit 6 off, or Config_Base+7 bit 3 off
+static void mpu_irq(const struct ecase *c, u8 k) {
+  u8 old[3], seen;
+  u32 t0;
+  int ok;
+
+  mpu_smart();
+  mpu_irq_on(k != 4, k != 5, old);
+  irq_clear();
+  H->outb((u16)(mpu + 1), 0xFF);
+  t0 = H->now();
+  while (!nmpu && since(t0) < tk(20000))
+    H->idle();
+  seen = cfg_r(6);
+  if (k == 3)
+    ok = nmpu && (mpu_st & 0x08) && !(mpu_after & 0x08) && mpu_n &&
+         mpu_in[0] == MPU_ACK;
+  else
+    ok = !nmpu && (k == 4 ? !(seen & 0x08) : (seen & 0x08) != 0);
+  if (nmpu)
+    res(c->id, ok ? R_PASS : R_FAIL,
+        "%u interrupt%s, the first %lu us after FFh, Config_Base+6 %02X at it "
+        "and %02X after the handler read %u byte%s (%02X)",
+        nmpu, nmpu == 1 ? "" : "s", (unsigned long)us_of(mpu_ta - t0), mpu_st,
+        mpu_after, mpu_n, mpu_n == 1 ? "" : "s", mpu_in[0]);
+  else
+    res(c->id, ok ? R_PASS : R_FAIL,
+        "no interrupt in 20 ms, Config_Base+6 %02X with the byte waiting "
+        "(status %02X)",
+        seen, mpu_status());
+  mpu_irq_back(old);
+  mpu_smart();
+}
+
+// k=6, 7: MIDI out through the loopback cable to MIDI in, in UART mode,
+// the bytes read as they come, with the MPU-401's interrupt off (polled),
+// or by the handler, with Linux's settings for the interrupt
+static void mpu_loop(const struct ecase *c, u8 k) {
+  static u8 in[sizeof(mpu_msg)];
+  static char q[120];
+  u8 old[3];
+  u16 polls, n = 0, i;
+  u32 t0, tw = 0, tl = 0, tf = 0, ts, w;
+  long us;
+  int r;
+
+  mpu_smart();
+  us = mpu_cmd(0x3F, &polls);
+  if (us < 0) {
+    res(c->id, R_FAIL, "3Fh: no acknowledge, so no UART mode");
+    return;
+  }
+  mpu_irq_on(k == 7, k == 7, old);
+  irq_clear();
+  t0 = H->now();
+  for (i = 0; i < sizeof(mpu_msg); i++) {
+    w = H->now();
+    while (mpu_status() & 0x40) {
+      if (k == 6)
+        while (n < sizeof(in) && !(mpu_status() & 0x80)) {
+          if (!n)
+            tf = H->now();
+          in[n++] = (u8)H->inb(mpu);
+          tl = H->now();
+        }
+      if (since(w) > tk(20000))
+        break;
+    }
+    if (since(w) > tw)
+      tw = since(w);
+    H->outb(mpu, mpu_msg[i]);
+  }
+  ts = since(t0);
+  w = H->now(); // the rest, and 20 ms of nothing
+  while (since(w) < tk(20000)) {
+    if (k == 6 && n < sizeof(in) && !(mpu_status() & 0x80)) {
+      if (!n)
+        tf = H->now();
+      in[n++] = (u8)H->inb(mpu);
+      tl = w = H->now();
+    } else if (k == 7 && mpu_n && mpu_tb != tl)
+      tl = w = mpu_tb;
+    H->idle();
+  }
+  if (k == 7) {
+    for (i = 0; i < mpu_n && i < sizeof(in); i++)
+      in[i] = mpu_in[i];
+    n = mpu_n;
+    tf = mpu_ta;
+    tl = mpu_tb;
+  }
+  r = mpu_compare(q, in, n);
+  if (n > 1)
+    res(c->id, r == 1 ? R_PASS : R_FAIL,
+        "%s; the first %lu us after the start, then %lu us a byte; out: %u "
+        "bytes in %lu us, %lu us at most for room",
+        q, (unsigned long)us_of(tf - t0),
+        (unsigned long)(us_of(tl - tf) / (n - 1)), (u16)sizeof(mpu_msg),
+        (unsigned long)us_of(ts), (unsigned long)us_of(tw));
+  else
+    res(c->id, n ? R_FAIL : R_INFO,
+        "%s; out: %u bytes in %lu us, %lu us at most for room", q,
+        (u16)sizeof(mpu_msg), (unsigned long)us_of(ts),
+        (unsigned long)us_of(tw));
+  if (k == 7 && nmpu)
+    res(c->id, R_INFO,
+        "%u interrupts for %u bytes, Config_Base+6 %02X at the first and %02X "
+        "after its bytes",
+        nmpu, mpu_n, mpu_st, mpu_after);
+  mpu_irq_back(old);
+  mpu_smart();
+}
+
+static void run_mpu(const struct ecase *c, const struct pc *p) {
+  u8 old64;
+
+  if (!cfg) {
+    res(c->id, R_SKIP, "no Config_Base");
+    return;
+  }
+  if (!mpu) {
+    res(c->id, R_SKIP,
+        "the BIOS left the MPU-401 off (LDN 1 64h and 65h are 0, or card 25h "
+        "bit 0 puts it in LDN 3), and the probe doesn't turn it on");
+    return;
+  }
+  chip_reset(3);
+  // the MPU-401's request off while the case reads its bytes itself, so
+  // that the handler takes no acknowledge; on again only where asked
+  old64 = mix_r(0x64);
+  if (p->kind && (old64 & 0x40))
+    mix_w(0x64, (u8)(old64 & ~0x40));
+  switch (p->kind) {
+  case 0:
+    mpu_cfg(c);
+    break;
+  case 1:
+    mpu_ack(c, 0xFF);
+    break;
+  case 2:
+    mpu_ack(c, 0x3F);
+    break;
+  case 3:
+  case 4:
+  case 5:
+    mpu_irq(c, p->kind);
+    break;
+  default:
+    mpu_loop(c, p->kind);
+    break;
+  }
+  if (p->kind && (old64 & 0x40))
+    mix_w(0x64, old64);
+  chip_reset(3);
+}
+
 // --- the run -----------------------------------------------------------------
 
 static unsigned group_of(const char *id) {
-  static const char *const names[] = {"env",  "rst", "a1",   "a2",
-                                      "both", "h1",  "h4",   "stream",
-                                      "fix",  "lvl", "typef"};
+  static const char *const names[] = {"env",  "rst", "a1",    "a2",
+                                      "both", "h1",  "h4",    "stream",
+                                      "fix",  "lvl", "typef", "mpu"};
   unsigned i, n;
 
   for (i = 0; i < ESS_ARRAY_SIZE(names); i++) {
@@ -3032,6 +3385,9 @@ static void run_case(const struct ecase *c) {
   case RUN_TYPEF:
     run_typef(c, &p);
     break;
+  case RUN_MPU:
+    run_mpu(c, &p);
+    break;
   }
 }
 
@@ -3063,9 +3419,9 @@ static void summary(void) {
 
 int esp_run(const struct esp_hal *hal, const struct esp_card *card,
             unsigned opts, unsigned groups, const char *only) {
-  static const char *const gname[] = {"env",  "rst", "a1",   "a2",
-                                      "both", "h1",  "h4",   "stream",
-                                      "fix",  "lvl", "typef"};
+  static const char *const gname[] = {"env",  "rst", "a1",    "a2",
+                                      "both", "h1",  "h4",    "stream",
+                                      "fix",  "lvl", "typef", "mpu"};
   static const char *const gwhat[] = {
       "the machine and the card",
       "what each reset clears",
@@ -3078,7 +3434,9 @@ int esp_run(const struct esp_hal *hal, const struct esp_card *card,
       "which start keeps a 16-bit stream in step",
       "full scale at the top levels: where the chip clips",
       "recordings under the PIIX4's Type F timing, which can stop the "
-      "machine"};
+      "machine",
+      "the MPU-401: its setup, its interrupt, and MIDI through a loopback "
+      "cable"};
   u16 i;
   unsigned g, last_g = 0;
   int v, loud = 0, asked = 0, skip = 0;

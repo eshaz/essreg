@@ -60,10 +60,10 @@ SRC = os.path.join(ROOT, "src")
 EXE = os.path.join(ROOT, "build", "essprobe.exe")
 AREA = 0x40000              # the DMA area, 64 KB in one page
 O_RECORD, O_SHORT, O_SILENT, O_TINY = 0x01, 0x02, 0x04, 0x08
-G_ALL = 0x7FF
+G_ALL = 0xFFF
 IDLE_US = 25                # the time an idle() of the cases takes
 GROUPS = ("env", "rst", "a1", "a2", "both", "h1", "h4", "stream", "fix",
-          "lvl")
+          "lvl", "mpu")
 OPTIN = ("typef",)          # only when named
 TYPEF = ["typef.m54_b2", "typef.m54_b0", "typef.m54_b1", "typef.m14_b0",
          "typef.m14_b1", "typef.m14_b2", "typef.m14_hold1",
@@ -328,11 +328,13 @@ class CasesTest(unittest.TestCase):
 @unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
 class ModelTest(unittest.TestCase):
     """every case on the chip model, in real mode: the window is the
-    ports themselves"""
+    ports themselves, and the MPU-401 as the laptop's BIOS leaves it, with
+    a loopback cable"""
 
     @classmethod
     def setUpClass(cls):
-        cls.card = ChipCard()
+        from mpu401 import MPU401
+        cls.card = ChipCard(mpu=MPU401(loop=True))
         cls.before = snapshot(cls.card)
         cls.probe = Run(cls.card)
 
@@ -524,6 +526,88 @@ class TypefTest(unittest.TestCase):
         self.assertIn("no Intel PIIX4 on PCI bus 0",
                       run.text("typef.m14_b2"))
         self.assertEqual(run.results["typef.m14_b2"][0][0], "PASS")
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class MpuTest(unittest.TestCase):
+    """the mpu group as the laptop's BIOS leaves the MPU-401, without a
+    cable, with its IRQ elsewhere, and off"""
+
+    def mpu(self, loop=True, **kw):
+        from mpu401 import MPU401
+        card = ChipCard(mpu=MPU401(loop=loop), **kw)
+        before = snapshot(card)
+        run = Run(card, only="mpu")
+        self.assertEqual(run.errors, [])
+        self.assertEqual(snapshot(card), before)
+        self.assertEqual(run.kept[-1], b"")
+        return run, card
+
+    def test_loop(self):
+        """with the cable every byte comes back, polled and by interrupt,
+        a byte each 320 us, an interrupt each"""
+        run, card = self.mpu()
+        res = run.results
+        self.assertEqual(sorted(res), sorted(
+            ["mpu.cfg", "mpu.reset", "mpu.uart", "mpu.irq", "mpu.irq_64off",
+             "mpu.irq_7off", "mpu.loop", "mpu.loopi"]))
+        self.assertEqual(run.failed, 0)
+        self.assertIn("MPU-401 at 330h", run.text("mpu.cfg"))
+        self.assertIn("25h=80 (MPU-401 in LDN 1, on the audio IRQ)",
+                      run.text("mpu.cfg"))
+        for c in ("mpu.loop", "mpu.loopi"):
+            self.assertRegex(run.text(c), r"all 77 bytes came back in order; "
+                             r"the first 3\d\d us after the start, then "
+                             r"3[12]\d us a byte")
+        self.assertIn("77 interrupts for 77 bytes", run.text("mpu.loopi"))
+        self.assertIn("Config_Base+6 08 at it and 00 after the handler read "
+                      "1 byte (FE)", run.text("mpu.irq"))
+        self.assertEqual(card.chip.mpu.sent[-1][1], 0xF7)
+        self.assertEqual(card.chip.mpu.overruns, 0)
+
+    def test_no_cable(self):
+        """nothing comes back: INFO, not a failure, and the setup, the
+        acknowledges and the interrupt still pass"""
+        run, card = self.mpu(loop=False)
+        self.assertEqual(run.failed, 0)
+        for c in ("mpu.loop", "mpu.loopi"):
+            self.assertEqual(run.results[c][0][0], "INFO")
+            self.assertIn("nothing came back", run.text(c))
+        for c in ("mpu.reset", "mpu.uart", "mpu.irq", "mpu.irq_64off",
+                  "mpu.irq_7off"):
+            self.assertEqual(run.results[c][0][0], "PASS", c)
+        self.assertEqual(len(card.chip.mpu.sent), 2 * 77)
+
+    def test_irq_elsewhere(self):
+        """card 28h on IRQ 7: the interrupt cases take the audio IRQ, as
+        Linux would, and give 28h back"""
+        run, card = self.mpu(mpu_regs={(None, 0x28): 7})
+        self.assertEqual(run.failed, 0)
+        self.assertIn("28h=07 (its IRQ)", run.text("mpu.cfg"))
+        self.assertEqual(card.chip.pnp[(None, 0x28)], 7)
+
+    def test_irq_on_already(self):
+        """mixer 64h bit 6 on from the BIOS: each case turns the request
+        off while it reads the MPU-401 itself, so that the handler takes
+        no acknowledge and the polled loop gets every byte"""
+        from mpu401 import MPU401
+        card = ChipCard(mpu=MPU401(loop=True))
+        card.chip.mixer[0x64] |= 0x40
+        before = snapshot(card)
+        run = Run(card, only="mpu")
+        self.assertEqual(run.failed, 0)
+        self.assertEqual({r for rs in run.results.values() for r, _d in rs},
+                         {"PASS", "INFO"})
+        self.assertIn("mixer 64h=40 (bit 6, its IRQ mask: on)",
+                      run.text("mpu.cfg"))
+        self.assertEqual(snapshot(card), before)
+
+    def test_off(self):
+        """no base in LDN 1: every case skipped, the MPU-401 untouched"""
+        run = Run(ChipCard(), only="mpu")
+        self.assertEqual({r for rs in run.results.values() for r, _d in rs},
+                         {"SKIP"})
+        self.assertIn("the probe doesn't turn it on", run.text("mpu.cfg"))
 
 
 @unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
@@ -1018,6 +1102,22 @@ class ExeTest(unittest.TestCase):
                       "(Type F, DMA 1)", machine)
         self.assertEqual(card.pci.writes(), [])     # it only reads
         self.assertEqual(card.pci.addr, 0)          # and puts CF8h back
+
+    def test_mpu_loop(self):
+        """the mpu group in the program, its handler on the shared IRQ:
+        with the cable everything comes back, polled and by interrupt"""
+        from mpu401 import MPU401
+        card = ChipCard(mpu=MPU401(loop=True))
+        before = snapshot(card)
+        d, code = self.dos(card, "/A /T /C:mpu")
+        self.assertEqual(code, 0, d.output)
+        res = results(self.report(d))
+        self.assertEqual(len(res), 8)
+        self.assertEqual({r for rs in res.values() for r, _d in rs},
+                         {"PASS", "INFO"})
+        for c in ("mpu.loop", "mpu.loopi"):
+            self.assertIn("all 77 bytes came back in order", res[c][0][1])
+        self.assertEqual(snapshot(card), before)
 
     def test_typef_resumed(self):
         """/C:typef /K after a run that stopped in typef.m14_b1: the old

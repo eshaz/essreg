@@ -113,6 +113,12 @@ such as `t2=0` for Audio 2's single transfers.
   full volume FFh and the master's 62, and 1.2 gives EEh and 63
   ([SB16_FRONT.md](SB16_FRONT.md)). `m=` sets the master for the case alone,
   and `amp=` the tone's amplitude. Version 1.8 adds the group.
+* **mpu**: the MPU-401 where the BIOS put it (LDN 1 64h and 65h), never
+  turned on: its setup, how FFh and 3Fh answer, its interrupt with Linux's
+  settings and with each mask off, and MIDI out to MIDI in through a
+  loopback cable, polled and by interrupt. Without a cable, `mpu.loop` and
+  `mpu.loopi` say that nothing came back. [MPU401.md](MPU401.md) explains
+  each line. Version 1.9 adds the group.
 * **typef**: recordings under the Intel PIIX4's Type F DMA timing, which
   stopped the laptop under Linux
   ([ESS_EXTENDED.md](ESS_EXTENDED.md#type-f-dma-on-the-piix4)). Audio 1
@@ -157,6 +163,9 @@ restart`, and so does the screen. `/N` runs without the window.
 * `esssb16` can load right after a run, since it sets the chip up from the
   power-on state that the probe leaves. Only when EMM386 kept the window's
   trap, restart first, because `esssb16` traps that port too.
+* The mpu cases send 77 bytes of MIDI out of the MIDI port, a note on and
+  off on channel 16 and a SysEx with the non-commercial ID 7Dh, and change
+  card 28h, mixer 64h and Config_Base+7 only for the case.
 * The typef cases can stop the machine until a power cycle. They run only
   when named, ask before the first, and write each case's `START` line to
   the disk before its recording starts, so that the report's last line names

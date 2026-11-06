@@ -272,9 +272,11 @@ they find in a folder, `RESULTS`, to send back:
    their folders, as in `ESSCHECK C:\PW C:\PD C:\AP`.
 
 It keeps the memory as `MEM` shows it, `CONFIG.SYS`, `AUTOEXEC.BAT`,
-`DOSSTART.BAT` and the environment, then runs `essprobe` on the chip: a
-game's refills behind the DMA count, on DMA 5 as `esssb16` plays it under
-EMM386, recorded when you press R and then Enter at the level tone. Where
+`DOSSTART.BAT` and the environment, then runs `essprobe` on the chip: the
+machine's lines, a game's refills behind the DMA count, on DMA 5 as
+`esssb16` plays it under EMM386, the full-scale tones, and the MPU-401, with
+MIDI out to MIDI in through a loopback cable if one is plugged in first,
+recorded when you press R and then Enter at the level tone. Where
 `essprobe`'s report is there from a run before, S goes on without it, and R
 runs it again. It loads HDPMI32i and `esssb16`, shows what `esssb16` said,
 stops if it didn't load, keeps the memory again and runs `sb16test`'s
