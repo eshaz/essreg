@@ -1,49 +1,49 @@
-es1869test 0.1 on armada 6.18.57-gentoo-armada, Thu Nov  5 13:00:09 2026
+es1869test 0.1 on armada 6.18.57-gentoo-armada, Fri Nov  6 09:40:20 2026
 machine: alsa
 case cal.rec2: the second card hears the left output through the cable
-    441 Hz, left                     -15.8341 dBFS  (-60 to -1)
-    661.5 Hz, right                  -55.0017 dBFS
-    noise                            -64.6693 dBFS
-    clock against the chip           -28.2503 ppm
+    441 Hz, left                     -15.8141 dBFS  (-60 to -1)
+    661.5 Hz, right                  -55.1128 dBFS
+    noise                            -69.3758 dBFS
+    clock against the chip           -20.1984 ppm
     the second card hears the left output, -3.8 dB
-  PASS (3.6 s)
+  PASS (3.7 s)
 case cal.linear: the second card's level, a tone 6 dB a step at fixed volumes
-    -0 dB: -16.14 dBFS, +0.00 dB off
-    -6 dB: -22.08 dBFS, +0.08 dB off
-    -12 dB: -28.11 dBFS, +0.08 dB off
-    -18 dB: -34.11 dBFS, +0.10 dB off
-    -24 dB: -40.09 dBFS, +0.14 dB off
-    -30 dB: -46.05 dBFS, +0.20 dB off
-    worst 6 dB step through the cable     0.200579 dB
-  PASS (9.3 s)
+    -0 dB: -16.11 dBFS, +0.00 dB off
+    -6 dB: -22.07 dBFS, +0.05 dB off
+    -12 dB: -28.09 dBFS, +0.06 dB off
+    -18 dB: -34.09 dBFS, +0.08 dB off
+    -24 dB: -40.07 dBFS, +0.12 dB off
+    -30 dB: -46.00 dBFS, +0.21 dB off
+    worst 6 dB step through the cable     0.212298 dB
+  PASS (9.4 s)
 case clock.families: the 768 kHz clock against the 793.8 kHz one
-    768 kHz against 793.8 kHz         251.955 ppm  (-3000 to 3000)
-  PASS (7.2 s)
+    768 kHz against 793.8 kHz         251.948 ppm  (-3000 to 3000)
+  PASS (7.3 s)
 case clock.fm: the FM's clock against the 793.8 kHz one
     the FM's clock against 793.8 kHz      2081.82 ppm  (-3000 to 3000)
-  KNOWN (6.6 s): the FM's clock runs +2082 ppm of 49716 Hz against 793.8 kHz
+  KNOWN (6.7 s): the FM's clock runs +2082 ppm of 49716 Hz against 793.8 kHz
 case clock.system: the 793.8 kHz clock against the system's
-    793.8 kHz against the system's raw clock        1.275 ppm  (-100 to 100)
-    the steered clock against the raw one       30.224 ppm  (-500 to 500)
+    793.8 kHz against the system's raw clock        1.191 ppm  (-100 to 100)
+    the steered clock against the raw one       28.835 ppm  (-500 to 500)
   PASS (30.8 s)
 case probe.card: the PCM devices, the proc file, the register hwdep, settings.def
     PCM devices                             4 of 4  (4 to 4)
     7Ch against its control                 0   (0 to 0)
   PASS (0.0 s)
 case probe.controls: every control as settings.def has it, its parameter agreeing
-    controls as settings.def has them           59   (59 to 59)
+    controls as settings.def has them           78   (78 to 78)
   PASS (0.0 s)
 case probe.alsamixer: the rate correction and the DAC stages in alsamixer's Playback view
-    elements in the Playback view            7   (7 to 7)
-  PASS (0.0 s)
+    elements in their alsamixer views           11   (11 to 11)
+  PASS (0.1 s)
 case probe.params: every parameter readable and in its range
-    parameters                             98   (98 to 98)
+    parameters                             99   (99 to 99)
   PASS (0.0 s)
 case params.rw: a parameter written at runtime moves its control, and back
-    parameters that reach their controls           51   (51 to 51)
-  PASS (1.1 s)
+    parameters that reach their controls           65   (65 to 65)
+  PASS (1.3 s)
 case params.bad: bad values give ERANGE or EINVAL and change nothing
-    parameters that refuse bad values           32   (32 to 32)
+    parameters that refuse bad values           33   (33 to 33)
   PASS (0.0 s)
 case dig.fmt.s16: Audio 2, 16-bit stereo, recorded exactly through the music DAC
     frames missing at the end               0   (0 to 16)
@@ -116,17 +116,17 @@ case dig.pause: a pause resumes on the next frame
     frames missing at the end               0   (0 to 16)
     the release against the pause           -3 frames  (-16 to 16)
     xruns                                   0   (0 to 0)
-    pause, idle frames                  19863   (14914.8 to 29829.6)
+    pause, idle frames                  19864   (14914.8 to 29829.6)
   KNOWN (3.7 s): 0 frames missing at the start, 0 at the end, a release -3 frames from its pause
 case dig.mmap: every frame through mmap
     frames missing at the end               0   (0 to 16)
     xruns                                   0   (0 to 0)
   PASS (4.4 s)
 case dig.dmix: every frame through dmix
-    frames missing at the start           333   (0 to 513)
+    frames missing at the start           328   (0 to 513)
     frames missing at the end               0   (0 to 16)
     xruns                                   0   (0 to 0)
-  KNOWN (4.4 s): 333 frames missing at the start, 0 at the end, a release +0 frames from its pause
+  KNOWN (4.4 s): 328 frames missing at the start, 0 at the end, a release +0 frames from its pause
 case dig.drain.full: a drain that begins with the buffer nearly full: idle frames after it
     frames missing at the end               0   (0 to 16)
     xruns                                   0   (0 to 0)
@@ -138,17 +138,17 @@ case dig.drain.two: a drain with two periods in the buffer: idle frames after it
 case dig.two: two periods in the buffer, polled as JACK does it, every frame
     frames missing at the end               0   (0 to 16)
     xruns                                   0   (0 to 0)
-  PASS (4.4 s)
+  PASS (4.3 s)
 case dig.trim: the rate correction: a2_trim_ppb moves the samples' pitch, cleanly
     the pitch's change                   1000 ppm  (999.9 to 1000.1)
     THD+N                            -89.9794 dB  (-200 to -75)
     glitches                                0   (0 to 0)
-  PASS (23.4 s)
+  PASS (24.0 s)
 case dig.trim.mono: the same in mono
     the pitch's change                   1000 ppm  (999.9 to 1000.1)
     THD+N                            -89.9794 dB  (-200 to -75)
     glitches                                0   (0 to 0)
-  PASS (23.2 s)
+  PASS (23.3 s)
 case dig.trim.two: the same with two periods in the buffer, polled as JACK does it
     the pitch's change                   1000 ppm  (999.9 to 1000.1)
     THD+N                            -89.9794 dB  (-200 to -75)
@@ -158,21 +158,21 @@ case dig.trim.down: the same, down by as much
     the pitch's change                  -1000 ppm  (-1000.1 to -999.9)
     THD+N                            -90.0053 dB  (-200 to -75)
     glitches                                0   (0 to 0)
-  PASS (24.7 s)
+  PASS (23.3 s)
 case dig.trim.48: the same at 48 kHz
     the pitch's change                   1000 ppm  (999.9 to 1000.1)
     THD+N                            -90.0321 dB  (-200 to -75)
     glitches                                0   (0 to 0)
-  PASS (24.5 s)
+  PASS (24.0 s)
 case dig.trim.exact: the rate correction with nothing to correct: every frame as it was
     frames missing at the end               0   (0 to 16)
     xruns                                   0   (0 to 0)
   PASS (3.3 s)
 case dig.clock: the Clock mode at 48 kHz: the samples follow the clock it measures
-    the pitch's change, less the clock     -251.951 ppm  (-254.95 to -248.95)
-    THD+N                            -89.9735 dB  (-200 to -75)
+    the pitch's change, less the clock     -251.952 ppm  (-254.95 to -248.95)
+    THD+N                            -90.0285 dB  (-200 to -75)
     glitches                                0   (0 to 0)
-  PASS (28.1 s)
+  PASS (28.6 s)
 case rs.exact: every frame the DMA took, +1000 ppm, is the filter's C code's
     the frames lost at the start            0   (0 to 16)
     the frames compared                176174   (172651 to 176174)
@@ -182,7 +182,7 @@ case rs.exact.down: the same, -1000 ppm
     the frames lost at the start            0   (0 to 16)
     the frames compared                176527   (172996 to 176527)
     the frames that differ                  0   (0 to 0)
-  PASS (5.6 s)
+  PASS (5.5 s)
 case rs.exact.mono: the same, in mono
     the frames lost at the start            0   (0 to 16)
     the frames compared                176174   (172651 to 176174)
@@ -212,9 +212,9 @@ case rs.over.3: the same at 3x, from 22050 Hz
     the frames lost at the start            0   (0 to 16)
     the frames compared                264475   (259186 to 264475)
     the frames that differ                  0   (0 to 0)
-  PASS (7.3 s)
+  PASS (7.2 s)
 case rs.over.drain: a drain with the ring at 2x
-    the frames short of the stream     -16.3356   (-70 to 18)
+    the frames short of the stream     -17.3356   (-70 to 18)
   PASS (6.6 s)
 case rs.over.runout: a client that stops writing, the ring at 2x
     the frames past the tone that aren't silent            0   (0 to 0)
@@ -287,7 +287,7 @@ case rs.band.48: the same at 48 kHz, -252 ppm
     THD+N at 20000 Hz                -91.9642 dB  (-200 to -85)
     worst spur at 20000 Hz           -99.7905 dB  (-200 to -90)
     glitches at 20000 Hz                    0   (0 to 0)
-  PASS (88.2 s)
+  PASS (88.5 s)
 case rs.treble: the hold taken back: tones to 20 kHz at their full level
     level over the DAC at 997 Hz   0.00818519 dB  (-0.2 to 0.2)
     THD+N at 997 Hz                  -90.2944 dB  (-200 to -85)
@@ -307,7 +307,7 @@ case rs.treble: the hold taken back: tones to 20 kHz at their full level
     level over the DAC at 20000 Hz    -0.141599 dB  (-0.2 to 0.2)
     THD+N at 20000 Hz                -94.3512 dB  (-200 to -85)
     glitches at 20000 Hz                    0   (0 to 0)
-  PASS (66.4 s)
+  PASS (66.0 s)
 case rs.treble.30: the same at a step of 30 ppm
     level over the DAC at 997 Hz   0.00749773 dB  (-0.2 to 0.2)
     THD+N at 997 Hz                  -88.6342 dB  (-200 to -85)
@@ -327,13 +327,13 @@ case rs.treble.30: the same at a step of 30 ppm
     level over the DAC at 20000 Hz    -0.141755 dB  (-0.2 to 0.2)
     THD+N at 20000 Hz                -88.4292 dB  (-200 to -85)
     glitches at 20000 Hz                    0   (0 to 0)
-  PASS (65.6 s)
+  PASS (65.4 s)
 case rs.imd.ccif: 19 and 20 kHz: what falls between them
     what falls between them          -101.958 dBFS  (-200 to -92)
   PASS (6.7 s)
 case rs.imd.smpte: 60 Hz under 7 kHz: what falls between them
     what falls between them          -122.385 dBFS  (-200 to -92)
-  PASS (7.1 s)
+  PASS (6.7 s)
 case rs.quiet: a tone at -60 dBFS keeps its level, over 16-bit noise
     the level                      0.00782972 dB  (-0.1 to 0.1)
     THD+N                            -35.5828 dB  (-200 to -32)
@@ -341,24 +341,24 @@ case rs.quiet: a tone at -60 dBFS keeps its level, over 16-bit noise
   PASS (11.0 s)
 case rs.dither: dither at -80 dBFS: the noise it adds, the spurs it takes
     noise, without                   -101.967 dBFS  (-200 to -90)
-    noise, with                      -95.7259 dBFS  (-200 to -88)
+    noise, with                      -95.7207 dBFS  (-200 to -88)
     worst spur, without               -106.06 dBFS
-    worst spur, with                 -105.544 dBFS
-    the noise it adds                 6.24066 dB  (0 to 7)
-  PASS (21.9 s)
+    worst spur, with                 -105.763 dBFS
+    the noise it adds                 6.24586 dB  (0 to 7)
+  PASS (22.4 s)
 case rs.live: the mixer's controls under a stream take effect at once
     xruns                                   0   (0 to 0)
     the pitch, part 1            -1.77552e-05 ppm  (-0.5 to 0.5)
-    the pitch, part 2                 99.9998 ppm  (99.5 to 100.5)
-    the pitch, part 3                -99.9998 ppm  (-100.5 to -99.5)
-    the pitch, part 4                  29.084 ppm  (28.585 to 29.585)
+    the pitch, part 2                 99.9997 ppm  (99.5 to 100.5)
+    the pitch, part 3                -99.9999 ppm  (-100.5 to -99.5)
+    the pitch, part 4                 27.6826 ppm  (27.182 to 28.182)
     the pitch, part 5             2.10309e-05 ppm  (-0.5 to 0.5)
     steps in the tone                       1   (0 to 4)
-  PASS (17.0 s)
+  PASS (16.6 s)
 case rs.pause: a pause goes on in step within a FIFO, at the same pitch
     xruns                                   0   (0 to 0)
     the pitch after it                   1000 ppm  (999 to 1001)
-    the frames it slips at the release     -3.90609   (-16 to 16)
+    the frames it slips at the release     -3.91808   (-16 to 16)
   PASS (6.8 s)
 case rs.xrun: an underrun recovers at the same pitch
     xruns                                   1   (1 to 1)
@@ -372,103 +372,103 @@ case rs.runout: a client that stops writing hears silence, not the ring's old fr
     xruns                                   0   (0 to 0)
   PASS (3.0 s)
 case rs.clock.44: 44.1 kHz for a minute: within 2 ppm of the slope the driver fitted
-    Off, on the steered clock        -29.0724 ppm  (-500 to 500)
-    Clock, on the raw clock           30.1628 ppm
-    the driver's reading of the steered clock       30.078 ppm
-    Clock, on the raw clock, less that    0.0847673 ppm  (-2 to 2)
-    Clock, on the steered clock      0.117859 ppm
-    what's left of the readings       11.2726 us  (0 to 600)
-    the master on the raw clock         0.714 ppm
+    Off, on the steered clock        -28.1992 ppm  (-500 to 500)
+    Clock, on the raw clock           28.7119 ppm
+    the driver's reading of the steered clock       28.835 ppm
+    Clock, on the raw clock, less that    -0.123082 ppm  (-2 to 2)
+    Clock, on the steered clock     -0.113493 ppm
+    what's left of the readings       10.5545 us  (0 to 600)
+    the master on the raw clock         0.874 ppm
     xruns                                   0   (0 to 0)
   PASS (120.5 s)
 case rs.clock.48: 48 kHz for a minute: within 2 ppm of the slope the driver fitted
-    Off, on the steered clock          222.84 ppm  (-500 to 500)
-    Clock, on the raw clock           30.1609 ppm
-    the driver's reading of the steered clock       30.069 ppm
-    Clock, on the raw clock, less that    0.0919012 ppm  (-2 to 2)
-    Clock, on the steered clock     0.0979539 ppm
-    what's left of the readings       8.72683 us  (0 to 600)
-    the master on the raw clock         0.817 ppm
+    Off, on the steered clock         224.103 ppm  (-500 to 500)
+    Clock, on the raw clock           28.8017 ppm
+    the driver's reading of the steered clock       28.835 ppm
+    Clock, on the raw clock, less that    -0.033291 ppm  (-2 to 2)
+    Clock, on the steered clock    -0.0310769 ppm
+    what's left of the readings       8.47061 us  (0 to 600)
+    the master on the raw clock         0.894 ppm
     xruns                                   0   (0 to 0)
   PASS (120.3 s)
 case rs.rates: the Clock mode at every clock family's rates, within 2 ppm
-    at 8000 Hz, less the steered clock     -2.19591 ppm  (-6 to 6)
+    at 8000 Hz, less the steered clock     0.279094 ppm  (-6 to 6)
     xruns at 8000 Hz                        0   (0 to 0)
-    at 11025 Hz, less the steered clock     -2.43673 ppm  (-6 to 6)
+    at 11025 Hz, less the steered clock     0.449555 ppm  (-6 to 6)
     xruns at 11025 Hz                       0   (0 to 0)
-    at 22050 Hz, less the steered clock     0.446095 ppm  (-2 to 2)
+    at 22050 Hz, less the steered clock     -1.02183 ppm  (-2 to 2)
     xruns at 22050 Hz                       0   (0 to 0)
-    at 32000 Hz, less the steered clock     0.667051 ppm  (-2 to 2)
+    at 32000 Hz, less the steered clock   -0.0560236 ppm  (-2 to 2)
     xruns at 32000 Hz                       0   (0 to 0)
-    at 44100 Hz, less the steered clock      0.20958 ppm  (-2 to 2)
+    at 44100 Hz, less the steered clock    -0.169677 ppm  (-2 to 2)
     xruns at 44100 Hz                       0   (0 to 0)
-    at 48000 Hz, less the steered clock    -0.217085 ppm  (-2 to 2)
+    at 48000 Hz, less the steered clock     0.403112 ppm  (-2 to 2)
     xruns at 48000 Hz                       0   (0 to 0)
-    at 88200 Hz, less the steered clock      0.90397 ppm  (-2 to 2)
+    at 88200 Hz, less the steered clock   -0.0804681 ppm  (-2 to 2)
     xruns at 88200 Hz                       0   (0 to 0)
-    at 96000 Hz, less the steered clock    0.0785313 ppm  (-2 to 2)
+    at 96000 Hz, less the steered clock    -0.317391 ppm  (-2 to 2)
     xruns at 96000 Hz                       0   (0 to 0)
   PASS (96.9 s)
 case rs.bench: the filter's cycles a frame on this CPU, MMX and C
-    MMX, stereo, cycles a frame        179.26 
-    MMX, mono, cycles a frame         116.356 
-    C, stereo, cycles a frame         650.246 
-    MMX, stereo at 44.1 kHz, of the CPU       1.9763 %  (0 to 6)
-    the C code's cost over MMX's      3.62739 x
+    MMX, stereo, cycles a frame       165.221 
+    MMX, mono, cycles a frame          116.54 
+    C, stereo, cycles a frame         651.212 
+    MMX, stereo at 44.1 kHz, of the CPU      1.82152 %  (0 to 6)
+    the C code's cost over MMX's      3.94145 x
   PASS (0.2 s)
 case rs.analog.1k: at 1 kHz through the DAC and ADC the filter adds nothing
-    THD+N, Off                       -61.5033 dB
-    THD+N, with the filter           -61.5383 dB
-    what the filter adds to THD+N    -0.034994 dB  (-1.5 to 1.5)
-    what it does to the level     -0.00124022 dB  (-0.1 to 0.1)
-  PASS (43.0 s)
+    THD+N, Off                       -61.3609 dB
+    THD+N, with the filter           -61.5671 dB
+    what the filter adds to THD+N     -0.20621 dB  (-1.5 to 1.5)
+    what it does to the level     -0.00194501 dB  (-0.1 to 0.1)
+  PASS (43.1 s)
 case rs.analog.10k: the same at 10 kHz
-    THD+N, Off                       -52.6706 dB
-    THD+N, with the filter           -52.6567 dB
-    what the filter adds to THD+N    0.0138496 dB  (-1.5 to 1.5)
-    what it does to the level      0.00115872 dB  (-0.1 to 0.1)
-  PASS (43.6 s)
+    THD+N, Off                        -52.827 dB
+    THD+N, with the filter           -52.8143 dB
+    what the filter adds to THD+N    0.0126738 dB  (-1.5 to 1.5)
+    what it does to the level      0.00218842 dB  (-0.1 to 0.1)
+  PASS (43.3 s)
 case rs.analog.16k: the same at 16 kHz
-    THD+N, Off                       -43.9196 dB
-    THD+N, with the filter           -43.9016 dB
-    what the filter adds to THD+N    0.0179281 dB  (-1.5 to 1.5)
-    what it does to the level    -0.000323118 dB  (-0.1 to 0.1)
-  PASS (43.7 s)
+    THD+N, Off                       -43.9838 dB
+    THD+N, with the filter           -44.0314 dB
+    what the filter adds to THD+N   -0.0476623 dB  (-1.5 to 1.5)
+    what it does to the level     0.000511699 dB  (-0.1 to 0.1)
+  PASS (43.5 s)
 case cpu.rs.44: the filter's part of the machine, 44.1 kHz stereo; the longest fill
-    the filter's part, from what's left of the machine      11.8887 %
-    the latest timer                  1378.49 us
-    the longest fill                  130.192 us  (0 to 350)
-    the driver's own cycles, Off     0.294675 %  (0 to 1)
-    and in Clock                      3.23608 %  (0 to 6)
+    the filter's part, from what's left of the machine      3.86915 %
+    the latest timer                  1393.91 us
+    the longest fill                  130.177 us  (0 to 350)
+    the driver's own cycles, Off     0.301125 %  (0 to 1)
+    and in Clock                      3.29627 %  (0 to 6)
   PASS (51.3 s)
 case cpu.rs.48: the same at 48 kHz
-    the filter's part, from what's left of the machine      4.75014 %
-    the latest timer                  944.963 us
-    the longest fill                  134.605 us  (0 to 350)
-    the driver's own cycles, Off     0.316203 %  (0 to 1)
-    and in Clock                      3.95187 %  (0 to 6)
-  PASS (51.5 s)
+    the filter's part, from what's left of the machine      4.69643 %
+    the latest timer                  439.829 us
+    the longest fill                  136.917 us  (0 to 350)
+    the driver's own cycles, Off     0.334854 %  (0 to 1)
+    and in Clock                      4.00881 %  (0 to 6)
+  PASS (51.4 s)
 case cpu.rs.mono: the same, 44.1 kHz mono
-    the filter's part, from what's left of the machine      3.67014 %
-    the latest timer                    261.3 us
-    the longest fill                  125.857 us  (0 to 350)
-    the driver's own cycles, Off     0.195777 %  (0 to 1)
-    and in Clock                      1.97665 %  (0 to 4)
+    the filter's part, from what's left of the machine      2.62568 %
+    the latest timer                  336.429 us
+    the longest fill                  134.657 us  (0 to 350)
+    the driver's own cycles, Off     0.205709 %  (0 to 1)
+    and in Clock                      2.04302 %  (0 to 4)
   PASS (50.1 s)
 case cpu.rs.96: the same at 96 kHz
-    the filter's part, from what's left of the machine      7.84629 %
-    the latest timer                  1263.81 us
-    the longest fill                   127.52 us  (0 to 350)
-    the driver's own cycles, Off     0.670481 %  (0 to 1)
-    and in Clock                      7.87168 %  (0 to 12)
-  PASS (54.6 s)
+    the filter's part, from what's left of the machine      9.52571 %
+    the latest timer                   312.15 us
+    the longest fill                  129.814 us  (0 to 350)
+    the driver's own cycles, Off     0.641664 %  (0 to 1)
+    and in Clock                      8.03606 %  (0 to 12)
+  PASS (55.1 s)
 case cpu.over.2: the driver's share with the ring at 2x
-    the driver's own cycles            6.1423 %  (0 to 10)
-    and in Clock                      6.26279 %  (0 to 10)
+    the driver's own cycles           6.23166 %  (0 to 10)
+    and in Clock                      6.32132 %  (0 to 10)
   PASS (13.0 s)
 case cpu.over.3: and at 3x
-    the driver's own cycles           9.65668 %  (0 to 15)
-    and in Clock                      9.86238 %  (0 to 15)
+    the driver's own cycles           9.82093 %  (0 to 15)
+    and in Clock                      10.0044 %  (0 to 15)
   PASS (13.0 s)
 case dig.runout: an application that stops writing: the core's silence reaches the ring
     frames missing at the end               0   (0 to 16)
@@ -477,24 +477,24 @@ case dig.runout: an application that stops writing: the core's silence reaches t
 case dig.long: half a minute, every frame
     frames missing at the end               0   (0 to 16)
     xruns                                   0   (0 to 0)
-  PASS (34.8 s)
+  PASS (34.3 s)
 case fm.idle: PCM 1 reads +128 with the FM silent
     samples other than +128                 0   (0 to 0)
   PASS (0.5 s)
 case fm.esfm.sides: native register 6: bit 5 on the left, bit 4 on the right
-    bit 5, left                      -12.0648 dBFS  (-40 to 0)
+    bit 5, left                      -12.0653 dBFS  (-40 to 0)
     bit 5, right                            0 rms  (0 to 0)
-    bit 4, right                     -12.0641 dBFS  (-40 to 0)
+    bit 4, right                     -12.0635 dBFS  (-40 to 0)
     bit 4, left                             0 rms  (0 to 0)
   PASS (4.1 s)
 case fm.opl3.sides: OPL3 channel A on the left with fm_sides, mirrored without
-    fm_sides=1, A on the left        -18.1095 dBFS  (-40 to 0)
+    fm_sides=1, A on the left        -18.1085 dBFS  (-40 to 0)
     fm_sides=1, A on the right              0 rms  (0 to 0)
-    fm_sides=1, B on the right       -18.1106 dBFS  (-40 to 0)
+    fm_sides=1, B on the right       -18.1099 dBFS  (-40 to 0)
     fm_sides=1, B on the left               0 rms  (0 to 0)
-    fm_sides=0, A on the right       -18.1083 dBFS  (-40 to 0)
+    fm_sides=0, A on the right       -18.1096 dBFS  (-40 to 0)
     fm_sides=0, A on the left               0 rms  (0 to 0)
-    fm_sides=0, B on the left        -18.1103 dBFS  (-40 to 0)
+    fm_sides=0, B on the left        -18.1087 dBFS  (-40 to 0)
     fm_sides=0, B on the right              0 rms  (0 to 0)
   PASS (8.3 s)
 case fm.pitch: a native note's pitch, exactly, and its sides alike
@@ -502,227 +502,237 @@ case fm.pitch: a native note's pitch, exactly, and its sides alike
     sides                                   0 dB  (-0.1 to 0.1)
   PASS (3.3 s)
 case a1rec.fmt.s16: Audio 1 records Audio 2's tones: 16-bit stereo
-    441 Hz                           -16.5373 dBFS  (-40 to -1)
-    661.5 Hz on the left             -82.3639 dB  (-200 to -20)
-    441 Hz on the right              -81.0203 dB  (-200 to -20)
-    THD+N, left                      -58.7621 dB  (-200 to -30)
-    pitch                           -0.010601 ppm  (-100 to 100)
+    441 Hz                           -16.5337 dBFS  (-40 to -1)
+    661.5 Hz on the left             -84.2767 dB  (-200 to -20)
+    441 Hz on the right              -83.6377 dB  (-200 to -20)
+    THD+N, left                       -59.109 dB  (-200 to -30)
+    pitch                         -0.00330923 ppm  (-100 to 100)
     glitches                                0   (0 to 0)
   PASS (20.3 s)
 case a1rec.fmt.s16m: the same, 16-bit mono
-    441 Hz                           -16.3218 dBFS  (-40 to -1)
-    THD+N, left                      -58.7328 dB  (-200 to -30)
-    pitch                           0.0204027 ppm  (-100 to 100)
+    441 Hz                           -16.3168 dBFS  (-40 to -1)
+    THD+N, left                      -58.9013 dB  (-200 to -30)
+    pitch                         0.000723378 ppm  (-100 to 100)
     glitches                                0   (0 to 0)
-  PASS (10.3 s)
+  PASS (10.2 s)
 case a1rec.fmt.u8: the same, 8-bit unsigned
-    441 Hz                           -16.5677 dBFS  (-40 to -1)
-    661.5 Hz on the left              -69.279 dB  (-200 to -20)
-    441 Hz on the right              -58.9275 dB  (-200 to -20)
-    THD+N, left                      -33.5108 dB  (-200 to -25)
-    pitch                            0.391204 ppm  (-100 to 100)
+    441 Hz                           -16.4522 dBFS  (-40 to -1)
+    661.5 Hz on the left             -89.5479 dB  (-200 to -20)
+    441 Hz on the right              -51.1999 dB  (-200 to -20)
+    THD+N, left                      -32.9267 dB  (-200 to -25)
+    pitch                           0.0425965 ppm  (-100 to 100)
     glitches                                0   (0 to 0)
-  PASS (11.1 s)
+  PASS (10.1 s)
 case a1rec.fmt.u8m: the same, 8-bit mono
-    441 Hz                           -16.3065 dBFS  (-40 to -1)
-    THD+N, left                      -33.4352 dB  (-200 to -25)
-    pitch                          -0.0745122 ppm  (-100 to 100)
+    441 Hz                           -16.2977 dBFS  (-40 to -1)
+    THD+N, left                      -35.4439 dB  (-200 to -25)
+    pitch                            0.032018 ppm  (-100 to 100)
     glitches                                0   (0 to 0)
   PASS (6.3 s)
 case a1rec.fmt.s8: the same, 8-bit signed
-    441 Hz                           -16.5494 dBFS  (-40 to -1)
-    661.5 Hz on the left             -78.6742 dB  (-200 to -20)
-    441 Hz on the right              -49.7454 dB  (-200 to -20)
-    THD+N, left                      -32.8066 dB  (-200 to -25)
-    pitch                           0.0185133 ppm  (-100 to 100)
+    441 Hz                           -16.5463 dBFS  (-40 to -1)
+    661.5 Hz on the left             -77.8358 dB  (-200 to -20)
+    441 Hz on the right              -50.8376 dB  (-200 to -20)
+    THD+N, left                      -32.8026 dB  (-200 to -25)
+    pitch                            0.273917 ppm  (-100 to 100)
     glitches                                0   (0 to 0)
-  PASS (10.6 s)
+  PASS (11.7 s)
 case a1rec.fmt.u16: the same, 16-bit unsigned
-    441 Hz                           -16.5331 dBFS  (-40 to -1)
-    661.5 Hz on the left             -84.0212 dB  (-200 to -20)
-    441 Hz on the right              -77.1981 dB  (-200 to -20)
-    THD+N, left                      -58.6421 dB  (-200 to -30)
-    pitch                          0.00984379 ppm  (-100 to 100)
+    441 Hz                           -16.5365 dBFS  (-40 to -1)
+    661.5 Hz on the left             -81.4523 dB  (-200 to -20)
+    441 Hz on the right              -78.7612 dB  (-200 to -20)
+    THD+N, left                      -59.1802 dB  (-200 to -30)
+    pitch                         0.000552781 ppm  (-100 to 100)
     glitches                                0   (0 to 0)
-  PASS (20.3 s)
+  PASS (20.2 s)
 case a1rec.rate.8000: 16-bit stereo at 8000 Hz
-    441 Hz                           -16.6905 dBFS  (-40 to -1)
-    661.5 Hz on the left             -79.7385 dB  (-200 to -20)
-    441 Hz on the right              -81.2234 dB  (-200 to -20)
-    THD+N, left                       -54.395 dB  (-200 to -30)
-    pitch                            -251.957 ppm  (-600 to 600)
+    441 Hz                           -16.6833 dBFS  (-40 to -1)
+    661.5 Hz on the left             -81.8257 dB  (-200 to -20)
+    441 Hz on the right              -79.1743 dB  (-200 to -20)
+    THD+N, left                      -54.3689 dB  (-200 to -30)
+    pitch                            -251.935 ppm  (-600 to 600)
     glitches                                0   (0 to 0)
   PASS (4.7 s)
 case a1rec.rate.11025: at 11025 Hz
-    441 Hz                           -16.5324 dBFS  (-40 to -1)
-    661.5 Hz on the left             -85.1497 dB  (-200 to -20)
-    441 Hz on the right                -83.86 dB  (-200 to -20)
-    THD+N, left                      -58.1153 dB  (-200 to -30)
-    pitch                           0.0119462 ppm  (-100 to 100)
+    441 Hz                           -16.5264 dBFS  (-40 to -1)
+    661.5 Hz on the left             -87.3025 dB  (-200 to -20)
+    441 Hz on the right              -83.6614 dB  (-200 to -20)
+    THD+N, left                      -58.4704 dB  (-200 to -30)
+    pitch                           0.0141885 ppm  (-100 to 100)
     glitches                                0   (0 to 0)
-  PASS (7.3 s)
+  PASS (6.7 s)
 case a1rec.rate.16000: at 16000 Hz
-    441 Hz                           -16.6883 dBFS  (-40 to -1)
-    661.5 Hz on the left             -80.2595 dB  (-200 to -20)
-    441 Hz on the right              -79.5261 dB  (-200 to -20)
-    THD+N, left                      -54.3305 dB  (-200 to -30)
-    pitch                            -251.942 ppm  (-600 to 600)
+    441 Hz                           -16.6853 dBFS  (-40 to -1)
+    661.5 Hz on the left             -82.7819 dB  (-200 to -20)
+    441 Hz on the right              -83.5517 dB  (-200 to -20)
+    THD+N, left                      -54.4158 dB  (-200 to -30)
+    pitch                            -251.955 ppm  (-600 to 600)
     glitches                                0   (0 to 0)
   PASS (7.1 s)
 case a1rec.rate.22050: at 22050 Hz
-    441 Hz                           -16.5305 dBFS  (-40 to -1)
-    661.5 Hz on the left             -81.9095 dB  (-200 to -20)
-    441 Hz on the right               -79.697 dB  (-200 to -20)
-    THD+N, left                       -58.447 dB  (-200 to -30)
-    pitch                             0.01163 ppm  (-100 to 100)
+    441 Hz                           -16.5338 dBFS  (-40 to -1)
+    661.5 Hz on the left             -81.9192 dB  (-200 to -20)
+    441 Hz on the right              -78.6085 dB  (-200 to -20)
+    THD+N, left                      -58.3528 dB  (-200 to -30)
+    pitch                           0.0121808 ppm  (-100 to 100)
     glitches                                0   (0 to 0)
   PASS (11.1 s)
 case a1rec.rate.32000: at 32000 Hz
-    441 Hz                           -16.6905 dBFS  (-40 to -1)
-    661.5 Hz on the left             -81.9424 dB  (-200 to -20)
-    441 Hz on the right              -82.6283 dB  (-200 to -20)
-    THD+N, left                      -54.3843 dB  (-200 to -30)
-    pitch                             -251.94 ppm  (-600 to 600)
+    441 Hz                           -16.6901 dBFS  (-40 to -1)
+    661.5 Hz on the left             -83.3979 dB  (-200 to -20)
+    441 Hz on the right              -83.2177 dB  (-200 to -20)
+    THD+N, left                      -54.3448 dB  (-200 to -30)
+    pitch                             -251.95 ppm  (-600 to 600)
     glitches                                0   (0 to 0)
-  PASS (12.0 s)
+  PASS (12.4 s)
 case a1rec.rate.44100: at 44100 Hz
-    441 Hz                            -16.533 dBFS  (-40 to -1)
-    661.5 Hz on the left             -85.4531 dB  (-200 to -20)
-    441 Hz on the right              -82.2081 dB  (-200 to -20)
-    THD+N, left                      -58.6457 dB  (-200 to -30)
-    pitch                          0.00615791 ppm  (-100 to 100)
+    441 Hz                           -16.5324 dBFS  (-40 to -1)
+    661.5 Hz on the left             -82.3038 dB  (-200 to -20)
+    441 Hz on the right              -83.8551 dB  (-200 to -20)
+    THD+N, left                      -58.9109 dB  (-200 to -30)
+    pitch                          0.00115645 ppm  (-100 to 100)
     glitches                                0   (0 to 0)
-  PASS (20.9 s)
+  PASS (20.3 s)
 case a1rec.rate.48000: at 48000 Hz
-    441 Hz                           -16.6927 dBFS  (-40 to -1)
-    661.5 Hz on the left             -85.5992 dB  (-200 to -20)
-    441 Hz on the right              -80.1881 dB  (-200 to -20)
-    THD+N, left                      -54.4893 dB  (-200 to -30)
-    pitch                            -251.942 ppm  (-600 to 600)
+    441 Hz                           -16.6937 dBFS  (-40 to -1)
+    661.5 Hz on the left             -81.3348 dB  (-200 to -20)
+    441 Hz on the right               -79.902 dB  (-200 to -20)
+    THD+N, left                      -54.3004 dB  (-200 to -30)
+    pitch                            -251.954 ppm  (-600 to 600)
     glitches                                0   (0 to 0)
-  PASS (20.7 s)
+  PASS (20.6 s)
 case a1rec.start.s16: ten 16-bit stereo recordings, each the tone from its first frame
-    run 0: 0 frames off the tone, the first -5381, an offset of 9
-    dump: /var/tmp/et-p3/a1rec.start.s16-a1c.wav
-    run 1: 0 frames off the tone, the first -5384, an offset of 10
-    dump: /var/tmp/et-p3/a1rec.start.s16-a1c.wav
-    run 6: 0 frames off the tone, the first -5382, an offset of 11
-    dump: /var/tmp/et-p3/a1rec.start.s16-a1c.wav
+    run 0: 0 frames off the tone, the first -4448, an offset of 0
+    dump: /var/tmp/et-final/a1rec.start.s16-a1c.wav
+    run 1: 0 frames off the tone, the first -4446, an offset of -1
+    dump: /var/tmp/et-final/a1rec.start.s16-a1c.wav
+    run 3: 0 frames off the tone, the first -4167, an offset of 1
+    dump: /var/tmp/et-final/a1rec.start.s16-a1c.wav
+    run 9: 0 frames off the tone, the first -4151, an offset of 5
+    dump: /var/tmp/et-final/a1rec.start.s16-a1c.wav
     frames at the start off the tone            0   (0 to 0)
-    offset over the first 5 ms        10.9014   (-330 to 330)
-  PASS (20.1 s)
-case a1rec.start.s16m: the same, 16-bit mono
-    run 0: 0 frames off the tone, the first -5190, an offset of 9
-    dump: /var/tmp/et-p3/a1rec.start.s16m-a1c.wav
-    run 1: 0 frames off the tone, the first -5192, an offset of 10
-    dump: /var/tmp/et-p3/a1rec.start.s16m-a1c.wav
-    run 6: 0 frames off the tone, the first -5496, an offset of 10
-    dump: /var/tmp/et-p3/a1rec.start.s16m-a1c.wav
-    frames at the start off the tone            0   (0 to 0)
-    offset over the first 5 ms         10.203   (-330 to 330)
+    offset over the first 5 ms         5.4546   (-330 to 330)
   PASS (20.0 s)
-case a1rec.start.u8: the same, 8-bit stereo
-    run 0: 0 frames off the tone, the first -5632, an offset of 15
-    dump: /var/tmp/et-p3/a1rec.start.u8-a1c.wav
+case a1rec.start.s16m: the same, 16-bit mono
+    run 0: 0 frames off the tone, the first -4549, an offset of 5
+    dump: /var/tmp/et-final/a1rec.start.s16m-a1c.wav
+    run 1: 0 frames off the tone, the first -4757, an offset of 5
+    dump: /var/tmp/et-final/a1rec.start.s16m-a1c.wav
+    run 3: 0 frames off the tone, the first -4252, an offset of 6
+    dump: /var/tmp/et-final/a1rec.start.s16m-a1c.wav
     frames at the start off the tone            0   (0 to 0)
-    offset over the first 5 ms        15.1824   (-330 to 330)
+    offset over the first 5 ms        6.46817   (-330 to 330)
+  PASS (19.9 s)
+case a1rec.start.u8: the same, 8-bit stereo
+    run 0: 0 frames off the tone, the first -4608, an offset of 5
+    dump: /var/tmp/et-final/a1rec.start.u8-a1c.wav
+    run 5: 0 frames off the tone, the first -4608, an offset of -6
+    dump: /var/tmp/et-final/a1rec.start.u8-a1c.wav
+    run 7: 0 frames off the tone, the first -4352, an offset of -7
+    dump: /var/tmp/et-final/a1rec.start.u8-a1c.wav
+    run 8: 0 frames off the tone, the first -4352, an offset of -8
+    dump: /var/tmp/et-final/a1rec.start.u8-a1c.wav
+    frames at the start off the tone            0   (0 to 0)
+    offset over the first 5 ms       -7.93885   (-330 to 330)
   PASS (18.4 s)
 case a1rec.start.8000: the same, at 8000 Hz
-    run 0: 0 frames off the tone, the first -5490, an offset of -1
-    dump: /var/tmp/et-p3/a1rec.start.8000-a1c.wav
-    run 1: 0 frames off the tone, the first -4612, an offset of 8
-    dump: /var/tmp/et-p3/a1rec.start.8000-a1c.wav
-    run 3: 0 frames off the tone, the first -4137, an offset of 10
-    dump: /var/tmp/et-p3/a1rec.start.8000-a1c.wav
+    run 0: 0 frames off the tone, the first -4386, an offset of -1
+    dump: /var/tmp/et-final/a1rec.start.8000-a1c.wav
+    run 1: 0 frames off the tone, the first -4121, an offset of 5
+    dump: /var/tmp/et-final/a1rec.start.8000-a1c.wav
+    run 2: 0 frames off the tone, the first -3941, an offset of 6
+    dump: /var/tmp/et-final/a1rec.start.8000-a1c.wav
+    run 6: 0 frames off the tone, the first -3948, an offset of 7
+    dump: /var/tmp/et-final/a1rec.start.8000-a1c.wav
     frames at the start off the tone            0   (0 to 0)
-    offset over the first 5 ms        9.80607   (-330 to 330)
+    offset over the first 5 ms        7.07283   (-330 to 330)
   PASS (17.4 s)
 case a1rec.start.48000: the same, at 48000 Hz
-    run 0: 0 frames off the tone, the first -5566, an offset of 8
-    dump: /var/tmp/et-p3/a1rec.start.48000-a1c.wav
-    run 1: 0 frames off the tone, the first -5402, an offset of 10
-    dump: /var/tmp/et-p3/a1rec.start.48000-a1c.wav
-    run 3: 0 frames off the tone, the first -5694, an offset of 10
-    dump: /var/tmp/et-p3/a1rec.start.48000-a1c.wav
+    run 0: 0 frames off the tone, the first -4198, an offset of 6
+    dump: /var/tmp/et-final/a1rec.start.48000-a1c.wav
+    run 1: 0 frames off the tone, the first -4410, an offset of 7
+    dump: /var/tmp/et-final/a1rec.start.48000-a1c.wav
+    run 7: 0 frames off the tone, the first -4086, an offset of 7
+    dump: /var/tmp/et-final/a1rec.start.48000-a1c.wav
     frames at the start off the tone            0   (0 to 0)
-    offset over the first 5 ms        9.75016   (-330 to 330)
+    offset over the first 5 ms        6.99435   (-330 to 330)
   PASS (20.0 s)
 case a1rec.dc: the ADC's offset with a silent source, and a step of Capture DC Offset
-    the ADC's offset, left            22.5386   (-32 to 32)
-    the ADC's offset, right           26.7393   (-32 to 32)
-    a step of Capture DC Offset, left      61.7331   (58 to 70)
-    a step of Capture DC Offset, right      62.0421   (58 to 70)
+    the ADC's offset, left            18.7204   (-32 to 32)
+    the ADC's offset, right           22.1662   (-32 to 32)
+    a step of Capture DC Offset, left      63.6564   (58 to 70)
+    a step of Capture DC Offset, right      63.7337   (58 to 70)
   PASS (4.6 s)
 case a1rec.settle0: a1c_settle_ms=0, ESS's start: the input's offset at the start
-    run 0: 2205 frames off the tone, the first -32768, an offset of 26694
-    dump: /var/tmp/et-p3/a1rec.settle0-a1c.wav
-    run 1: 2205 frames off the tone, the first -32768, an offset of 26761
-    dump: /var/tmp/et-p3/a1rec.settle0-a1c.wav
+    run 0: 2205 frames off the tone, the first -4830, an offset of 3871
+    dump: /var/tmp/et-final/a1rec.settle0-a1c.wav
+    run 1: 2205 frames off the tone, the first -4830, an offset of 3898
+    dump: /var/tmp/et-final/a1rec.settle0-a1c.wav
     frames at the start off the tone         2205 
-    offset over the first 5 ms        26761.1 
-  KNOWN (20.4 s): without the settle a recording starts 26761 off, as with ESS's drivers
+    offset over the first 5 ms        3898.07 
+  KNOWN (20.0 s): without the settle a recording starts 3898 off, as with ESS's drivers
 case a1play.fmt.s16: Audio 1 plays through the cable: 16-bit stereo
-    441 Hz                           -19.6244 dBFS  (-60 to -1)
-    661.5 Hz, the right side         -38.9732 dB  (-200 to -20)
-    THD+N                            -36.0174 dB  (-200 to -15)
-    pitch, against the second card      -22.546 ppm  (-6000 to 6000)
+    441 Hz                           -19.6256 dBFS  (-60 to -1)
+    661.5 Hz, the right side         -39.1777 dB  (-200 to -20)
+    THD+N                            -38.7704 dB  (-200 to -15)
+    pitch, against the second card     -23.4048 ppm  (-6000 to 6000)
   PASS (7.7 s)
 case a1play.fmt.s16m: the same, 16-bit mono
-    441 Hz                           -19.7184 dBFS  (-60 to -1)
-    THD+N                            -39.3843 dB  (-200 to -15)
-    pitch, against the second card     -22.3765 ppm  (-6000 to 6000)
-  PASS (7.6 s)
+    441 Hz                           -19.7197 dBFS  (-60 to -1)
+    THD+N                            -49.1527 dB  (-200 to -15)
+    pitch, against the second card     -23.3684 ppm  (-6000 to 6000)
+  PASS (8.2 s)
 case a1play.fmt.u8: the same, 8-bit unsigned
-    441 Hz                           -19.6675 dBFS  (-60 to -1)
-    661.5 Hz, the right side         -39.1548 dB  (-200 to -20)
-    THD+N                            -33.9391 dB  (-200 to -12)
-    pitch, against the second card     -22.4797 ppm  (-6000 to 6000)
-  PASS (7.7 s)
+    441 Hz                            -19.668 dBFS  (-60 to -1)
+    661.5 Hz, the right side         -39.1362 dB  (-200 to -20)
+    THD+N                            -35.6756 dB  (-200 to -12)
+    pitch, against the second card     -23.2949 ppm  (-6000 to 6000)
+  PASS (7.6 s)
 case a1play.fmt.u8m: the same, 8-bit mono
-    441 Hz                           -19.7646 dBFS  (-60 to -1)
-    THD+N                            -35.7102 dB  (-200 to -12)
-    pitch, against the second card     -22.1445 ppm  (-6000 to 6000)
+    441 Hz                            -19.764 dBFS  (-60 to -1)
+    THD+N                            -38.2676 dB  (-200 to -12)
+    pitch, against the second card     -23.1855 ppm  (-6000 to 6000)
   PASS (7.6 s)
 case a1play.fmt.s8: the same, 8-bit signed
-    441 Hz                           -19.6703 dBFS  (-60 to -1)
-    661.5 Hz, the right side         -38.9751 dB  (-200 to -20)
-    THD+N                            -34.1496 dB  (-200 to -12)
-    pitch, against the second card     -22.2526 ppm  (-6000 to 6000)
-  PASS (7.7 s)
+    441 Hz                           -19.6672 dBFS  (-60 to -1)
+    661.5 Hz, the right side         -39.1442 dB  (-200 to -20)
+    THD+N                            -35.6931 dB  (-200 to -12)
+    pitch, against the second card     -23.1635 ppm  (-6000 to 6000)
+  PASS (7.6 s)
 case a1play.fmt.u16: the same, 16-bit unsigned
-    441 Hz                           -19.6241 dBFS  (-60 to -1)
-    661.5 Hz, the right side         -39.0762 dB  (-200 to -20)
-    THD+N                            -36.1038 dB  (-200 to -15)
-    pitch, against the second card     -22.4109 ppm  (-6000 to 6000)
+    441 Hz                           -19.6234 dBFS  (-60 to -1)
+    661.5 Hz, the right side         -39.1453 dB  (-200 to -20)
+    THD+N                              -38.76 dB  (-200 to -15)
+    pitch, against the second card     -23.1255 ppm  (-6000 to 6000)
   PASS (7.7 s)
 case a1play.rate.8000: 16-bit stereo, 8000 Hz
-    441 Hz                           -19.7886 dBFS  (-60 to -1)
-    661.5 Hz, the right side         -39.4785 dB  (-200 to -20)
-    THD+N                            -21.4774 dB  (-200 to -15)
-    pitch, against the second card      229.531 ppm  (-6000 to 6000)
-  PASS (7.7 s)
+    441 Hz                           -19.7811 dBFS  (-60 to -1)
+    661.5 Hz, the right side          -39.358 dB  (-200 to -20)
+    THD+N                            -21.5581 dB  (-200 to -15)
+    pitch, against the second card      228.783 ppm  (-6000 to 6000)
+  PASS (7.6 s)
 case a1play.rate.11025: at 11025 Hz
-    441 Hz                           -19.6644 dBFS  (-60 to -1)
-    661.5 Hz, the right side         -39.3061 dB  (-200 to -20)
-    THD+N                            -25.0838 dB  (-200 to -15)
-    pitch, against the second card     -22.6681 ppm  (-6000 to 6000)
+    441 Hz                           -19.6628 dBFS  (-60 to -1)
+    661.5 Hz, the right side         -39.2189 dB  (-200 to -20)
+    THD+N                            -25.2716 dB  (-200 to -15)
+    pitch, against the second card      -23.277 ppm  (-6000 to 6000)
   PASS (7.6 s)
 case a1play.rate.22050: at 22050 Hz
-    441 Hz                           -19.6294 dBFS  (-60 to -1)
-    661.5 Hz, the right side         -39.0513 dB  (-200 to -20)
-    THD+N                             -35.948 dB  (-200 to -15)
-    pitch, against the second card     -22.4488 ppm  (-6000 to 6000)
-  PASS (7.6 s)
-case a1play.rate.48000: at 48000 Hz
-    441 Hz                           -19.7112 dBFS  (-60 to -1)
-    661.5 Hz, the right side         -39.4322 dB  (-200 to -20)
-    THD+N                            -36.2046 dB  (-200 to -15)
-    pitch, against the second card      229.265 ppm  (-6000 to 6000)
+    441 Hz                           -19.6347 dBFS  (-60 to -1)
+    661.5 Hz, the right side         -39.1904 dB  (-200 to -20)
+    THD+N                            -38.7759 dB  (-200 to -15)
+    pitch, against the second card      -23.366 ppm  (-6000 to 6000)
   PASS (7.7 s)
+case a1play.rate.48000: at 48000 Hz
+    441 Hz                           -19.7063 dBFS  (-60 to -1)
+    661.5 Hz, the right side         -39.2888 dB  (-200 to -20)
+    THD+N                            -38.7695 dB  (-200 to -15)
+    pitch, against the second card      228.499 ppm  (-6000 to 6000)
+  PASS (8.3 s)
 case a1play.start: twenty starts in step: 16-bit clean, 8-bit with its sides
     16-bit starts in step                  10 of 10  (10 to 10)
     8-bit starts with their sides           10 of 10  (10 to 10)
-  PASS (151.6 s)
+  PASS (152.5 s)
 case a1play.drain: a drain ending on a period's end plays Audio 1's FIFO out
     the tone's length                 999.354 ms  (985 to 1030)
   PASS (2.4 s)
@@ -730,87 +740,157 @@ case a1play.pausedrain: a drain out of a pause plays what was queued
     the tone's length                 1199.56 ms  (1185 to 1230)
   PASS (2.4 s)
 case a1play.click: the click at a pause's release, against the tone's peak
-    the worst click, of the tone's peak      5.65481 
-    the mean                          1.78091 
-  KNOWN (18.6 s): a pause's release clicks, up to 5.7 times the tone
+    the worst click, of the tone's peak      5.92789 
+    the mean                          1.84522 
+  KNOWN (18.6 s): a pause's release clicks, up to 5.9 times the tone
 case buf.delay: Audio 2's delay counts its FIFO; its first frame plays at once
-    first frame after the trigger     -0.79923 ms  (-5 to 5)
-    the delay against the music DAC     -3.02157 ms  (-5 to 5)
+    first frame after the trigger    -0.816346 ms  (-5 to 5)
+    the delay against the music DAC     -3.00534 ms  (-5 to 5)
     the FIFO in the delay                  16 frames  (16 to 16)
   PASS (3.3 s)
 case buf.drain: a drain ends as the last frame plays
-    half a second's drain            0.504884 s  (0.495 to 0.53)
+    half a second's drain            0.505098 s  (0.495 to 0.53)
   PASS (0.6 s)
 case buf.xrun.play: a stalled writer: an xrun, then every frame
     xruns                                   1   (1 to 3)
     frames moved                       132300   (132300 to 132300)
-  PASS (3.7 s)
+  PASS (3.8 s)
 case buf.xrun.rec: a stalled reader: an xrun, then every frame
     xruns                                   1   (1 to 3)
     frames moved                       132300   (132300 to 132300)
   PASS (3.9 s)
+case mix.scale: no level's dB range moves with the record source
+    levels with a dB scale                 19   (1 to 200)
+    ranges that moved with the source            0   (0 to 0)
+  PASS (0.1 s)
+case mix.adc: the ADC's list, Capture Source and 1Ch show one value
+    mismatches over the eight sources            0   (0 to 0)
+  PASS (0.0 s)
 case mix.a2: Audio 2's volume (7Ch) on its dB scale, through source 7
-    PCM Playback Volume at 15: -24.73 dBFS, noise -115.5 dBFS
-    at 1: -56.89 dBFS, the scale says -56.23
-    left high, right low: their difference      8.75091 dB  (8.5 to 9.5)
+    PCM Playback Volume at 15: -24.72 dBFS, noise -119.4 dBFS
+    at 1: -56.79 dBFS, the scale says -56.22
+    left high, right low: their difference      8.73868 dB  (8.5 to 9.5)
     steps measured                         14   (3 to 100)
-    worst step against the scale    -0.665554 dB  (-0.7 to 0.7)
+    worst step against the scale    -0.566238 dB  (-0.7 to 0.7)
     steps that rose                         0   (0 to 0)
     mutes that muted                        1   (1 to 1)
   PASS (17.2 s)
 case mix.a2rec: Audio 2 into the record mixer (69h) on its dB scale
-    PCM Capture Volume at 15: -19.55 dBFS, noise -120.4 dBFS
-    at 1: -51.57 dBFS, the scale says -51.05
-    left high, right low: their difference      8.69562 dB  (8.5 to 9.5)
+    PCM Capture Volume at 15: -19.56 dBFS, noise -125.4 dBFS
+    at 1: -51.61 dBFS, the scale says -51.06
+    left high, right low: their difference      8.69176 dB  (8.5 to 9.5)
     steps measured                         14   (3 to 100)
-    worst step against the scale     -0.51981 dB  (-0.7 to 0.7)
+    worst step against the scale    -0.555108 dB  (-0.7 to 0.7)
     steps that rose                         0   (0 to 0)
     mutes that muted                        1   (1 to 1)
   PASS (17.2 s)
 case mix.capture: the recording level (B4h) on the line inputs' dB scale
-    Capture Volume at 15: -15.59 dBFS, noise -102.4 dBFS
-    left high, right low: their difference       8.7612 dB  (8.5 to 9.5)
+    Capture Volume at 15: -15.59 dBFS, noise -104.0 dBFS
+    left high, right low: their difference      8.76345 dB  (8.5 to 9.5)
     steps measured                         15   (3 to 100)
-    worst step against the scale    0.0679526 dB  (-0.7 to 0.7)
+    worst step against the scale     0.070448 dB  (-0.7 to 0.7)
     steps that rose                         0   (0 to 0)
     mutes that muted                        1   (1 to 1)
-  PASS (17.3 s)
+  PASS (17.2 s)
 case mix.fmrec: the music DAC into the record mixer (6Bh) on its dB scale
-    FM Capture Volume at 15: -1.71 dBFS, noise -102.0 dBFS
-    left high, right low: their difference      9.30207 dB  (8.5 to 9.5)
+    FM Capture Volume at 15: -1.70 dBFS, noise -111.1 dBFS
+    left high, right low: their difference      9.29617 dB  (8.5 to 9.5)
     steps measured                         14   (3 to 100)
-    worst step against the scale    -0.189071 dB  (-0.7 to 0.7)
+    worst step against the scale    -0.193266 dB  (-0.7 to 0.7)
     steps that rose                         0   (0 to 0)
     mutes that muted                        1   (1 to 1)
-  PASS (36.2 s)
+  PASS (36.1 s)
 case mix.master: the master on its dB scale, through record source 3 (AOUT)
-    Master Playback Volume at 63: -19.45 dBFS, noise -117.1 dBFS
-    left high, right low: their difference      4.20335 dB  (4 to 5)
+    Master Playback Volume at 63: -19.46 dBFS, noise -124.2 dBFS
+    left high, right low: their difference      4.19337 dB  (4 to 5)
     steps measured                         24   (3 to 100)
-    worst step against the scale     0.180952 dB  (-0.7 to 0.7)
+    worst step against the scale     0.263489 dB  (-0.7 to 0.7)
     steps that rose                         0   (0 to 0)
     mutes that muted                        1   (1 to 1)
-  PASS (26.4 s)
+  PASS (26.3 s)
 case mix.a1: Audio 1's volume (14h) on its dB scale, through a linear cable
-    PCM Playback Volume at 14: -25.73 dBFS, noise -98.5 dBFS
+    PCM Playback Volume at 14: -25.73 dBFS, noise -109.5 dBFS
     steps measured                         13   (3 to 100)
-    worst step against the scale    -0.187158 dB  (-0.7 to 0.7)
+    worst step against the scale    -0.199583 dB  (-0.7 to 0.7)
     steps that rose                         0   (0 to 0)
     mutes that muted                        1   (1 to 1)
   PASS (15.6 s)
 case dac.images: Audio 2's image at 22.05 kHz, with each DAC stage
-    image against the tone, stages off      -32.045 dB
-    image against the tone, oversampling     -57.7173 dB
-    image against the tone, filter     -69.0161 dB
-    oversampling takes the image down      25.6723 dB  (10 to 200)
-    the filter takes the image down      36.9711 dB  (3 to 200)
+    image against the tone, stages off      -32.008 dB
+    image against the tone, oversampling     -59.0867 dB
+    image against the tone, filter     -71.4251 dB
+    oversampling takes the image down      27.0787 dB  (10 to 200)
+    the filter takes the image down      39.4171 dB  (3 to 200)
   KNOWN (6.6 s): with the stages off the image is -32 dB, as without oversampling
 case dac.fold: the ADC's filter takes the image that moves a tone's level
-    the levels' spread, the ADC's filter off   0.00157923 dB
-    and on, the spread             0.00134649 dB  (0 to 0.5)
-    the level, the filter off         -20.515 dBFS
-    and on                           -21.8557 dBFS
+    the levels' spread, the ADC's filter off   0.00382674 dB
+    and on, the spread             0.00259879 dB  (0 to 0.5)
+    the level, the filter off        -21.1989 dBFS
+    and on                            -21.468 dBFS
   PASS (25.1 s)
+case dac.over.44: Audio 2 Output Rate clocks the DAC up, on 793.8 kHz's divisors
+    70h asked for 1x                       92   (92 to 92)
+    the image at 17050 Hz, 1x        -12.0416 dB
+    the image is there at 1x         -12.0416 dB  (-30 to 0)
+    70h asked for 2x                      110   (110 to 110)
+    the image at 17050 Hz, 2x        -81.9366 dB
+    the image is gone, 2x             69.8949 dB  (20 to 200)
+    9 kHz up from 1x, 2x              2.45605 dB  (2.11099 to 2.91099)
+    70h asked for 3x                      116   (116 to 116)
+    the image at 17050 Hz, 3x        -80.3687 dB
+    the image is gone, 3x              68.327 dB  (20 to 200)
+    9 kHz up from 1x, 3x              2.98981 dB  (2.63009 to 3.43009)
+  PASS (16.8 s)
+case dac.over.48: the same on 768 kHz's divisors, which stop at 2x here
+    70h asked for 1x                      224   (224 to 224)
+    the image at 19000 Hz, 1x         -13.326 dB
+    the image is there at 1x          -13.326 dB  (-30 to 0)
+    70h asked for 2x                      240   (240 to 240)
+    the image at 19000 Hz, 2x        -55.7813 dB
+    the image is gone, 2x             42.4553 dB  (20 to 200)
+    9 kHz up from 1x, 2x              2.14808 dB  (1.76977 to 2.56977)
+    70h asked for 3x                      240   (240 to 240)
+    the image at 19000 Hz, 2x        -55.4268 dB
+    the image is gone, 2x             42.1007 dB  (20 to 200)
+    9 kHz up from 1x, 2x              2.14694 dB  (1.76977 to 2.56977)
+  PASS (16.8 s)
+case dac.over.live: the same under a playing stream with MPD's buffer
+    the buffer it got                   16384 frames  (16384 to 16384)
+    xruns                                   0   (0 to 0)
+    control writes refused                  0   (0 to 0)
+    70h at the end, 1x                    110   (110 to 110)
+    15 kHz at 1x, part 1             -19.9701 dBFS
+    15 kHz at 3x, part 2             -17.7542 dBFS
+    up from 1x, part 2                2.21586 dB  (1.82239 to 2.62239)
+    pitch, part 2                   -0.313361 ppm  (-30 to 30)
+    15 kHz at 2x, part 3             -18.1419 dBFS
+    up from 1x, part 3                1.82821 dB  (1.45231 to 2.25231)
+    pitch, part 3                     0.20436 ppm  (-30 to 30)
+    15 kHz at 1x, part 4             -19.9695 dBFS
+    up from 1x, part 4            0.000541574 dB  (-0.4 to 0.4)
+    pitch, part 4                   0.0156449 ppm  (-30 to 30)
+    pieces with a stall of 16               0 
+  PASS (12.7 s)
+case dac.over.quality: distortion and noise at each rate, against the same chain at 1x
+    THD+N at 997 Hz, 1x               -36.987 dB
+    THD+N at 10 kHz, 1x              -48.0698 dB
+    noise of a silent stream, 1x     -69.6212 dBFS
+    pieces with a stall of 8, 1x            0 
+    THD+N at 997 Hz, 2x              -37.4163 dB
+    THD+N at 997 Hz, 2x against 1x    -0.429293 dB  (-40 to 1)
+    THD+N at 10 kHz, 2x              -47.6091 dB
+    THD+N at 10 kHz, 2x against 1x     0.460744 dB  (-40 to 1)
+    noise of a silent stream, 2x     -69.8679 dBFS
+    noise of a silent stream, 2x against 1x    -0.246648 dB  (-40 to 1)
+    pieces with a stall of 8, 2x            0 
+    THD+N at 997 Hz, 3x              -38.1197 dB
+    THD+N at 997 Hz, 3x against 1x      -1.1327 dB  (-40 to 1)
+    THD+N at 10 kHz, 3x              -47.7165 dB
+    THD+N at 10 kHz, 3x against 1x     0.353337 dB  (-40 to 1)
+    noise of a silent stream, 3x     -69.7435 dBFS
+    noise of a silent stream, 3x against 1x    -0.122279 dB  (-40 to 1)
+    pieces with a stall of 8, 3x            1 
+  PASS (86.3 s)
 case dac.corner.11025: Audio 2's filter corner at 11025 Hz, from the driver's 72h
     1654 Hz (0.15 of the rate): +0.0 dB
     2756 Hz (0.25 of the rate): -0.8 dB
@@ -818,136 +898,129 @@ case dac.corner.11025: Audio 2's filter corner at 11025 Hz, from the driver's 72
     4190 Hz (0.38 of the rate): +1.1 dB
     4630 Hz (0.42 of the rate): +0.6 dB
     5072 Hz (0.46 of the rate): -6.9 dB
-    the filter's -3 dB point, of the rate     0.439251   (0.3 to 0.5)
-    the filter's -3 dB point          4842.74 Hz
-  PASS (6.6 s)
+    the filter's -3 dB point, of the rate     0.439279   (0.3 to 0.5)
+    the filter's -3 dB point          4843.05 Hz
+  PASS (6.8 s)
 case dac.corner.22050: the same at 22050 Hz
     3308 Hz (0.15 of the rate): +0.0 dB
     5512 Hz (0.25 of the rate): -0.8 dB
     7056 Hz (0.32 of the rate): -0.8 dB
     8379 Hz (0.38 of the rate): +1.1 dB
     9261 Hz (0.42 of the rate): +0.6 dB
-    10143 Hz (0.46 of the rate): -6.9 dB
-    the filter's -3 dB point, of the rate     0.439067   (0.3 to 0.5)
-    the filter's -3 dB point          9681.43 Hz
+    10143 Hz (0.46 of the rate): -6.8 dB
+    the filter's -3 dB point, of the rate     0.439394   (0.3 to 0.5)
+    the filter's -3 dB point          9688.64 Hz
   PASS (6.7 s)
 case dac.corner.32000: the same at 32000 Hz
     4800 Hz (0.15 of the rate): +0.0 dB
     8000 Hz (0.25 of the rate): -0.8 dB
     10240 Hz (0.32 of the rate): -0.9 dB
-    12160 Hz (0.38 of the rate): +0.6 dB
+    12160 Hz (0.38 of the rate): +0.5 dB
     13440 Hz (0.42 of the rate): +1.7 dB
     14720 Hz (0.46 of the rate): -3.9 dB
-    the filter's -3 dB point, of the rate     0.453564   (0.3 to 0.5)
-    the filter's -3 dB point          14514.1 Hz
-  PASS (6.8 s)
+    the filter's -3 dB point, of the rate      0.45363   (0.3 to 0.5)
+    the filter's -3 dB point          14516.2 Hz
+  PASS (6.9 s)
 case a2.rate.8000: Audio 2 at 8000 Hz on its clock, heard by Audio 1 at 48 kHz
-    pitch against Audio 1's clock   0.00148834 ppm  (-100 to 100)
-    THD+N below the first image      -60.9213 dB  (-200 to -30)
-  PASS (11.1 s)
+    pitch against Audio 1's clock  -0.00197682 ppm  (-100 to 100)
+    THD+N below the first image      -60.7808 dB  (-200 to -30)
+  PASS (10.9 s)
 case a2.rate.11025: at 11025 Hz
-    pitch against Audio 1's clock      -251.94 ppm  (-600 to 600)
-    THD+N below the first image      -60.5858 dB  (-200 to -30)
+    pitch against Audio 1's clock     -251.953 ppm  (-600 to 600)
+    THD+N below the first image      -60.7188 dB  (-200 to -30)
   PASS (11.0 s)
 case a2.rate.16000: at 16000 Hz
-    pitch against Audio 1's clock   -0.0091466 ppm  (-100 to 100)
-    THD+N below the first image       -59.887 dB  (-200 to -30)
+    pitch against Audio 1's clock   0.00778347 ppm  (-100 to 100)
+    THD+N below the first image      -59.9339 dB  (-200 to -30)
   PASS (11.0 s)
 case a2.rate.22050: at 22050 Hz
-    pitch against Audio 1's clock     -251.951 ppm  (-600 to 600)
-    THD+N below the first image      -59.1092 dB  (-200 to -30)
-  PASS (11.0 s)
+    pitch against Audio 1's clock     -251.956 ppm  (-600 to 600)
+    THD+N below the first image      -58.8994 dB  (-200 to -30)
+  PASS (11.5 s)
 case a2.rate.32000: at 32000 Hz
-    pitch against Audio 1's clock -0.000785741 ppm  (-100 to 100)
-    THD+N below the first image      -58.5232 dB  (-200 to -30)
-  PASS (11.3 s)
+    pitch against Audio 1's clock  0.000844084 ppm  (-100 to 100)
+    THD+N below the first image      -58.6133 dB  (-200 to -30)
+  PASS (11.0 s)
 case a2.rate.44100: at 44100 Hz
-    pitch against Audio 1's clock     -251.951 ppm  (-600 to 600)
-    THD+N below the first image      -58.0346 dB  (-200 to -30)
+    pitch against Audio 1's clock     -251.949 ppm  (-600 to 600)
+    THD+N below the first image      -57.7847 dB  (-200 to -30)
   PASS (11.1 s)
 case a2.rate.48000: at 48000 Hz
-    pitch against Audio 1's clock  -0.00165206 ppm  (-100 to 100)
-    THD+N below the first image      -58.1528 dB  (-200 to -30)
-  PASS (11.0 s)
+    pitch against Audio 1's clock   0.00236645 ppm  (-100 to 100)
+    THD+N below the first image      -57.9614 dB  (-200 to -30)
+  PASS (11.1 s)
 case a2.rate.88200: at 88200 Hz
-    pitch against Audio 1's clock     -251.948 ppm  (-600 to 600)
-    THD+N below the first image       -58.047 dB  (-200 to -30)
-  PASS (11.3 s)
+    pitch against Audio 1's clock     -251.954 ppm  (-600 to 600)
+    THD+N below the first image      -57.7923 dB  (-200 to -30)
+  PASS (11.2 s)
 case a2.rate.96000: at 96000 Hz
-    pitch against Audio 1's clock      -7.1305 ppm  (-100 to 100)
-    THD+N below the first image      -36.2329 dB  (-200 to -30)
-  PASS (11.4 s)
+    pitch against Audio 1's clock   0.00315976 ppm  (-100 to 100)
+    THD+N below the first image      -57.7336 dB  (-200 to -30)
+  PASS (11.3 s)
 case 3d.quick: the 3-D controls: the boost, its level's scale, the model, the limit
     25 runs, about 138 s
-    run 1 (ess) skipped in 1 windows, measured again
-    run 3 (52=20) skipped in 1 windows, measured again
-    run 4 (model) skipped in 2 windows, measured again
-    run 9 (56=00) skipped in 1 windows, measured again
-    run 12 (58=FF) skipped in 1 windows, measured again
-    run 13 (5A=00) skipped in 1 windows, measured again
-    run 24 (off again) skipped in 1 windows, measured again
-    the report: /var/tmp/et-p3/3d.quick.txt
+    the report: /var/tmp/et-final/3d.quick.txt
     runs that failed or clipped             0   (0 to 0)
-    S>S at 400 Hz, ESS's setting      17.9515 dB  (12 to 24)
-    M>M with ESS's setting, furthest from 0 dB  -0.00697824 dB  (-1 to 1)
-    the boost at 400 Hz from level 63 to 32, against the scale   -0.0458185 dB  (-2 to 2)
-    S>S at 400 Hz, level 0           0.251019 dB  (-1 to 1)
-    M>S at 400 Hz with the model      13.9464 dB  (8 to 24)
-    S>S at 400 Hz with the model     -23.7244 dB  (-100 to -12)
-    the limit's hold at 1 kHz, S/M +6 dB      15.3401 dB  (6 to 40)
-    the limit's hold at 1 kHz, S/M -24 dB   0.00108051 dB  (-1.5 to 1.5)
-    54h-5Ah at their ends with the limit off, furthest from ESS's   -0.0107803 dB  (-0.5 to 0.5)
-    the path at the end against the start   0.00475699 dB  (-0.5 to 0.5)
-  PASS (220.5 s)
+    S>S at 400 Hz, ESS's setting      17.9535 dB  (12 to 24)
+    M>M with ESS's setting, furthest from 0 dB  -0.00699019 dB  (-1 to 1)
+    the boost at 400 Hz from level 63 to 32, against the scale    -0.035307 dB  (-2 to 2)
+    S>S at 400 Hz, level 0           0.247224 dB  (-1 to 1)
+    M>S at 400 Hz with the model      13.9457 dB  (8 to 24)
+    S>S at 400 Hz with the model      -23.978 dB  (-100 to -12)
+    the limit's hold at 1 kHz, S/M +6 dB      15.3395 dB  (6 to 40)
+    the limit's hold at 1 kHz, S/M -24 dB   0.00600815 dB  (-1.5 to 1.5)
+    54h-5Ah at their ends with the limit off, furthest from ESS's   -0.0101433 dB  (-0.5 to 0.5)
+    the path at the end against the start  -0.00653825 dB  (-0.5 to 0.5)
+  PASS (176.2 s)
 case dual.map: the dual device: channel 1 on Audio 1, channel 3 on Audio 2, one clock
-    channel 1, 441 Hz                -23.1976 dBFS  (-60 to -1)
-    channel 3, 882 Hz                -24.8598 dBFS  (-60 to -1)
-    their pitches, against 2         -1.44179 ppm  (-100 to 100)
+    channel 1, 441 Hz                -23.1775 dBFS  (-60 to -1)
+    channel 3, 882 Hz                -24.9005 dBFS  (-60 to -1)
+    their pitches, against 2         -31.4729 ppm  (-100 to 100)
   PASS (4.8 s)
 case dual.align: the two DACs begin within half a frame of each other
-    the two tones from one DAC, in time     -553.164 us
-    Audio 2 against Audio 1           6.02461 frames  (-20 to 20)
-    Audio 2 against Audio 1, in time      136.612 us
-  KNOWN (9.4 s): Audio 2 began +6.0 frames from Audio 1, not in step
+    the two tones from one DAC, in time     -554.463 us
+    Audio 2 against Audio 1           3.20393 frames  (-20 to 20)
+    Audio 2 against Audio 1, in time      72.6516 us
+  KNOWN (9.4 s): Audio 2 began +3.2 frames from Audio 1, not in step
 case dual.align.22050: the same at 22050 Hz
-    the two tones from one DAC, in time     -551.946 us
-    Audio 2 against Audio 1         -0.321606 frames  (-20 to 20)
-    Audio 2 against Audio 1, in time     -14.5853 us
-  PASS (9.3 s)
+    the two tones from one DAC, in time     -554.504 us
+    Audio 2 against Audio 1           4.63465 frames  (-20 to 20)
+    Audio 2 against Audio 1, in time      210.188 us
+  KNOWN (9.3 s): Audio 2 began +4.6 frames from Audio 1, not in step
 case dual.align.48000: the same at 48000 Hz
-    the two tones from one DAC, in time     -551.789 us
-    Audio 2 against Audio 1          0.367101 frames  (-20 to 20)
-    Audio 2 against Audio 1, in time      7.64794 us
-  PASS (9.4 s)
+    the two tones from one DAC, in time      -554.37 us
+    Audio 2 against Audio 1         -0.683046 frames  (-20 to 20)
+    Audio 2 against Audio 1, in time     -14.2301 us
+  KNOWN (9.4 s): Audio 2 began -0.7 frames from Audio 1, not in step
 case both.a1play: Audio 2 plays on while Audio 1 starts and stops eight times
     aplay's exit                            0   (0 to 0)
     Audio 2's xruns                         0   (0 to 0)
     Audio 2 at -18.6 dBFS in the cable's median 50 ms
-    its lowest 50 ms 5.9 s after the onset
-    Audio 2's lowest 50 ms against its median    -0.100437 dB  (-6 to 0)
+    its lowest 50 ms 9.8 s after the onset
+    Audio 2's lowest 50 ms against its median    -0.013397 dB  (-6 to 0)
   PASS (16.2 s)
 case both.a1rec: Audio 2 plays on while Audio 1 starts and stops eight recordings
     arecord's exit                          0   (0 to 0)
     Audio 2's xruns                         0   (0 to 0)
     Audio 2 at -18.6 dBFS in the cable's median 50 ms
-    its lowest 50 ms 6.7 s after the onset
-    Audio 2's lowest 50 ms against its median    -0.106492 dB  (-6 to 0)
+    its lowest 50 ms 12.5 s after the onset
+    Audio 2's lowest 50 ms against its median  -0.00726652 dB  (-6 to 0)
   PASS (16.2 s)
 case mix.monitor: the record monitor puts the record source on AOUT while Audio 1 records
     arecord's exit                          0   (0 to 0)
     Audio 2's xruns                         0   (0 to 0)
-    -58.8 dB at 2.10 s after the onset
+    -20.5 dB at 1.95 s after the onset
+    -59.4 dB at 2.00 s after the onset
+    -59.3 dB at 2.05 s after the onset
+    -60.8 dB at 2.10 s after the onset
     -59.6 dB at 2.15 s after the onset
-    -58.8 dB at 2.20 s after the onset
-    -56.5 dB at 2.25 s after the onset
-    -60.1 dB at 2.30 s after the onset
-    -60.4 dB at 2.35 s after the onset
-    -57.6 dB at 2.40 s after the onset
-    -60.8 dB at 2.45 s after the onset
+    -59.7 dB at 2.20 s after the onset
+    -58.4 dB at 2.25 s after the onset
+    -58.1 dB at 2.30 s after the onset
     Audio 2 at -18.6 dBFS in the cable's median 50 ms
-    its lowest 50 ms 11.5 s after the onset
-    the output's lowest 50 ms with the monitor, against its median     -61.6103 dB  (-200 to -20)
-  PASS (16.3 s)
+    its lowest 50 ms 2.4 s after the onset
+    the output's lowest 50 ms with the monitor, against its median     -62.0397 dB  (-200 to -20)
+  PASS (16.4 s)
 case latency.min.a2: Audio 2's smallest period of four without an xrun
     period 32 (took 32, buffer 128): 0 xruns
     smallest period without an xrun           32 frames  (32 to 512)
@@ -960,35 +1033,38 @@ case latency.min.a1: Audio 1's smallest period of four without an xrun
   PASS (3.3 s)
 case music.aplay: aplay plays a file on Audio 2, every frame on the dig path
     frames played exactly              132300   (132284 to 132300)
-  PASS (5.7 s)
+  PASS (5.5 s)
 case cpu.a2: the CPU while Audio 2 plays: under 1 %
     interrupts a second                  21.6 
     ring ticks a second                     0 
-    the driver's share               0.298528 %  (0 to 1)
-    busy, idle                              0 %
-    busy, playing                         1.1 %
+    the driver's share               0.302741 %  (0 to 1)
+    busy, idle                       0.100402 %
+    busy, playing                       1.001 %
   PASS (20.6 s)
 case cpu.a1: the CPU while Audio 1 plays: under 1 %
     interrupts a second                  21.6 
     ring ticks a second                     0 
-    the driver's share              0.0989746 %  (0 to 1)
-    busy, idle                       0.200803 %
-    busy, playing                     5.79421 %
+    the driver's share               0.106438 %  (0 to 1)
+    busy, idle                       0.100503 %
+    busy, playing                     5.98205 %
   PASS (20.6 s)
 case cpu.both: the CPU while both play: under 2 %
     interrupts a second                  43.2 
     ring ticks a second                     0 
-    the driver's share               0.424952 %  (0 to 2)
+    the driver's share               0.427821 %  (0 to 2)
     busy, idle                       0.100402 %
-    busy, playing                     1.40421 %
+    busy, playing                      1.5015 %
   PASS (20.6 s)
 case beep.out: the PC speaker's levels, heard by the second card
-    level 0: -93.3 dBFS
-    level 4: -76.4 dBFS
-    level 7: -69.9 dBFS
-    level 7 over level 0              23.3856 dB  (20 to 200)
-    level 4 over level 0              16.8824 dB  (3 to 23.3856)
+    level 0: -122.0 dBFS
+    level 4: -78.9 dBFS
+    level 7: -70.1 dBFS
+    level 7 over level 0              51.9223 dB  (20 to 200)
+    level 4 over level 0              43.0373 dB  (3 to 51.9223)
   PASS (3.2 s)
+case beep.follow: the PC speaker's register follows the master, and its level stays
+    steps that missed                       0   (0 to 0)
+  PASS (0.1 s)
 case hwvol.buttons: the volume buttons move the master and its control, or the counters
   SKIP: needs someone at the machine (-i)
 case pwr.partial: pwr_save puts the idle chip partly down, and a stream wakes it
@@ -1006,55 +1082,58 @@ case pwr.self: after Self-Timed Power Down a stream wakes the chip
 case midi.mpu: amidi sends a note out of the MPU-401
     amidi's exit                            0   (0 to 0)
   PASS (0.2 s)
+case midi.mpu.loop: with a cable from MIDI out to in, the bytes come back as they went
+    nothing came back: no cable from MIDI out to MIDI in
+  SKIP (1.2 s)
 case midi.esfm: GMCHECK.MID on the ESFM synth, every step on PCM 1
-    MIDI time 0 in the recording     0.578828 s  (0 to 1.5)
+    MIDI time 0 in the recording     0.574463 s  (0 to 1.5)
     C4, against A440                 -11.9285 cents  (-20 to 0)
-    modulation 0: vibrato             0.21622 cents  (0 to 4)
-    modulation 40: vibrato            8.15637 cents  (5 to 22)
-    modulation 127: vibrato           20.9584 cents  (10 to 45)
-    modulation 0 again                 0.2039 cents  (0 to 4)
-    pressure 90: vibrato              18.4756 cents  (10 to 45)
-    pressure 0: vibrato              0.152588 cents  (0 to 4)
-    pan 64, left                     -26.0435 dBFS  (-50 to 0)
-    pan 64, right                    -28.0335 dBFS  (-50 to 0)
-    pan 0, left                      -26.1978 dBFS  (-50 to 0)
+    modulation 0: vibrato            0.185589 cents  (0 to 4)
+    modulation 40: vibrato            7.66605 cents  (5 to 22)
+    modulation 127: vibrato           14.2994 cents  (10 to 45)
+    modulation 0 again               0.246683 cents  (0 to 4)
+    pressure 90: vibrato              18.9318 cents  (10 to 45)
+    pressure 0: vibrato              0.126373 cents  (0 to 4)
+    pan 64, left                     -26.0437 dBFS  (-50 to 0)
+    pan 64, right                    -28.0338 dBFS  (-50 to 0)
+    pan 0, left                      -26.1976 dBFS  (-50 to 0)
     pan 0, right                            0 rms  (0 to 0)
     pan 127, left                           0 rms  (0 to 0)
-    pan 127, right                   -29.4242 dBFS  (-50 to 0)
-    pan 64 again, left                -29.477 dBFS  (-50 to 0)
-    pan 64 again, right              -31.8711 dBFS  (-50 to 0)
-    RPN 1 +50 cents                   49.3723 cents  (40 to 60)
-    RPN 1 -50 cents                   -46.539 cents  (-60 to -40)
-    RPN 1 in tune                    -6.21645 cents  (-10 to 10)
+    pan 127, right                   -29.4245 dBFS  (-50 to 0)
+    pan 64 again, left               -29.4778 dBFS  (-50 to 0)
+    pan 64 again, right              -31.8721 dBFS  (-50 to 0)
+    RPN 1 +50 cents                    49.373 cents  (40 to 60)
+    RPN 1 -50 cents                  -46.5421 cents  (-60 to -40)
+    RPN 1 in tune                    -6.21701 cents  (-10 to 10)
     RPN 2 +12                         1201.57 cents  (1190 to 1210)
-    RPN 2 0                         0.0950994 cents  (-10 to 10)
-    bend range 12, full               1200.86 cents  (1190 to 1210)
-    bend back to center             -0.118651 cents  (-10 to 10)
-    master 1000h against 3FFFh       -1.97185 dB  (-40 to -1)
-    master 3FFFh against before      -2.63142 dB  (-3 to 3)
-    controller 121, before, left     -28.2443 dBFS  (-50 to 0)
+    RPN 2 0                         0.0943404 cents  (-10 to 10)
+    bend range 12, full               1200.87 cents  (1190 to 1210)
+    bend back to center             -0.129424 cents  (-10 to 10)
+    master 1000h against 3FFFh       -1.98483 dB  (-40 to -1)
+    master 3FFFh against before      -2.62593 dB  (-3 to 3)
+    controller 121, before, left     -28.2777 dBFS  (-50 to 0)
     controller 121, before, right            0 rms  (0 to 0)
-    bend +1 semitone                  100.898 cents  (90 to 110)
-    vibrato before 121                17.4112 cents  (10 to 45)
-    after 121: in tune               0.983921 cents  (-10 to 10)
-    after 121: vibrato               0.496506 cents  (0 to 4)
-    controller 121, after, left      -25.4804 dBFS  (-50 to 0)
+    bend +1 semitone                  101.016 cents  (90 to 110)
+    vibrato before 121                13.0705 cents  (10 to 45)
+    after 121: in tune               0.934496 cents  (-10 to 10)
+    after 121: vibrato               0.503102 cents  (0 to 4)
+    controller 121, after, left      -25.6639 dBFS  (-50 to 0)
     controller 121, after, right            0 rms  (0 to 0)
     kernel: Loading firmware: es1869/esfm-gm.bin
-  PASS (63.1 s)
+  PASS (62.3 s)
 case midi.opl3: the OPL3 synth with sbiload's bank: notes, pitch and pan on PCM 1
-    MIDI time 0 in the recording      0.54409 s  (0 to 1.5)
-    C4, against A440                 -9.42119 cents  (-25 to 25)
-    pan 64, left                     -36.6309 dBFS  (-50 to 0)
-    pan 64, right                    -36.6309 dBFS  (-50 to 0)
-    pan 0, left                      -31.4178 dBFS  (-50 to 0)
+    MIDI time 0 in the recording     0.544593 s  (0 to 1.5)
+    C4, against A440                 -9.42078 cents  (-25 to 25)
+    pan 64, left                     -36.5669 dBFS  (-50 to 0)
+    pan 64, right                    -36.5669 dBFS  (-50 to 0)
+    pan 0, left                      -31.3443 dBFS  (-50 to 0)
     pan 0, right                            0 rms  (0 to 0)
     pan 127, left                           0 rms  (0 to 0)
-    pan 127, right                   -31.5644 dBFS  (-50 to 0)
-    pan 64 again, left               -31.6064 dBFS  (-50 to 0)
-    pan 64 again, right              -31.6064 dBFS  (-50 to 0)
+    pan 127, right                   -31.6068 dBFS  (-50 to 0)
+    pan 64 again, left               -31.6501 dBFS  (-50 to 0)
+    pan 64 again, right              -31.6501 dBFS  (-50 to 0)
   PASS (12.9 s)
 case midi.soft: WildMidi on Audio 1, heard by the second card
-    music over the noise              25.4976 dB  (10 to 200)
+    music over the noise              29.7204 dB  (10 to 200)
   PASS (36.1 s)
-passed 146, failed 0, known 7, skipped 1, errors 0
+passed 151, failed 0, known 9, skipped 2, errors 0
