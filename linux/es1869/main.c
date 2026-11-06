@@ -563,7 +563,11 @@ out:
 
 static void es1869_unlist(void *data)
 {
-	es1869_settings_card_del(data);
+	struct es1869 *chip = data;
+
+	es1869_settings_card_del(chip);
+	if (!chip->dead && chip->pwr_down != 2)
+		es1869_beep_leave(chip);
 }
 
 // a resource in an 8-bit PnP register of the audio device: the chip's unless

@@ -738,9 +738,10 @@ static int alsa_ctl_db(void *ctx, const char *name, int index, long value,
 	return snd_ctl_convert_to_dB(a->ctl, id, value, cdb);
 }
 
-// as alsamixer asks: an enum that isn't a capture enum, a playback switch or
-// a playback volume is in its Playback view
-static int alsa_selem(void *ctx, const char *name, int *playback)
+// as alsamixer asks: an enum that isn't a capture enum, a playback switch or a
+// playback volume is in its Playback view, and a capture enum, a capture
+// switch or a capture volume in its Capture view
+static int alsa_selem(void *ctx, const char *name, int *views)
 {
 	snd_mixer_t *m;
 	snd_mixer_elem_t *e;
@@ -761,10 +762,22 @@ static int alsa_selem(void *ctx, const char *name, int *playback)
 	     e = snd_mixer_elem_next(e)) {
 		if (strcmp(snd_mixer_selem_get_name(e), name))
 			continue;
-		*playback = snd_mixer_selem_is_enumerated(e) ?
-				    !snd_mixer_selem_is_enum_capture(e) :
-				    snd_mixer_selem_has_playback_switch(e) ||
-					    snd_mixer_selem_has_playback_volume(e);
+		if (snd_mixer_selem_is_enumerated(e))
+			*views = snd_mixer_selem_is_enum_capture(e) ?
+					 ET_VIEW_CAPTURE :
+					 ET_VIEW_PLAYBACK;
+		else
+			*views =
+				(snd_mixer_selem_has_playback_switch(e) ||
+						 snd_mixer_selem_has_playback_volume(
+							 e) ?
+					 ET_VIEW_PLAYBACK :
+					 0) |
+				(snd_mixer_selem_has_capture_switch(e) ||
+						 snd_mixer_selem_has_capture_volume(
+							 e) ?
+					 ET_VIEW_CAPTURE :
+					 0);
 		err = 0;
 		break;
 	}

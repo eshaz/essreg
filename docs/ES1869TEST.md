@@ -239,7 +239,11 @@ The cases reach the chip four ways:
   sides apart. `mix.monitor` turns the record monitor on with a silent
   record source and arecord recording eight times, and the output falls
   silent in each recording, since the monitor puts the record source on AOUT
-  in place of the playback mix.
+  in place of the playback mix. `mix.scale` reads every level's dB range at
+  all eight record sources: none may move, since alsactl's restore converts
+  a level whose range differs from the saved one. `mix.adc` sets each source
+  through the ADC Input list and through Capture Source, and reads it back
+  through the other and from 1Ch.
 * `a1play.drain`: a second of tone at 8 kHz in 8 bits, whose last frame ends
   a period, drained: it lasts the second, within the second card's clock,
   where a stop at the DMA's end cuts the 32 ms that the chip's FIFO holds.
@@ -276,7 +280,10 @@ The cases reach the chip four ways:
   `3d.quick.txt` or `3d.full.txt`, in the output directory.
 * `beep`: a console tone at the PC speaker's levels 0, 4 and 7, heard by the
   second card: KNOWN where it doesn't hear that pin, which the board mixes
-  in after the chip. It needs root, and the pcspkr module.
+  in after the chip. It needs root, and the pcspkr module. `beep.follow`
+  moves the master and reads 3Ch, which has to follow it and go to 0 when
+  both sides are muted, while the level stays what was set, also after
+  reading it, which goes through the chip.
 * `gpo`: a tone through the output at each state of GPO0 and GPO1, heard by
   the second card: KNOWN where neither pin changes the line output.
 * `hwvol` (with `-i`): the volume buttons, each pressed when asked, move the

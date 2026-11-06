@@ -82,31 +82,40 @@ static int parse_param(const char *buf, long v[2])
 }
 
 // probe.alsamixer: what someone looks for in alsamixer is there, in its
-// Playback view: a control can exist and not make it to the simple mixer
+// view: a control can exist and not make it to the simple mixer
 enum et_result c_probe_alsamixer(struct et_ctx *c, const struct et_case *k)
 {
-	static const char *const names[] = {
-		"Audio 2 Rate Correction", "Audio 2 Rate Trim",
-		"Audio 2 Rate Dither", "Audio 2 Filter", "Audio 2 Oversampling",
-		"Audio 2 Own Clock", "Audio 2 To FM",
+	static const struct {
+		const char *name;
+		int view;
+	} t[] = {
+		{ "Audio 2 Rate Correction", ET_VIEW_PLAYBACK },
+		{ "Audio 2 Rate Trim", ET_VIEW_PLAYBACK },
+		{ "Audio 2 Rate Dither", ET_VIEW_PLAYBACK },
+		{ "Audio 2 Filter", ET_VIEW_PLAYBACK },
+		{ "Audio 2 Oversampling", ET_VIEW_PLAYBACK },
+		{ "Audio 2 Own Clock", ET_VIEW_PLAYBACK },
+		{ "Audio 2 To FM", ET_VIEW_PLAYBACK },
+		{ "Beep Follows Master", ET_VIEW_PLAYBACK },
+		{ "ESFM Vibrato", ET_VIEW_PLAYBACK },
+		{ "Dual", ET_VIEW_PLAYBACK },
+		{ "ADC Input", ET_VIEW_CAPTURE },
 	};
-	unsigned int i;
+	unsigned int i, n = sizeof(t) / sizeof(t[0]);
 	int seen = 0;
 
 	(void)k;
-	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
-		int playback = 0;
+	for (i = 0; i < n; i++) {
+		int views = 0;
 
-		if (c->hal->selem(c->hal->ctx, names[i], &playback) < 0)
-			et_fail(c, "no element '%s'", names[i]);
-		else if (!playback)
-			et_fail(c, "'%s' isn't in the Playback view", names[i]);
+		if (c->hal->selem(c->hal->ctx, t[i].name, &views) < 0)
+			et_fail(c, "no element '%s'", t[i].name);
+		else if (!(views & t[i].view))
+			et_fail(c, "'%s' isn't in its view", t[i].name);
 		else
 			seen++;
 	}
-	et_measure(c, "elements in the Playback view", seen, "",
-		   sizeof(names) / sizeof(names[0]),
-		   sizeof(names) / sizeof(names[0]));
+	et_measure(c, "elements in their alsamixer views", seen, "", n, n);
 	return ET_PASS;
 }
 

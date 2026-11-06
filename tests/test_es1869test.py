@@ -57,6 +57,7 @@ FAULTS = {
     0x10000000: "rs.clock.44",     # the Clock mode misses the steered clock
     0x20000000: "rs.treble",       # the hold's correction does nothing
     0x40000000: "rs.over.2",       # the ring stays at the stream's rate
+    0x80000000: "mix.scale",       # the record level's scale follows the source
 }
 
 # the cases that run only when named, or with someone at the machine

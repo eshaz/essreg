@@ -163,6 +163,7 @@ struct es1869 {
 	struct es1869_dual dual;
 	struct snd_kcontrol *kctl[ES_S_COUNT];
 	struct snd_kcontrol *hwvol_kctl[2];
+	struct snd_kcontrol *adc_kctl; // the ADC's input as a plain list
 	struct snd_rawmidi *rmidi;
 	struct snd_opl3 *opl3;
 	void (*opl3_command)(struct snd_opl3 *opl3, unsigned short cmd,
@@ -225,10 +226,10 @@ int es1869_setting_format(int id, char *buf, size_t size);
 
 // mixer.c
 const unsigned int *es1869_tlv(u8 tlv);
-int es1869_rec_tlv(struct snd_kcontrol *kctl, int op_flag, unsigned int size,
-		   unsigned int __user *tlv);
 int es1869_mixer_extra(struct es1869 *chip);
 void es1869_hwvol_notify(struct es1869 *chip);
+void es1869_beep_out(struct es1869 *chip);
+void es1869_beep_leave(struct es1869 *chip);
 
 // pcm.c
 struct es1869_limit;

@@ -176,6 +176,7 @@ int es1869_a1_prepare(struct es1869_hw *hw, const struct es1869_stream *s,
 		      bool capture, bool monitor);
 int es1869_a1_go(struct es1869_hw *hw, bool capture);
 int es1869_a1_dac(struct es1869_hw *hw, bool on);
+u8 es1869_beep_level(u8 level, u8 m60, u8 m62);
 int es1869_a1_stop(struct es1869_hw *hw, bool capture, u8 ch, bool adc);
 int es1869_a1_pause(struct es1869_hw *hw, bool push);
 

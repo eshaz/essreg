@@ -69,6 +69,8 @@ FN(c_buf_drain)
 FN(c_buf_xrun)
 FN(c_cpu)
 FN(c_mix)
+FN(c_mix_scale)
+FN(c_mix_adc)
 FN(c_dual_map)
 FN(c_dual_align)
 FN(c_both_restart)
@@ -87,6 +89,7 @@ FN(c_3d_quick)
 FN(c_3d_full)
 FN(c_gpo_out)
 FN(c_beep_out)
+FN(c_beep_follow)
 FN(c_hwvol_buttons)
 FN(c_pm_suspend)
 FN(c_pm_stream)
@@ -292,6 +295,10 @@ const struct et_case et_cases[] = {
 	CASE("buf.xrun.rec", 0, c_buf_xrun, 1,
 	     "a stalled reader: an xrun, then every frame")
 
+	CASE("mix.scale", Q | N, c_mix_scale, 0,
+	     "no level's dB range moves with the record source")
+	CASE("mix.adc", Q | N | ET_ROOT, c_mix_adc, 0,
+	     "the ADC's list, Capture Source and 1Ch show one value")
 	CASE("mix.a2", Q, c_mix, 0,
 	     "Audio 2's volume (7Ch) on its dB scale, through source 7")
 	CASE("mix.a2rec", 0, c_mix, 1,
@@ -368,6 +375,8 @@ const struct et_case et_cases[] = {
 
 	CASE("beep.out", R | ET_ROOT, c_beep_out, 0,
 	     "the PC speaker's levels, heard by the second card")
+	CASE("beep.follow", Q | N | ET_ROOT, c_beep_follow, 0,
+	     "the PC speaker's register follows the master, and its level stays")
 	CASE("gpo.out", R | ET_OPTIN, c_gpo_out, 0,
 	     "what GPO0 and GPO1 do to the line output")
 	CASE("hwvol.buttons", ET_INTER, c_hwvol_buttons, 0,

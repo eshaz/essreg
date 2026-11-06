@@ -20,7 +20,8 @@
  *          bits 7:4, F_HOOK applied by its own code, F_FOUND the chip's
  *          value at load unless a parameter gives one, F_IDLE refused
  *          while Audio 2 is open, F_IDLE_A1 while
- *          Audio 1 is open, F_NEXT applied at the next prepare
+ *          Audio 1 is open, F_NEXT applied at the next prepare, F_OPEN read
+ *          when the device or synth is next opened
  *   items  an enum's texts, separated by |, or a string's default
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
@@ -58,13 +59,13 @@ ES1869_SET(mono_volume, MONO_VOLUME, S_STEREO, B_MIX, 0x6D, 0, 4, 0, 15, 0,
 	   T_AUX, F_CTL | F_PARAM | F_INIT, 0, "Mono Playback Volume", "",
 	   "MONO_IN to the output (6Dh), 13 = 0 dB")
 ES1869_SET(beep_volume, BEEP_VOLUME, S_INT, B_MIX, 0x3C, 0, 3, 0, 7, 0,
-	   T_BEEP, F_CTL | F_PARAM | F_INIT | F_FOUND, 0, "Beep Playback Volume", "",
-	   "the PC speaker (3Ch bits 2:0), 7 = -6 dB, 0 mutes it; the board mixes it in after the master")
+	   T_BEEP, F_CTL | F_PARAM | F_INIT | F_FOUND | F_HOOK, 0, "Beep Playback Volume", "",
+	   "the PC speaker (3Ch bits 2:0), 7 = -6 dB, 0 mutes it; the board mixes it in after the master, so with beep_follow this is its level at full master")
+ES1869_SET(beep_follow, BEEP_FOLLOW, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_HOOK, 0, "Beep Follows Master Playback Switch", "",
+	   "3Ch scaled by the master and 0 while it is muted, as ESS's ES1869.DRV does it; 0 keeps the two apart")
 
 /* recording */
-/* the source first: alsactl restores in this order, and the level's dB
- * scale follows the source, so a level restored under another source's
- * scale would be converted to keep its dB, and would climb at each store */
 ES1869_SET(capture_source, CAPTURE_SOURCE, S_ENUM, B_MIX, 0x1C, 0, 3, 0, 7, 5,
 	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "Capture Source",
 	   "Mic|Mic Master|CD|AOUT|Mic1|Mix|Line|Master",
@@ -138,7 +139,7 @@ ES1869_SET(a8_rec_bits, A8_REC_BITS, S_INT, B_NONE, 0, 0, 0, 0, 0xF4, 0xF4,
 	   T_NONE, F_PARAM | F_NEXT, 0, "", "",
 	   "A8h's bits beside its channels and monitor in a recording: ESS's F4h (F5h/F6h)")
 ES1869_SET(filter_corner, FILTER_CORNER, S_INT, B_NONE, 0, 0, 0, 100, 1000, 875,
-	   T_NONE, F_PARAM | F_NEXT, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM | F_NEXT, 0, "Filter Corner", "",
 	   "the filters' corner below 44.1 kHz, in thousandths of half the rate; ESS's 875")
 
 /* the mono output and input (7Dh) */
@@ -205,10 +206,10 @@ ES1869_SET(gpo_power_down, GPO_POWER_DOWN, S_INT, B_NONE, 0, 0, 8, 0, 255, 0,
 	   T_NONE, F_CTL | F_PARAM | F_INIT | F_HOOK, 0, "GPO Power Down", "",
 	   "the GPOs at power-down (DSP CFh, read with CEh)")
 ES1869_SET(pwr_save, PWR_SAVE, S_INT, B_NONE, 0, 0, 0, 0, 3600, 0,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM, 0, "Power Save Seconds", "",
 	   "seconds of idleness before a power-down, 0 never")
 ES1869_SET(pwr_full, PWR_FULL, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM, 0, "Full Power Down Switch", "",
 	   "power down fully (the inputs go silent) instead of partly")
 
 /* DMA */
@@ -239,7 +240,7 @@ ES1869_SET(a1_settle_mode, A1_SETTLE_MODE, S_INT, B_NONE, 0, 0, 0, 0, 1, 0,
 	   T_NONE, F_PARAM, 0, "", "",
 	   "0 a timer unmasks the channel, 1 the start waits for it")
 ES1869_SET(a1c_settle_ms, A1C_SETTLE_MS, S_INT, B_NONE, 0, 0, 0, 0, 1000, 200,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM, 0, "ADC Settle Milliseconds", "",
 	   "how long a recording waits for the ADC's input to settle after the codec turns to it (ms); 0 starts at once, as ESS's drivers do, and the first 100 ms then carry the input's offset decaying")
 ES1869_SET(a2_lead_ms, A2_LEAD_MS, S_INT, B_NONE, 0, 0, 0, 4, 500, 40,
 	   T_NONE, F_PARAM, 0, "", "",
@@ -289,15 +290,15 @@ ES1869_SET(a2_max_bps, A2_MAX_BPS, S_INT, B_NONE, 0, 0, 0, 12404, 3175200, 38400
 	   T_NONE, F_PARAM | F_NEXT, 0, "", "",
 	   "Audio 2's highest DMA byte rate")
 ES1869_SET(rate_limit, RATE_LIMIT, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
-	   T_NONE, F_PARAM | F_NEXT, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM | F_NEXT, 0, "Rate Limit Switch", "",
 	   "0 lifts the rate limits above, for es1869test's rate.max")
 
 /* devices and access */
 ES1869_SET(fmdig_device, FMDIG_DEVICE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "FM Digital Capture Switch", "",
 	   "PCM device 1, the music DAC recorded digitally, opens")
 ES1869_SET(dual_playback, DUAL_PLAYBACK, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "Dual Playback Switch", "",
 	   "PCM device 2, both DACs as four channels, opens")
 ES1869_SET(irq_sources, IRQ_SOURCES, S_INT, B_NONE, 0, 0, 0, 0, 15, 15,
 	   T_NONE, F_PARAM | F_HOOK, 0, "", "",
@@ -314,13 +315,13 @@ ES1869_SET(regs_write, REGS_WRITE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
 
 /* FM */
 ES1869_SET(opl3, OPL3, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM, 0, "OPL3 Switch", "",
 	   "the OPL3 hwdep and synth open")
 ES1869_SET(esfm, ESFM, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "ESFM Switch", "",
 	   "the ESFM hwdep and synth open")
 ES1869_SET(fm_sides, FM_SIDES, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM, 0, "FM Sides Switch", "",
 	   "OPL3 channel A and the ESFM synth's pan left on the left output; 0 the chip's mirror")
 ES1869_SET(esfm_delay, ESFM_DELAY, S_INT, B_NONE, 0, 0, 0, 0, 32, 6,
 	   T_NONE, F_PARAM, 0, "", "",
@@ -329,26 +330,26 @@ ES1869_SET(esfm_bank, ESFM_BANK, S_STR, B_NONE, 0, 0, 0, 0, 0, 0,
 	   T_NONE, F_PARAM, 0, "", "es1869/esfm-gm.bin",
 	   "the GM bank's firmware file; a write loads it")
 ES1869_SET(esfm_square, ESFM_SQUARE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM, 0, "ESFM Better Square Switch", "",
 	   "the bank with the better square wave (es1869/esfm-gm-square.bin)")
 ES1869_SET(esfm_silence_on_close, ESFM_SILENCE_ON_CLOSE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "ESFM Silence On Close Switch", "",
 	   "every voice off when the synth's last user goes, the pedal's too; 0 is ESS's all notes off, though the FM's return to the OPL3 mode stops them right after")
 ES1869_SET(esfm_pedal_release, ESFM_PEDAL_RELEASE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "ESFM Pedal Release Switch", "",
 	   "a program change releases the sustain pedal")
 ES1869_SET(esfm_vibrato, ESFM_VIBRATO, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "ESFM Vibrato Switch", "",
 	   "vibrato from the modulation wheel and channel pressure")
 ES1869_SET(esfm_tuning, ESFM_TUNING, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "ESFM Tuning Switch", "",
 	   "RPN 1 and 2, fine and coarse tuning")
 ES1869_SET(esfm_reset_controllers, ESFM_RESET_CONTROLLERS, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "ESFM Reset Controllers Switch", "",
 	   "controller 121 as RP-015 has it; 0 ESS's reset")
 ES1869_SET(esfm_live_pan, ESFM_LIVE_PAN, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "ESFM Live Pan Switch", "",
 	   "a pan change moves sounding notes too")
 ES1869_SET(esfm_sysex, ESFM_SYSEX, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
-	   T_NONE, F_PARAM, 0, "", "",
+	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "ESFM SysEx Switch", "",
 	   "the GM, GM2, GS and XG resets and the master volume")

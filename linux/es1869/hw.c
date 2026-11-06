@@ -547,6 +547,17 @@ int es1869_a1_pause(struct es1869_hw *hw, bool push)
 	return err ? err : es1869_ctrl_update(hw, 0xB7, 0x80, 0x80);
 }
 
+// the PC speaker's level, 0-7, under the master: scaled by the louder side, as
+// ESS's ES1869.DRV does it, and silent once both are muted. 60h and 62h have
+// the level in bits 5:0 and the mute in bit 6
+u8 es1869_beep_level(u8 level, u8 m60, u8 m62)
+{
+	unsigned int l = m60 & 0x40 ? 0 : (m60 & 0x3F) + 1;
+	unsigned int r = m62 & 0x40 ? 0 : (m62 & 0x3F) + 1;
+
+	return level * (l > r ? l : r) / 64;
+}
+
 // Audio 1's DAC into the mixer (D1h) or out of it (D3h)
 int es1869_a1_dac(struct es1869_hw *hw, bool on)
 {

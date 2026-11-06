@@ -449,17 +449,22 @@ and data accesses and its DSP commands are safe. The BIOS's only DSP
 commands outside S3 and POST, C6h and then B4h at 22h, sit in an SMI that
 nothing calls, and its other writes of 3Ch come only from Computer Setup's
 int 15h call, which Linux never makes (celeronix-6a's BIOS notes, chapters
-05 and 09). "Beep Playback Volume" reads 3Ch from the chip, so it follows
-the popup, and a resume puts back what it had. At load the driver leaves 3Ch
-as the BIOS left it, unless a parameter sets it: the chip's reset value is
-4, and on the Armada CMOS 47h is 0, as is the saved state, so the PC speaker
-is silent there until something raises it.
+05 and 09). At load the driver takes the PC speaker's level from 3Ch as the
+BIOS left it, unless a parameter sets it: the chip's reset value is 4, and
+on the Armada CMOS 47h is 0, so the PC speaker is silent there until
+something raises it.
 
 The PC speaker comes out on the chip's own pin (PCSPKO), and the board mixes
 it in after the chip, so the master, its mute and the volume buttons don't
-reach it. ESS's ES1869.DRV scales 3Ch by the master in software and zeroes
-it while the master is muted; this driver keeps the two apart, as snd-es18xx
-does.
+reach it. So the driver does what ESS's ES1869.DRV does, with `beep_follow`,
+on by default: Beep Playback Volume is the level at full master, and 3Ch
+gets that level times the louder side of the master, plus 1, over 64, or 0
+while both sides are muted. The buttons move it too, and a change from the
+Fn keys lasts until the next look at the chip. When the driver unloads it
+leaves the level itself in 3Ch, for the next load to find. With
+`beep_follow=0` the two stay apart, as in snd-es18xx: the control reads 3Ch
+from the chip, so that it follows the popup, and a resume puts back what it
+had.
 
 ## Power
 
@@ -554,6 +559,13 @@ root, with no driver and no interrupt: it reads the lines, sends and
 receives, and times how fast a unit takes bytes.
 
 ## Tools
+
+`linux/tools/es1869ctl` is a full-screen panel of the driver's settings and
+status, with what alsamixer can't show: the streams and their real rates,
+what the ADC is hearing, and the parameters.
+[LINUX_CONTROLS.md](LINUX_CONTROLS.md) lists every control, what it does on
+the chip, and how to reach it. `make -C linux/tools/es1869ctl` builds it,
+with alsa-lib and ncurses.
 
 `linux/tools/essreg` builds essreg, the register utility, from its own
 sources in `src/`, with its register access through the driver's register
@@ -667,7 +679,11 @@ saved state wins over a parameter. The defaults are the Kconfig options
   MONO_IN to the output (6Dh), 13 = 0 dB.
 * `beep_volume` ("Beep Playback Volume"): 0 to 7, default 0. The PC speaker
   (3Ch bits 2:0), 7 = -6 dB, 0 mutes it; the board mixes it in after the
-  master. Without a parameter at load, the chip keeps its level.
+  master, so with beep_follow this is its level at full master. Without a
+  parameter at load, the chip keeps its level.
+* `beep_follow` ("Beep Follows Master Playback Switch"): 0 to 1, default 1.
+  3Ch scaled by the master and 0 while it is muted, as ESS's ES1869.DRV does
+  it; 0 keeps the two apart.
 * `capture_source` ("Capture Source"): 0 Mic, 1 Mic Master, 2 CD, 3 AOUT, 4
   Mic1, 5 Mix, 6 Line, 7 Master, default Mix. The record source (1Ch bits
   2:0): 5 the record mixer, 7 the 3-D output before the master.
@@ -721,9 +737,9 @@ saved state wins over a parameter. The defaults are the Kconfig options
 * `a8_rec_bits`: 0 to 244, default 244. A8h's bits beside its channels and
   monitor in a recording: ESS's F4h (F5h/F6h). It takes effect at the next
   prepare.
-* `filter_corner`: 100 to 1000, default 875. The filters' corner below 44.1
-  kHz, in thousandths of half the rate; ESS's 875. It takes effect at the
-  next prepare.
+* `filter_corner` ("Filter Corner"): 100 to 1000, default 875. The filters'
+  corner below 44.1 kHz, in thousandths of half the rate; ESS's 875. It
+  takes effect at the next prepare.
 * `mono_out` ("Mono Output Source"): 0 Mute, 1 CIN_R, 2 Audio 2 Right, 3
   Record Mix, default Record Mix. What MONO_OUT carries (7Dh bits 2:1);
   ESS's 3.
@@ -764,10 +780,10 @@ saved state wins over a parameter. The defaults are the Kconfig options
   power down after this many 8 s of no access (BDh), 0 never.
 * `gpo_power_down` ("GPO Power Down"): 0 to 255, default 0. The GPOs at
   power-down (DSP CFh, read with CEh).
-* `pwr_save`: 0 to 3600, default 0. Seconds of idleness before a power-down,
-  0 never.
-* `pwr_full`: 0 to 1, default 0. Power down fully (the inputs go silent)
-  instead of partly.
+* `pwr_save` ("Power Save Seconds"): 0 to 3600, default 0. Seconds of
+  idleness before a power-down, 0 never.
+* `pwr_full` ("Full Power Down Switch"): 0 to 1, default 0. Power down fully
+  (the inputs go silent) instead of partly.
 * `dma_single` ("Single Mode DMA Switch"): 0 to 1, default 0. Single
   transfers instead of demand transfers (8237, B9h, 78h). It takes effect at
   the next prepare.
@@ -789,10 +805,10 @@ saved state wins over a parameter. The defaults are the Kconfig options
   periods.
 * `a1_settle_mode`: 0 to 1, default 0. 0 a timer unmasks the channel, 1 the
   start waits for it.
-* `a1c_settle_ms`: 0 to 1000, default 200. How long a recording waits for
-  the ADC's input to settle after the codec turns to it (ms); 0 starts at
-  once, as ESS's drivers do, and the first 100 ms then carry the input's
-  offset decaying.
+* `a1c_settle_ms` ("ADC Settle Milliseconds"): 0 to 1000, default 200. How
+  long a recording waits for the ADC's input to settle after the codec turns
+  to it (ms); 0 starts at once, as ESS's drivers do, and the first 100 ms
+  then carry the input's offset decaying.
 * `a2_lead_ms`: 4 to 500, default 40. How far ahead Audio 2's ring is filled
   on DMA 5 (ms).
 * `a2_tick_us`: 500 to 20000, default 2000. The ring's refill period on DMA
@@ -838,12 +854,14 @@ saved state wins over a parameter. The defaults are the Kconfig options
   rate. It takes effect at the next prepare.
 * `a2_max_bps`: 12404 to 3175200, default 384000. Audio 2's highest DMA byte
   rate. It takes effect at the next prepare.
-* `rate_limit`: 0 to 1, default 1. 0 lifts the rate limits above, for
-  es1869test's rate.max. It takes effect at the next prepare.
-* `fmdig_device`: 0 to 1, default 1. PCM device 1, the music DAC recorded
-  digitally, opens.
-* `dual_playback`: 0 to 1, default 0. PCM device 2, both DACs as four
-  channels, opens.
+* `rate_limit` ("Rate Limit Switch"): 0 to 1, default 1. 0 lifts the rate
+  limits above, for es1869test's rate.max. It takes effect at the next
+  prepare.
+* `fmdig_device` ("FM Digital Capture Switch"): 0 to 1, default 1. PCM
+  device 1, the music DAC recorded digitally, opens. It takes effect at the
+  next open.
+* `dual_playback` ("Dual Playback Switch"): 0 to 1, default 0. PCM device 2,
+  both DACs as four channels, opens. It takes effect at the next open.
 * `irq_sources`: 0 to 15, default 15. The sources the line carries: 1 Audio
   1, 2 Audio 2, 4 the buttons, 8 the MPU-401.
 * `irq_mode`: 0 to 1, default 0. 0 the sources polled where they live, as
@@ -852,28 +870,35 @@ saved state wins over a parameter. The defaults are the Kconfig options
   and each interrupt's sources, 2 also every port write.
 * `regs_write`: 0 to 1, default 0. The register hwdep writes (CAP_SYS_RAWIO
   too).
-* `opl3`: 0 to 1, default 1. The OPL3 hwdep and synth open.
-* `esfm`: 0 to 1, default 1. The ESFM hwdep and synth open.
-* `fm_sides`: 0 to 1, default 1. OPL3 channel A and the ESFM synth's pan
-  left on the left output; 0 the chip's mirror.
+* `opl3` ("OPL3 Switch"): 0 to 1, default 1. The OPL3 hwdep and synth open.
+* `esfm` ("ESFM Switch"): 0 to 1, default 1. The ESFM hwdep and synth open.
+  It takes effect at the next open.
+* `fm_sides` ("FM Sides Switch"): 0 to 1, default 1. OPL3 channel A and the
+  ESFM synth's pan left on the left output; 0 the chip's mirror.
 * `esfm_delay`: 0 to 32, default 6. Status reads after each ESFM address or
   data write.
 * `esfm_bank`: default "es1869/esfm-gm.bin". The GM bank's firmware file; a
   write loads it.
-* `esfm_square`: 0 to 1, default 0. The bank with the better square wave
-  (es1869/esfm-gm-square.bin).
-* `esfm_silence_on_close`: 0 to 1, default 1. Every voice off when the
-  synth's last user goes, the pedal's too; 0 is ESS's all notes off, though
-  the FM's return to the OPL3 mode stops them right after.
-* `esfm_pedal_release`: 0 to 1, default 1. A program change releases the
-  sustain pedal.
-* `esfm_vibrato`: 0 to 1, default 1. Vibrato from the modulation wheel and
-  channel pressure.
-* `esfm_tuning`: 0 to 1, default 1. RPN 1 and 2, fine and coarse tuning.
-* `esfm_reset_controllers`: 0 to 1, default 1. Controller 121 as RP-015 has
-  it; 0 ESS's reset.
-* `esfm_live_pan`: 0 to 1, default 1. A pan change moves sounding notes too.
-* `esfm_sysex`: 0 to 1, default 1. The GM, GM2, GS and XG resets and the
-  master volume.
+* `esfm_square` ("ESFM Better Square Switch"): 0 to 1, default 0. The bank
+  with the better square wave (es1869/esfm-gm-square.bin).
+* `esfm_silence_on_close` ("ESFM Silence On Close Switch"): 0 to 1,
+  default 1. Every voice off when the synth's last user goes, the pedal's
+  too; 0 is ESS's all notes off, though the FM's return to the OPL3 mode
+  stops them right after. It takes effect at the next open.
+* `esfm_pedal_release` ("ESFM Pedal Release Switch"): 0 to 1, default 1. A
+  program change releases the sustain pedal. It takes effect at the next
+  open.
+* `esfm_vibrato` ("ESFM Vibrato Switch"): 0 to 1, default 1. Vibrato from
+  the modulation wheel and channel pressure. It takes effect at the next
+  open.
+* `esfm_tuning` ("ESFM Tuning Switch"): 0 to 1, default 1. RPN 1 and 2, fine
+  and coarse tuning. It takes effect at the next open.
+* `esfm_reset_controllers` ("ESFM Reset Controllers Switch"): 0 to 1,
+  default 1. Controller 121 as RP-015 has it; 0 ESS's reset. It takes effect
+  at the next open.
+* `esfm_live_pan` ("ESFM Live Pan Switch"): 0 to 1, default 1. A pan change
+  moves sounding notes too. It takes effect at the next open.
+* `esfm_sysex` ("ESFM SysEx Switch"): 0 to 1, default 1. The GM, GM2, GS and
+  XG resets and the master volume. It takes effect at the next open.
 
 <!-- /settings -->

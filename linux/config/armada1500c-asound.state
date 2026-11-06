@@ -207,10 +207,10 @@ state.ES1869 {
 			type INTEGER
 			count 2
 			range '0 - 15'
-			dbmin 0
-			dbmax 2250
-			dbvalue.0 450
-			dbvalue.1 450
+			dbmin -600
+			dbmax 1650
+			dbvalue.0 -150
+			dbvalue.1 -150
 		}
 	}
 	control.14 {

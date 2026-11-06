@@ -30,6 +30,7 @@
 
 #include "cases.h"
 #include "hal.h"
+#include "settab.h"
 
 struct path {
 	const char *ctl;
@@ -510,5 +511,93 @@ enum et_result c_dac_corner(struct et_ctx *c, const struct et_case *k)
 	et_measure(c, "the filter's -3 dB point, of the rate", corner, "", 0.3,
 		   0.5);
 	et_measure(c, "the filter's -3 dB point", corner * rate, "Hz", 1, 0);
+	return ET_PASS;
+}
+
+// mix.scale: no level's dB range moves with the record source. alsactl's
+// restore converts a level whose range differs from the one it saved, in a
+// pass before it has written anything, so the card still has its source from
+// load, and a range that followed the source raised the level at every boot
+enum et_result c_mix_scale(struct et_ctx *c, const struct et_case *k)
+{
+	long (*first)[2] = calloc(et_nsettings, sizeof(*first));
+	int src, i, levels = 0, moved = 0;
+
+	(void)k;
+	if (!first)
+		abort();
+	for (src = 0; src < 8; src++) {
+		if (et_ctl_set(c, "Capture Source", 0, src, src) < 0) {
+			free(first);
+			return ET_ERROR;
+		}
+		for (i = 0; i < et_nsettings; i++) {
+			const struct et_setting *s = &et_settings[i];
+			long lo, hi;
+
+			if (!(s->flags & F_CTL) || s->tlv == T_NONE)
+				continue;
+			if (c->hal->ctl_db(c->hal->ctx, s->ctl, s->index,
+					   s->min, &lo) < 0 ||
+			    c->hal->ctl_db(c->hal->ctx, s->ctl, s->index,
+					   s->max, &hi) < 0) {
+				et_fail(c, "no dB scale on '%s'", s->ctl);
+				continue;
+			}
+			if (!src) {
+				first[i][0] = lo;
+				first[i][1] = hi;
+				levels++;
+			} else if (lo != first[i][0] || hi != first[i][1]) {
+				et_fail(c,
+					"source %d moves '%s' to %ld..%ld cB",
+					src, s->ctl, lo, hi);
+				moved++;
+			}
+		}
+	}
+	free(first);
+	et_measure(c, "levels with a dB scale", levels, "", 1, 200);
+	et_measure(c, "ranges that moved with the source", moved, "", 0, 0);
+	return ET_PASS;
+}
+
+// mix.adc: the list alsamixer shows for the ADC's input is the record source:
+// a value set through either name reads back through the other and in 1Ch
+enum et_result c_mix_adc(struct et_ctx *c, const struct et_case *k)
+{
+	static const char *const list = "ADC Input Capture Enum";
+	static const char *const stock = "Capture Source";
+	int src, bad = 0;
+
+	(void)k;
+	for (src = 0; src < 8; src++) {
+		int other = (src + 3) & 7, r1c = -1;
+		long v = -1;
+
+		if (et_ctl_set(c, list, 0, src, src) < 0)
+			return ET_ERROR;
+		if (et_ctl_get(c, stock, 0, &v, 1) < 1 || v != src) {
+			et_fail(c,
+				"the list at %d leaves Capture Source at %ld",
+				src, v);
+			bad++;
+		}
+		if (c->hal->reg_read(c->hal->ctx, 0, 0x1C, &r1c) < 0 ||
+		    (r1c & 7) != src) {
+			et_fail(c, "the list at %d leaves 1Ch at %02x", src,
+				r1c);
+			bad++;
+		}
+		if (et_ctl_set(c, stock, 0, other, other) < 0)
+			return ET_ERROR;
+		if (et_ctl_get(c, list, 0, &v, 1) < 1 || v != other) {
+			et_fail(c,
+				"Capture Source at %d leaves the list at %ld",
+				other, v);
+			bad++;
+		}
+	}
+	et_measure(c, "mismatches over the eight sources", bad, "", 0, 0);
 	return ET_PASS;
 }

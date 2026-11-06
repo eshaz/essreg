@@ -158,6 +158,7 @@ def library():
             "es1869_irq_edge": ([P], None),
             "es1869_irq_storm": ([P, ctypes.c_ulong, ctypes.c_ulong],
                                  ctypes.c_bool),
+            "es1869_beep_level": ([u8, u8, u8], u8),
             "es1869_forward": ([ctypes.POINTER(ul), ul, ul, ul], ul),
             "es1869_fill_plan": ([ctypes.POINTER(Fill), ul, ul, ul,
                                   ctypes.POINTER(ul)], ul),
@@ -864,6 +865,34 @@ class ProtocolTest(unittest.TestCase):
         self.assertEqual(len(d.chip.log), before)
         d.mix_update(0x71, 0x20, 0x20)
         self.assertEqual(d.chip.mixer[0x71], 0x32)
+
+
+class BeepTest(unittest.TestCase):
+    """the PC speaker under the master: ESS's scale, the louder side, and
+    nothing once both are muted"""
+
+    def setUp(self):
+        self.lib = library()
+
+    def level(self, level, left, right):
+        return self.lib.es1869_beep_level(level, left, right)
+
+    def test_full_master_is_the_level(self):
+        for level in range(8):
+            self.assertEqual(self.level(level, 63, 63), level)
+
+    def test_scaled_down(self):
+        self.assertEqual([self.level(6, m, m) for m in (47, 31, 15, 7)],
+                         [4, 3, 1, 0])
+
+    def test_louder_side(self):
+        self.assertEqual(self.level(6, 15, 63), 6)
+        self.assertEqual(self.level(6, 63, 15), 6)
+
+    def test_mute(self):
+        self.assertEqual(self.level(7, 63 | 0x40, 63 | 0x40), 0)
+        self.assertEqual(self.level(6, 15, 63 | 0x40), 1)
+        self.assertEqual(self.level(6, 63 | 0x40, 15), 1)
 
 
 class StormTest(unittest.TestCase):

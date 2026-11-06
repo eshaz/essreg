@@ -46,6 +46,7 @@ DIST_FILES := LICENSE docs/ES1869TEST.md docs/LINUX.md \
 	linux/test/Makefile $(wildcard test/*.c test/*.h test/baseline/*) \
 	linux/tools/essreg/Makefile linux/tools/essreg/esshw_linux.c \
 	linux/tools/essreg/shim/i86.h \
+	linux/tools/es1869ctl/Makefile linux/tools/es1869ctl/es1869ctl.c \
 	linux/es1869/settings.def linux/es1869/settings_kinds.h \
 	linux/es1869/resample.c linux/es1869/resample.h \
 	linux/es1869/hw_compat.h \

@@ -17,7 +17,9 @@
  * hardware volume buttons, which the interrupt reads back, and which its
  * control reads from the chip, since the buttons move the master with
  * their interrupt off the line too. So does the PC speaker's, which a
- * notebook's BIOS may move from its Fn keys.
+ * notebook's BIOS may move from its Fn keys, unless it follows the master:
+ * then the setting is its level at full master, 3Ch holds the level scaled,
+ * and a change from the Fn keys lasts until the next look at the chip.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
@@ -141,12 +143,49 @@ static int smag_value(u8 code)
 	return code & 0x10 ? -(int)(code & 0x0F) - 1 : code & 0x0F;
 }
 
+// 3Ch, as the level or as the master scales it. The board mixes the PC
+// speaker in after the chip, so this is the only way it hears the master
+static void beep_out_locked(struct es1869 *chip)
+{
+	struct es1869_hw *hw = &chip->hw;
+	int level = es1869_val(ES_S_beep_volume);
+
+	if (es1869_val(ES_S_beep_follow))
+		level = es1869_beep_level(level, hw->mix[0x60], hw->mix[0x62]);
+	es1869_mix_update(hw, 0x3C, 0x07, level);
+}
+
+// the master moved by itself: the buttons' interrupt, outside the lock
+void es1869_beep_out(struct es1869 *chip)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&chip->reg_lock, flags);
+	beep_out_locked(chip);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
+}
+
+// the level itself back in 3Ch, for whatever uses the chip next: the next
+// load takes it from there
+void es1869_beep_leave(struct es1869 *chip)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&chip->reg_lock, flags);
+	es1869_mix_update(&chip->hw, 0x3C, 0x07, es1869_val(ES_S_beep_volume));
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
+}
+
 static void apply_hook(struct es1869 *chip, int id)
 {
 	struct es1869_hw *hw = &chip->hw;
 	u8 low;
 
 	switch (id) {
+	case ES_S_beep_volume:
+	case ES_S_beep_follow:
+		beep_out_locked(chip);
+		break;
 	case ES_S_self_power_down:
 		// never through the shadow: BDh can't be read back, and goes
 		// with the power. A partial power-down only, which any access
@@ -217,6 +256,8 @@ static void apply_locked(struct es1869 *chip, int id)
 			es1869_mix_update(hw, 0x60, 0x40, l ? 0 : 0x40);
 			es1869_mix_update(hw, 0x62, 0x40, r ? 0 : 0x40);
 		}
+		if (es1869_val(ES_S_beep_follow))
+			beep_out_locked(chip);
 		return;
 	case S_BOOL:
 		v = (!!l ^ !!(s->flags & F_INV)) << s->shift;
@@ -247,6 +288,17 @@ static void apply_locked(struct es1869 *chip, int id)
 	}
 }
 
+// the ADC's input has a second control, the plain list
+static void es1869_adc_notify(struct es1869 *chip)
+{
+	if (chip->adc_kctl)
+		snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE,
+			       &chip->adc_kctl->id);
+	if (chip->kctl[ES_S_capture_source])
+		snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE,
+			       &chip->kctl[ES_S_capture_source]->id);
+}
+
 void es1869_setting_apply(struct es1869 *chip, int id)
 {
 	unsigned long flags;
@@ -262,10 +314,8 @@ void es1869_setting_apply(struct es1869 *chip, int id)
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	switch (id) {
 	case ES_S_capture_source:
-		// the record level's dB scale follows the source
-		if (chip->kctl[ES_S_capture_volume])
-			snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_TLV,
-				       &chip->kctl[ES_S_capture_volume]->id);
+		// its two controls show one value
+		es1869_adc_notify(chip);
 		break;
 	case ES_S_pwr_save:
 		es1869_power_save_changed(chip);
@@ -386,7 +436,12 @@ void es1869_settings_sync(struct es1869 *chip)
 	hw->mix[0x3C] = es1869_mix_read(hw, 0x3C);
 	setting_from_shadow(chip, ES_S_master_volume);
 	setting_from_shadow(chip, ES_S_master_switch);
-	setting_from_shadow(chip, ES_S_beep_volume);
+	// while the beep follows the master, 3Ch holds the scaled level, which
+	// must not become the level, or each read would lower it again
+	if (es1869_val(ES_S_beep_follow))
+		beep_out_locked(chip);
+	else
+		setting_from_shadow(chip, ES_S_beep_volume);
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 }
 
@@ -417,9 +472,8 @@ void es1869_settings_notify_reg(struct es1869 *chip, u8 bank, u8 reg)
 		if (chip->kctl[id])
 			snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE,
 				       &chip->kctl[id]->id);
-		if (id == ES_S_capture_source && chip->kctl[ES_S_capture_volume])
-			snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_TLV,
-				       &chip->kctl[ES_S_capture_volume]->id);
+		if (id == ES_S_capture_source)
+			es1869_adc_notify(chip);
 	}
 }
 
@@ -687,11 +741,7 @@ int es1869_settings_controls(struct es1869 *chip)
 		knew.private_value = id;
 		knew.access = SNDRV_CTL_ELEM_ACCESS_READWRITE;
 		knew.tlv.p = NULL;
-		if (s->tlv == T_REC) {
-			knew.access |= SNDRV_CTL_ELEM_ACCESS_TLV_READ |
-				       SNDRV_CTL_ELEM_ACCESS_TLV_CALLBACK;
-			knew.tlv.c = es1869_rec_tlv;
-		} else if (s->tlv != T_NONE) {
+		if (s->tlv != T_NONE) {
 			knew.access |= SNDRV_CTL_ELEM_ACCESS_TLV_READ;
 			knew.tlv.p = es1869_tlv(s->tlv);
 		}
@@ -701,5 +751,17 @@ int es1869_settings_controls(struct es1869 *chip)
 			return err;
 		chip->kctl[id] = kctl;
 	}
-	return 0;
+	// alsa-lib splits "Capture Source", the name saved states know, over
+	// an element per item, so alsamixer shows no list of it: this name
+	// comes out as one list, "ADC Input", in its Capture view
+	knew.name = "ADC Input Capture Enum";
+	knew.index = 0;
+	knew.private_value = ES_S_capture_source;
+	knew.access = SNDRV_CTL_ELEM_ACCESS_READWRITE;
+	knew.tlv.p = NULL;
+	chip->adc_kctl = snd_ctl_new1(&knew, chip);
+	err = snd_ctl_add(chip->card, chip->adc_kctl);
+	if (err < 0)
+		chip->adc_kctl = NULL;
+	return err;
 }

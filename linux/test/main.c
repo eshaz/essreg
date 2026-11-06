@@ -403,7 +403,8 @@ int main(int argc, char **argv)
 	};
 	struct et_ctx c = { .outdir = ".", .max_out = -20 };
 	const char *rec2 = NULL;
-	int sim = -1, restore = 0, list = 0, need_rec2 = 0, opt, i;
+	int sim = 0, restore = 0, list = 0, need_rec2 = 0, opt, i;
+	unsigned int faults = 0;
 	int compared, moved;
 	int counts[5] = { 0 };
 	struct utsname un;
@@ -450,7 +451,8 @@ int main(int argc, char **argv)
 			c.stock = 1;
 			break;
 		case 's':
-			sim = optarg ? (int)strtol(optarg, NULL, 0) : 0;
+			sim = 1;
+			faults = optarg ? strtoul(optarg, NULL, 0) : 0;
 			break;
 		case 'R':
 			restore = 1;
@@ -496,8 +498,8 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
-	if (sim >= 0) {
-		hal = et_hal_sim(sim);
+	if (sim) {
+		hal = et_hal_sim(faults);
 	} else {
 		if (!take_lock()) {
 			fprintf(stderr, "es1869test: another run holds the lock\n");
@@ -515,7 +517,7 @@ int main(int argc, char **argv)
 		return 2;
 	}
 	c.hal = hal;
-	if (sim < 0) {
+	if (!sim) {
 		const char *jp = journal_path();
 		int r = et_journal_replay(hal, jp);
 

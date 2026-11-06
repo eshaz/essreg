@@ -12,8 +12,10 @@ linux/es1869/settings.def lists every setting once, as ES1869_SET rows.
 From them this writes linux/es1869/Kconfig (the driver's options and a
 "Default settings" menu with a CONFIG_SND_ES1869_DEFAULT_<ID> per row),
 linux/es1869/oot_config.h (the same defaults for builds outside the kernel
-tree, which have no Kconfig), and the settings section of docs/LINUX.md,
-between its <!-- settings --> markers.
+tree, which have no Kconfig), the settings section of docs/LINUX.md, between
+its <!-- settings --> markers, and the lists of docs/LINUX_CONTROLS.md,
+between its <!-- controls --> markers, by the groups of GROUPS, the pages of
+linux/tools/es1869ctl.
 """
 
 import os
@@ -26,6 +28,7 @@ DEF = os.path.join(DRV, "settings.def")
 KCONFIG = os.path.join(DRV, "Kconfig")
 OOT = os.path.join(DRV, "oot_config.h")
 DOC = os.path.join(ROOT, "docs", "LINUX.md")
+CONTROLS_DOC = os.path.join(ROOT, "docs", "LINUX_CONTROLS.md")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import mdfmt  # noqa: E402
 from regdoc import split_args, unquote  # noqa: E402
@@ -34,6 +37,32 @@ FIELDS = ("id", "ID", "kind", "bank", "reg", "shift", "width", "min", "max",
           "def", "tlv", "flags", "index", "control", "items", "desc")
 MARK_BEGIN = "<!-- settings -->"
 MARK_END = "<!-- /settings -->"
+CTL_BEGIN = "<!-- controls -->"
+CTL_END = "<!-- /controls -->"
+
+# the groups of settings.def, as es1869ctl's pages: a title, the row it
+# starts at
+GROUPS = (("Output", "master_volume"), ("Record", "capture_source"),
+          ("DACs", "audio2_oversampling"), ("Mono", "mono_out"),
+          ("3-D", "spatial_switch"), ("Buttons", "hwvol_split"),
+          ("Power", "gpo0"), ("DMA", "dma_single"), ("Rate", "a2_resample"),
+          ("Limits", "a1p_max_rate"), ("Devices", "fmdig_device"),
+          ("FM", "opl3"))
+
+# the controls that aren't rows, by the row they follow
+EXTRA = {
+    "capture_source": "* **ADC Input** (`ADC Input Capture Enum`, F4): the "
+                      "same value as Capture Source, as a plain list.\n",
+    "hwvol_count3": "* **Hardware Master** (`Hardware Master Playback "
+                    "Volume` and `Hardware Master Playback Switch`, F3): "
+                    "61h and 63h, the counters the buttons move in split "
+                    "mode.\n",
+}
+
+SUFFIXES = (" Playback Enum", " Playback Switch", " Playback Route",
+            " Playback Volume", " Capture Enum", " Capture Switch",
+            " Capture Route", " Capture Volume", " Enum", " Switch",
+            " Route", " Volume")
 
 
 def parse(path=DEF):
@@ -185,47 +214,122 @@ def wrap(text, width):
 
 # what the docs add to a setting's description, for what its flags change
 WHEN = (("F_NEXT", " It takes effect at the next prepare."),
+        ("F_OPEN", " It takes effect at the next open."),
         ("F_IDLE", " A write fails with EBUSY while Audio 2 is open."),
         ("F_IDLE_A1", " A write fails with EBUSY while Audio 1 is open."),
         ("F_FOUND", " Without a parameter at load, the chip keeps its level."))
 
 
+def range_text(r):
+    """a setting's values and default"""
+    if r["kind"] == "S_STR":
+        return 'default "%s"' % r["items"]
+    if r["kind"] == "S_ENUM":
+        items = r["items"].split("|")
+        return "%s, default %s" % (", ".join(
+            "%d %s" % (i, t) for i, t in enumerate(items)),
+            items[r["def"]] if r["def"] < len(items) else r["def"])
+    if r["kind"] in ("S_STEREO", "S_MASTER"):
+        return "%d to %d a channel, default %d" % (r["min"], r["max"],
+                                                   r["def"])
+    return "%d to %d, default %d" % (r["min"], r["max"], r["def"])
+
+
+def sentence(text):
+    return text[0].upper() + text[1:]
+
+
 def doc_section(rows):
     out = [MARK_BEGIN + "\n\n"]
     for r in rows:
-        if r["kind"] == "S_STR":
-            what = 'default "%s"' % r["items"]
-        elif r["kind"] == "S_ENUM":
-            items = r["items"].split("|")
-            what = "%s, default %s" % (", ".join(
-                "%d %s" % (i, t) for i, t in enumerate(items)),
-                items[r["def"]] if r["def"] < len(items) else r["def"])
-        elif r["kind"] in ("S_STEREO", "S_MASTER"):
-            what = "%d to %d a channel, default %d" % (r["min"], r["max"],
-                                                       r["def"])
-        else:
-            what = "%d to %d, default %d" % (r["min"], r["max"], r["def"])
         ctl = ' ("%s")' % r["control"] if r["control"] else ""
         when = "".join(text for flag, text in WHEN if flag in r["flags"])
-        out.append("* `%s`%s: %s. %s.%s\n" % (r["id"], ctl, what,
-                                              r["desc"][0].upper() +
-                                              r["desc"][1:], when))
+        out.append("* `%s`%s: %s. %s.%s\n" % (r["id"], ctl, range_text(r),
+                                              sentence(r["desc"]), when))
     out.append("\n" + MARK_END)
     return "".join(out)
+
+
+def element(name):
+    """the name alsamixer shows for a control, as alsa-lib's base_len()"""
+    if name in ("Capture Volume", "Capture Switch"):
+        return "Capture"
+    for s in SUFFIXES:
+        if name.endswith(s) and len(name) > len(s) and \
+                name[-len(s) - 1] != "-":
+            return name[:-len(s)]
+    return name
+
+
+def view(r):
+    """alsamixer's views of a control, by the simple mixer's rules: a list
+    is in F3 unless it is a capture enum, a volume without a direction is
+    in both, and a switch without one is a playback switch"""
+    name = r["control"]
+    if name == "Capture Source":
+        return "F4, a CAPTURE switch on each source"
+    if name.endswith(("Capture Volume", "Capture Switch", " Capture Enum")):
+        return "F4"
+    if r["kind"] in ("S_BOOL", "S_MASTERSW", "S_ENUM") or \
+            name.endswith(" Playback Volume"):
+        return "F3"
+    return "F3 and F4"
+
+
+def controls_section(rows):
+    """the lists of LINUX_CONTROLS.md: each group's controls, then the
+    settings it has with no control"""
+    starts = {first: title for title, first in GROUPS}
+    groups, title = [], None
+    for r in rows:
+        if r["id"] in starts:
+            title = starts[r["id"]]
+            groups.append((title, []))
+        groups[-1][1].append(r)
+    out = [CTL_BEGIN + "\n\n"]
+    for title, members in groups:
+        out.append("### %s\n\n" % title)
+        ctls = [r for r in members if r["control"]]
+        params = [r for r in members if not r["control"]]
+        for r in ctls:
+            when = "".join(t for f, t in WHEN if f in r["flags"])
+            out.append("* **%s** (`%s`, %s): %s. %s. Parameter `%s`.%s\n" %
+                       (element(r["control"]), r["control"], view(r),
+                        range_text(r), sentence(r["desc"]), r["id"], when))
+            out.append(EXTRA.get(r["id"], ""))
+        if params:
+            out.append("\nParameters only:\n\n")
+        for r in params:
+            when = "".join(t for f, t in WHEN if f in r["flags"])
+            out.append("* `%s`: %s. %s.%s\n" %
+                       (r["id"], range_text(r), sentence(r["desc"]), when))
+        out.append("\n")
+    out.append(CTL_END)
+    return "".join(out)
+
+
+def between(path, begin, end, section):
+    """the text of a doc with what its markers hold replaced, or None"""
+    with open(path, encoding="ascii", newline="") as f:
+        doc = f.read()
+    nl = "\r\n" if "\r\n" in doc else "\n"
+    a, b = doc.find(begin), doc.find(end)
+    if a < 0 or b <= a:
+        return None
+    text = mdfmt.format_text(section).rstrip("\n").replace("\n", nl)
+    return doc[:a] + text + doc[b + len(end):]
 
 
 def outputs(rows):
     """{path: text} of what this writes; the doc only if it has markers"""
     files = {KCONFIG: kconfig(rows), OOT: oot_config(rows)}
-    if os.path.exists(DOC):
-        with open(DOC, encoding="ascii", newline="") as f:
-            doc = f.read()
-        nl = "\r\n" if "\r\n" in doc else "\n"
-        a, b = doc.find(MARK_BEGIN), doc.find(MARK_END)
-        if a >= 0 and b > a:
-            section = mdfmt.format_text(doc_section(rows)).rstrip("\n")
-            section = section.replace("\n", nl)
-            files[DOC] = doc[:a] + section + doc[b + len(MARK_END):]
+    for path, begin, end, section in (
+            (DOC, MARK_BEGIN, MARK_END, doc_section),
+            (CONTROLS_DOC, CTL_BEGIN, CTL_END, controls_section)):
+        if os.path.exists(path):
+            text = between(path, begin, end, section(rows))
+            if text is not None:
+                files[path] = text
     return files
 
 

@@ -45,8 +45,12 @@ static const DECLARE_TLV_DB_SCALE(tlv_beep, -2700, 300, 1);
 // the 3-D effect's boost near 450 Hz, as a card measured it
 // (docs/SPATIALIZER.md): +16.8 dB at 3Fh
 static const DECLARE_TLV_DB_SCALE(tlv_3d, -3045, 75, 0);
-static const DECLARE_TLV_DB_SCALE(tlv_rec_mic, 0, 150, 0);
-static const DECLARE_TLV_DB_SCALE(tlv_rec_line, -600, 150, 0);
+// B4h: one scale, whatever the source, though the microphone's path has 6 dB
+// more in front of it. alsactl's restore converts a level to keep its dB
+// when the scale differs from the saved one, and in the pass before it
+// writes anything, so a scale that followed the source raised the level by
+// 6 dB at every boot
+static const DECLARE_TLV_DB_SCALE(tlv_rec, -600, 150, 0);
 
 const unsigned int *es1869_tlv(u8 tlv)
 {
@@ -65,25 +69,10 @@ const unsigned int *es1869_tlv(u8 tlv)
 		return tlv_beep;
 	case T_3D:
 		return tlv_3d;
+	case T_REC:
+		return tlv_rec;
 	}
 	return NULL;
-}
-
-// the record level's scale for the source: the microphone's (sources 0
-// and 4) or the others'
-int es1869_rec_tlv(struct snd_kcontrol *kctl, int op_flag, unsigned int size,
-		   unsigned int __user *tlv)
-{
-	int src = es1869_val(ES_S_capture_source);
-	const unsigned int *t = src == 0 || src == 4 ? tlv_rec_mic :
-				tlv_rec_line;
-	unsigned int len = t[SNDRV_CTL_TLVO_LEN] + 2 * sizeof(unsigned int);
-
-	if (op_flag != SNDRV_CTL_TLV_OP_READ)
-		return -ENXIO;
-	if (size < len)
-		return -ENOMEM;
-	return copy_to_user(tlv, t, len) ? -EFAULT : 0;
 }
 
 // --- the hardware volume counters (61h/63h), which the buttons move -----
@@ -158,6 +147,8 @@ void es1869_hwvol_notify(struct es1869 *chip)
 	WRITE_ONCE(es1869_vals[ES_S_master_volume][1], hw->mix[0x62] & 0x3F);
 	WRITE_ONCE(es1869_vals[ES_S_master_switch][0], !(hw->mix[0x60] & 0x40));
 	WRITE_ONCE(es1869_vals[ES_S_master_switch][1], !(hw->mix[0x62] & 0x40));
+	if (es1869_val(ES_S_beep_follow))
+		es1869_beep_out(chip);
 	if (chip->kctl[ES_S_master_volume])
 		snd_ctl_notify(chip->card, SNDRV_CTL_EVENT_MASK_VALUE,
 			       &chip->kctl[ES_S_master_volume]->id);

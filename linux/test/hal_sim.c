@@ -43,14 +43,20 @@ struct sim {
 	long hwcount[2]; // 61h and 63h, which the buttons move with the split
 	char klog[512];
 	double mute_at; // SIM_A1_MUTES: Audio 2 silent 100 ms from here
+	long adc_own; // SIM_MIXER: what the ADC's list holds by itself
 };
 
 static struct sim sim;
+
+#define ADC_LIST "ADC Input Capture Enum"
 
 static int find_ctl(const char *name, int index)
 {
 	int i;
 
+	// the ADC's list is the record source under a second name
+	if (!strcmp(name, ADC_LIST))
+		name = "Capture Source";
 	for (i = 0; i < et_nsettings; i++)
 		if ((et_settings[i].flags & F_CTL) &&
 		    et_settings[i].index == index &&
@@ -794,6 +800,10 @@ static int sim_ctl_get(void *ctx, const char *name, int index, long *v,
 	}
 	if (i < 0)
 		return -ENOENT;
+	if ((sim.faults & SIM_MIXER) && !strcmp(name, ADC_LIST)) {
+		v[0] = sim.adc_own;
+		return 1;
+	}
 	count = et_setting_count(&et_settings[i]);
 	for (j = 0; j < count && j < n; j++)
 		v[j] = sim.val[i][j];
@@ -808,6 +818,10 @@ static int sim_ctl_set(void *ctx, const char *name, int index, const long *v,
 	(void)ctx;
 	if (i < 0)
 		return -ENOENT;
+	if ((sim.faults & SIM_MIXER) && !strcmp(name, ADC_LIST)) {
+		sim.adc_own = v[0];
+		return 1;
+	}
 	count = et_setting_count(&et_settings[i]);
 	for (j = 0; j < count; j++) {
 		long x = v[j < n ? j : n - 1];
@@ -824,10 +838,11 @@ static int sim_ctl_set(void *ctx, const char *name, int index, const long *v,
 }
 
 // a control's name less what the simple mixer takes off it
-static int sim_selem(void *ctx, const char *name, int *playback)
+static int sim_selem(void *ctx, const char *name, int *views)
 {
 	static const char *const ends[] = { "", " Switch", " Playback Switch",
-					     " Playback Volume" };
+					    " Playback Volume",
+					    " Capture Enum" };
 	char full[64];
 	unsigned int i;
 
@@ -835,7 +850,7 @@ static int sim_selem(void *ctx, const char *name, int *playback)
 	for (i = 0; i < sizeof(ends) / sizeof(ends[0]); i++) {
 		snprintf(full, sizeof(full), "%s%s", name, ends[i]);
 		if (find_ctl(full, 0) >= 0) {
-			*playback = 1;
+			*views = i == 4 ? ET_VIEW_CAPTURE : ET_VIEW_PLAYBACK;
 			return 0;
 		}
 	}
@@ -871,6 +886,10 @@ static int sim_ctl_db(void *ctx, const char *name, int index, long value,
 	if (i < 0 || !et_settings[i].tlv)
 		return -ENOENT;
 	*cdb = tlv_cdb(et_settings[i].tlv, value);
+	if ((sim.faults & SIM_MIXER) && et_settings[i].tlv == T_REC &&
+	    (ctl("Capture Source", 0, 0) == 0 ||
+	     ctl("Capture Source", 0, 0) == 4))
+		*cdb += 600;
 	return 0;
 }
 
@@ -971,11 +990,31 @@ static int reg_value(int bank, int reg)
 	return v & 0xFF;
 }
 
+// 3Ch: the level, scaled by the louder side of the master while it follows
+static int beep_reg(void)
+{
+	static const int sides[2] = { 0, 1 };
+	long level = ctl("Beep Playback Volume", 0, 0), top = 0;
+	int ch;
+
+	if (!param("beep_follow") || (sim.faults & SIM_MIXER))
+		return level;
+	for (ch = 0; ch < 2; ch++) {
+		long m = ctl("Master Playback Volume", 0, sides[ch]) + 1;
+
+		if (ctl("Master Playback Switch", 0, sides[ch]) && m > top)
+			top = m;
+	}
+	return level * top / 64;
+}
+
 static int sim_reg_read(void *ctx, int bank, int reg, int *val)
 {
 	(void)ctx;
 	*val = bank == 0 || bank == 1 ? reg_value(bank ? B_CTRL : B_MIX, reg) :
 					0;
+	if (bank == 0 && reg == 0x3C)
+		*val = beep_reg();
 	return 0;
 }
 

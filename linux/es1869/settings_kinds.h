@@ -48,5 +48,6 @@
 #define F_IDLE 0x080
 #define F_NEXT 0x100
 #define F_IDLE_A1 0x200
+#define F_OPEN 0x400
 
 #endif /* ES1869_SETTINGS_KINDS_H */

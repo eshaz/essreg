@@ -66,6 +66,74 @@ static void engines(struct et_ctx *c)
 
 // --- gpo ---------------------------------------------------------------------
 
+// 3Ch as it stands
+static int beep_reg(struct et_ctx *c)
+{
+	int v = -1;
+
+	if (c->hal->reg_read(c->hal->ctx, 0, 0x3C, &v) < 0)
+		return -1;
+	return v & 7;
+}
+
+// beep.follow: the board mixes the PC speaker in after the master, so the
+// driver scales 3Ch by it, as ESS's ES1869.DRV does. Reading the level goes
+// through the chip, so that it can't take the scaled value for the level
+enum et_result c_beep_follow(struct et_ctx *c, const struct et_case *k)
+{
+	static const int masters[] = { 63, 47, 31, 15, 7 };
+	unsigned int i;
+	int bad = 0, level = 6, r;
+	long v = -1;
+
+	(void)k;
+	et_mix_quiet(c);
+	et_ctl_set(c, "Beep Follows Master Playback Switch", 0, 1, 1);
+	et_ctl_set(c, "Beep Playback Volume", 0, level, level);
+	et_ctl_set(c, "Master Playback Switch", 0, 1, 1);
+	for (i = 0; i < sizeof(masters) / sizeof(masters[0]); i++) {
+		int m = masters[i], want = level * (m + 1) / 64, n;
+
+		et_ctl_set(c, "Master Playback Volume", 0, m, m);
+		for (n = 0; n < 3; n++)
+			et_ctl_get(c, "Beep Playback Volume", 0, &v, 1);
+		r = beep_reg(c);
+		if (r != want || v != level) {
+			et_fail(c, "master %d: 3Ch %d, not %d, the level %ld",
+				m, r, want, v);
+			bad++;
+		}
+	}
+	// the louder side counts, and a muted side doesn't
+	et_ctl_set(c, "Master Playback Volume", 0, 15, 63);
+	r = beep_reg(c);
+	if (r != level) {
+		et_fail(c, "master 15,63: 3Ch %d, not %d", r, level);
+		bad++;
+	}
+	et_ctl_set(c, "Master Playback Switch", 0, 1, 0);
+	r = beep_reg(c);
+	if (r != level * 16 / 64) {
+		et_fail(c, "master 15,63 with the right muted: 3Ch %d", r);
+		bad++;
+	}
+	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
+	r = beep_reg(c);
+	if (r != 0) {
+		et_fail(c, "muted: 3Ch %d", r);
+		bad++;
+	}
+	// apart again, 3Ch is the level
+	et_ctl_set(c, "Beep Follows Master Playback Switch", 0, 0, 0);
+	r = beep_reg(c);
+	if (r != level) {
+		et_fail(c, "not following: 3Ch %d, not %d", r, level);
+		bad++;
+	}
+	et_measure(c, "steps that missed", bad, "", 0, 0);
+	return ET_PASS;
+}
+
 // beep.out: a console tone at the PC speaker's levels, heard by the second
 // card where the board mixes that pin into what it hears
 enum et_result c_beep_out(struct et_ctx *c, const struct et_case *k)
@@ -78,6 +146,8 @@ enum et_result c_beep_out(struct et_ctx *c, const struct et_case *k)
 	(void)k;
 	et_mix_quiet(c);
 	et_mix_dig(c, 0);
+	// the levels themselves, whatever the master is at
+	et_ctl_set(c, "Beep Follows Master Playback Switch", 0, 0, 0);
 	snprintf(cmd, sizeof(cmd), "%s --tone 400", self());
 	for (i = 0; i < 3; i++) {
 		struct et_stream s[2];

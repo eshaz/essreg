@@ -12,6 +12,10 @@
 
 #include "et.h"
 
+// alsamixer's views a simple element shows in
+#define ET_VIEW_PLAYBACK 1
+#define ET_VIEW_CAPTURE 2
+
 struct et_hal {
 	const char *name;
 	void *ctx;
@@ -38,7 +42,8 @@ struct et_hal {
 		      long *cdb);
 	// an element of the simple mixer, which alsamixer and amixer show: 0
 	// and whether alsamixer's Playback view has it, or -ENOENT
-	int (*selem)(void *ctx, const char *name, int *playback);
+	// a simple element's alsamixer views: ET_VIEW_PLAYBACK | ET_VIEW_CAPTURE
+	int (*selem)(void *ctx, const char *name, int *views);
 	// the card's controls, one at a time: 0 and the name, or -ENOENT
 	int (*ctl_nth)(void *ctx, int nth, char *name, int len, int *index);
 
@@ -139,5 +144,8 @@ int et_klog_fault(const char *msg);
 #define SIM_RS_REAL_TIME 0x10000000 // the Clock mode misses the steered clock
 #define SIM_RS_TREBLE 0x20000000 // the hold's correction does nothing
 #define SIM_RS_OVER 0x40000000 // the ring stays at the stream's rate
+#define SIM_MIXER 0x80000000u // the record level's scale moves with the source,
+			      // the ADC's list holds its own value, and the
+			      // PC speaker doesn't hear the master
 
 #endif

@@ -62,4 +62,5 @@ __pycache__/
 /linux/es1869-driver.patch
 /linux/tools/essreg/essreg
 /linux/test/es1869test
+/linux/tools/es1869ctl/es1869ctl
 /linux/es1869test-*.tar.gz
