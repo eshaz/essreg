@@ -653,7 +653,7 @@ class ExeModelTest(unittest.TestCase):
     def test_machine(self):
         """what the report says of the machine"""
         for line in ("dos: 7.10", "windows: not running",
-                     "esssb16: not resident",
+                     "esssb16: not resident", "piix4: none on PCI bus 0",
                      "blaster: A220 I5 D1 H5 P330 T6"):
             self.assertIn(line, self.lines)
 
@@ -839,7 +839,9 @@ class ExePersonTest(unittest.TestCase):
 
     def test_dos_box(self):
         """in a Windows DOS box: ES1869.VXD's version and settings, which
-        its API gives, or none, with ESS's driver"""
+        its API gives, or none, with ESS's driver, and the laptop's PIIX4,
+        only read"""
+        from pcicfg import laptop
         adi = bytearray(0xE9)
         struct.pack_into("<I", adi, 0x55, 0x00012345)     # the devnode
         for info, line in (((0x0117, 0xFFFF, 0x4321),
@@ -847,12 +849,16 @@ class ExePersonTest(unittest.TestCase):
                             "settings 4321"),
                            (None, "es1869.vxd: no register API (ESS's "
                             "driver, or none)")):
-            d, _ = exe_run(ModelCard(), "/A /T",
+            bus = laptop()
+            d, _ = exe_run(ModelCard(pci=bus), "/A /T",
                            keys=Person({}, "the DSP's commands"),
                            vxd={"adi": bytes(adi), "info": info})
             lines = report(d)
             self.assertIn("windows: 4.10, a DOS box", lines)
             self.assertIn(line, lines)
+            self.assertIn("PIIX4 0:07.0: 76h=8Dh (Type F, DMA 5), 77h=89h "
+                          "(Type F, DMA 1)", lines)
+            self.assertEqual((bus.writes(), bus.addr), ([], 0))
             self.assertEqual([(c[0], c[3]) for c in d.vxd_calls],
                              [(0x0001, 0xE9), (0x0400, None)])
             self.assertEqual(d.vxd_calls[1][2], 0x00012345)

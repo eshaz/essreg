@@ -32,6 +32,7 @@
 #include <string.h>
 
 #include "dosplat.h"
+#include "piix4.h"
 #include "sb16t.h"
 
 #define RST_NAME "SB16TEST.RST"
@@ -41,8 +42,8 @@
 static struct sbt_card card;
 static struct sbt_hal hal;
 static struct plat_blaster blaster;
-static char envtext[10][100];
-static const char *envp[11];
+static char envtext[12][100];
+static const char *envp[13];
 static int nenv;
 
 static char report_name[80] = "SB16TEST.TXT";
@@ -174,7 +175,7 @@ static void dos_state(const char *section) {
 static void env_add(const char *fmt, ...) {
   va_list ap;
 
-  if (nenv >= 10)
+  if (nenv >= 12)
     return;
   va_start(ap, fmt);
   _vbprintf(envtext[nenv], sizeof(envtext[0]), fmt, ap);
@@ -263,6 +264,20 @@ static int vxd_info(u16 *ver, u16 *feat, u16 *sett) {
 }
 // clang-format on
 
+// the Intel PIIX4's Type F registers (piix4.h), which a DOS box reads too
+static void typef_line(void) {
+  static char line[80];
+  u8 r[2], dev = piix4_find(&piix4_dos);
+
+  if (dev == PIIX4_NONE) {
+    env_add("piix4: none on PCI bus 0");
+    return;
+  }
+  piix4_mbdma(&piix4_dos, dev, r);
+  piix4_text(line, dev, r);
+  env_add("%s", line);
+}
+
 static void machine(void) {
   union REGS r;
   struct dosdate_t d;
@@ -304,6 +319,7 @@ static void machine(void) {
             *(u16 __far *)MK_FP(tsr_seg - 1, 3) * 16UL);
   } else
     env_add("esssb16: not resident");
+  typef_line();
   env_add("blaster: %.60s", blaster.text[0] ? blaster.text : "(not set)");
   if (h_over >= 0)
     env_add("/H: the 16-bit DMA %d, in place of BLASTER's H", h_over);

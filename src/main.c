@@ -5,6 +5,7 @@
 
 #include "debug.h"
 #include "esshw.h"
+#include "piix4.h"
 #include "regs.h"
 
 static int failed; // the exit code: 1 when something didn't work
@@ -18,7 +19,7 @@ static int bad_value(const char *opt, const char *arg) {
                {"or", -1024, 960, 0}, {"micp", 0, 1, 0}, {"ml", 0, 15, 1},
                {"m", 0, 1, 0},        {"pa", 0, 1, 0},   {"fmd", 0, 1, 0},
                {"fms", 0, 1, 0},      {"fmr", 0, 1, 0},  {"t", 0, 1, 0},
-               {"x", 0, 1, 0}};
+               {"tf", 0, 1, 0},       {"x", 0, 1, 0}};
   unsigned n = (unsigned)(arg - opt - 1), i;
   char *end;
   long v;
@@ -48,6 +49,52 @@ static int in_windows(void) {
   return r.h.al != 0 && r.h.al != 0x80;
 }
 
+// tf: the Intel PIIX4's Type F DMA timing (piix4.h), read and explained;
+// tf=0 or tf=1 turns it off or on for Audio 1's channel (PnP 74h) only, and
+// only at the DOS prompt: in a DOS box the configuration ports aren't this
+// program's alone
+static void type_f(int want) {
+  static char line[80];
+  u8 r[2], dev = piix4_find(&piix4_dos);
+  int ch = -1, i, got;
+
+  if (dev == PIIX4_NONE) {
+    printf("Type F: no Intel PIIX4 on PCI bus 0\n");
+    failed = 1;
+    return;
+  }
+  if (esshw_detect_config() == 0)
+    ch = esshw_pnp_read(1, 0x74);
+  piix4_mbdma(&piix4_dos, dev, r);
+  if (want >= 0) {
+    if (in_windows()) {
+      printf("tf=%d: at the DOS prompt only, outside Windows\n", want);
+      failed = 1;
+      return;
+    }
+    if (ch < 0 || ch > 3) {
+      printf("tf=%d: Audio 1's DMA channel (PnP 74h) is unknown\n", want);
+      failed = 1;
+      return;
+    }
+    got = piix4_typef(&piix4_dos, dev, (u8)ch, want, r);
+    if (got < 0) {
+      printf("tf=%d: no MBDMA register names DMA %d, nothing changed\n", want,
+             ch);
+      failed = 1;
+    }
+  }
+  piix4_text(line, dev, r);
+  printf("%s\n", line);
+  if (ch >= 0 && ch <= 3) {
+    i = piix4_reg_of(r, (u8)ch);
+    printf("Audio 1's DMA %d: %s\n", ch,
+           i < 0                  ? "no MBDMA register names it"
+           : (r[i] & PIIX4_TYPEF) ? "Type F on"
+                                  : "Type F off");
+  }
+}
+
 // clang-format off
 static void print_opts() {
   printf("ES1869 Register Utility (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>\n");
@@ -73,6 +120,7 @@ static void print_opts() {
   printf("| fms=[1,0]          | FM,IIS,ES689 digital sync    Enable / Disable\n");
   printf("| fmr=[1,0]          | FM Reset                     Execute\n");
   printf("| t=[1,0]            | Telegaming Mode              Enable / Disable\n");
+  printf("| tf=[1,0]           | PIIX4 Type F, Audio 1's DMA  Enable / Disable\n");
   printf("| x=[1,0]            | Safe DSP protocol (C6h)      Enable / Disable\n\n");
   printf("Example: `essreg r=before.txt 3=0 m=1 pa=1 t=0 r=after.txt`");
 }
@@ -86,8 +134,9 @@ int main(int argc, char *argv[]) {
     print_opts();
 
   // in a DOS box the chip only answers while no Windows program has the
-  // sound device: without its ID every value would read FFh
-  if (argc > 1 && in_windows()) {
+  // sound device: without its ID every value would read FFh. tf alone
+  // reads the PCI bridge, which answers anyway
+  if (argc > 1 && in_windows() && !(argc == 2 && !strcmp(argv[1], "tf"))) {
     unsigned char id[4];
     esshw_mixer_id(id);
     if (id[0] != 0x18 || id[1] != 0x69) {
@@ -135,6 +184,8 @@ int main(int argc, char *argv[]) {
 	    else if (argv[i][2] == 's') get_fm_sync_audio_2();
 	    else if (argv[i][2] == 'r') get_fm_reset();
 	  }
+      else if (argv[i][0] == 't' && argv[i][1] == 'f')
+        type_f(-1);
       else if (argv[i][0] == 't')
         get_telegaming_mode();
       else if (argv[i][0] == 'a') {
@@ -203,6 +254,7 @@ int main(int argc, char *argv[]) {
 	    else if (argv[i][2] == 's') set_fm_sync_audio_2(atoi(arg_data));
 	    else if (argv[i][2] == 'r') set_fm_reset(atoi(arg_data));
 	  }
+      else if (argv[i][0] == 't' && argv[i][1] == 'f') type_f(atoi(arg_data));
       else if (argv[i][0] == 't') set_telegaming_mode(atoi(arg_data));
       else if (argv[i][0] == 'x') set_safe_protocol(atoi(arg_data));
     }

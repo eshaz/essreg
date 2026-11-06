@@ -43,6 +43,7 @@
 #include "dosplat.h"
 #include "essp.h"
 #include "essp0.h"
+#include "piix4.h"
 
 #define RST_NAME "ESSPROBE.RST"
 #define RST_TMP "ESSPROBE.$$$"
@@ -59,8 +60,8 @@
 static struct esp_card card;
 static struct esp_hal hal;
 static struct plat_blaster blaster;
-static char envtext[14][100];
-static const char *envp[15];
+static char envtext[16][100];
+static const char *envp[17];
 static int nenv;
 
 static char report_name[80] = "ESSPROBE.TXT";
@@ -323,7 +324,7 @@ static int win_phys(struct esp_io *io, u16 n) {
 static void env_add(const char *fmt, ...) {
   va_list ap;
 
-  if (nenv >= 14)
+  if (nenv >= 16)
     return;
   va_start(ap, fmt);
   _vbprintf(envtext[nenv], sizeof(envtext[0]), fmt, ap);
@@ -407,85 +408,36 @@ static void config_lines(void) {
     env_add("config.sys: no memory manager's line");
 }
 
-// clang-format off
-static u32 pci_get(u32 at) {
-  u16 alo = (u16)at, ahi = (u16)(at >> 16), lo = 0, hi = 0;
-
-  _asm {
-    mov ax, ahi
-    shl eax, 16
-    mov ax, alo
-    mov dx, 0x0CF8
-    out dx, eax
-    mov dx, 0x0CFC
-    in eax, dx
-    mov lo, ax
-    shr eax, 16
-    mov hi, ax
-  }
-  return ((u32)hi << 16) | lo;
-}
-// clang-format on
-
-// clang-format off
-static void pci_put(u32 at) {
-  u16 alo = (u16)at, ahi = (u16)(at >> 16);
-
-  _asm {
-    mov ax, ahi
-    shl eax, 16
-    mov ax, alo
-    mov dx, 0x0CF8
-    out dx, eax
-  }
-}
-// clang-format on
-
-// clang-format off
-static u32 pci_cf8(void) {
-  u16 lo = 0, hi = 0;
-
-  _asm {
-    mov dx, 0x0CF8
-    in eax, dx
-    mov lo, ax
-    shr eax, 16
-    mov hi, ax
-  }
-  return ((u32)hi << 16) | lo;
-}
-// clang-format on
-
 // the bridges and the sound devices on PCI bus 0, through configuration
-// mechanism 1, its address put back
+// mechanism 1 with its address put back (piix4.h), and the Intel PIIX4's
+// Type F registers
 static void pci_lines(void) {
   static char line[100];
-  u32 old, id, cls;
-  u16 dev;
+  u32 id, cls;
+  u8 dev, r[2];
   char *q = line;
 
-  plat_lock();
-  old = pci_cf8();
-  pci_put(0x80000000UL);
-  if (pci_cf8() != 0x80000000UL) {
-    pci_put(old);
-    plat_unlock();
+  if (!piix4_pci(&piix4_dos)) {
     env_add("pci: none (configuration mechanism 1 doesn't answer)");
     return;
   }
   q += sprintf(q, "pci bus 0:");
   for (dev = 0; dev < 32 && q < line + sizeof(line) - 24; dev++) {
-    id = pci_get(0x80000000UL | ((u32)dev << 11));
+    id = piix4_read(&piix4_dos, 0x80000000UL | ((u32)dev << 11));
     if ((u16)id == 0xFFFF)
       continue;
-    cls = pci_get(0x80000008UL | ((u32)dev << 11)) >> 16;
+    cls = piix4_read(&piix4_dos, 0x80000008UL | ((u32)dev << 11)) >> 16;
     if ((cls >> 8) == 0x06 || (cls >> 8) == 0x04)
       q += sprintf(q, " %u:%04X:%04X/%04X", dev, (u16)id, (u16)(id >> 16),
                    (u16)cls);
   }
-  pci_put(old);
-  plat_unlock();
   env_add("%s", line);
+  dev = piix4_find(&piix4_dos);
+  if (dev != PIIX4_NONE) {
+    piix4_mbdma(&piix4_dos, dev, r);
+    piix4_text(line, dev, r);
+    env_add("%s", line);
+  }
 }
 
 static void machine(void) {

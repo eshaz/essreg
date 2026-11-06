@@ -627,6 +627,13 @@ Type `exit` to go back to Windows. To go back to ESS's driver, copy
 * Check out `fmd=1`, which makes the chip record the FM digitally at its own
   rate, 49,716 Hz! In Windows, `esfmrec` (above) records it to a file.
   * [Examples!](digital_recording)
+* `tf` shows the Type F DMA timing of an Intel PIIX4, the PCI-to-ISA bridge
+  of laptops such as the Compaq Armada 1500c, and whether it is on for Audio
+  1's DMA channel. `tf=0` turns it off for that channel only, and `tf=1` on
+  again, at the DOS prompt only, until the next boot. Under Linux a
+  recording hung the Armada with it on, and
+  [docs/ESS_EXTENDED.md](docs/ESS_EXTENDED.md#type-f-dma-on-the-piix4) has
+  what is known under DOS and Windows.
 
 ```
 ES1869 Register Utility (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
@@ -652,6 +659,7 @@ ES1869 Register Utility (c) 2024 Ethan Halsall <ethan.s.halsall@gmail.com>
 | fms=[1,0]          | FM,IIS,ES689 digital sync    Enable / Disable
 | fmr=[1,0]          | FM Reset                     Execute
 | t=[1,0]            | Telegaming Mode              Enable / Disable
+| tf=[1,0]           | PIIX4 Type F, Audio 1's DMA  Enable / Disable
 | x=[1,0]            | Safe DSP protocol (C6h)      Enable / Disable
 
 Example: `essreg r=before.txt 3=0 m=1 pa=1 t=0 r=after.txt`

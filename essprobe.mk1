@@ -4,7 +4,8 @@
 # Notes:
 #
 # No stack checks, because the interrupt handler runs on whatever stack it
-# interrupts. sbtsound.obj and dosplat.obj are sb16test.mk1's.
+# interrupts. sbtsound.obj and dosplat.obj are sb16test.mk1's, and
+# piix4.obj is essreg.mk1's.
 #
 # (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 #
@@ -18,7 +19,7 @@ essp.obj : src\essp.c .AUTODEPEND
 essprobe.obj : src\essprobe.c .AUTODEPEND
  *wcc src\essprobe.c -i="$(%watcom)/h" $(ESSP_FLAGS) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
 
-essprobe.exe : essp.obj essprobe.obj sbtsound.obj dosplat.obj .AUTODEPEND
- @%write essprobe.lk1 FIL essprobe.obj,essp.obj,sbtsound.obj,dosplat.obj
+essprobe.exe : essp.obj essprobe.obj sbtsound.obj dosplat.obj piix4.obj .AUTODEPEND
+ @%write essprobe.lk1 FIL essprobe.obj,essp.obj,sbtsound.obj,dosplat.obj,piix4.obj
  @%append essprobe.lk1
  *wlink name essprobe sys dos op m libf cstart_t op maxe=10 op q op DOSSEG op STACK=4096 op el sort @essprobe.lk1

@@ -20,9 +20,11 @@ such as `t2=0` for Audio 2's single transfers.
 
 * **env**: the machine and the card. DOS, the memory manager and its
   version, the `CONFIG.SYS` lines that load it, the DPMI host, the PCI
-  bridges, the chip's identification, its PnP registers and the channels its
-  DMA pins are wired to, the mixer and the controller registers as found,
-  and the DMA controllers' registers as a program reads them.
+  bridges, an Intel PIIX4's Type F registers
+  ([ESS_EXTENDED.md](ESS_EXTENDED.md#type-f-dma-on-the-piix4)), the chip's
+  identification, its PnP registers and the channels its DMA pins are wired
+  to, the mixer and the controller registers as found, and the DMA
+  controllers' registers as a program reads them.
 * **rst**: what each reset clears. The probe sets known values in Audio 2's
   registers, the levels and the controller registers, then resets the chip
   with Audio_Base+6 = 3, then with 1, empties the FIFO with 2, and resets

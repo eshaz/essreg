@@ -51,6 +51,9 @@ managers](#the-dma-controllers-and-the-memory-managers)).
   (https://github.com/86Box/86Box/blob/236252e79721d314b6b019bdbf5e29ed65d63f04/src/sound/snd_sb.c).
 * **The first report** of `sb16test` from the card, which measured the rates
   of A1h ([SB16.md](SB16.md#rates)).
+* **The Linux driver session's report** from the same laptop, "snd-es1869:
+  driver decisions for the Windows and DOS rework", cited as the Linux
+  report.
 
 ## Ports
 
@@ -789,6 +792,42 @@ running channel and unmasks it has EMM386 program the 8237 anew at the
 unmask, from what the program wrote, so the transfer starts over at the
 buffer's start: the probe's count jumped back, and the rate it measured came
 out 4.6 percent high (`fix.pb2hold1` and the other held cases under EMM386).
+
+### Type F DMA on the PIIX4
+
+Intel's PIIX4, the laptop's PCI-to-ISA bridge at 00:07.0 (8086:7110), can
+run a motherboard DMA channel with its Type F timing. Two registers of its
+function 0, MBDMA at 76h and 77h, each name a channel in bits 2:0 (4 for
+none) and turn the timing on for it with bit 7. The laptop's BIOS leaves
+76h = 8Dh and 77h = 89h, Type F on DMA 5 and DMA 1, the ES1869's channels,
+and sets them again at every POST (the Linux report).
+
+Under Linux, playback worked with Type F on, and the first byte a recording
+moved into memory hung the machine until a power cycle, with no message.
+Every such recording ran the 8237 in demand mode, and every rate recorded
+once 77h bit 7 was clear, so the Linux driver clears it for Audio 1's
+channel when it loads (the Linux report).
+
+Under DOS and Windows:
+* **ESS's drivers record as Linux did.** ES1869.DRV's record start (6:2799)
+  programs the 8237 in demand mode, mode 14h with the channel, unless
+  "Single Mode DMA" is set, and B9h = 02h (6:28BC), with the channel
+  unmasked before B8h starts the chip. Neither ESS's drivers nor the rebuilt
+  ones touch the bridge.
+* **DOS has recorded on the laptop only in single mode.** sb16test's record
+  group through `esssb16`, mode 54h with B9h = 02h, finished with Type F on.
+  essprobe's `h4.wrong1` and `h4.wrong2`, single-mode write transfers with
+  the chip playing, finished too, but the chip drove no data there.
+* So a demand-mode recording with Type F on is the case still to try, in
+  Windows 98 and in DOS.
+
+`essreg tf` reads 76h and 77h and says whether Type F is on for Audio 1's
+channel (PnP 74h). `tf=0` and `tf=1` change only the register that names
+that channel, at the DOS prompt only, until the next boot. essprobe's and
+sb16test's machine lines show the two registers. `src/piix4.c` holds the
+rule for all of them: an Intel PIIX4 only, only the register that names the
+channel asked for, one byte written at CFCh + (register & 3), with
+interrupts off and CF8h put back.
 
 ## What the engines do to the machine
 

@@ -872,15 +872,18 @@ class ExeTest(unittest.TestCase):
 
     def test_pci_bus(self):
         """the laptop's bus 0 through the 32-bit accesses of CF8h and CFCh
-        (dosrun keeps their width): its bridges, as essprobe lists them"""
+        (dosrun keeps their width): its bridges, as essprobe lists them,
+        and the PIIX4's Type F registers"""
         from pcicfg import laptop
         card = ChipCard(pci=laptop())
         d, code = self.dos(card, "/A /T /C:env.machine")
         self.assertEqual(code, 0, d.output)
         res = results(self.report(d))
+        machine = [t for _r, t in res["env.machine"]]
         self.assertIn("pci bus 0: 0:8086:7192/0600 7:8086:7110/0601 "
-                      "17:104C:AC1C/0607",
-                      [t for _r, t in res["env.machine"]])
+                      "17:104C:AC1C/0607", machine)
+        self.assertIn("PIIX4 0:07.0: 76h=8Dh (Type F, DMA 5), 77h=89h "
+                      "(Type F, DMA 1)", machine)
         self.assertEqual(card.pci.writes(), [])     # it only reads
         self.assertEqual(card.pci.addr, 0)          # and puts CF8h back
 

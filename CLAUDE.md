@@ -17,10 +17,13 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   and its staging through WININIT.INI), `sb16t` (sb16test's checks of a
   Sound Blaster 16, which the tests also run on the host), `essp`
   (essprobe's cases of the bare chip, also run on the host), `sbtsound` (the
-  tones and DTMF markers of the recorded runs) and `dosplat` (the DOS
-  programs' clock, interrupt, report and crash-safe files). `src/essp0.asm`
-  is essprobe's window on the 8237 under EMM386, a port trap's handler,
-  which `tools/build_essp0.py` turns into `src/essp0.h`.
+  tones and DTMF markers of the recorded runs), `dosplat` (the DOS programs'
+  clock, interrupt, report and crash-safe files) and `piix4` (the Intel
+  PIIX4's Type F DMA registers, read for the machine lines of essprobe and
+  sb16test, and changed by `essreg tf` only in the register that names the
+  card's channel). `src/essp0.asm` is essprobe's window on the 8237 under
+  EMM386, a port trap's handler, which `tools/build_essp0.py` turns into
+  `src/essp0.h`.
 * `src/win/` holds `essctl.exe`, the 16-bit Windows control panel, and
   `ess3dw.c`, the Windows side of `ess3d.exe`, which sets the 3-D effect
   from the command line for keys. `ess3dtr.c` is ess3d's tray icon and
