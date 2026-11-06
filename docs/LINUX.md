@@ -595,6 +595,15 @@ cable from a device's output to its input would settle each of them.
 root, with no driver and no interrupt: it reads the lines, sends and
 receives, and times how fast a unit takes bytes.
 
+An Opcode MIDIEngine 2port/SE, a Music Quest design with its own power,
+works in one direction so far. `linux/tools/mqengine.c` reaches it the same
+way. Everything played into its input A comes up exactly: 142 bytes in a
+test with every data value and the status bytes. Bytes sent reach its output
+A, but a byte with bit 5 set doesn't come out, whatever the sequence around
+it, the control lines or the pace, which rules out most notes. The
+8Port/SE's drivers show the shape of the protocol, but this unit differs
+from them, and no driver for it has turned up.
+
 ## Tools
 
 `linux/tools/es1869ctl` is a full-screen panel of the driver's settings and
