@@ -69,13 +69,17 @@ DIST_FILES := LICENSE docs/ES1869TEST.md docs/LINUX.md docs/FLYER.md \
 	linux/tools/flyer.c linux/tools/flyer-up.sh linux/flyer/proto.h \
 	linux/es1869/settings.def linux/es1869/settings_kinds.h \
 	linux/es1869/resample.c linux/es1869/resample.h \
-	linux/es1869/hw_compat.h \
+	linux/es1869/treble.h linux/es1869/hw_compat.h \
+	docs/ES1869SCOPE.md linux/config/es1869cal.initd \
+	$(wildcard tools/es1869scope/*.c tools/es1869scope/*.h) \
+	linux/tools/es1869scope/Makefile \
 	linux/es1869/uapi/es1869.h \
 	src/esstypes.h src/s3dmeas.c src/s3dmeas.h src/s3dsim.c src/s3dsim.h \
 	src/main.c src/regs.c src/regs.h src/debug.c src/debug.h src/esshw.h
 dist:
 	tar -C .. --transform 's,^,$(DIST)/,' -czf $(DIST).tar.gz \
-		$(patsubst test/%,linux/test/%,$(DIST_FILES))
+		$(patsubst tools/es1869scope/%,linux/tools/es1869scope/%,\
+		$(patsubst test/%,linux/test/%,$(DIST_FILES)))
 
 # mqengine and flyer are directories too
 .PHONY: modules mqengine flyer clean patch deploy dist

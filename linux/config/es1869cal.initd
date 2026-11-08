@@ -1,0 +1,35 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# es1869cal: the ES1869's record path measured on its internal loop and taken
+# back by Audio 1's correction filter, at boot before MPD takes Audio 2.
+# es1869scope -C plays noise on Audio 2 at 2x with the treble correction on,
+# records it on Audio 1 through the record mixer with the master off, fits the
+# filter's taps, loads them with the filter on, and measures again. It puts
+# back every other control it changed. The figures go to
+# /var/lib/es1869/cal.txt and a picture to /var/lib/es1869/cal.ppm.
+#
+# Install as /etc/init.d/es1869cal and add it to the default runlevel:
+#   rc-update add es1869cal default
+#
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+
+description="the ES1869's record path calibrated on its internal loop"
+
+: "${ES1869SCOPE:=/usr/local/bin/es1869scope}"
+: "${ES1869CAL_SECONDS:=3}"
+
+depend() {
+	need alsasound
+	before mpd
+}
+
+start() {
+	ebegin "Calibrating the ES1869's record path"
+	checkpath -d -m 0755 /var/lib/es1869
+	"${ES1869SCOPE}" -C -T "${ES1869CAL_SECONDS}" -l /dev/null \
+		-s /var/lib/es1869/cal.ppm > /var/lib/es1869/cal.txt 2>&1
+	# a measurement that found no loop leaves the filter as it was
+	grep -q '^taps L' /var/lib/es1869/cal.txt
+	eend $? "no calibration: see /var/lib/es1869/cal.txt"
+}

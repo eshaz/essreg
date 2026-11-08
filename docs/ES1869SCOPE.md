@@ -240,6 +240,45 @@ a frame the two sample:
 So a correction taken from the loop at 1x holds only for that place, and the
 view shows the place it was taken at.
 
+## The calibration of Audio 1's correction
+
+`es1869scope -C` calibrates the correction filter on Audio 1's recordings
+(`a1c_filter`, `capfilt.c` and `a1filter.c` in the driver).
+
+What it measures and why:
+* **The record path alone:** it plays noise on Audio 2 at 2x with the treble
+  correction on. The DAC is then flat to 20 kHz within 0.02 dB, and at 2x
+  the DAC's images lie far above the ADC's band. So the loop's response is
+  the record path's own: 69h, the switched-capacitor filter (whose corner
+  ESS sets at 0.875 of half the rate, register A2h) and the ADC.
+* **The settings:** the record mixer takes Audio 2 alone at the calibrated
+  levels, with the master off, as in the loop view. Before the measurement
+  the correction filter goes off.
+
+What it does then:
+1. After `-T` seconds (12 by default, 3 at boot) it fits each channel's 33
+   taps by weighted least squares to the inverse of the measured response
+   against 1 kHz. The fit runs up to 20 kHz, holds that value above, and
+   lifts 12 dB at most.
+2. It loads them into "Audio 1 Correction Capture Taps" and switches "Audio
+   1 Correction Capture Switch" on.
+3. It measures the loop again for `-T` seconds, through the filter.
+4. It puts back every other control it set. The filter and its taps stay.
+
+With `-s` it writes the verification's picture, and the report gives the
+taps, each channel's largest gain, and the response before and after at 1,
+5, 10, 15, 18 and 20 kHz. From two files (`-x`, `-i`) it fits and shows the
+taps without loading them.
+
+`linux/config/es1869cal.initd` is the OpenRC service that runs it at boot,
+after alsasound and before MPD, so that MPD finds Audio 2 free. It writes
+`/var/lib/es1869/cal.txt` and `cal.ppm`. A run that finds no loop leaves the
+filter as it was and says so.
+
+Measured on the Armada, 2026-11-08, before the filter:
+* Record path at 20 kHz: -4.2 dB on the left, -5.4 dB on the right.
+* At 10 kHz: -0.9 dB and -1.3 dB.
+
 ## On the Armada
 
 With the USB WiFi stick in, 12 % of the chip's interrupts come 1 to 3 ms
