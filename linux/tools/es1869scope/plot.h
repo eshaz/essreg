@@ -25,7 +25,7 @@ struct axes {
 	int x, y, w, h; /* the plotting area in pixels */
 	double x0, x1, y0, y1;
 	int logx, logy;
-	const char *xunit, *yunit; /* NULL: powers of ten */
+	const char *xunit, *yunit; /* NULL: powers of ten, "": plain numbers */
 };
 
 /* the panel, its title, grid, ticks and labels; the area from the box */

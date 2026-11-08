@@ -4,7 +4,8 @@
  * terminal of its own, and redrawn as the log grows.
  *
  *   es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]
- *               [-v 1|2] [-c CAPTURE] [-r RATE] [-i FILE.wav]
+ *               [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]
+ *               [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL] [-T SECONDS]
  *
  * Notes:
  *
@@ -24,9 +25,18 @@
  * default, at -r Hz, 48000) only while it shows, or a WAV file with -i, and
  * draws it as a waterfall through the MMX FFT of fft.c (spectro.c).
  *
- * Keys: q quits, 1 and 2 choose the view, space holds the picture, r redraws.
- * -s draws once into a PPM file instead, at -W by -H (800 by 600), for tests
- * and for pictures of a run.
+ * The loop view, -v 3 or the key 3, plays noise on Audio 2 (-p) and records
+ * Audio 1 (-a) through the record mixer of the card -k, the ES1869's internal
+ * loop, while it shows, and draws the loop's response (loopview.c): each
+ * channel's magnitude and phase, what isn't the path, and the impulse
+ * response. The keys c, t and o start it again, turn Audio 2's treble
+ * correction over, and switch its output rate between 1x and 2x. With -x and
+ * -i it takes what was played and what came back from two WAV files instead.
+ *
+ * Keys: q quits, 1, 2 and 3 choose the view, space holds the picture, r
+ * redraws. -s draws once into a PPM file instead, at -W by -H (800 by 600),
+ * for tests and for pictures of a run, after -T seconds (12) of a live loop,
+ * whose figures then go to standard output, as they do for two files.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
@@ -42,6 +52,7 @@
 
 #include "draw.h"
 #include "fb.h"
+#include "loopview.h"
 #include "plot.h"
 #include "spectro.h"
 #include "tie.h"
@@ -617,7 +628,9 @@ static void usage(void)
 {
 	fprintf(stderr,
 		"usage: es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]\n"
-		"                   [-v 1|2] [-c CAPTURE] [-r RATE] [-i FILE.wav]\n");
+		"                   [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]\n"
+		"                   [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL]\n"
+		"                   [-T SECONDS]\n");
 }
 
 int main(int argc, char **argv)
@@ -626,7 +639,14 @@ int main(int argc, char **argv)
 	const char *shot = NULL, *cdev = "plughw:CARD=VXPocket,DEV=0";
 	const char *wav = NULL;
 	unsigned int w = 800, h = 600, rate = 48000;
+	struct loopview_cfg lc = { .play = "hw:CARD=ES1869,DEV=0,SUBDEV=0",
+				   .capture = "hw:CARD=ES1869,DEV=0",
+				   .ctl = "hw:CARD=ES1869",
+				   .rate = 44100,
+				   .level = -20 };
+	struct loopview *lv = NULL;
 	struct spectro *sp = NULL;
+	double secs = 12;
 	int view = 1;
 	static struct data d;
 	struct canvas c;
@@ -634,7 +654,7 @@ int main(int argc, char **argv)
 	struct fb fb;
 	int o, held = 0;
 
-	while ((o = getopt(argc, argv, "l:d:s:W:H:v:c:r:i:")) != -1) {
+	while ((o = getopt(argc, argv, "l:d:s:W:H:v:c:r:i:x:p:a:k:T:")) != -1) {
 		switch (o) {
 		case 'l':
 			log = optarg;
@@ -652,7 +672,9 @@ int main(int argc, char **argv)
 			h = atoi(optarg);
 			break;
 		case 'v':
-			view = atoi(optarg) == 2 ? 2 : 1;
+			view = atoi(optarg);
+			if (view < 1 || view > 3)
+				view = 1;
 			break;
 		case 'c':
 			cdev = optarg;
@@ -662,7 +684,24 @@ int main(int argc, char **argv)
 			break;
 		case 'i':
 			wav = optarg;
-			view = 2;
+			if (view != 3)
+				view = 2;
+			break;
+		case 'x':
+			lc.ref = optarg;
+			view = 3;
+			break;
+		case 'p':
+			lc.play = optarg;
+			break;
+		case 'a':
+			lc.capture = optarg;
+			break;
+		case 'k':
+			lc.ctl = optarg;
+			break;
+		case 'T':
+			secs = atof(optarg);
 			break;
 		default:
 			usage();
@@ -673,6 +712,12 @@ int main(int argc, char **argv)
 		fprintf(stderr, "es1869scope: no console font found\n");
 		return 2;
 	}
+	if (view == 3 && lc.ref)
+		lc.rec = wav;
+	if (view == 3 && lc.ref && !lc.rec) {
+		fprintf(stderr, "es1869scope: -x needs -i, what came back\n");
+		return 1;
+	}
 	if (follow(&d, log) < 0 && view == 1) {
 		fprintf(stderr, "es1869scope: %s: %s\n", log, strerror(errno));
 		return 2;
@@ -681,7 +726,28 @@ int main(int argc, char **argv)
 		if (canvas_init(&c, w, h))
 			return 2;
 		c.font = &font;
-		if (view == 2) {
+		if (view == 3) {
+			long long until;
+
+			signal(SIGINT, on_signal);
+			signal(SIGTERM, on_signal);
+			signal(SIGHUP, on_signal);
+			lv = loopview_open(&lc);
+			if (!lv)
+				return 2;
+			// a live loop for -T seconds of segments, and no more
+			// than that again while it finds its lag
+			until = time(NULL) + (long long)(2 * secs) + 10;
+			while (!lc.ref && !stop && time(NULL) < until &&
+			       loopview_seconds(lv) < secs) {
+				if (loopview_step(lv, &c) < 0)
+					break;
+				usleep(10000);
+			}
+			loopview_frame(lv, &c);
+			loopview_report(lv, stdout);
+			loopview_close(lv);
+		} else if (view == 2) {
 			sp = spectro_open(cdev, rate, wav, 10, 1);
 			if (!sp)
 				return 2;
@@ -724,6 +790,23 @@ int main(int argc, char **argv)
 			held = !held;
 		if (k == 'r')
 			fb.redraw = 1;
+		if (view == 3 && lv && (k == 'c' || k == 't' || k == 'o'))
+			loopview_key(lv, k);
+		if ((k == '3' || (view == 3 && !lv)) && !lv) {
+			// the loop's streams and mixer only while the view shows
+			spectro_close(sp);
+			sp = NULL;
+			lv = loopview_open(&lc);
+			view = lv ? 3 : 1;
+			if (lv)
+				loopview_frame(lv, &c);
+			fb.redraw = 1;
+		} else if ((k == '1' || k == '2') && lv) {
+			loopview_close(lv);
+			lv = NULL;
+			view = 1;
+			fb.redraw = 1;
+		}
 		if ((k == '2' || (view == 2 && !sp)) && !sp) {
 			// the capture is taken only while the view shows
 			sp = spectro_open(cdev, rate, wav, 10, 1);
@@ -738,6 +821,23 @@ int main(int argc, char **argv)
 			fb.redraw = 1;
 		}
 		fb_poll_switch(&fb);
+		if (view == 3) {
+			int r = held ? 0 : loopview_step(lv, &c);
+
+			if (r < 0) {
+				loopview_close(lv);
+				lv = NULL;
+				view = 1;
+				fb.redraw = 1;
+				continue;
+			}
+			if (fb.redraw)
+				loopview_frame(lv, &c);
+			if (fb.shown && (r || fb.redraw))
+				fb_present(&fb, &c);
+			usleep(10000);
+			continue;
+		}
 		if (view == 2) {
 			if (fb.redraw)
 				spectro_frame(sp, &c);
@@ -759,6 +859,7 @@ int main(int argc, char **argv)
 		}
 		usleep(fb.redraw ? 1000 : 500000);
 	}
+	loopview_close(lv);
 	spectro_close(sp);
 	fb_close(&fb);
 	canvas_free(&c);

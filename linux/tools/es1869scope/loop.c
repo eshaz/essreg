@@ -27,9 +27,11 @@ int loop_init(struct loop *l, unsigned int log2n)
 	l->sxx = calloc(n / 2 + 1, sizeof(double));
 	l->syy = calloc(n / 2 + 1, sizeof(double));
 	l->sxy = calloc(n + 2, sizeof(double));
-	l->zx = malloc(2 * n * sizeof(double));
-	l->zy = malloc(2 * n * sizeof(double));
-	if (!l->win || !l->sxx || !l->syy || !l->sxy || !l->zx || !l->zy) {
+	l->zx = malloc((n + 2) * sizeof(double));
+	l->zy = malloc((n + 2) * sizeof(double));
+	l->zw = malloc(2 * n * sizeof(double));
+	if (!l->win || !l->sxx || !l->syy || !l->sxy || !l->zx || !l->zy ||
+	    !l->zw) {
 		loop_free(l);
 		return -1;
 	}
@@ -46,6 +48,7 @@ void loop_free(struct loop *l)
 	free(l->sxy);
 	free(l->zx);
 	free(l->zy);
+	free(l->zw);
 	memset(l, 0, sizeof(*l));
 }
 
@@ -59,21 +62,38 @@ void loop_reset(struct loop *l)
 	l->segments = 0;
 }
 
-void loop_add(struct loop *l, const double *x, const double *y)
+// two real signals as one complex one, a + jb: the transform's bin k and the
+// conjugate of bin n - k give each one's own
+void loop_spectra(struct loop *l, const double *a, const double *b, double *za,
+		  double *zb)
 {
 	unsigned int n = l->n, k;
+	double *z = l->zw;
 
 	for (k = 0; k < n; k++) {
-		l->zx[2 * k] = x[k] * l->win[k];
-		l->zx[2 * k + 1] = 0;
-		l->zy[2 * k] = y[k] * l->win[k];
-		l->zy[2 * k + 1] = 0;
+		z[2 * k] = a[k] * l->win[k];
+		z[2 * k + 1] = b[k] * l->win[k];
 	}
-	tie_fft(l->zx, l->log2n);
-	tie_fft(l->zy, l->log2n);
+	tie_fft(z, l->log2n);
 	for (k = 0; k <= n / 2; k++) {
-		double xr = l->zx[2 * k], xi = l->zx[2 * k + 1];
-		double yr = l->zy[2 * k], yi = l->zy[2 * k + 1];
+		unsigned int c = (n - k) % n;
+		double zr = z[2 * k], zi = z[2 * k + 1];
+		double cr = z[2 * c], ci = -z[2 * c + 1];
+
+		za[2 * k] = (zr + cr) / 2;
+		za[2 * k + 1] = (zi + ci) / 2;
+		zb[2 * k] = (zi - ci) / 2;
+		zb[2 * k + 1] = -(zr - cr) / 2;
+	}
+}
+
+void loop_add_spectra(struct loop *l, const double *zx, const double *zy)
+{
+	unsigned int k;
+
+	for (k = 0; k <= l->n / 2; k++) {
+		double xr = zx[2 * k], xi = zx[2 * k + 1];
+		double yr = zy[2 * k], yi = zy[2 * k + 1];
 
 		l->sxx[k] += xr * xr + xi * xi;
 		l->syy[k] += yr * yr + yi * yi;
@@ -82,6 +102,12 @@ void loop_add(struct loop *l, const double *x, const double *y)
 		l->sxy[2 * k + 1] += yi * xr - yr * xi;
 	}
 	l->segments++;
+}
+
+void loop_add(struct loop *l, const double *x, const double *y)
+{
+	loop_spectra(l, x, y, l->zx, l->zy);
+	loop_add_spectra(l, l->zx, l->zy);
 }
 
 void loop_bin(const struct loop *l, unsigned int k, double *mag, double *phase,
@@ -126,8 +152,9 @@ long loop_lag(const double *x, const double *y, unsigned int log2n,
 		za[2 * k + 1] = yr * xi - yi * xr;
 	}
 	tie_fft(za, log2n + 1);
+	// the largest either way, since a path may invert
 	for (k = 1; k < m; k++)
-		if (za[2 * k] > za[2 * at])
+		if (fabs(za[2 * k]) > fabs(za[2 * at]))
 			at = k;
 	l = za[2 * ((at + m - 1) % m)];
 	c = za[2 * at];

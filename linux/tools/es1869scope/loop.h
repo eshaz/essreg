@@ -17,7 +17,8 @@ struct loop {
 	unsigned int log2n, n;
 	double *win;
 	double *sxx, *syy, *sxy; /* sxy: re and im interleaved */
-	double *zx, *zy;
+	double *zx, *zy; /* a segment's spectra, n/2 + 1 bins each */
+	double *zw; /* the FFT's work, 2n */
 	unsigned long segments;
 };
 
@@ -29,13 +30,24 @@ void loop_reset(struct loop *l);
 /* a segment of n samples of each, already lined up */
 void loop_add(struct loop *l, const double *x, const double *y);
 
+/*
+ * the windowed spectra of two real segments of n samples through one complex
+ * FFT, n/2 + 1 bins each into za and zb, re and im interleaved: for paths
+ * with more than one input and output, whose sums share the spectra
+ */
+void loop_spectra(struct loop *l, const double *a, const double *b, double *za,
+		  double *zb);
+/* a segment's spectra from loop_spectra(), x's and y's, added to the sums */
+void loop_add_spectra(struct loop *l, const double *zx, const double *zy);
+
 /* bin k, 0 to n/2: the response's magnitude and phase, and the coherence */
 void loop_bin(const struct loop *l, unsigned int k, double *mag, double *phase,
 	      double *coh);
 
 /*
  * how many samples y lags x, from -n/2 to n/2 - 1, by their cross-correlation
- * over 2^log2n samples of each, with the parabola through the peak in frac
+ * over 2^log2n samples of each, with the parabola through the peak in frac;
+ * the peak is the largest either way, so that a path that inverts is found
  */
 long loop_lag(const double *x, const double *y, unsigned int log2n,
 	      double *frac);

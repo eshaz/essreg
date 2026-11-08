@@ -74,7 +74,8 @@ against the raw clock.
 
 ```
 es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]
-            [-v 1|2] [-c CAPTURE] [-r RATE] [-i FILE.wav]
+            [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]
+            [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL] [-T SECONDS]
 ```
 
 It takes a virtual terminal's framebuffer, `/dev/fb0` by default, gives the
@@ -114,6 +115,102 @@ magnitudes go to dB through a bit scan and a table, with no floating point
 per bin, from 0 dB for a full-scale sine down to the colour map's black at
 -100 dB. A 1024-point FFT takes 8 us on Ethan's PC; the status line shows
 its time on the machine it runs on.
+
+## The loop view
+
+`es1869scope -v 3`, or the key 3, measures the ES1869's internal loop:
+* **What it plays:** noise on Audio 2 (`-p`, `hw:CARD=ES1869,DEV=0,SUBDEV=0`
+  by default), independent between the channels, at -20 dBFS rms.
+* **What it records:** Audio 1 (`-a`, `hw:CARD=ES1869,DEV=0`), through the
+  record mixer of the card `-k`.
+
+While the view shows, the record mixer takes Audio 2 alone:
+* record source Mix, 69h at 8, the ADC's level at 4;
+* every other record input at 0, the mic boost off;
+* the master switched off, so that nothing reaches the speakers;
+* Audio 2's rate correction off, so that what plays is what was written;
+* Audio 2's output rate at 2x at most, since 3x can't run while Audio 1
+  records.
+
+Each control's old value goes to `/var/tmp/es1869scope.UID.mixer` before it
+changes. The view puts the controls back when it closes, also after a
+signal, and the next start puts back what a run that ended without doing so
+left in that file. The device that is busy, as Audio 2 is while MPD plays,
+stops the view before anything changes.
+
+The view finds the lag between the two streams once, from the
+cross-correlation of their first 65536 frames, either way up, since this
+loop inverts. Both streams run from one crystal, so the lag holds. An xrun,
+or a change of a setting, moves it, and the view then starts again.
+
+Each segment of 8192 frames, half over the last, gives the spectra of what
+went in and what came back, two channels at a time through one complex FFT
+(`loop.c`). The four paths, each output from each input, are solved together
+against the inputs' cross-spectrum. Taken one at a time, the crosstalk would
+read the small correlation that two independent noises still have over a few
+seconds, about -16 dB after 4 s, instead of the path's -60 dB and below.
+
+The four panels:
+* the magnitude of each side against its gain at 1 kHz, with its figures at
+  10, 16, 20 and 22 kHz: how much filter the loop has;
+* the phase past the delay, which is the line fitted to the phase from 200
+  Hz to 3 kHz, weighted by the coherence;
+* what isn't the path: 1 - the coherence, the noise's share of each bin, and
+  the crosstalk, each side's against its own path;
+* the impulse response, from the response by the inverse FFT, upright where
+  the loop inverts.
+
+The status line shows the gains at 1 kHz, the lag and the delay past it in
+frames, and how long the right side lags the left. The keys work as follows:
+* `c` starts again;
+* `t` turns Audio 2's treble correction on or off;
+* `o` switches Audio 2's output rate between 1x and 2x.
+
+The view comes back with each, under its new setting.
+
+`-x PLAYED.wav -i BACK.wav` takes what was played and what came back from
+two WAV files (16 or 24-bit, one or two channels, the same rate) instead.
+`-s FILE.ppm` draws the picture once. It does that for the files, or after
+`-T` seconds of a live loop, 12 by default. It then writes the figures to
+standard output, a line each:
+* the lag and the delay;
+* whether each side inverts;
+* the gains;
+* the magnitude, phase, incoherence and crosstalk at a list of frequencies;
+* the impulse response's middle taps.
+
+`tests/test_es1869scope.py` reads a known path back from two files that way:
+a filter on one side, a gain on the other, both inverted, late by 1234
+frames, with crosstalk at -40 dB.
+
+On the Armada, with Audio 2 at 1x and 2x:
+* **Coherence:** 0.99998 or better from 50 Hz to 20 kHz, which is what one
+  crystal for both converters gives.
+* **The level:** -9.2 dB at 1 kHz on the left, -9.0 on the right.
+* **The low end:** a corner near 7 Hz, -0.4 dB at 20 Hz.
+* **Crosstalk:** -58 to -71 dB.
+* **Between the sides:** the right lags the left by 2.2 us.
+
+At 1x:
+* **Without the treble correction:** -1.5 dB at 10 kHz and -3.9 dB at 20 kHz
+  on the left, close to what the DAC's hold loses alone.
+* **With it:** the left stays within +0.25 dB to 22 kHz, and the right is
+  1.2 dB low from 14 kHz up.
+
+At 3x:
+* **The stalls:** Audio 1's recording costs the DAC stops, so the delay
+  jumps by up to 16 frames at a time and the coherence falls.
+
+At 1x the ADC samples in step with the DAC and folds the DAC's images back
+into the band. The top of the loop's response therefore depends on where in
+a frame the two sample:
+* **That place:** the delay past the lag in the status line.
+* **When it moved:** three starts in a row read 0.100 of a frame and gave
+  the same response to 0.01 dB. One start right after a 3x stream read 0.54,
+  and 20 kHz came out 12.8 dB lower.
+
+So a correction taken from the loop at 1x holds only for that place, and the
+view shows the place it was taken at.
 
 ## On the Armada
 

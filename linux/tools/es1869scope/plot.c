@@ -17,6 +17,11 @@ const char *si(double v, const char *unit, char *buf, size_t size)
 		snprintf(buf, size, "%.0e", v);
 		return buf;
 	}
+	// a plain number, as for dB and degrees, which take no prefix
+	if (!*unit) {
+		snprintf(buf, size, "%g", v);
+		return buf;
+	}
 	return si_unit(v, unit, buf, size);
 }
 

@@ -33,7 +33,8 @@ SZ = ctypes.c_size_t
 class Loop(ctypes.Structure):
     _fields_ = [("log2n", ctypes.c_uint), ("n", ctypes.c_uint),
                 ("win", DP), ("sxx", DP), ("syy", DP), ("sxy", DP),
-                ("zx", DP), ("zy", DP), ("segments", ctypes.c_ulong)]
+                ("zx", DP), ("zy", DP), ("zw", DP),
+                ("segments", ctypes.c_ulong)]
 
 
 class Fft(ctypes.Structure):
@@ -476,8 +477,9 @@ class LoopTest(unittest.TestCase):
         rng = np.random.default_rng(33)
         x = rng.normal(0, 1, 1 << 14)
         frac = D()
-        for lag in (0, 37, -120, 900):
-            y = np.roll(x, lag) + rng.normal(0, 0.1, len(x))
+        # the ES1869's own loop inverts, so a negative peak counts too
+        for lag, sign in ((0, 1), (37, 1), (-120, 1), (900, 1), (311, -1)):
+            y = sign * np.roll(x, lag) + rng.normal(0, 0.1, len(x))
             got = lib.loop_lag(dp(x), dp(np.ascontiguousarray(y)), 14,
                                ctypes.byref(frac))
             self.assertEqual(got, lag)
@@ -498,7 +500,7 @@ class ShotTest(unittest.TestCase):
         cls.prog = os.path.join(cls.tmp, "es1869scope")
         src = [os.path.join(SCOPE, f) for f in
                ("es1869scope.c", "tie.c", "draw.c", "fb.c", "plot.c",
-                "fft.c", "spectro.c")]
+                "fft.c", "spectro.c", "loop.c", "loopview.c")]
         subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall",
                                "-Wextra", "-Werror", "-o", cls.prog] + src +
                               ["-lasound", "-lz", "-lm"])
@@ -587,6 +589,93 @@ class ShotTest(unittest.TestCase):
         cols = rows.argmax(axis=1)
         want = 48 + f0 / 24000 * (800 - 48 - 8)
         self.assertLess(abs(np.median(cols) - want), 4)
+
+    def wav(self, path, frames, rate=44100):
+        import wave
+        w = wave.open(path, "wb")
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(np.round(np.clip(frames, -1, 1) * 32767)
+                      .astype("<i2").tobytes())
+        w.close()
+
+    def test_the_loop_view_reads_a_known_path(self):
+        """two files, what was played and what came back through a known
+        path: the left through [1/4, 1/2, 1/4], the right halved, both
+        inverted, 1234 frames late, each with the other at -40 dB"""
+        rng = np.random.default_rng(12)
+        n = 44100 * 4
+        x = rng.uniform(-0.17, 0.17, (n, 2))
+        left = np.convolve(x[:, 0], [0.25, 0.5, 0.25])[:n]
+        right = 0.5 * x[:, 1]
+        y = np.zeros((n + 1234, 2))
+        y[1234:, 0] = -(left + 0.01 * x[:, 1])
+        y[1234:, 1] = -(right + 0.005 * x[:, 0])
+        y += rng.normal(0, 1e-4, y.shape)
+        ref = os.path.join(self.tmp, "played.wav")
+        rec = os.path.join(self.tmp, "back.wav")
+        self.wav(ref, x)
+        self.wav(rec, y)
+        ppm = os.path.join(self.tmp, "loop.ppm")
+        r = subprocess.run([self.prog, "-l", os.devnull, "-v", "3", "-x", ref,
+                            "-i", rec, "-s", ppm],
+                           capture_output=True, text=True)
+        if r.returncode == 2 and "no console font" in r.stderr:
+            self.skipTest("no console font on this machine")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rep = {}
+        for line in r.stdout.splitlines():
+            f = line.split()
+            key = f[0] if f[0] != "at" else "at %s" % f[1]
+            rep[key] = f[1:] if f[0] != "at" else f[2:]
+        # the filter's centre is a frame on: the lag and the delay past it
+        # add up to 1235 for the left, 1234 for the right
+        lag = int(rep["lag"][0])
+        dl, dr = map(float, rep["delay"])
+        self.assertAlmostEqual(lag + dl, 1235, delta=0.05)
+        self.assertAlmostEqual(lag + dr, 1234, delta=0.05)
+        self.assertEqual(rep["invert"], ["1", "1"])
+        self.assertAlmostEqual(float(rep["gain"][0]),
+                               20 * np.log10(0.5 + 0.5 * np.cos(
+                                   2 * np.pi * 1000 / 44100)), delta=0.05)
+        self.assertAlmostEqual(float(rep["gain"][1]), 20 * np.log10(0.5),
+                               delta=0.05)
+        for hz in (100, 5000, 10000, 15000, 20000):
+            row = rep["at %d" % hz]
+            at = dict(zip(row[0::3], zip(row[1::3], row[2::3])))
+            h = 0.5 + 0.5 * np.cos(2 * np.pi * hz / 44100)
+            h1k = 0.5 + 0.5 * np.cos(2 * np.pi * 1000 / 44100)
+            self.assertAlmostEqual(float(at["mag"][0]),
+                                   20 * np.log10(h / h1k), delta=0.1, msg=hz)
+            self.assertAlmostEqual(float(at["mag"][1]), 0, delta=0.1, msg=hz)
+            # the phase past the delay: none, for both
+            self.assertLess(abs(float(at["phase"][0])), 1.0, msg=hz)
+            self.assertLess(abs(float(at["phase"][1])), 1.0, msg=hz)
+            # crosstalk against each side's own path
+            self.assertAlmostEqual(float(at["xtalk"][1]), -40, delta=1.5)
+            self.assertAlmostEqual(float(at["xtalk"][0]),
+                                   20 * np.log10(0.01 / h), delta=1.5)
+        seen = self.colours(ppm)
+        for rgb in self.PAIR:
+            self.assertIn(rgb, seen, "%06x missing" % rgb)
+
+    def test_the_loop_view_says_when_there_is_no_loop(self):
+        rng = np.random.default_rng(13)
+        x = rng.uniform(-0.17, 0.17, (44100 * 3, 2))
+        y = rng.uniform(-0.17, 0.17, (44100 * 3, 2))
+        ref = os.path.join(self.tmp, "a.wav")
+        rec = os.path.join(self.tmp, "b.wav")
+        self.wav(ref, x)
+        self.wav(rec, y)
+        ppm = os.path.join(self.tmp, "none.ppm")
+        r = subprocess.run([self.prog, "-l", os.devnull, "-v", "3", "-x", ref,
+                            "-i", rec, "-s", ppm],
+                           capture_output=True, text=True)
+        if r.returncode == 2 and "no console font" in r.stderr:
+            self.skipTest("no console font on this machine")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.startswith("none no loop"), r.stdout)
 
     def test_an_empty_log_still_draws(self):
         logf = os.path.join(self.tmp, "empty.log")
