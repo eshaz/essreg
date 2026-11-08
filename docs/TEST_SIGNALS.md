@@ -562,8 +562,10 @@ is, what its analysis gives and what a good result looks like.
 ## Signals and paths
 
 Each signal's paths, as the table has them: Loop, Out, In and Dig as above,
-and Quad the dual device into the VX. A signal can go anywhere its levels
-allow; these are the paths it was made for.
+and Quad the dual device into the VX. Loop and Dig need only the Armada;
+Out, In and Quad need the VX, and measure its converters with the chip's. A
+signal can go anywhere its levels allow; these are the paths it was made
+for.
 
 <!-- paths -->
 
@@ -717,13 +719,13 @@ there, which is smooth.
 From the boot's transfers, a correction for each side is 1 / H at its bins,
 smoothed over a sixth of an octave in power and set to 0 dB at 1 kHz, with
 its lift held to a few dB, since a lift costs headroom and the loop's noise
-rises with it. Over 20 kHz, where the DAC's hold takes 4 dB, and under 20
-Hz, nothing need be corrected. `a2_treble`'s table takes back only the DAC's
-response; a table from the loop takes back the record mixer's and the ADC's
-too, so the playback correction and the capture filter have to split it, the
-DAC's share by Out and the ADC's by In. `verify` then plays through the
-corrected loop, and its response should come back flat within a few tenths
-of a dB from 20 Hz to 20 kHz, between the bins too.
+rises with it. Nothing over 20 kHz or under 20 Hz needs correcting, and a
+lift there would only cost headroom. `a2_treble`'s table takes back only the
+DAC's response; a table from the loop takes back the record mixer's and the
+ADC's too, so the playback correction and the capture filter have to split
+it, the DAC's share by Out and the ADC's by In. `verify` then plays through
+the corrected loop, and its response should come back flat within a few
+tenths of a dB from 20 Hz to 20 kHz, between the bins too.
 
 ### The live analysis
 

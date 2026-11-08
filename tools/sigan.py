@@ -146,6 +146,15 @@ class Rec:
         return r
 
 
+def highpass(x, rate, lo=200.0):
+    """x without what lies under lo Hz, a ramp over the octave below it:
+    the ADC's offset and hum out of the markers' way"""
+    n = len(x)
+    f = np.fft.rfftfreq(n, 1.0 / rate)
+    g = np.clip((f - lo / 2) / (lo / 2), 0, 1)
+    return np.fft.irfft(np.fft.rfft(x, axis=0) * g[:, None], n, axis=0)
+
+
 def correlate(x, m):
     """each channel's correlation with m at each start, analytic, over m's
     energy (a gain, its sign and phase), and over both energies (0 to 1)"""
@@ -225,7 +234,8 @@ def find_markers(rec, made):
     r0 = rec.rate / made.rate
     m = ts.marker(rec.rate)
     k = len(m)
-    gains, norms = correlate(rec.x, m)
+    x = highpass(rec.x, rec.rate)
+    gains, norms = correlate(x, m)
     if gains is None:
         return None
     cands = []
@@ -273,18 +283,18 @@ def find_markers(rec, made):
     end = ev.get("e" + key[1])
     rho, how = r0, "start marker only, the nominal rate"
     if end:
-        d = refine_gap(rec.x[:, c_s], t_s, end[0], k)
+        d = refine_gap(x[:, c_s], t_s, end[0], k)
         rho = d / (marks[1] - marks[0])
         how = "markers %.3f s apart" % (d / rec.rate)
     big_t = int(round(ts.MARK_S * made.rate)) / made.rate
     eps = r0 / rho - 1
-    t_s = refine_marker(rec.x[:, c_s], t_s, rec.rate, big_t, eps)
+    t_s = refine_marker(x[:, c_s], t_s, rec.rate, big_t, eps)
     al = Align(t_s - (marks[0] + off) * rho, rho, r0, how)
     al.events = ev
     al.gains = marker_gains(gains, ev, rec.x.shape[1], rec.rate)
     if sep and ev.get("sL") and ev.get("sR"):
         # the right channel's own start, against the left's
-        t_r = refine_marker(rec.x[:, ev["sR"][1]], ev["sR"][0], rec.rate,
+        t_r = refine_marker(x[:, ev["sR"][1]], ev["sR"][0], rec.rate,
                             big_t, eps)
         al.skew = (t_r - t_s) / rho - sep
     return al
@@ -1569,12 +1579,11 @@ def an_tones(ctx):
             fit_f = fold(fr, rr) if alias else fr
             m = tone_measures(x, rr, fit_f)
             gain = db(m["amp"] / st["amp"])
-            mid = (a0 + a1) / 2
+            # the signal's own phase at the middle of what was fitted
             s_mid = (int(round(al.at(a0))) + len(x) / 2 - 0.5 - al.lag) / \
                 al.rho
             ref_ph = 2 * np.pi * f * (s_mid - st["at"]) / rate
             dph = (math.degrees(m["phase"] - ref_ph) + 180) % 360 - 180
-            del mid
             hs = {h[0]: h[2] for h in m["harm"]}
             rows.append(["%g" % f, ctx.oname(c), "%.1f" % st["level"],
                          "%.3f" % gain, "%.1f" % dph,
@@ -2060,7 +2069,7 @@ def an_chirps(ctx):
     rr = ctx.rec.rate
     big_t = int(round(ts.MARK_S * ctx.made.rate)) / ctx.made.rate
     m = template(rr, big_t, al.r0 / al.rho - 1)
-    _gains, norms = correlate(ctx.rec.x, m)
+    _gains, norms = correlate(highpass(ctx.rec.x, rr), m)
     sep = info.get("mark_sep", 0)
     for side, off in (("left", 0), ("right", sep)):
         if side == "right" and not sep:
@@ -2100,7 +2109,7 @@ def an_dual(ctx):
     rep, al = ctx.rep, ctx.al
     rr = ctx.rec.rate
     info = ctx.info
-    x = ctx.rec.x[:, ctx.outs[0]][:, None]
+    x = highpass(ctx.rec.x[:, ctx.outs[0]][:, None], rr)
     big_t = int(round(ts.MARK_S * ctx.made.rate)) / ctx.made.rate
     eps = al.r0 / al.rho - 1
     _g1, n1 = correlate(x, template(rr, big_t, eps))
@@ -2399,14 +2408,19 @@ def analyze(made, rec, ref=None, prefix=None):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("name")
-    ap.add_argument("rec")
-    ap.add_argument("--ref")
-    ap.add_argument("-o", dest="prefix")
-    ap.add_argument("--sig")
-    ap.add_argument("--rate", type=int, help="the signal's rate")
-    ap.add_argument("--rec-rate", type=int)
-    ap.add_argument("--ref-rate", type=int)
+    ap.add_argument("name", help="the signal's file name, or the file "
+                    "played")
+    ap.add_argument("rec", help="the recording, any WAV")
+    ap.add_argument("--ref", help="a second recording made at the same time")
+    ap.add_argument("-o", dest="prefix", help="write PREFIX.txt and "
+                    "PREFIX-*.csv")
+    ap.add_argument("--sig", help="the file played, against the signal "
+                    "made here")
+    ap.add_argument("--rate", type=int, help="the signal's rate, where the "
+                    "name has none")
+    ap.add_argument("--rec-rate", type=int, help="the recording's rate, in "
+                    "place of its header's")
+    ap.add_argument("--ref-rate", type=int, help="the same for --ref")
     ap.add_argument("--chans", help="two channels of the recording, A,B")
     args = ap.parse_args(argv)
     try:

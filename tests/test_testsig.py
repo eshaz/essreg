@@ -386,6 +386,14 @@ class AnalysisTest(unittest.TestCase):
         self.assertAlmostEqual(v["ppm"], 0, delta=0.01)
         self.assertAlmostEqual(db(at(v["response:L+R>o"], 1000)), -6.2,
                                delta=0.02)
+        # a quiet path with the ADC's offset that the Armada once had,
+        # -1005 LSB, over twice the markers' rms
+        y = shift(made("sweep-quick").floats() * 10 ** (-12.7 / 20), 777.0)
+        y += noise(y.shape, -80) - 1005 / 32768.0
+        v, _t = analyze("sweep-quick", y)
+        self.assertAlmostEqual(v["lag"], 777.0, delta=0.01)
+        self.assertAlmostEqual(db(at(v["response:L+R>o"], 1000)), -12.7,
+                               delta=0.05)
 
     def test_clocks(self):
         """a player 37 ppm fast, by markers, pilot, chirps and periods"""
