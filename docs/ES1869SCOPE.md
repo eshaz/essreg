@@ -32,7 +32,7 @@ covariance of the two pairs.
 ## es1869clock
 
 ```
-es1869clock [-o LOG] [-t SECONDS] [-l DB] [-I] [-e PLAY]
+es1869clock [-o LOG] [-t SECONDS] [-l DB] [-V LEVEL] [-I] [-e PLAY]
             [-a CAPTURE|none] [-A NAME]
             [-p PLAY|none] [-c CAPTURE] [-B NAME]
 ```
@@ -40,7 +40,9 @@ es1869clock [-o LOG] [-t SECONDS] [-l DB] [-I] [-e PLAY]
 * `-o` is the log, `/var/tmp/es1869clock.log` by default, and `-t` the
   length of the run, until a signal by default.
 * `-e` plays the chip's pilot, Audio 1 by default, at `-l` dBFS, -30 by
-  default.
+  default. The pilot leaves the chip through Audio 1's volume, which the
+  Armada's saved mixer holds at 0: `-V 12` sets it for the run and puts the
+  old value back at the end, also into the log in case the end is a crash.
 * `-a` records it, the Focusrite by default (`plughw:CARD=USB,DEV=0`), as
   the pair `-A`, `ef` by default.
 * `-p` plays the second pilot on its outputs 3 and 4, the Focusrite by

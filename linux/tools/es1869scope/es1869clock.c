@@ -4,7 +4,7 @@
  * other cards' crystals, logged a line at a time for es1869scope and for
  * reading later.
  *
- *   es1869clock [-o LOG] [-t SECONDS] [-l DB] [-I] [-e PLAY]
+ *   es1869clock [-o LOG] [-t SECONDS] [-l DB] [-V LEVEL] [-I] [-e PLAY]
  *               [-a CAPTURE|none] [-A NAME] [-p PLAY|none] [-c CAPTURE]
  *               [-B NAME]
  *
@@ -30,7 +30,9 @@
  * A stream with GIVE_UP errors in ten seconds is closed for the rest of the
  * run, so that a sick USB device isn't sent a prepare after every one.
  *
- * The ES1869's pilot is -l dBFS, -30 by default. A pilot is a table of whole
+ * The ES1869's pilot is -l dBFS, -30 by default, and -V sets Audio 1's volume
+ * (0 to 15) for the run, which a saved mixer may hold at 0, putting the old
+ * value back at the end. A pilot is a table of whole
  * cycles at its DAC's nominal rate, so that its pitch is that DAC's clock.
  *
  * The log's lines, a letter and then fields:
@@ -353,6 +355,55 @@ static void take(struct stream *s)
 	}
 }
 
+// --- Audio 1's volume ----------------------------------------------------------
+
+// The pilot leaves the chip through Audio 1's volume ("PCM Playback Volume",
+// index 1), which a saved mixer may hold at 0: -V sets it for the run and the
+// old value goes back at the end, and into the log in case the end is a crash
+static snd_ctl_t *mixer;
+static snd_ctl_elem_value_t *a1_old;
+
+static void a1_id(snd_ctl_elem_value_t *v)
+{
+	snd_ctl_elem_value_set_interface(v, SND_CTL_ELEM_IFACE_MIXER);
+	snd_ctl_elem_value_set_name(v, "PCM Playback Volume");
+	snd_ctl_elem_value_set_index(v, 1);
+}
+
+static int a1_volume(int level)
+{
+	snd_ctl_elem_value_t *v;
+	int err;
+
+	err = snd_ctl_open(&mixer, "hw:CARD=ES1869", 0);
+	if (err < 0)
+		return err;
+	if (snd_ctl_elem_value_malloc(&a1_old) || snd_ctl_elem_value_malloc(&v))
+		return -ENOMEM;
+	a1_id(a1_old);
+	err = snd_ctl_elem_read(mixer, a1_old);
+	if (err < 0)
+		return err;
+	fprintf(out, "# Audio 1's volume was %ld,%ld, now %d,%d\n",
+		snd_ctl_elem_value_get_integer(a1_old, 0),
+		snd_ctl_elem_value_get_integer(a1_old, 1), level, level);
+	a1_id(v);
+	snd_ctl_elem_value_set_integer(v, 0, level);
+	snd_ctl_elem_value_set_integer(v, 1, level);
+	err = snd_ctl_elem_write(mixer, v);
+	snd_ctl_elem_value_free(v);
+	return err < 0 ? err : 0;
+}
+
+static void a1_restore(void)
+{
+	if (!mixer || !a1_old)
+		return;
+	snd_ctl_elem_write(mixer, a1_old);
+	snd_ctl_close(mixer);
+	mixer = NULL;
+}
+
 // --- once a second -----------------------------------------------------------
 
 static void system_line(void)
@@ -476,7 +527,7 @@ static void chrony_poll(void)
 static void usage(void)
 {
 	fprintf(stderr,
-		"usage: es1869clock [-o LOG] [-t SECONDS] [-l DB] [-I] [-e PLAY]\n"
+		"usage: es1869clock [-o LOG] [-t SECONDS] [-l DB] [-V LEVEL] [-I] [-e PLAY]\n"
 		"                   [-a CAPTURE|none] [-A NAME] [-p PLAY|none] [-c CAPTURE] [-B NAME]\n");
 }
 
@@ -520,10 +571,10 @@ int main(int argc, char **argv)
 	double level = -30, secs = 0;
 	unsigned long long irq_last = 0;
 	long long t_end = 0;
-	int o, i, nfds, tfd, irqs = 1, first = 1, second = 1, ns;
+	int o, i, nfds, tfd, irqs = 1, first = 1, second = 1, ns, volume = -1;
 	unsigned long seconds = 0;
 
-	while ((o = getopt(argc, argv, "o:t:e:a:A:p:c:B:l:I")) != -1) {
+	while ((o = getopt(argc, argv, "o:t:e:a:A:p:c:B:l:V:I")) != -1) {
 		switch (o) {
 		case 'o':
 			log = optarg;
@@ -561,6 +612,9 @@ int main(int argc, char **argv)
 		case 'I':
 			irqs = 0;
 			break;
+		case 'V':
+			volume = atoi(optarg);
+			break;
 		default:
 			usage();
 			return 1;
@@ -596,9 +650,13 @@ int main(int argc, char **argv)
 		    capture_init(&sc, sname, 12000))
 			return 2;
 	}
+	if (volume >= 0 && a1_volume(volume) < 0)
+		logw("Audio 1's volume: no control to set");
 	for (i = 0; i < ns; i++)
-		if (open_stream(all[i]))
+		if (open_stream(all[i])) {
+			a1_restore();
 			return 3;
+		}
 	for (i = 0; i < ns; i++)
 		if (all[i]->dir == SND_PCM_STREAM_PLAYBACK)
 			feed(all[i]);
@@ -678,6 +736,7 @@ int main(int argc, char **argv)
 	}
 	for (i = 0; i < ns; i++)
 		snd_pcm_close(all[i]->pcm);
+	a1_restore();
 	fprintf(out, "# es1869clock ends, raw %lld\n",
 		ns_of(CLOCK_MONOTONIC_RAW));
 	fflush(out);
