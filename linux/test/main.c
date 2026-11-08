@@ -152,10 +152,18 @@ static void klog_check(struct et_ctx *c)
 		et_note(c, "kernel: %d more lines", shown - 8);
 }
 
+// what every case starts from: the samples as written, at the chip's own
+// pitch and the stream's own rate, whatever the machine keeps them at (the
+// Armada keeps the Clock mode and 3x); the rate filter's cases set them
+// themselves
+static const char *const plain_params[] = { "a2_resample", "a2_oversample",
+					    "a2_treble" };
+
 static enum et_result run_case(struct et_ctx *c, const struct et_case *k)
 {
 	const char *why = unmet(c, k);
-	enum et_result r;
+	enum et_result r = ET_PASS;
+	unsigned int i;
 	long mode;
 	double t0;
 
@@ -168,15 +176,16 @@ static enum et_result run_case(struct et_ctx *c, const struct et_case *k)
 		return ET_SKIP;
 	}
 	t0 = hal->now(hal->ctx);
-	// every case plays the samples as written, at the chip's own pitch:
-	// the rate correction's own cases set it themselves
-	if (!et_param_get(c, "a2_resample", &mode) && mode &&
-	    et_param_set(c, "a2_resample", 0)) {
-		snprintf(c->why, sizeof(c->why), "a2_resample stayed on");
-		r = ET_ERROR;
-	} else {
+	for (i = 0; i < sizeof(plain_params) / sizeof(plain_params[0]); i++)
+		if (!et_param_get(c, plain_params[i], &mode) && mode &&
+		    et_param_set(c, plain_params[i], 0)) {
+			snprintf(c->why, sizeof(c->why), "%s stayed on",
+				 plain_params[i]);
+			r = ET_ERROR;
+			break;
+		}
+	if (r != ET_ERROR)
 		r = k->fn(c, k);
-	}
 	klog_check(c);
 	if ((r == ET_PASS || r == ET_KNOWN) && c->fails)
 		r = ET_FAIL;
