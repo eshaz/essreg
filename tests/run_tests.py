@@ -73,6 +73,7 @@ def c_tests(tmp):
              ("t_s3dmeas", src("s3dmeas.c", "s3dsim.c"), []),
              ("t_fmrec", src("fmrec.c"), []),
              ("t_tears", src("tears.c"), []),
+             ("t_wchk", src("wchk.c", "tears.c"), []),
              ("t_wavestat", src("wavestat.c"),
               [os.path.join(ROOT, "driver", "ES1869.DRV"),
                os.path.join(ROOT, "build", "ES1869.DRV")]),
