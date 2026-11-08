@@ -57,6 +57,12 @@ EXTRA = {
                     "Volume` and `Hardware Master Playback Switch`, F3): "
                     "61h and 63h, the counters the buttons move in split "
                     "mode.\n",
+    "a1c_filter": "* **Audio 1 Correction Taps** (`Audio 1 Correction "
+                  "Capture Taps`): the correction filter's taps, 17 for "
+                  "each channel, the left's first, each the centre then "
+                  "outward, in units of 1/16384; the identity until a "
+                  "calibration (`es1869scope -C`) loads its own. A "
+                  "recording takes them at its start.\n",
 }
 
 SUFFIXES = (" Playback Enum", " Playback Switch", " Playback Route",

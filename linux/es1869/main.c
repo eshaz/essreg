@@ -228,7 +228,7 @@ static irqreturn_t es1869_interrupt(int irq_no, void *dev_id)
 		if ((st & ES_IRQ_MPU) && chip->rmidi)
 			snd_mpu401_uart_interrupt(irq_no, chip->rmidi->private_data);
 		if (s1)
-			snd_pcm_period_elapsed(s1);
+			es1869_a1c_period(chip, s1);
 		if (s2)
 			snd_pcm_period_elapsed(s2);
 		if (st & ES_IRQ_HWV)
@@ -736,6 +736,8 @@ static int es1869_probe(struct snd_card *card, int dev)
 	if (err < 0)
 		return err;
 	err = es1869_mixer_extra(chip);
+	if (!err)
+		err = es1869_a1c_new(chip);
 	if (err < 0)
 		return err;
 	err = es1869_fm_new(chip);

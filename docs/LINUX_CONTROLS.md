@@ -391,6 +391,16 @@ Parameters only:
   stream's rate, or up to the filter's edge at 20 kHz where it moves the
   samples, with the DAC's stages off, for 5 dB less headroom at the top.
   Parameter `a2_treble`.
+* **Audio 1 Correction** (`Audio 1 Correction Capture Switch`, F4): 0 to 1,
+  default 0. Audio 1's 16-bit recordings through a filter of 33 taps a
+  channel that takes back the record path's own response, with the taps of
+  "Audio 1 Correction Capture Taps" (es1869scope -v 3 -C measures and loads
+  them): the frames come 16 later, and the FM recording stays exact.
+  Parameter `a1c_filter`. It takes effect at the next prepare.
+* **Audio 1 Correction Taps** (`Audio 1 Correction Capture Taps`): the
+  correction filter's taps, 17 for each channel, the left's first, each the
+  centre then outward, in units of 1/16384; the identity until a calibration
+  (`es1869scope -C`) loads its own. A recording takes them at its start.
 
 Parameters only:
 

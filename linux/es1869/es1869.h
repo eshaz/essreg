@@ -36,6 +36,7 @@ struct pci_dev;
 
 #include "hw.h"
 #include "resample.h"
+#include "capfilt.h"
 #include "settings.h"
 
 #define ES1869_A1_BUF (64 * 1024) // Audio 1's buffer, one 64 KiB page
@@ -190,6 +191,13 @@ struct es1869 {
 	bool a1_dac; // D1h sent: Audio 1 into the mixer
 	bool a1_draining; // a drain's silence goes on past the last frame
 	snd_pcm_uframes_t a1_silent_to; // the absolute frame it has reached
+	// the correction filter on Audio 1's recordings (a1filter.c)
+	struct es1869_cf a1c_cf;
+	s16 a1c_taps[2][ES_CF_HALF + 1]; // what the next recording takes
+	struct work_struct a1c_work;
+	bool a1c_on; // this recording goes through it
+	snd_pcm_uframes_t a1c_at; // the next frame of the buffer to filter
+	u64 a1c_frames; // filtered since the driver loaded
 
 	// the chip's clock, from the interrupts of a running stream (clock.c)
 	struct es1869_clock clk;
@@ -337,6 +345,14 @@ void es1869_mon_a2_go(struct es1869 *chip, struct snd_pcm_runtime *rt,
 		      bool fresh);
 void es1869_mon_a2_stop(struct es1869 *chip);
 void es1869_mon_proc(struct es1869 *chip, struct snd_info_buffer *buf);
+
+// a1filter.c
+int es1869_a1c_new(struct es1869 *chip);
+void es1869_a1c_prepare(struct es1869 *chip, struct snd_pcm_substream *ss);
+void es1869_a1c_period(struct es1869 *chip, struct snd_pcm_substream *ss);
+snd_pcm_uframes_t es1869_a1c_pointer(struct es1869 *chip);
+void es1869_a1c_sync(struct es1869 *chip);
+void es1869_a1c_proc(struct es1869 *chip, struct snd_info_buffer *buf);
 
 // whether the monitor takes what Audio 2's DMA takes
 static inline bool es1869_mon_taking(struct es1869 *chip)

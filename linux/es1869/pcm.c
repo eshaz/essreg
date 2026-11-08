@@ -521,6 +521,10 @@ static int a1_prepare(struct snd_pcm_substream *substream)
 		    es1869_dsp_recover(chip))
 			break;
 	}
+	if (!err && capture)
+		es1869_a1c_prepare(chip, substream);
+	else
+		chip->a1c_on = false;
 	if (es1869_val(ES_S_irq_trace))
 		dev_info(chip->dev, "%s prepared: %d\n",
 			 es1869_owner_names[chip->a1_owner], err);
@@ -652,6 +656,9 @@ static snd_pcm_uframes_t a1_pointer(struct snd_pcm_substream *substream)
 	if (es1869_val(ES_S_irq_trace) >= 2)
 		dev_info_ratelimited(chip->dev, "Audio 1 at %u\n", pos);
 	off = bytes_to_frames(runtime, pos);
+	// through the correction filter, only what it has been through
+	if (a1_capture(chip) && chip->a1c_on)
+		return es1869_a1c_pointer(chip);
 	if (a1_capture(chip))
 		return es1869_forward(&chip->a1_last, off, runtime->buffer_size,
 				      bytes_to_frames(runtime, 32));
@@ -669,6 +676,7 @@ static int a1_sync_stop(struct snd_pcm_substream *substream)
 
 	hrtimer_cancel(&chip->a1_settle);
 	synchronize_irq(chip->irq);
+	es1869_a1c_sync(chip);
 	return 0;
 }
 

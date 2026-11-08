@@ -935,6 +935,12 @@ saved state wins over a parameter. The defaults are the Kconfig options
   back, at 1x, 2x and 3x: within 0.05 dB up to half the stream's rate, or up
   to the filter's edge at 20 kHz where it moves the samples, with the DAC's
   stages off, for 5 dB less headroom at the top.
+* `a1c_filter` ("Audio 1 Correction Capture Switch"): 0 to 1, default 0.
+  Audio 1's 16-bit recordings through a filter of 33 taps a channel that
+  takes back the record path's own response, with the taps of "Audio 1
+  Correction Capture Taps" (es1869scope -v 3 -C measures and loads them):
+  the frames come 16 later, and the FM recording stays exact. It takes
+  effect at the next prepare.
 * `a1p_max_rate`: 3101 to 793800, default 48000. Audio 1 playback's highest
   rate (Hz). It takes effect at the next prepare.
 * `a1c_max_rate`: 3101 to 793800, default 52920. Audio 1 recording's highest
