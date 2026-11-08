@@ -32,6 +32,7 @@ interrupt, and in each port access, which takes a microsecond; the
 engines catch up before every access.
 """
 
+import math
 import os
 import sys
 
@@ -57,6 +58,9 @@ ADC_MAX_HZ = 52920
 # kHz is the master over 30, so 48 kHz plays 252.9 ppm sharp (the Linux
 # report)
 CLOCK_768 = 768193.5
+# the music DAC's rate, the FM's, as measured: the master over 478 (fmrec.h);
+# mixer 7Fh bit 4 records its samples on Audio 1 at that rate (DS p.65)
+FM_DAC_HZ = 49819.5
 
 # Audio_Base+Ch's interrupt bits
 I_OVF, I_HE, I_PROC = 0x01, 0x02, 0x04
@@ -216,7 +220,43 @@ class ES1869Audio:
         return self.pnp.get((1, 0x75), 4)
 
     def a1_rate(self):
+        if self.ctrl[0xB8] & 0x08 and self.mixer[0x7F] & 0x10:
+            return FM_DAC_HZ        # the music DAC's samples, at its rate
         return a1_hz(self.ctrl[0xA1], bool(self.mixer[0x71] & 0x20))
+
+    def fm_frame(self):
+        """the music DAC's next frame, as 7Fh bit 4 hands it to Audio 1:
+        each keyed voice's operators in native mode as sines at their pitch
+        and attenuation, register 6 bit 5 on the left and bit 4 on the
+        right, as the chip plays them (the Linux report, and ESFM.DRV's
+        TrueSides); silence while I2S has the music DAC (7Fh bit 0)"""
+        n = self.fm_n = getattr(self, "fm_n", -1) + 1
+        fm = getattr(self, "fm", None)
+        if fm is None or self.mixer[0x7F] & 0x01:
+            return (0, 0)
+        if getattr(self, "fm_seen", None) != len(fm.writes):
+            self.fm_seen = len(fm.writes)
+            self.fm_ops = []
+            for v in range(18):
+                if not fm.nat[0x240 + v] & 1:
+                    continue
+                for op in range(4):
+                    r = fm.nat[v * 32 + op * 8:v * 32 + op * 8 + 8]
+                    if not r[6] & 0x30:
+                        continue
+                    fnum = r[4] | (r[5] & 3) << 8
+                    hz = fnum * FM_DAC_HZ / (1 << (20 - ((r[5] >> 2) & 7)))
+                    amp = 8000 * 10 ** (-(r[1] & 0x3F) * 0.75 / 20)
+                    self.fm_ops.append((hz, amp, r[6] & 0x20, r[6] & 0x10))
+        left = right = 0.0
+        for hz, amp, to_left, to_right in self.fm_ops:
+            s = amp * math.sin(2 * math.pi * hz * n / FM_DAC_HZ)
+            if to_left:
+                left += s
+            if to_right:
+                right += s
+        return tuple(max(-32768, min(32767, int(round(x))))
+                     for x in (left, right))
 
     def a2_rate(self):
         if self.mixer[0x71] & 0x02:
@@ -368,8 +408,13 @@ class ES1869Audio:
             return                  # the FIFO isn't on the converter
         size = (bits // 8) * (2 if stereo else 1)
         if adc:
-            frame = self.source(1)[0] if self.source else \
-                (0,) * (2 if stereo else 1)
+            if self.mixer[0x7F] & 0x10:
+                frame = self.fm_frame()
+                if not stereo:
+                    frame = ((frame[0] + frame[1]) // 2,)
+            else:
+                frame = self.source(1)[0] if self.source else \
+                    (0,) * (2 if stereo else 1)
             data = encode([frame], bits, signed, stereo)
             if len(s.fifo) + len(data) <= s.size:
                 s.fifo += data

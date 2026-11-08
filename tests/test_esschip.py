@@ -11,7 +11,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dma8237 import DMA8237  # noqa: E402
-from esschip import ES1869Audio, a1_hz, a2_hz, decode  # noqa: E402
+from esschip import (ES1869Audio, FM_DAC_HZ, a1_hz, a2_hz,  # noqa: E402
+                     decode)
 from vxdemu import FakeES1869  # noqa: E402
 from mpu401 import ACK_US, BYTE_US, FIFO, MPU401  # noqa: E402
 from sbgame import program_dma, words, samples16  # noqa: E402
@@ -127,6 +128,46 @@ def stream(data, skip=0):
             for i in range(skip, len(data) - 3, 4)]
 
 
+def fm_native(chip, regs, voice=0, op=0):
+    """ESFM native mode (105h = 80h through 388h), an operator's registers,
+    and the voice keyed on (240h + voice bit 0)"""
+    chip.outb(0x38A, 0x05)
+    chip.outb(0x38B, 0x80)
+
+    def nat(reg, v):
+        chip.outb(0x38A, reg & 0xFF)
+        chip.outb(0x38B, reg >> 8)
+        chip.outb(0x389, v)
+    for r, v in regs.items():
+        nat(voice * 32 + op * 8 + r, v)
+    nat(0x240 + voice, 0x01)
+
+
+def fm_record(chip, mix7f, us):
+    """Audio 1 records 16-bit stereo for us with mixer 7Fh = mix7f, A1h at
+    22,050 Hz, which 7Fh bit 4 overrides; the frames it took"""
+    program_dma(Card(chip), 1, BUF, 0x8000, record=True)
+    reset(chip)
+    dsp(chip, 0xC6)
+    chip.mixer[0x7F] = mix7f
+    reg(chip, 0xB8, 0x0E)                   # the ADC, to memory, auto
+    a8 = reg_read(chip, 0xA8)
+    reg(chip, 0xA8, (a8 & 0xFC) | 0x01)     # stereo
+    reg(chip, 0xB9, 0x02)
+    reg(chip, 0xA1, 0xDC)
+    reg(chip, 0xA2, 0xF0)
+    reg(chip, 0xA4, 0x00)
+    reg(chip, 0xA5, 0x80)                   # 32 KB
+    reg(chip, 0xB7, 0x71)
+    reg(chip, 0xB7, 0xBC)                   # 16-bit signed stereo
+    reg(chip, 0xB1, reg_read(chip, 0xB1) | 0x50)
+    reg(chip, 0xB2, reg_read(chip, 0xB2) | 0x50)
+    reg(chip, 0xB8, reg_read(chip, 0xB8) | 0x01)
+    before = len(chip.recorded)
+    run(chip, us)
+    return chip.recorded[before:]
+
+
 class ExtendedTest(unittest.TestCase):
     def test_rates(self):
         """A1h's clocks as the card of the first report measured them, not
@@ -167,6 +208,28 @@ class ExtendedTest(unittest.TestCase):
                 run(chip, 1000)
                 self.assertEqual([w for _t, w in chip.violations],
                                  ["the ADC above 52920 Hz"] if bad else [])
+
+    def test_fm_digital(self):
+        """mixer 7Fh bit 4: Audio 1 records the music DAC at its own rate,
+        49,819.5 Hz, whatever A1h says, a keyed operator's register 6 bit 5
+        on the left and bit 4 on the right, as the chip plays them, and
+        nothing while I2S has the music DAC (7Fh bit 0)"""
+        for r6, mix7f, want in ((0x10, 0x10, "right"), (0x20, 0x10, "left"),
+                                (0x30, 0x10, "both"), (0x10, 0x11, "none")):
+            with self.subTest(r6=r6, mix7f=mix7f):
+                chip = Chip()
+                fm_native(chip, {1: 0x00, 4: 0x44, 5: 0x12, 6: r6})
+                frames = fm_record(chip, mix7f, 200000)
+                self.assertAlmostEqual(len(frames) / 0.2, FM_DAC_HZ,
+                                       delta=10)
+                left = max(abs(f[0]) for f in frames)
+                right = max(abs(f[1]) for f in frames)
+                self.assertEqual((left > 4000, right > 4000),
+                                 {"right": (False, True),
+                                  "left": (True, False),
+                                  "both": (True, True),
+                                  "none": (False, False)}[want])
+                self.assertEqual(chip.violations, [])
 
     def test_sixteen_bit_stereo_auto(self):
         chip = Chip()
