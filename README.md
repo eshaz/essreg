@@ -913,11 +913,11 @@ G3.
 
 ### Checking the fixes
 
-Copy `build\esswchk.exe` to `C:\ESSREG`, close the programs that play sound,
-and run `C:\ESSREG\esswchk.exe /auto`. In about 10 minutes its window says
-*Done*, and `C:\ESSREG\WCHECK.TXT` says how each fix did on the card
-([docs/ESSWCHK.md](docs/ESSWCHK.md)). `ESSCHECK.BAT` runs it too, after the
-checks in DOS
+Copy `build\esswchk.exe` and `build\sb16test.exe` to `C:\ESSREG`, close the
+programs that play sound, and run `C:\ESSREG\esswchk.exe /auto`. In about 10
+minutes its window says *Done*, and `C:\ESSREG\WCHECK.TXT` says how each fix
+did on the card ([docs/ESSWCHK.md](docs/ESSWCHK.md)). `ESSCHECK.BAT` runs it
+too, after the checks in DOS
 ([docs/ESSSB16.md](docs/ESSSB16.md#checking-it-on-the-machine)).
 
 ### Going back

@@ -86,19 +86,72 @@ void wchk_pos_add(struct wchk_pos *p, u32 pos, u32 ms, double bytes_per_ms) {
   p->n++;
 }
 
-u32 wchk_ring(u16 most) {
-  u32 r = 1;
-
-  while (r <= most)
-    r <<= 1;
-  return r;
+void wchk_cnt_init(struct wchk_cnt *c) {
+  memset(c, 0, sizeof(*c));
+  tears_init(&c->t, 0x10000UL, 2, 4096);
 }
 
-u16 wchk_count_pos(u16 count, u32 ring) {
-  long p = (long)ring - 1 - (long)count;
+// the count falls as the DMA moves
+static u16 cnt_pos(u16 count) { return (u16)(0xFFFF - count); }
 
-  p %= (long)ring;
-  return (u16)(p < 0 ? p + (long)ring : p);
+// a series' first reading, which tears_add can't judge, against the next
+// two: counted and left out when it's torn, so that the step from it
+// isn't a step back; 1 then
+static int cnt_first_torn(struct tears *t, const u16 *count) {
+  s32 step = (s16)(cnt_pos(count[2]) - cnt_pos(count[1]));
+  s32 dev = (s16)(cnt_pos(count[0]) - cnt_pos(count[1])) + step;
+  s32 mag = dev < 0 ? -dev : dev;
+
+  if (step < -TEARS_NEAR || step > TEARS_NEAR || mag < TEARS_NEAR)
+    return 0;
+  t->readings++;
+  if (mag < 2 * TEARS_NEAR)
+    t->torn128++;
+  else if (mag < 4 * TEARS_NEAR)
+    t->torn256++;
+  else
+    t->torn_other++;
+  if (mag > (t->worst < 0 ? -t->worst : t->worst))
+    t->worst = dev;
+  return 1;
+}
+
+// counts s to e - 1, one series, into c's tears
+static void cnt_series(struct wchk_cnt *c, const u16 *count, unsigned s,
+                       unsigned e) {
+  u16 pos[64];
+  unsigned k = 0;
+
+  if (e - s >= 3 && cnt_first_torn(&c->t, count + s))
+    s++;
+  for (; s < e; s++) {
+    pos[k++] = cnt_pos(count[s]);
+    if (k == sizeof(pos) / sizeof(pos[0])) {
+      tears_add(&c->t, pos, k);
+      k = 0;
+    }
+  }
+  tears_add(&c->t, pos, k);
+  tears_break(&c->t);
+}
+
+void wchk_cnt_add(struct wchk_cnt *c, const u16 *count, unsigned n) {
+  unsigned i, s = 0;
+
+  for (i = 0; i < n; i++) {
+    if (count[i] > c->most)
+      c->most = count[i];
+    if (!i)
+      continue;
+    if (count[i] != count[i - 1])
+      c->moved++;
+    if ((u32)count[i] >= (u32)count[i - 1] + WCHK_WRAP) {
+      cnt_series(c, count, s, i); // the ring wrapped: a new series
+      s = i;
+      c->wraps++;
+    }
+  }
+  cnt_series(c, count, s, n); // a gap before the next burst
 }
 
 void wchk_sbt_init(struct wchk_sbt *s) { memset(s, 0, sizeof(*s)); }
@@ -124,8 +177,10 @@ void wchk_sbt_line(struct wchk_sbt *s, const char *line) {
 
 // --- verdicts ----------------------------------------------------------------
 
-int wchk_count(const struct tears *t, int fixed, char *text) {
+int wchk_count(const struct wchk_cnt *c, int fixed, char *text) {
+  const struct tears *t = &c->t;
   u32 torn = tears_torn(t);
+  int still = c->moved < t->readings / 64;
   int n = sprintf(text,
                   "%lu readings, %lu torn (%lu near 128, %lu near 256, %lu "
                   "more), the worst %ld off, %lu steps back",
@@ -134,6 +189,8 @@ int wchk_count(const struct tears *t, int fixed, char *text) {
                   (unsigned long)t->torn_other, (long)t->worst,
                   (unsigned long)t->back);
 
+  if (t->readings && still)
+    n += sprintf(text + n, "; the count hardly moved");
   if (!fixed) {
     if (torn)
       sprintf(text + n, "; one in %lu, as ESS's VxD reads it",
@@ -146,7 +203,7 @@ int wchk_count(const struct tears *t, int fixed, char *text) {
     strcpy(text + n, "; nothing read");
     return WCHK_FAIL;
   }
-  return torn || t->back ? WCHK_FAIL : WCHK_PASS;
+  return torn || t->back || still ? WCHK_FAIL : WCHK_PASS;
 }
 
 int wchk_position(const struct wchk_pos *p, u32 ms, char *text) {

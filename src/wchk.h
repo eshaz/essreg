@@ -73,12 +73,23 @@ struct wchk_pos {
 void wchk_pos_init(struct wchk_pos *p);
 void wchk_pos_add(struct wchk_pos *p, u32 pos, u32 ms, double bytes_per_ms);
 
-// the ring a channel's count runs down, from the largest count read: the
-// next power of two, as the drivers' DMA buffers are
-u32 wchk_ring(u16 most);
+// a channel's count read in bursts, as positions into t: the series breaks
+// after each burst, for the gap before the next, and where the count jumps
+// up by WCHK_WRAP or more, the ring wrapping, so neither a gap nor the
+// ring's size, two of the driver's blocks, matters
+#define WCHK_WRAP 1024
+struct wchk_cnt {
+  struct tears t;
+  u16 most;  // the largest count
+  u32 moved; // readings that differ from the one before
+  u32 wraps; // the ring wrapped
+  u32 slow;  // bursts left out, the caller's: Windows ran in them
+};
 
-// a count's position in a ring of units, from 0
-u16 wchk_count_pos(u16 count, u32 ring);
+void wchk_cnt_init(struct wchk_cnt *c);
+
+// a burst of n counts read in a row
+void wchk_cnt_add(struct wchk_cnt *c, const u16 *count, unsigned n);
 
 // sb16test's report, fed a line at a time: its summary and its ctl.poll16
 struct wchk_sbt {
@@ -93,8 +104,8 @@ void wchk_sbt_line(struct wchk_sbt *s, const char *line);
 // the verdicts, each with its text into text
 // vxd.count1 and vxd.count2: readings of a moving channel's count through
 // VxD 0004; fixed when the VxD reads until two agree (1.26 or later, with
-// DmaCountTwice on)
-int wchk_count(const struct tears *t, int fixed, char *text);
+// DmaCountTwice on). A count that hardly moved fails: the device didn't play
+int wchk_count(const struct wchk_cnt *c, int fixed, char *text);
 
 // a1.position: GETPOS over ms
 int wchk_position(const struct wchk_pos *p, u32 ms, char *text);

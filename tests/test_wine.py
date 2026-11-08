@@ -44,11 +44,12 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   holds what was written; /split= goes on in NAME_2.WAV without a gap
 - esswchk: /sim passes every check of the fixed drivers, /sim=old gives
   the old drivers' FAIL and KNOWN, and DmaCountTwice=0 in SYSTEM.INI the
-  counts' INFO; sb.box writes SB16BOX.BAT for the VxD's Sound Blaster 16
-  and judges sb16test's report by its summary; /R gives each sound's line
-  with its marker, which tools/wchkrec.py passes in a recording made to
-  the report; a bad option, no card, /once= and a run ended by force,
-  which leaves the report's .$$$
+  counts' INFO; sb.box writes SB16BOX.BAT for the VxD's Sound Blaster 16,
+  judges sb16test's report by its summary, and waits for it idle, on a
+  timer; /R gives each sound's line with its marker, which
+  tools/wchkrec.py passes in a recording made to the report; a bad
+  option, no card, /once= and a run ended by force, which leaves the
+  report's .$$$
 - essinst: with ESS's drivers in the Windows SYSTEM folder, /y
   /norestart keeps them as .ORG files, stages the rebuilt ones as .NEW
   files and lists them in WININIT.INI; a restart carried out by hand puts
@@ -651,7 +652,7 @@ class WineTest(unittest.TestCase):
         for c in self.WCHK:
             self.assertEqual([r for r, _d in res[c]], ["PASS"], c)
         self.assertIn("100000 readings, 0 torn", res["vxd.count2"][0][1])
-        self.assertIn("a ring of 8192", res["vxd.count2"][0][1])
+        self.assertIn("the count up to 8191, 32 wraps", res["vxd.count2"][0][1])
         self.assertIn("the last header back 531, 532, 533 ms",
                       res["a1.drain"][0][1])
         self.assertRegex(res["fm.pan0"][0][1], r"^left -12\.\d, right -120")
@@ -721,6 +722,17 @@ class WineTest(unittest.TestCase):
         res, _text, _log = self.wchk("W5", "/sim", "/q")
         self.assertEqual(res["sb.box"][0][0], "FAIL")
         os.remove(self.path("SB16BOX.TXT"))
+
+    def test_esswchk_box_idle(self):
+        """sb.box with no report coming: esswchk waits for it idle, on a
+        timer's messages, and /sim then skips it"""
+        if os.path.exists(self.path("SB16BOX.TXT")):
+            os.remove(self.path("SB16BOX.TXT"))
+        res, _text, log = self.wchk("W11", "/sim", "/q")
+        self.assertEqual(res["sb.box"][0][0], "SKIP")
+        self.assertIn("/sim: no DOS box", res["sb.box"][0][1])
+        self.assertNotIn("No timer", log)
+        self.assertIn("exit 0", log)
 
     def test_esswchk_sounds(self):
         """/R: the level tone and the start marker BADC, each sound after

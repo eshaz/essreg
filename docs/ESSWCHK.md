@@ -23,7 +23,12 @@ verdicts are [`src/wchk.c`](../src/wchk.c)'s.
   between the reads of the count's low and high byte is 256 off. With the
   extension 1.26 or later and `DmaCountTwice=1`, the VxD reads until two
   readings agree within 32, so no reading may be torn: PASS or FAIL. ESS's
-  VxD reads once, which is INFO with how often a reading was torn.
+  VxD reads once, which is INFO with how often a reading was torn. The
+  readings come in bursts of 250 with Windows' messages between them, and
+  each burst is judged by itself, broken where the count jumps up as the
+  driver's ring of two blocks wraps, so neither the gaps nor the ring's size
+  matter; a burst that took over 40 ms is left out. The count has to move,
+  and may not step back.
 * **a1.position**: the Audio 1 device streams for a minute while esswchk
   asks for its position in bursts of 250. The position never steps back, and
   never moves faster than the stream plays. A torn count in the player would
@@ -45,15 +50,17 @@ verdicts are [`src/wchk.c`](../src/wchk.c)'s.
 * **sb.box**: `SB16BOX.BAT`, which esswchk writes next to itself, runs
   `sb16test /A` in a DOS box on the VxD's Sound Blaster 16, with `BLASTER`
   from the VxD's resources and `H` from `SoundBlaster16DMA`. esswchk closes
-  its devices first and waits up to 5 minutes for `SB16BOX.TXT`, next to the
-  report: PASS when its summary has no FAIL, and its `ctl.poll16` line comes
-  along. SKIP when the VxD's Sound Blaster 16 is off.
+  its devices first and waits up to 10 minutes for `SB16BOX.TXT`, next to
+  the report, idle between a timer's messages, so that the DOS box gets the
+  processor: PASS when its summary has no FAIL, and its `ctl.poll16` line
+  comes along. SKIP when the VxD's Sound Blaster 16 is off, or when
+  `SB16TEST.EXE` isn't next to esswchk.
 
 ## Running it
 
 ESSCHECK starts it with `/auto`, and `/R` where the run is recorded. To run
-it by hand, close the programs that play sound and run `esswchk /auto`. The
-checks take about 10 minutes.
+it by hand, put `sb16test.exe` next to it, close the programs that play
+sound and run `esswchk /auto`. The checks take about 10 minutes.
 
 The options:
 * `/auto`: every check with no question; the window stays open with the
@@ -99,7 +106,7 @@ its side by its level.
 `tests/host/t_wchk.c` checks the measures and verdicts, on /sim's card for
 the fixed drivers and the old ones. `tests/test_wine.py` runs esswchk under
 Wine with `/sim` and `/sim=old`, with `DmaCountTwice=0`, with canned
-`sb16test` reports, without a card, and ended by force, which leaves the
-report as `WCHECK.$$$`. `tests/test_wchkrec.py` makes recordings to a report
-and breaks them, and under Wine a recording made to esswchk's own `/R`
-report passes.
+`sb16test` reports and with none coming, without a card, and ended by force,
+which leaves the report as `WCHECK.$$$`. `tests/test_wchkrec.py` makes
+recordings to a report and breaks them, and under Wine a recording made to
+esswchk's own `/R` report passes.

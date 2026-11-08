@@ -70,7 +70,6 @@
 #include "esfmlive.h"
 #include "esshw.h"
 #include "sbtsound.h"
-#include "tears.h"
 #include "vxdapi.h"
 #include "wavestat.h"
 #include "wchk.h"
@@ -93,7 +92,7 @@
 #define FM_RATE_SECS 30
 #define FM_BUFS 12
 #define FM_FRAMES 4096 // 82 ms a block
-#define BOX_SECS 300   // sb16test in the DOS box at most
+#define BOX_SECS 600   // sb16test in the DOS box at most
 #define SND_MS 1000    // each recorded sound
 #define MAX_HDRS 32
 
@@ -198,6 +197,25 @@ static int wait_ms(DWORD ms) {
     if (pump())
       return 0;
   return 1;
+}
+
+#define IDT_IDLE 1
+
+// ms pass with esswchk idle between a timer's messages, so that a DOS box
+// gets the processor; wait_ms without the timer. 0 if the run has to stop
+static int idle_ms(DWORD ms) {
+  static int told;
+  DWORD t0 = timeGetTime();
+
+  if (!dlg || !SetTimer(dlg, IDT_IDLE, 250, NULL)) {
+    if (!told++)
+      log_line("No timer: esswchk keeps the processor while it waits");
+    return wait_ms(ms);
+  }
+  while (timeGetTime() - t0 < ms && !pump())
+    WaitMessage();
+  KillTimer(dlg, IDT_IDLE);
+  return !stop_now;
 }
 
 // --- the report
@@ -541,13 +559,16 @@ static int count_read(int a1, u32 i, u16 *count) {
   return vxd_dma_count(a1 ? 0 : 1, count) ? -1 : 0;
 }
 
+// a burst slower than this had Windows run something else in it, long
+// enough for the ring to wrap unseen: it's left out
+#define BURST_MS 40
+
 static void check_count(int a1) {
-  static u16 pos[CHUNK];
-  static struct tears t;
+  static u16 c[CHUNK];
+  static struct wchk_cnt w;
   const char *id = a1 ? "vxd.count1" : "vxd.count2";
   char text[WCHK_TEXT];
-  u16 c, most = 0;
-  u32 i, ring;
+  u32 i, t0;
   int j, dev, r, bad = 0;
   UINT err;
 
@@ -574,28 +595,19 @@ static void check_count(int a1) {
       return;
     }
   }
-  // the ring from the largest count, then the readings
-  for (i = 0; i < 4000; i++) {
-    if (count_read(a1, i, &c)) {
-      bad = 1;
-      break;
-    }
-    if (c > most)
-      most = c;
-    if (i % CHUNK == CHUNK - 1 && pump())
-      break;
-  }
-  ring = wchk_ring(most);
-  tears_init(&t, ring, 2, 4096);
+  // bursts of readings, each a series of its own, the messages between
+  wchk_cnt_init(&w);
   for (i = 0; i < READINGS && !bad && !stop_now; i += CHUNK) {
-    for (j = 0; j < CHUNK; j++) {
-      if (count_read(a1, 4000 + i + j, &c)) {
+    t0 = timeGetTime();
+    for (j = 0; j < CHUNK; j++)
+      if (count_read(a1, i + j, &c[j])) {
         bad = 1;
         break;
       }
-      pos[j] = wchk_count_pos(c, ring);
-    }
-    tears_add(&t, pos, (unsigned)j);
+    if (!opt.sim && timeGetTime() - t0 > BURST_MS)
+      w.slow++;
+    else
+      wchk_cnt_add(&w, c, (unsigned)j);
     pump();
   }
   if (!opt.sim)
@@ -604,8 +616,15 @@ static void check_count(int a1) {
     res(id, WCHK_FAIL, "VxD 0004 failed");
     return;
   }
-  r = wchk_count(&t, drv.count_fixed, text);
-  res(id, r, "%s; a ring of %lu", text, (unsigned long)ring);
+  if (stop_now)
+    return;
+  r = wchk_count(&w, drv.count_fixed, text);
+  if (w.slow)
+    res(id, r, "%s; the count up to %u, %lu wraps; %lu bursts left out, slow",
+        text, w.most, (unsigned long)w.wraps, (unsigned long)w.slow);
+  else
+    res(id, r, "%s; the count up to %u, %lu wraps", text, w.most,
+        (unsigned long)w.wraps);
 }
 
 // --- a1.position
@@ -1211,6 +1230,10 @@ static void check_box(void) {
     return;
   }
   full_path("SB16TEST.EXE", cmd, sizeof(cmd));
+  if (!opt.sim && access(cmd, 0)) {
+    res("sb.box", WCHK_SKIP, "no %.140s: it goes next to esswchk.exe", cmd);
+    return;
+  }
   dir_of(cmd, dir, sizeof(dir));
   dir_of(rep_path, rdir, sizeof(rdir));
   _bprintf(bat, sizeof(bat), "%.140sSB16BOX.BAT", dir);
@@ -1229,10 +1252,12 @@ static void check_box(void) {
   }
   fprintf(f, "@ECHO OFF\n");
   fprintf(f, "REM esswchk: sb16test on the VxD's Sound Blaster 16\n");
+  fprintf(f, "SET BLASTER=A%X I%u D%u", base, irq, dma);
   if (h >= 5 && h <= 7)
-    fprintf(f, "SET BLASTER=A%X I%u D%u H%d P%X T6\n", base, irq, dma, h, mpu);
-  else
-    fprintf(f, "SET BLASTER=A%X I%u D%u P%X T6\n", base, irq, dma, mpu);
+    fprintf(f, " H%d", h);
+  if (mpu && mpu != 0xFFFF) // without an MPU-401, no P
+    fprintf(f, " P%X", mpu);
+  fprintf(f, " T6\n");
   fprintf(f, "%sSB16TEST.EXE /A /O:%s\n", dir, txt);
   fprintf(f, "EXIT\n");
   r = fclose(f);
@@ -1261,7 +1286,7 @@ static void check_box(void) {
         wchk_sbt_line(&s, line);
       fclose(f);
     }
-    if (s.found || !wait_ms(1000) ||
+    if (s.found || !idle_ms(1000) ||
         timeGetTime() - t0 > (opt.sim ? 2000UL : BOX_SECS * 1000UL))
       break;
   }
@@ -1272,7 +1297,11 @@ static void check_box(void) {
     return;
   }
   r = wchk_sbt_verdict(&s, text);
-  res("sb.box", r, "%s", s.found ? text : "no summary after 5 minutes");
+  if (s.found)
+    res("sb.box", r, "%s", text);
+  else
+    res("sb.box", r, "no summary in %.140s after %u minutes", txt,
+        BOX_SECS / 60);
 }
 
 // --- the run
@@ -1421,6 +1450,9 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev, LPSTR cmdline, int show_) {
 
   inst = hinst;
   (void)prev;
+  // a disk's error comes back to the call, with no box (SB16BOX.TXT is the
+  // DOS box's while sb16test writes it)
+  SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
   for (q = 64; !SetMessageQueue(q) && q > 8; q /= 2)
     ;
   if (parse(cmdline) < 0) {
