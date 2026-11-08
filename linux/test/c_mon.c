@@ -189,6 +189,20 @@ static int mon_line(const struct et_stream *s, double *ppm, double *rms,
 	return 0;
 }
 
+// the loop's noise repeats every 65535 frames, the period of an_lfsr()'s
+// words, so a lag holds only modulo that: the one nearest 0 is the loop's
+#define MON_NOISE 65535L
+
+static long mon_wrap(long lag)
+{
+	lag %= MON_NOISE;
+	if (lag > MON_NOISE / 2)
+		lag -= MON_NOISE;
+	else if (lag < -MON_NOISE / 2)
+		lag += MON_NOISE;
+	return lag;
+}
+
 // the analog loop against the monitor: the lag of Audio 1's recording, in
 // frames, on the monitor's first second and on its last, and their delay by
 // the two streams' timestamps
@@ -201,9 +215,9 @@ static void mon_loop(struct et_ctx *c, const struct et_stream *m,
 	double corr = 0, corr2 = 0, ppm, rms, mt, mf, at, af;
 	long lag, lag2;
 
-	lag = an_lag(x, sec, y, a1->done, a1->done, &corr);
-	lag2 = an_lag(x + last, sec, y, a1->done, a1->done, &corr2) -
-	       (long)last;
+	lag = mon_wrap(an_lag(x, sec, y, a1->done, a1->done, &corr));
+	lag2 = mon_wrap(an_lag(x + last, sec, y, a1->done, a1->done, &corr2) -
+			(long)last);
 	et_measure(c, "the loop's correlation, first second", corr, "", 0.5, 1);
 	et_measure(c, "and last", corr2, "", 0.5, 1);
 	et_measure(c, "the loop's lag, last second less first", lag2 - lag,
