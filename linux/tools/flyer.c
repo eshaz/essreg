@@ -1,38 +1,34 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /*
- * flyer: a parallel port MIDI interface from user space, by port I/O, with no
- * driver and no interrupt: a first look at MOTU's PC-MIDI Flyer on the protocol
- * of its MIDI Timepiece AV, which snd-mtpav speaks. As root.
+ * flyer: MOTU's PC-MIDI Flyer on the parallel port from user space, by port
+ * I/O, with no driver and no interrupt. As root. A port is a or b.
  *
- *   flyer [-p PORT] look              the registers, and what each control bit
- *                                     does to the status
+ *   flyer [-p PORT] look              the lines at each control state
  *   flyer [-p PORT] raw TOKEN...      d XX: data, c XX: control, s: read status,
- *                                     r: read data, x: read control, e XX: ECR,
- *                                     E: read ECR, u N: wait N us
- *   flyer [-p PORT] init              0xF5 p 0xFE for ports 0 to 7, as
- *                                     snd-mtpav's scan does
- *   flyer [-p PORT] send OUT BYTE...  OUT 0 for all, 1 for A, 2 for B
- *   flyer [-p PORT] recv SECONDS      what comes in, by port
+ *                                     x: read control, u N: wait N us
+ *   flyer [-p PORT] id                the model the unit says it is
+ *   flyer [-p PORT] init              the supply, then MOTU's open command
+ *   flyer [-p PORT] cmd XX            a byte on the command channel
+ *   flyer [-p PORT] send OUT BYTE...  to OUT, one every -g us
+ *   flyer [-p PORT] recv SECONDS      what comes in, by input
  *   flyer [-p PORT] watch SECONDS     each change of the status lines, reading
  *                                     no byte
- *   flyer [-p PORT] trace BYTE...     each byte, then the status lines' changes
- *                                     for 2 ms: a byte going out on MIDI holds
- *                                     the unit busy for about 320 us
- *   flyer [-p PORT] ask BYTE...       the bytes as they are, then whatever the
- *                                     unit sends back in 300 ms
- *   flyer [-p PORT] rate OUT N        N bytes as fast as the unit takes them: a
- *                                     unit that sends them takes 3125 a second
- *   flyer [-p PORT] sweep             a note after 0xF5 p for all 256 p: the
- *                                     note says p, the velocity its top bit
- *   flyer [-p PORT] try [US]          every idle state of the control lines and
- *                                     each line as the strobe, a note a pattern,
- *                                     with the data lines high between bytes
+ *   flyer [-p PORT] trace OUT N       the status lines after each of N bytes
+ *   flyer [-p PORT] lat OUT           how long a byte takes to come back
+ *   flyer [-p PORT] loop OUT N        a sysex of N bytes to a, b or ab, reading
+ *                                     both inputs, for a cable from that output
+ *                                     to an input
+ *   flyer [-p PORT] fill OUT N        N bytes, then what the unit held of them
+ *   flyer [-p PORT] depth OUT STEP    bytes the unit takes before room falls
+ *   flyer [-p PORT] pace OUT N        N bursts, with each change of the lines
+ *   flyer [-p PORT] flood OUT N       N bytes with no look at the room flag
+ *   flyer [-p PORT] alive             whether the unit's pulse is there
  *
- * Bytes out go on the data lines, latched by a falling edge of control bit 2
- * once status bit 7 (ready) is up. Status bit 3 says that a byte waits, and it
- * comes back two bits at a time on status bits 5 and 4, low bits first, each
- * pair on control bit 3. A byte 0xF5 and a port number says where the bytes
- * after it belong, in both directions.
+ * -g US spaces the bytes of send and loop; 0, the default for loop, leaves it
+ * to the unit's room flag, FL_BURST bytes each time.
+ *
+ * The protocol is in linux/flyer/proto.h. This is for looking at a unit without
+ * the driver, so don't run the two together.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
@@ -44,24 +40,17 @@
 #include <time.h>
 #include <unistd.h>
 
-#define DATA 0
-#define STATUS 1
-#define CONTROL 2
-#define ECR 0x402 // past the port's base, on an ECP port: the mode in bits 7:5
+static unsigned int base = 0x378, gap;
 
-#define S_READY 0x80
-#define S_ACK 0x40
-#define S_IN1 0x20
-#define S_IN0 0x10
-#define S_BYTE 0x08
+#define fl_out(io, reg, v) outb(v, (io)->base + (reg))
+#define fl_in(io, reg) inb((io)->base + (reg))
+#define fl_ms(n) usleep((n) * 1000)
+#define fl_us(n) usleep(n)
+#include "../flyer/proto.h"
 
-#define C_WRITE 0x04
-#define C_READ 0x08
-#define C_INT 0x10
+#define ROOM_S 0.05 // a full FIFO drains in 3 ms
 
-#define READY_POLLS 10000 // of 10 us, as snd-mtpav's
-
-static unsigned int base = 0x378;
+static struct fl_io io;
 
 static double now(void)
 {
@@ -79,85 +68,32 @@ static void wait_us(unsigned int n)
 		;
 }
 
-static int ready(void)
+static int port_of(const char *s)
 {
-	int n;
-
-	for (n = 0; n < READY_POLLS; n++) {
-		if (inb(base + STATUS) & S_READY)
-			return 1;
-		wait_us(10);
-	}
-	return 0;
+	return s[0] == 'b' || s[0] == 'B' || s[0] == '1';
 }
 
-// one byte, with what snd-mtpav does around it; 0 if the unit never was ready
-static int put(unsigned char b)
+static void show(const char *what, unsigned char c)
 {
-	unsigned char c;
-
-	if (!ready())
-		return 0;
-	c = inb(base + CONTROL) & 0x1C;
-	outb(b, base + DATA);
-	outb(c & ~C_WRITE, base + CONTROL);
-	outb(c | C_WRITE, base + CONTROL);
-	return 1;
+	outb(c, base + FL_CONTROL);
+	wait_us(20);
+	printf("%-10s control %02x status %02x\n", what, inb(base + FL_CONTROL),
+	       inb(base + FL_STATUS));
 }
 
-static int get(void)
-{
-	unsigned char c = inb(base + CONTROL) & 0x1C;
-	unsigned char v = 0;
-	int i;
-
-	for (i = 0; i < 4; i++) {
-		unsigned char s;
-
-		outb(c | C_READ, base + CONTROL);
-		s = inb(base + STATUS);
-		outb(c & ~C_READ, base + CONTROL);
-		v |= ((s & (S_IN0 | S_IN1)) >> 4) << (i * 2);
-	}
-	return v;
-}
-
-static void show(const char *what)
-{
-	printf("%-14s data %02x status %02x control %02x ecr %02x\n", what,
-	       inb(base + DATA), inb(base + STATUS), inb(base + CONTROL),
-	       inb(base + ECR));
-}
-
+// each output's strobe sends FFh, which comes back round a cable
 static int look(void)
 {
-	unsigned char c = inb(base + CONTROL);
-	int bit;
-
-	show("as found");
-	for (bit = 0; bit < 5; bit++) {
-		char name[32];
-
-		outb(c ^ (1 << bit), base + CONTROL);
-		wait_us(100);
-		snprintf(name, sizeof(name), "control bit %d", bit);
-		show(name);
-		outb(c, base + CONTROL);
-		wait_us(100);
-	}
-	// bit 5 turns the data lines around where the port can
-	outb(c | 0x20, base + CONTROL);
-	wait_us(100);
-	show("data lines in");
-	outb(c, base + CONTROL);
-	outb(0x55, base + DATA);
-	wait_us(10);
-	show("data 55h");
-	outb(0xAA, base + DATA);
-	wait_us(10);
-	show("data AAh");
-	outb(0, base + DATA);
-	show("as left");
+	outb(0xFF, base + FL_DATA);
+	wait_us(20);
+	show("idle", FL_C_IDLE);
+	show("write A", fl_strobe(0));
+	show("read A", fl_reader(0));
+	show("write B", fl_strobe(1));
+	show("read B", fl_reader(1));
+	show("command", FL_C_COMMAND);
+	show("both read", 0x1E);
+	show("idle", FL_C_IDLE);
 	return 0;
 }
 
@@ -169,19 +105,13 @@ static int raw(int argc, char **argv)
 		const char *t = argv[i];
 
 		if (!strcmp(t, "s")) {
-			printf("status %02x\n", inb(base + STATUS));
-		} else if (!strcmp(t, "r")) {
-			printf("data %02x\n", inb(base + DATA));
+			printf("status %02x\n", inb(base + FL_STATUS));
 		} else if (!strcmp(t, "x")) {
-			printf("control %02x\n", inb(base + CONTROL));
-		} else if (!strcmp(t, "E")) {
-			printf("ecr %02x\n", inb(base + ECR));
-		} else if (i + 1 < argc && !strcmp(t, "e")) {
-			outb(strtoul(argv[++i], NULL, 16), base + ECR);
+			printf("control %02x\n", inb(base + FL_CONTROL));
 		} else if (i + 1 < argc && !strcmp(t, "d")) {
-			outb(strtoul(argv[++i], NULL, 16), base + DATA);
+			outb(strtoul(argv[++i], NULL, 16), base + FL_DATA);
 		} else if (i + 1 < argc && !strcmp(t, "c")) {
-			outb(strtoul(argv[++i], NULL, 16), base + CONTROL);
+			outb(strtoul(argv[++i], NULL, 16), base + FL_CONTROL);
 		} else if (i + 1 < argc && !strcmp(t, "u")) {
 			wait_us(strtoul(argv[++i], NULL, 0));
 		} else {
@@ -192,177 +122,68 @@ static int raw(int argc, char **argv)
 	return 0;
 }
 
-static int init(void)
+static int has_room(void)
 {
-	int p;
+	double end = now() + ROOM_S;
 
-	outb(C_WRITE, base + CONTROL);
-	for (p = 0; p < 8; p++)
-		if (!put(0xF5) || !put(p) || !put(0xFE)) {
-			printf("not ready at port %d: status %02x\n", p,
-			       inb(base + STATUS));
+	while (now() < end)
+		if (fl_room(&io))
 			return 1;
-		}
-	printf("all ready: status %02x\n", inb(base + STATUS));
 	return 0;
 }
 
-static int send(int argc, char **argv)
+static int send(int out, int argc, char **argv)
 {
 	int i;
 
-	outb(C_WRITE, base + CONTROL);
-	if (!put(0xF5) || !put(strtoul(argv[0], NULL, 0))) {
-		printf("not ready: status %02x\n", inb(base + STATUS));
-		return 1;
-	}
-	for (i = 1; i < argc; i++)
-		if (!put(strtoul(argv[i], NULL, 16))) {
-			printf("not ready after %d bytes: status %02x\n", i - 1,
-			       inb(base + STATUS));
-			return 1;
-		}
-	printf("sent %d bytes: status %02x\n", argc - 1, inb(base + STATUS));
-	return 0;
-}
-
-// a byte with this strobe from this idle state, then the data lines high, which
-// may be what feeds the unit
-static void pulse(unsigned char idle, unsigned char line, unsigned char b,
-		  unsigned int us)
-{
-	outb(b, base + DATA);
-	wait_us(us);
-	outb(idle ^ line, base + CONTROL);
-	wait_us(us);
-	outb(idle, base + CONTROL);
-	wait_us(us);
-	outb(0xFF, base + DATA);
-	wait_us(320); // a MIDI byte
-}
-
-// the note says the idle state and the strobe, the velocity the port selected
-static int try_all(unsigned int us)
-{
-	static const unsigned char lines[] = { 1, 2, 4, 8 };
-	int idle, l, p;
-
-	outb(0xFF, base + DATA);
-	for (idle = 0; idle < 16; idle++)
-		for (l = 0; l < 4; l++)
-			for (p = 0; p < 3; p++) {
-				outb(idle, base + CONTROL);
-				wait_us(us);
-				if (p) {
-					pulse(idle, lines[l], 0xF5, us);
-					pulse(idle, lines[l], p, us);
-				}
-				pulse(idle, lines[l], 0x90, us);
-				pulse(idle, lines[l], idle | l << 4, us);
-				pulse(idle, lines[l], 1 + p, us);
-				wait_us(2000);
-			}
-	outb(C_WRITE, base + CONTROL);
-	printf("done: status %02x\n", inb(base + STATUS));
-	return 0;
-}
-
-static int trace(int argc, char **argv)
-{
-	int i;
-
-	outb(C_WRITE, base + CONTROL);
 	for (i = 0; i < argc; i++) {
-		double t0, end;
-		int last = -1;
+		if (!has_room()) {
+			printf("the unit never had room, byte %d\n", i);
+			return 3;
+		}
+		fl_put(&io, out, strtoul(argv[i], NULL, 16));
+		wait_us(gap);
+	}
+	return 0;
+}
 
-		if (!put(strtoul(argv[i], NULL, 16))) {
-			printf("%s: not ready, status %02x\n", argv[i],
-			       inb(base + STATUS));
+static int recv_for(double secs)
+{
+	double end = now() + secs;
+	unsigned long n = 0;
+	int was = -1, in;
+
+	while (now() < end) {
+		if (!fl_any(&io)) {
+			usleep(100);
 			continue;
 		}
-		t0 = now();
-		end = t0 + 0.002;
-		printf("%s:", argv[i]);
-		while (now() < end) {
-			int s = inb(base + STATUS) & 0xF8;
+		for (in = 0; in < 2; in++) {
+			unsigned char b;
 
-			if (s != last) {
-				printf(" %.0f:%02x", (now() - t0) * 1e6, s);
-				last = s;
-			}
-		}
-		printf("\n");
-	}
-	return 0;
-}
-
-static int ask(int argc, char **argv)
-{
-	double end;
-	int i, n = 0;
-
-	outb(C_WRITE, base + CONTROL);
-	while (inb(base + STATUS) & S_BYTE)
-		get();
-	for (i = 0; i < argc; i++)
-		put(strtoul(argv[i], NULL, 16));
-	outb(0xFF, base + DATA);
-	end = now() + 0.3;
-	printf("back:");
-	while (now() < end)
-		if (inb(base + STATUS) & S_BYTE) {
-			printf(" %02x", get());
+			if (!fl_waiting(&io, in))
+				continue;
+			b = fl_get(&io, in);
+			if (in != was)
+				printf("[%c] ", 'A' + in);
+			was = in;
+			printf("%02x ", b);
+			fflush(stdout);
 			n++;
 		}
-	printf(" (%d)\n", n);
-	return 0;
-}
-
-static int rate(int out, int n)
-{
-	double t0;
-	int i;
-
-	outb(C_WRITE, base + CONTROL);
-	if (!put(0xF5) || !put(out))
-		return 1;
-	t0 = now();
-	for (i = 0; i < n; i++)
-		if (!put(0xF8))
-			break;
-	printf("port %d: %d of %d bytes in %.1f ms, %.0f a second, status %02x\n",
-	       out, i, n, (now() - t0) * 1e3, i / (now() - t0),
-	       inb(base + STATUS));
-	return 0;
-}
-
-static int sweep(void)
-{
-	int p;
-
-	outb(C_WRITE, base + CONTROL);
-	for (p = 0; p < 256; p++) {
-		put(0xF5);
-		put(p);
-		put(0x90);
-		put(p & 0x7F);
-		put(1 + (p >> 7));
-		outb(0xFF, base + DATA);
-		wait_us(1500);
 	}
-	printf("swept: status %02x\n", inb(base + STATUS));
+	printf("\n%lu bytes\n", n);
 	return 0;
 }
 
 static int watch(double secs)
 {
 	double start = now(), end = start + secs;
-	int last = -1;
 	unsigned long n = 0;
+	int last = -1;
 
 	while (now() < end) {
-		int s = inb(base + STATUS) & 0xF8;
+		int s = inb(base + FL_STATUS) & 0xF8;
 
 		if (s != last) {
 			if (n++ < 200)
@@ -374,80 +195,339 @@ static int watch(double secs)
 	return 0;
 }
 
-static int recv_for(double secs)
+static void drain(void)
 {
-	double start = now(), end = start + secs;
-	int state = 0, port = -1;
-	unsigned long n = 0;
+	double end = now() + 0.01;
+	int in;
 
-	outb(C_WRITE, base + CONTROL);
-	while (now() < end) {
-		int b;
+	while (now() < end)
+		for (in = 0; in < 2; in++)
+			if (fl_waiting(&io, in))
+				fl_get(&io, in);
+}
 
-		if (!(inb(base + STATUS) & S_BYTE)) {
-			usleep(100);
-			continue;
-		}
-		b = get();
-		n++;
-		if (b >= 0xF8) {
-			printf("%9.4f port %d: %02x\n", now() - start, port, b);
-		} else if (state) {
-			port = b;
-			state = 0;
-			printf("%9.4f port now %d\n", now() - start, port);
-		} else if (b == 0xF5) {
-			state = 1;
-		} else {
-			printf("%9.4f port %d: %02x\n", now() - start, port, b);
-		}
-		fflush(stdout);
+// how long a byte takes from its strobe to the input: a MIDI cable takes 320 us
+// for the byte alone
+static int lat(int out)
+{
+	double t[2][16];
+	int n[2] = { 0, 0 }, i, in;
+
+	drain();
+	for (i = 0; i < 16; i++) {
+		double t0, end;
+
+		fl_put(&io, out, 0x10 + i);
+		t0 = now();
+		end = t0 + 0.02;
+		while (now() < end)
+			for (in = 0; in < 2; in++)
+				if (fl_waiting(&io, in)) {
+					fl_get(&io, in);
+					t[in][n[in]++ & 15] = now() - t0;
+					end = 0;
+				}
 	}
-	printf("%lu bytes in %.1f s, status %02x\n", n, secs, inb(base + STATUS));
+	for (in = 0; in < 2; in++) {
+		double lo = 1, hi = 0;
+
+		for (i = 0; i < n[in] && i < 16; i++) {
+			lo = t[in][i] < lo ? t[in][i] : lo;
+			hi = t[in][i] > hi ? t[in][i] : hi;
+		}
+		if (n[in])
+			printf("%c to %c: %d of 16 back, %.0f to %.0f us\n", 'A' + out,
+			       'A' + in, n[in], lo * 1e6, hi * 1e6);
+		else
+			printf("%c to %c: none back\n", 'A' + out, 'A' + in);
+	}
+	return 0;
+}
+
+// the status lines' changes after each byte, for 1 ms, reading no byte until the
+// end of each: when the unit raises the line that interrupts, status bit 6
+static int trace(int out, int n)
+{
+	int i, in;
+
+	drain();
+	for (i = 0; i < n; i++) {
+		double t0, end;
+		int last = -1;
+
+		fl_put(&io, out, 0x20 + i);
+		t0 = now();
+		end = t0 + 0.001;
+		printf("byte %d:", i);
+		while (now() < end) {
+			int s = inb(base + FL_STATUS) & 0xF8;
+
+			if (s != last) {
+				printf(" %.0f:%02x", (now() - t0) * 1e6, s);
+				last = s;
+			}
+		}
+		printf("\n");
+		for (in = 0; in < 2; in++)
+			while (fl_waiting(&io, in))
+				printf("  read %c: %02x, status %02x\n", 'A' + in,
+				       fl_get(&io, in), inb(base + FL_STATUS));
+	}
+	return 0;
+}
+
+// the byte of a test sysex
+static unsigned char nth(int i, int n)
+{
+	return !i ? 0xF0 : i == n - 1 ? 0xF7 : i % 128;
+}
+
+// bytes with no read until they are all out: how many the unit held, and which
+static int fill(int out, int n)
+{
+	int i, in, count = 0;
+	double start = now();
+
+	drain();
+	for (i = 0; i < n; i++) {
+		if (!has_room()) {
+			printf("no room at byte %d\n", i);
+			break;
+		}
+		fl_put(&io, out, i & 0x7F);
+	}
+	usleep(20000);
+	printf("%d bytes in %.0f ms, back:", n, (now() - start) * 1e3);
+	for (in = 0; in < 2; in++)
+		while (fl_waiting(&io, in)) {
+			int b = fl_get(&io, in);
+
+			if (count++ < 12)
+				printf(" %02x", b);
+		}
+	printf(" ... %d in all\n", count);
+	return 0;
+}
+
+// bursts of FL_BURST bytes on the room flag, with each change of the interrupt
+// line and the flag: whether a rise of the line comes with the room
+static int pace(int out, int bursts)
+{
+	static double at[4096];
+	static unsigned char st[4096];
+	int n = 0, i, k, in, last = -1, bytes = 0;
+	double t0;
+
+	drain();
+	t0 = now();
+	for (i = 0; i < bursts;) {
+		int s = inb(base + FL_STATUS);
+
+		if ((s & 0xC8) != last && n < 4096) {
+			at[n] = now() - t0;
+			st[n++] = s;
+			last = s & 0xC8;
+		}
+		for (in = 0; in < 2; in++)
+			if (s & FL_S_BYTE && fl_waiting(&io, in)) {
+				fl_get(&io, in);
+				bytes++;
+			}
+		if (s & FL_S_ROOM) {
+			if (n < 4096) {
+				at[n] = now() - t0;
+				st[n++] = 1;
+			}
+			for (k = 0; k < FL_BURST; k++)
+				fl_put(&io, out, 0x10 + k);
+			i++;
+		}
+	}
+	for (i = 0; i < n; i++) {
+		if (st[i] == 1)
+			printf("%7.0f burst\n", at[i] * 1e6);
+		else
+			printf("%7.0f %02x\n", at[i] * 1e6, st[i]);
+	}
+	printf("%d back\n", bytes);
+	return 0;
+}
+
+// n bytes in a row with no look at the room flag, then what came back
+static int flood(int out, int n)
+{
+	int i, in, count = 0;
+
+	drain();
+	while (!fl_room(&io))
+		;
+	for (i = 0; i < n; i++)
+		fl_put(&io, out, 0x20 + i);
+	usleep(10000);
+	printf("%d in a row, back:", n);
+	for (in = 0; in < 2; in++)
+		while (fl_waiting(&io, in)) {
+			printf(" %02x", fl_get(&io, in));
+			count++;
+		}
+	printf(" (%d)\n", count);
+	return 0;
+}
+
+// how many bytes the unit takes before its room flag falls, checked every step
+// bytes, then how long the flag stays down
+static int depth(int out, int step)
+{
+	int n = 0, i;
+	double t0;
+
+	drain();
+	while (fl_room(&io) && n < 1024)
+		for (i = 0; i < step; i++)
+			fl_put(&io, out, 0x10 + n++ % 64);
+	t0 = now();
+	while (!fl_room(&io) && now() < t0 + 0.05)
+		;
+	printf("%d bytes, %d at a time, then %.0f us without room\n", n, step,
+	       (now() - t0) * 1e6);
+	usleep(10000);
+	drain();
+	return 0;
+}
+
+// a sysex of n bytes to OUT, a, b or ab, with both inputs read throughout: what
+// came back on each, against what was sent
+static int loop(const char *to, int n)
+{
+	static unsigned char got[2][8192];
+	int count[2] = { 0, 0 }, i = 0, k, in, wrong[2] = { 0, 0 }, full = 0, o;
+	int use[2] = { !!strchr(to, 'a'), !!strchr(to, 'b') };
+	double start = now(), end = 0;
+
+	if (n > 8192)
+		n = 8192;
+	drain();
+	while (i < n || now() < end) {
+		for (in = 0; in < 2; in++)
+			if (fl_waiting(&io, in)) {
+				unsigned char b = fl_get(&io, in);
+
+				if (count[in] < 8192)
+					got[in][count[in]++] = b;
+			}
+		if (i >= n)
+			continue;
+		if (gap) {
+			for (o = 0; o < 2; o++)
+				if (use[o])
+					fl_put(&io, o, nth(i, n));
+			i++;
+			wait_us(gap);
+		} else if (fl_room(&io)) {
+			for (k = 0; k < FL_BURST && i < n; i++)
+				for (o = 0; o < 2; o++)
+					if (use[o]) {
+						fl_put(&io, o, nth(i, n));
+						k++;
+					}
+		} else {
+			full++;
+		}
+		if (i == n)
+			end = now() + 0.25;
+	}
+	for (in = 0; in < 2; in++)
+		for (k = 0; k < count[in] && k < n; k++)
+			wrong[in] += got[in][k] != nth(k, n);
+	printf("%d bytes to %s in %.0f ms: in A %d (%d wrong), in B %d (%d wrong),"
+	       " %d polls found no room\n",
+	       n, to, (end - 0.25 - start) * 1e3, count[0], wrong[0], count[1],
+	       wrong[1], full);
+	for (in = 0; in < 2; in++)
+		if (wrong[in] || (count[in] && count[in] != n)) {
+			for (k = 0; k < count[in] && k < 32; k++)
+				printf("%02x ", got[in][k]);
+			printf("\n");
+		}
 	return 0;
 }
 
 int main(int argc, char **argv)
 {
-	int a = 1;
+	const char *c;
+	int o;
 
-	if (a + 1 < argc && !strcmp(argv[a], "-p")) {
-		base = strtoul(argv[a + 1], NULL, 16);
-		a += 2;
+	while ((o = getopt(argc, argv, "p:g:")) != -1) {
+		if (o == 'p')
+			base = strtoul(optarg, NULL, 0);
+		else if (o == 'g')
+			gap = strtoul(optarg, NULL, 0);
+		else
+			return 1;
 	}
-	if (a >= argc) {
-		fprintf(stderr, "usage: flyer [-p PORT] look | raw TOKEN... | init"
-				" | send OUT BYTE... | recv SECONDS | watch SECONDS"
-				" | trace BYTE... | ask BYTE... | rate OUT N | sweep"
-				" | try [US]\n");
+	if (optind >= argc) {
+		fprintf(stderr, "usage: flyer [-p PORT] [-g US] look | raw TOKEN..."
+				" | id | init | cmd XX | send OUT BYTE..."
+				" | recv SECONDS | watch SECONDS | trace OUT N"
+				" | lat OUT | loop OUT N | fill OUT N"
+				" | depth OUT STEP | pace OUT N | flood OUT N"
+				" | alive\n");
 		return 1;
 	}
-	if (ioperm(base, 3, 1) || ioperm(base + ECR, 1, 1)) {
+	if (ioperm(base, 3, 1)) {
 		perror("flyer: ioperm");
 		return 2;
 	}
-	if (!strcmp(argv[a], "look"))
+	io.base = base;
+	argc -= optind;
+	argv += optind;
+	c = argv[0];
+	if (!strcmp(c, "look"))
 		return look();
-	if (!strcmp(argv[a], "raw"))
-		return raw(argc - a - 1, argv + a + 1);
-	if (!strcmp(argv[a], "init"))
-		return init();
-	if (!strcmp(argv[a], "send") && argc - a >= 2)
-		return send(argc - a - 1, argv + a + 1);
-	if (!strcmp(argv[a], "ask") && argc - a >= 2)
-		return ask(argc - a - 1, argv + a + 1);
-	if (!strcmp(argv[a], "rate") && argc - a >= 3)
-		return rate(atoi(argv[a + 1]), atoi(argv[a + 2]));
-	if (!strcmp(argv[a], "sweep"))
-		return sweep();
-	if (!strcmp(argv[a], "trace") && argc - a >= 2)
-		return trace(argc - a - 1, argv + a + 1);
-	if (!strcmp(argv[a], "watch") && argc - a >= 2)
-		return watch(atof(argv[a + 1]));
-	if (!strcmp(argv[a], "try"))
-		return try_all(a + 1 < argc ? strtoul(argv[a + 1], NULL, 0) : 20);
-	if (!strcmp(argv[a], "recv") && argc - a >= 2)
-		return recv_for(atof(argv[a + 1]));
-	fprintf(stderr, "flyer: what is %s?\n", argv[a]);
+	if (!strcmp(c, "raw"))
+		return raw(argc - 1, argv + 1);
+	if (!strcmp(c, "id")) {
+		unsigned char before = inb(base + FL_STATUS);
+		int v = fl_id(&io);
+
+		printf("status before %02x, id %d, status after %02x\n", before, v,
+		       inb(base + FL_STATUS));
+		return 0;
+	}
+	if (!strcmp(c, "init")) {
+		fl_start(&io);
+		printf("status %02x\n", inb(base + FL_STATUS));
+		return 0;
+	}
+	if (!strcmp(c, "cmd") && argc >= 2) {
+		fl_command(&io, strtoul(argv[1], NULL, 16));
+		printf("status %02x\n", inb(base + FL_STATUS));
+		return 0;
+	}
+	if (!strcmp(c, "send") && argc >= 3)
+		return send(port_of(argv[1]), argc - 2, argv + 2);
+	if (!strcmp(c, "recv") && argc >= 2)
+		return recv_for(atof(argv[1]));
+	if (!strcmp(c, "watch") && argc >= 2)
+		return watch(atof(argv[1]));
+	if (!strcmp(c, "trace") && argc >= 3)
+		return trace(port_of(argv[1]), atoi(argv[2]));
+	if (!strcmp(c, "lat") && argc >= 2)
+		return lat(port_of(argv[1]));
+	if (!strcmp(c, "loop") && argc >= 3)
+		return loop(argv[1], atoi(argv[2]));
+	if (!strcmp(c, "flood") && argc >= 3)
+		return flood(port_of(argv[1]), atoi(argv[2]));
+	if (!strcmp(c, "alive")) {
+		printf("%s\n", fl_alive(&io) ? "alive" : "no pulse");
+		return 0;
+	}
+	if (!strcmp(c, "pace") && argc >= 3)
+		return pace(port_of(argv[1]), atoi(argv[2]));
+	if (!strcmp(c, "depth") && argc >= 3)
+		return depth(port_of(argv[1]), atoi(argv[2]));
+	if (!strcmp(c, "fill") && argc >= 3)
+		return fill(port_of(argv[1]), atoi(argv[2]));
+	fprintf(stderr, "flyer: what is %s?\n", c);
 	return 1;
 }
