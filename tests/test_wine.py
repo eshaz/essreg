@@ -46,7 +46,8 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   the old drivers' FAIL and KNOWN, and DmaCountTwice=0 in SYSTEM.INI the
   counts' INFO; sb.box writes SB16BOX.BAT for the VxD's Sound Blaster 16
   and judges sb16test's report by its summary; /R gives each sound's line
-  with its marker; a bad option, no card, /once= and a run ended by force,
+  with its marker, which tools/wchkrec.py passes in a recording made to
+  the report; a bad option, no card, /once= and a run ended by force,
   which leaves the report's .$$$
 - essinst: with ESS's drivers in the Windows SYSTEM folder, /y
   /norestart keeps them as .ORG files, stages the rebuilt ones as .NEW
@@ -58,6 +59,7 @@ Win16 wants 8.3 path names, so the work directory is reached through a
 short symbolic link in /tmp.
 """
 
+import io
 import os
 import re
 import resource
@@ -739,6 +741,27 @@ class WineTest(unittest.TestCase):
         self.assertEqual(len(re.findall(r" \d+-\d+",
                                         res["p.restart"][0][1])), 2)
         self.assertRegex(res["rec.end"][0][1], r"^marker CDAB at \d+ us$")
+
+    def test_esswchk_round_trip(self):
+        """/R's report, and a recording made to it: tools/wchkrec.py finds
+        every marker and passes every sound"""
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("needs numpy")
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import test_wchkrec
+        import wchkrec
+        self.wchk("W10", "/sim", "/R", "/q", "/nobox")
+        test_wchkrec.write_wav(self.path("W10.WAV"), test_wchkrec.recording(
+            self.path("W10.TXT")))
+        out = io.StringIO()
+        failed = wchkrec.analyze(self.path("W10.TXT"), self.path("W10.WAV"),
+                                 out)
+        self.assertEqual(failed, 0, out.getvalue())
+        self.assertIn("the clock: 12 markers", out.getvalue())
+        self.assertIn("0 of 10 recorded sounds failed", out.getvalue())
 
     def test_esswchk_bad_option(self):
         with open(self.path("ONCE2.BAT"), "w") as f:

@@ -1042,18 +1042,21 @@ static UINT play(int dev, DWORD rate, int chans, struct snd_tone *t, u32 frames,
   return err;
 }
 
-// a marker's DTMF on Audio 2's device, 22050 Hz 8-bit mono; the time it
-// began, ms
+// a marker's DTMF on Audio 2's device, 22050 Hz 8-bit mono, 100 ms a
+// symbol after 200 ms of quiet; the time it began, ms. /sim takes as long
 static u32 marker(const char *syms) {
   struct wbuf b;
   PCMWAVEFORMAT f;
   HWAVEOUT h;
-  u32 t = timeGetTime();
+  u32 t;
   int dev = find_a2();
 
   wait_ms(200);
-  if (opt.sim || dev < 0 || wbuf_new(&b, 22050L))
-    return timeGetTime();
+  t = timeGetTime();
+  if (opt.sim || dev < 0 || wbuf_new(&b, 22050L)) {
+    wait_ms(100UL * strlen(syms));
+    return t;
+  }
   pcm_format(&f, 22050, 1, 8);
   if (!waveOutOpen(&h, dev, (LPWAVEFORMAT)&f, 0, 0, CALLBACK_NULL)) {
     poke_at = (u8 __huge *)b.h->lpData;
