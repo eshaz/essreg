@@ -108,6 +108,10 @@ A signal (SIGINT, SIGTERM or SIGHUP) restores and exits with 7. A run cut
 short another way, by a crash or a reboot, leaves the journal, and the next
 run, or `es1869test --restore`, applies it before anything else.
 
+Each case starts with `a2_resample` at 0, Off, through the journal, so that
+Audio 2 plays its samples as written at the chip's own pitch whatever the
+driver's default. The rate correction's own cases set it themselves.
+
 ## The paths
 
 The cases reach the chip four ways:

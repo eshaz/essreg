@@ -156,6 +156,7 @@ static enum et_result run_case(struct et_ctx *c, const struct et_case *k)
 {
 	const char *why = unmet(c, k);
 	enum et_result r;
+	long mode;
 	double t0;
 
 	c->k = k;
@@ -167,7 +168,15 @@ static enum et_result run_case(struct et_ctx *c, const struct et_case *k)
 		return ET_SKIP;
 	}
 	t0 = hal->now(hal->ctx);
-	r = k->fn(c, k);
+	// every case plays the samples as written, at the chip's own pitch:
+	// the rate correction's own cases set it themselves
+	if (!et_param_get(c, "a2_resample", &mode) && mode &&
+	    et_param_set(c, "a2_resample", 0)) {
+		snprintf(c->why, sizeof(c->why), "a2_resample stayed on");
+		r = ET_ERROR;
+	} else {
+		r = k->fn(c, k);
+	}
 	klog_check(c);
 	if ((r == ET_PASS || r == ET_KNOWN) && c->fails)
 		r = ET_FAIL;

@@ -729,14 +729,15 @@ config SND_ES1869_DEFAULT_A2_PAUSE
 config SND_ES1869_DEFAULT_A2_RESAMPLE
 	int "a2_resample"
 	range 0 2
-	default 0
+	default 2
 	help
 	  Audio 2's 16-bit streams on DMA 5 through a filter that
 	  corrects their rate, also while one plays: Trim by a2_trim,
 	  Clock also to the system's clock, as the chip's measures
-	  against it; Off leaves the samples as they are. The ALSA
-	  control "Audio 2 Rate Correction". The module parameter
-	  a2_resample sets it at load and at runtime, through
+	  against it, which is true time with chronyd running; Off
+	  leaves the samples as they are. The ALSA control "Audio 2 Rate
+	  Correction". The module parameter a2_resample sets it at load
+	  and at runtime, through
 	  /sys/module/snd_es1869/parameters/a2_resample.
 
 config SND_ES1869_DEFAULT_A2_TRIM

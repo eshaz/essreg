@@ -364,10 +364,11 @@ Parameters only:
 ### Rate
 
 * **Audio 2 Rate Correction** (`Audio 2 Rate Correction`, F3): 0 Off, 1
-  Trim, 2 Clock, default Off. Audio 2's 16-bit streams on DMA 5 through a
+  Trim, 2 Clock, default Clock. Audio 2's 16-bit streams on DMA 5 through a
   filter that corrects their rate, also while one plays: Trim by a2_trim,
-  Clock also to the system's clock, as the chip's measures against it; Off
-  leaves the samples as they are. Parameter `a2_resample`.
+  Clock also to the system's clock, as the chip's measures against it, which
+  is true time with chronyd running; Off leaves the samples as they are.
+  Parameter `a2_resample`.
 * **Audio 2 Rate Trim** (`Audio 2 Rate Trim`, F3): 0 -500 ppm, 1 -200 ppm, 2
   -100 ppm, 3 -50 ppm, 4 -20 ppm, 5 -10 ppm, 6 -5 ppm, 7 -2 ppm, 8 -1 ppm, 9
   -0.5 ppm, 10 -0.2 ppm, 11 -0.1 ppm, 12 0, 13 +0.1 ppm, 14 +0.2 ppm, 15

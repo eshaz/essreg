@@ -198,23 +198,24 @@ ppm. The FM's clock fits no such small ratio of either. On one crystal the
 difference between the chip and the system can't drift, so that a warming
 crystal shows only against NTP.
 
-The system clock isn't disciplined: cron sets it from the network every six
-hours and nothing corrects its rate. Two offsets from NTP 1404 s apart put
-the Armada's crystal about 30 ppm slow of real time, as chrony's drift file
-has it, so that 44.1 kHz plays about 29 ppm flat of real time and 48 kHz
-about 223 ppm sharp.
+On the Armada chronyd runs as a service and steers the system clock; without
+it, cron sets the clock from the network every six hours and nothing
+corrects its rate. Two offsets from NTP 1404 s apart put the Armada's
+crystal about 30 ppm slow of real time, as chrony's drift file has it, so
+that 44.1 kHz plays about 29 ppm flat of real time and 48 kHz about 223 ppm
+sharp, unless the Clock mode below corrects it.
 
 ## Rate correction
 
 The chip has one clock input and no trim, so that a stream's rate can only
 be changed in its samples. `a2_resample`, the control Audio 2 Rate
 Correction, puts Audio 2's stream through a filter on its way to the ring:
-* `0`, Off, the default, leaves the samples as the application wrote them.
+* `0`, Off, leaves the samples as the application wrote them.
 * `1`, Trim, moves the rate by `a2_trim`, the control Audio 2 Rate Trim, a
   list from -500 to +500 ppm that alsamixer steps through, plus
   `a2_trim_ppb` for a value in between. At 0 the samples stay exact.
-* `2`, Clock, plays the stream true to the system's clock, plus the same
-  trim.
+* `2`, Clock, the default, plays the stream true to the system's clock, plus
+  the same trim. With chronyd running that is real time.
 
 The controls show up in alsamixer's Playback view (F3) with Audio 2 Rate
 Dither, and all of them take effect while a stream plays. Turning the
@@ -225,7 +226,9 @@ Armada's, with a buffer of at least 256 frames. Any other stream, Audio 1,
 the FM and the dual device play as they always do, and so does a pointer
 that stands, as under dmix, whose data changes in place. The samples are
 then no longer the application's, a choice between the true rate and the
-exact samples, so it stays off by default.
+exact samples. The driver takes the true rate by default; Off gives an
+application its samples back exactly, and es1869test turns it off for every
+case but the correction's own.
 
 The filter is a Kaiser-windowed sinc of 68 taps, blended from 128 places at
 each frame, in MMX where the CPU has it. What sets its length is the top of
@@ -896,10 +899,10 @@ saved state wins over a parameter. The defaults are the Kconfig options
 * `a2_pause`: 0 to 1, default 0. Pause on an 8-bit Audio 2 channel through
   78h, which may resume off step. It takes effect at the next prepare.
 * `a2_resample` ("Audio 2 Rate Correction"): 0 Off, 1 Trim, 2 Clock, default
-  Off. Audio 2's 16-bit streams on DMA 5 through a filter that corrects
+  Clock. Audio 2's 16-bit streams on DMA 5 through a filter that corrects
   their rate, also while one plays: Trim by a2_trim, Clock also to the
-  system's clock, as the chip's measures against it; Off leaves the samples
-  as they are.
+  system's clock, as the chip's measures against it, which is true time with
+  chronyd running; Off leaves the samples as they are.
 * `a2_trim` ("Audio 2 Rate Trim"): 0 -500 ppm, 1 -200 ppm, 2 -100 ppm, 3 -50
   ppm, 4 -20 ppm, 5 -10 ppm, 6 -5 ppm, 7 -2 ppm, 8 -1 ppm, 9 -0.5 ppm, 10
   -0.2 ppm, 11 -0.1 ppm, 12 0, 13 +0.1 ppm, 14 +0.2 ppm, 15 +0.5 ppm, 16 +1

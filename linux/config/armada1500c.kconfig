@@ -15,6 +15,8 @@ CONFIG_SND_ES1869_DEFAULT_AUDIO2_OVERSAMPLING=0
 CONFIG_SND_ES1869_DEFAULT_AUDIO2_FILTER=0
 CONFIG_SND_ES1869_DEFAULT_AUDIO1_FILTER=0
 CONFIG_SND_ES1869_DEFAULT_PIIX4_TYPE_F=0
+# Audio 2 true to real time, as chronyd steers the system clock (Clock)
+CONFIG_SND_ES1869_DEFAULT_A2_RESAMPLE=2
 
 # The rate limits' defaults are es1869test's rate.max on the laptop: Audio 2
 # clean to 99225 Hz while Audio 1 records (132300 Hz alone), so 96000 Hz;
