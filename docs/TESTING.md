@@ -166,43 +166,14 @@ tools/ow2build.sh /path/to/open-watcom     # binaries in out/ow2/
 
 ### Under Wine
 
-With `ESSREG_WINE=1`, `tests/test_wine.py` runs `essctl.exe`, `ess3d.exe`
-and `esfmrec.exe` as 16-bit Windows programs under Wine. It needs 32-bit
-Wine and Xvfb, and covers these cases:
-* essctl saves and loads a profile against the simulated chip. A save keeps
-  the file's other sections, and a save onto a full disk, which the test
-  simulates with a file size limit, leaves the old file as it was.
-* `essctl /i2s=off` sets `ESSWaveTableChip` in the ES1869's registry key and
-  clears mixer 7Fh bit 0, and `/i2s=on` sets ESS's default again.
-* essctl loads a bank live into the real `ESFM.DRV`.
-* `essctl /dump` writes the ESFM voice table, with ESS's driver and with the
-  fixed one.
-* `essctl /dump` writes the wave driver lines with no `ES1869.DRV` loaded,
-  with ESS's and with the rebuilt one. `ES1869.DRV` doesn't load without VDS
-  (INT 4Bh), which Wine doesn't have, so the test's `drvhold.exe` answers
-  the version call while the driver loads.
-* The fixed `ESFM.DRV` loads the bank file named in `SYSTEM.INI` when the
-  device is opened, and `essctl /load` writes the bank's name there.
-* The fixed `ESFM.DRV` reads its `[ESFM.DRV]` switches from `SYSTEM.INI`,
-  and with `BetterSquareWave=0` it plays ESS's bank.
-* ess3d runs its commands against the simulated chip, and the test also
-  tries a bad command and a run without a card. It reads the results from
-  ess3d's `/log=` file, because Wine drops the exit code of a 16-bit Windows
-  program, whose process always exits with 0.
-* A second ess3d hands its setting to the box of the first one and exits.
-* `ess3d measure quick /sim` writes its report of the effect of /sim and
-  puts the mixer back. Ended by force with `taskkill /f`, it leaves its
-  restore file and the report so far, and the next ess3d puts the mixer
-  back.
-* A second `ess3d tray` opens the panel of the first one, and `ess3d exit`
-  closes the tray icon. Wine shows no tray icon for a 16-bit program,
-  because its 16-bit and 32-bit icon handles differ. Windows 9x has only one
-  kind, so the icon shows only there.
-* esfmrec records the test tone, also with `/raw` and `/split=`.
-* esfmrec is ended by force with Wine's `taskkill /f`. The header it saved
-  every 5 s holds the samples, and its next start repairs the header.
-* esfmrec records onto a full disk, which the test simulates with a file
-  size limit. It stops, and the file stays playable.
+With `ESSREG_WINE=1`, `tests/test_wine.py` runs `essctl.exe`, `ess3d.exe`,
+`esfmrec.exe` and `essinst.exe` as 16-bit Windows programs under Wine, with
+32-bit Wine and Xvfb; its docstring lists the cases. Wine drops a 16-bit
+Windows program's exit code, so the tests read each program's log or report.
+`ES1869.DRV` doesn't load without VDS (INT 4Bh), which Wine doesn't have, so
+the test's `drvhold.exe` answers the version call while the driver loads,
+and Wine shows no tray icon for a 16-bit program, whose 16-bit and 32-bit
+icon handles differ there.
 
 ### Screenshots
 

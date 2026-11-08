@@ -30,7 +30,8 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
 - ess3d's display: a second ess3d hands its setting to the display of the
   first and exits, and the first goes after the second one's time
 - ess3d's tray icon: a second "ess3d tray" opens the panel of the first,
-  and "ess3d exit" closes it
+  and "ess3d exit" closes it (Wine shows no tray icon for a 16-bit
+  program, whose 16-bit and 32-bit icon handles differ there)
 - ess3d measure: the quick plan against the effect of /sim writes its
   report and puts the mixer back, and the next ess3d puts back the
   mixer of a measurement that was ended by force; the chirp plan finds
