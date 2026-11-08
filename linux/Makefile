@@ -68,4 +68,5 @@ dist:
 	tar -C .. --transform 's,^,$(DIST)/,' -czf $(DIST).tar.gz \
 		$(patsubst test/%,linux/test/%,$(DIST_FILES))
 
-.PHONY: modules clean patch deploy dist
+# mqengine is a directory too
+.PHONY: modules mqengine clean patch deploy dist
