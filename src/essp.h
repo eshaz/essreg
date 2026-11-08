@@ -32,13 +32,14 @@
 
 #include "esstypes.h"
 
-#define ESP_VERSION "2.0"
+#define ESP_VERSION "2.1"
 
 // esp_run's options
 #define ESP_O_RECORD 0x0001 // a recorded run: the level tone, then markers
 #define ESP_O_SHORT 0x0002  // the short run: the cases marked for it
 #define ESP_O_SILENT 0x0004 // the cases without a sound only
 #define ESP_O_TINY 0x0008   // short buffers and sounds (the host tests)
+#define ESP_O_LEVEL 0x0010  // the level tone plays 10 s, with no question
 
 // the groups, a bit each in esp_run's mask
 #define ESP_G_ENV 0x0001    // the card, the machine, the memory manager
@@ -92,7 +93,7 @@ struct esp_hal {
   void (*hook)(u8 irq);         // the card's IRQ hooked, 0: unhooked
   void (*irq_mask)(int masked); // the card's IRQ at the PIC
   // the person's key, one of keys, after the question: the level tone's
-  // Enter in a recorded run
+  // Enter in a recorded run without ESP_O_LEVEL
   int (*ask)(const char *id, const char *question, const char *keys);
   void (*line)(const char *text); // a line of the report
   void (*say)(const char *text);  // progress on the screen

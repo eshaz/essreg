@@ -1736,10 +1736,13 @@ static void master_back(const u8 *old) {
   mix_w(0x62, old[1]);
 }
 
+#define LEVEL_US 10000000UL // ESP_O_LEVEL's level tone
+
 // the recorded run's start: a full-scale tone until the person, who sets
-// the recorder's level by it, presses Enter; then the start marker. With
-// loud, the run's loudest levels play it (14h FFh, the master at 63), so
-// that the recorder takes the lvl cases without clipping
+// the recorder's level by it, presses Enter, or for LEVEL_US with
+// ESP_O_LEVEL; then the start marker. With loud, the run's loudest levels
+// play it (14h FFh, the master at 63), so that the recorder takes the lvl
+// cases without clipping
 static void record_start(int loud) {
   struct pc p;
   u8 old[2];
@@ -1763,10 +1766,15 @@ static void record_start(int loud) {
   a1_program(&p, &en[0]);
   eng_dma(&p, &en[0], 1);
   eng_start(&p);
-  a = H->ask("r.level",
-             "A full-scale tone plays: set the recorder's level\n just under "
-             "clipping, start recording, and press Enter",
-             "\r");
+  if (O & ESP_O_LEVEL) {
+    H->say("A full-scale tone plays 10 seconds: the recorder's level goes "
+           "just under clipping by it");
+    a = pass_time(O & ESP_O_TINY ? 200000UL : LEVEL_US) ? '\r' : 0;
+  } else
+    a = H->ask("r.level",
+               "A full-scale tone plays: set the recorder's level\n just "
+               "under clipping, start recording, and press Enter",
+               "\r");
   eng_stop();
   if (loud)
     master_back(old);

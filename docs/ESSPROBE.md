@@ -217,6 +217,8 @@ restart`, and so does the screen. `/N` runs without the window.
 
 The options:
 * `/R`: a recorded run.
+* `/L`: with `/R`, the level tone plays 10 seconds and the run goes on by
+  itself, with no question, as ESSCHECK runs it (version 2.1).
 * `/S`: the short run, the cases marked for it in each group.
 * `/A`: the cases without a sound only.
 * `/C:names`: only the cases whose names start so, groups or cases,
@@ -252,9 +254,9 @@ report's file, and 6 when cases failed.
 1. Connect the card's line out to a recorder's line in, in stereo, and
    record a WAV file at 44.1 or 48 kHz, 16 or 24-bit.
 2. Run `ESSPROBE /R /S`. A full-scale tone plays: set the recorder's level
-   just under clipping, start recording, and press Enter. The cases follow,
-   each sound after its marker, then the end marker. Stop recording after
-   it.
+   just under clipping, start recording, and press Enter (with `/L`, the
+   tone plays 10 seconds and the run goes on). The cases follow, each sound
+   after its marker, then the end marker. Stop recording after it.
 3. Run `ESSPROBE /R /O:FULLREC.TXT` the same way, into a second file.
 4. Send each report with its recording.
 

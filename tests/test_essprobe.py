@@ -59,7 +59,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src")
 EXE = os.path.join(ROOT, "build", "essprobe.exe")
 AREA = 0x40000              # the DMA area, 64 KB in one page
-O_RECORD, O_SHORT, O_SILENT, O_TINY = 0x01, 0x02, 0x04, 0x08
+O_RECORD, O_SHORT, O_SILENT, O_TINY, O_LEVEL = 0x01, 0x02, 0x04, 0x08, 0x10
 G_ALL = 0x1FFF
 IDLE_US = 25                # the time an idle() of the cases takes
 GROUPS = ("env", "rst", "a1", "a2", "both", "h1", "h4", "stream", "fix",
@@ -365,6 +365,19 @@ class ModelTest(unittest.TestCase):
     def test_no_errors(self):
         self.assertEqual(self.probe.errors, [])
         self.assertEqual(self.probe.hooked, [5, 0])
+
+    def test_level_timed(self):
+        """/L: the level tone plays its time, the short run's 0.2 s, and
+        the run goes on with no question"""
+        quick = Run(ChipCard(), opts=O_TINY | O_RECORD, only="a1.base")
+        timed = Run(ChipCard(), opts=O_TINY | O_RECORD | O_LEVEL,
+                    only="a1.base")
+        self.assertEqual([cid for cid, _q in quick.asked], ["r.level"])
+        self.assertEqual(timed.asked, [])
+        self.assertEqual(timed.errors, [])
+        self.assertIn("marker ABCD at 0 us", timed.text("rec.start"))
+        longer = timed.card.chip.clock.us - quick.card.chip.clock.us
+        self.assertTrue(190000 <= longer <= 260000, longer)
 
     def test_every_case(self):
         """every case runs, and fails only where the laptop's card failed
@@ -1241,6 +1254,14 @@ class ExeTest(unittest.TestCase):
         self.assertNotIn("ESSPROBE.RST", d.files)
         self.assertNotIn("restart before", d.output)    # no window, no trap
         self.assertNotIn("window: removed", lines)
+
+    def test_level_no_key(self):
+        """/R /L, as ESSCHECK runs it: the level tone goes on by itself,
+        and no key is read"""
+        d, code = self.dos(ChipCard(), "/R /L /T /C:a1.base")
+        self.assertEqual(code, 0, d.output)
+        self.assertIn("rec.start", results(self.report(d)))
+        self.assertIn("A full-scale tone plays 10 seconds", d.output)
 
     def test_pci_bus(self):
         """the laptop's bus 0 through the 32-bit accesses of CF8h and CFCh

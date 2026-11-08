@@ -7,7 +7,7 @@
  * recorded run (docs/ESSPROBE.md).
  *
  * Usage:
- *   `essprobe [/R] [/S] [/A] [/C:names] [/N] [/O:file]`
+ *   `essprobe [/R] [/L] [/S] [/A] [/C:names] [/N] [/K] [/O:file]`
  *
  * Notes:
  *
@@ -595,19 +595,22 @@ static void on_break(int sig) {
 }
 
 static void usage(void) {
-  puts("usage: essprobe [/R] [/S] [/A] [/C:names] [/N] [/K] [/O:file]\n"
-       "  /R  a recorded run: a tone to set the recorder's level, then each\n"
-       "      sound after its DTMF marker\n"
-       "  /S  the short run: a case of each kind\n"
-       "  /A  the cases without a sound only\n"
-       "  /C  only the cases whose names start so: groups (env rst a1 a2 both\n"
-       "      h1 h4 stream fix lvl mpu) or cases, comma-separated; typef,\n"
-       "      which can stop the machine, runs only by its name\n"
-       "  /N  no window on the DMA controllers under EMM386\n"
-       "  /K  after a run that stopped the machine: the report's last case\n"
-       "      fails, and the cases after it run, added to the report\n"
-       "  /O  the report's file, else ESSPROBE.TXT\n"
-       "Run it in real DOS without esssb16, BLASTER set (A). Esc stops.");
+  puts(
+      "usage: essprobe [/R] [/L] [/S] [/A] [/C:names] [/N] [/K] [/O:file]\n"
+      "  /R  a recorded run: a tone to set the recorder's level, then each\n"
+      "      sound after its DTMF marker\n"
+      "  /S  the short run: a case of each kind\n"
+      "  /A  the cases without a sound only\n"
+      "  /C  only the cases whose names start so: groups (env rst a1 a2 both\n"
+      "      h1 h4 stream fix lvl mpu meas) or cases, comma-separated; typef,\n"
+      "      which can stop the machine, runs only by its name\n"
+      "  /L  with /R: the level tone plays 10 seconds and the run goes on\n"
+      "      by itself, with no question\n"
+      "  /N  no window on the DMA controllers under EMM386\n"
+      "  /K  after a run that stopped the machine: the report's last case\n"
+      "      fails, and the cases after it run, added to the report\n"
+      "  /O  the report's file, else ESSPROBE.TXT\n"
+      "Run it in real DOS without esssb16, BLASTER set (A). Esc stops.");
 }
 
 int main(int argc, char **argv) {
@@ -634,6 +637,9 @@ int main(int argc, char **argv) {
       break;
     case 'T': // short buffers and sounds, for the host tests' emulator
       opts |= ESP_O_TINY;
+      break;
+    case 'L':
+      opts |= ESP_O_LEVEL;
       break;
     case 'N':
       nowin = 1;
