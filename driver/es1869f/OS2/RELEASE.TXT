@@ -1,0 +1,186 @@
+
+
+
+
+                         ES1869 AudioDrive OS/2 Driver
+
+                                 Version 2.10
+
+                            Software Release Notes
+
+                               March 19, 1997
+
+
+
+
+        About This Release
+
+        ESS Technology is providing new OS/2 drivers for the
+        ES1869 AudioDrive chip in this Software Release.
+
+        This document provides:
+
+        - a description of the changes to the drivers
+
+        - installation notes
+
+        Please read this document completely before you upgrade your
+        system, and follow the instructions carefully.
+
+
+
+
+        Release Information
+
+        Product:        ES1869 AudioDrive OS/2 Device Driver,
+                        Version 2.10
+
+        Drivers:        ES1869 (with ESFM and wavetable)
+
+        OS:             OS/2 Warp 4.0 and OS/2 Warp 3.0
+
+        Release Date:   March 19, 1997
+
+
+
+
+        Release Description
+
+        The ES1869 AudioDrive OS/2 Driver Software Release incorporates
+        new features such as 3D Spatializer available in ES1869
+        AudioDrive chip.
+
+
+
+        Known Problems
+
+        1. For OS/2 Warp 3.0, opening too many MIDI files makes the
+           OS/2 system unstable. This problem is related to MMPM/2
+           and depends on system resource.  On systems with 8 Mbs
+           memory, the limit is 3; 16 Mbs, 6.
+
+        2. Tempo in MIDI files may not be 100% accurate due to timing
+           delay and MMPM/2 architecture.
+
+        3. For OS/2 Warp 3.0, running MCI commands "seek wave to #"
+           and then "play wave" to a 16-bit wave file sometimes generates
+           very loud static noise.  Likewise using "record wave from #"
+           to record a 16-bit wave file may generate wrong file.  It all
+           depends on the seek position.
+
+        4. To be able to play and record wave files at the same time,
+           the enforcement of only one active wave file by MMPM/2 is
+           relaxed.  Therefore, some problems or erratic behaviors may
+           pop up if two wave files are played.
+
+        5. The OS/2 driver allows sharing of audio and MPU-401
+           interrupts, but it is not recommended.  If both are shared,
+           occasionally too much MIDI in data will lock up AudioDrive's
+           interrupt processing when a wave file is played or recorded.
+           To get out of this situation, stop the wave file, stop the
+           MIDI in source, close all MIDI files, and restart the wave
+           file to re-initialize AudioDrive's interrupt processing.
+
+        6. Due to the nature of MIDI music, turning MIDI in on while the
+           MIDI in data are coming may not generate the right sounds.
+           It is recommended to stop the MIDI in source first before
+           enable MIDI in.
+
+
+
+
+        Installation Notes
+
+        To install the new drivers successfully the following steps must
+        be taken:
+
+        1. Open an OS/2 Window and run the EINSTALL.EXE program on the
+           installation disk by typing "A:\EINSTALL."  The program first
+           runs ESDETECT.EXE to auto-detect the chip, then calls
+           ESUNINST.EXE to remove old drivers.  That program will create
+           a backup of CONFIG.SYS named CONFIG.ESS and remove the audio
+           device lines from CONFIG.SYS.  It also creates a backup of
+           MMPM2.INI named MMPM2.ESS and removes the audio drivers
+           information from MMPM2.INI.  In addition, it removes any
+           other ESS driver information in COMPLIST.INI.  After then,
+           the installation program calls Multimedia Application Install
+           program, MINSTALL.EXE.  After it finishes, another program,
+           ESCONFIG.EXE, will be called to update CONFIG.SYS if
+           necessary.
+
+        2. When Multimedia Application Install program brings up, a
+           check mark beside ES1869 AudioDrive means that item is
+           already selected.  To toggle selection, click the mouse on
+           the item.  Click the Install button to start the
+           installation.  Once the drivers are installed, shutdown OS/2
+           and reset the computer for the new ES1869 drivers to take
+           effect.
+
+        3. If the installation cannot be completed, read the logs
+           EINSTALL.LOG in \MMOS2\INSTALL subdirectory and MINSTALL.LOG
+           in \MMOS2\INSTALL subdirectory or root directory to find out
+           the problem.
+
+        4. If during the installation an error saying the audio device
+           is already in use by another application comes up, make sure
+           all applications that utilize audio have been closed.  If
+           this is caused by system sounds not closing the audio device,
+           you have three options to remedy this situation:
+
+           A. Remove the audio driver by running ESUNINST.EXE.
+
+           B. Go to Sounds object in System Setup folder and uncheck
+              Enable system sounds option.  After the driver is
+              installed properly, check the option to enable system
+              sounds.
+
+           C. Run DINSTSND.CMD in d:\MMOS2\INSTALL subdirectory.  After
+              the driver is installed properly, run INSTSND.CMD d: to
+              enable system sounds.
+
+           Perform one of these operations and reboot to disable system
+           sounds.  Install the drivers again.
+
+        5. If WIN-OS/2 is installed in the system, start WIN-OS/2 and
+           run "A:\SETUP" to install WIN-OS/2 drivers.  Change the
+           WIN-OS/2 settings to the following if necessary:
+              AUDIO_ADAPTER_SHARING = Required
+              INT_DURING_IO = On
+
+        6. Since OS/2 Warp 3.0 MINSTALL.EXE changes the icons of MIDI
+           player and Digital Video player to that of Digital Audio
+           player in the Multimedia folder, you may want to change them
+           back to the originals.  To change the icon of MIDI player,
+           right click MIDI player to bring up the menu.  Select
+           Settings, select General, and click the Find... button.  In
+           the Start Folder window, enter \MMOS2\INSTALL.  Click the
+           Find button and a window of all found icons appears.  Select
+           MIDIPLAY.ICO and click OK.  Close the MIDI player Settings
+           notebook.  For Digital Video player, repeat the above steps
+           but select VIDPLAY.ICO instead.
+
+        8. If the MIDI plays are not smooth in WIN-OS/2, you need to
+           change the timer resolution.  Edit SYSTEM.INI in your Windows
+           directory.  Under [timer.drv] are TIMERMax386Res and
+           TIMERMax286Res.  You need to change the values to less than 8
+           from the default of 10.
+
+
+        These are the files copied to your hard disk for the MMPM/2
+        component:
+
+        \MMOS2
+                ES1869DD.SYS
+                VAUDDRV.SYS
+                ESDAEMON.EXE
+                ES938.EXE
+        \MMOS2\DLL
+                CARDINFO.DLL
+                ESSVSD88.DLL
+        \MMOS2\HELP
+                ES1869IN.HLP
+        \OS2\BOOT
+                CLOCK01.SYS
+                CLOCK02.SYS
+                TIMER0.SYS
+

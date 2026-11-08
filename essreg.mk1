@@ -10,7 +10,13 @@ debug.obj : src\debug.c .AUTODEPEND
 main.obj : src\main.c .AUTODEPEND
  *wcc src\main.c -i="$(%watcom)/h" $(INSTRUCTION_SET) $(OPTIMIZATION) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
  
-essreg.exe : regs.obj debug.obj main.obj .AUTODEPEND
- @%write essreg.lk1 FIL main.obj,debug.obj,regs.obj
+esshw.obj : src\esshw.c .AUTODEPEND
+ *wcc src\esshw.c -i="$(%watcom)/h" $(INSTRUCTION_SET) $(OPTIMIZATION) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+
+piix4.obj : src\piix4.c .AUTODEPEND
+ *wcc src\piix4.c -i="$(%watcom)/h" $(INSTRUCTION_SET) $(OPTIMIZATION) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+
+essreg.exe : regs.obj debug.obj main.obj esshw.obj piix4.obj .AUTODEPEND
+ @%write essreg.lk1 FIL main.obj,debug.obj,regs.obj,esshw.obj,piix4.obj
  @%append essreg.lk1
- *wlink name essreg sys dos op m libf cstart_t op maxe=10 op q op DOSSEG op STACK=512 op el sort @essreg.lk1
+ *wlink name essreg sys dos op m libf cstart_t op maxe=10 op q op DOSSEG op STACK=4096 op el sort @essreg.lk1

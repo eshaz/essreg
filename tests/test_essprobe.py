@@ -1,0 +1,1452 @@
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""essprobe's cases on the chip model, its window under EMM386, and the
+program itself.
+
+src/essp.c, the cases that essprobe.exe runs on the machine, is built for
+the host and called through ctypes, its hardware layer on the bare chip
+model (sbfronts.ChipCard) with the short sounds (/T). Every case runs: the
+rates the DMA measures must be the registers', the pauses must stop it,
+the chip must see no undefined use but in the cases that look for one
+(78h bit 5), the DMA no cycle the wrong way round but in the cases that
+make one, and the run must give back everything it changed: the mixer,
+the PnP registers, the interrupt mask and the VGA DAC. With emm386dma's
+EMM386 in front of the DMA controllers, the h1 cases must tell when the
+8237 gets a program's programming and whose flip-flop it is.
+
+A recorded run's recording is made from what the chip's two DACs played,
+each frame at the time the run's timeline gives, through 14h's and 7Ch's
+levels: tools/essprec.py has to pass it, and to fail it broken the ways a
+card's sounds break (a flat tone, a loop, a dead side, a sound where
+there should be none, another rate).
+
+src/essp0.asm, the window, runs in tsremu's model of EMM386's call of a
+trap handler at ring 0; build/essprobe.exe runs in tests/dosrun.py, with
+its refusals and its restore file.
+
+usage: python3 -m unittest tests.test_essprobe   (needs gcc, nasm and
+unicorn)
+"""
+
+import ctypes
+import os
+import re
+import struct
+import subprocess
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "tools"))
+
+from test_vxdext import HAVE_UNICORN, have_nasm  # noqa: E402
+
+try:
+    import numpy as np
+    import essprec
+except ImportError:             # the analysis needs numpy
+    np = essprec = None
+
+if HAVE_UNICORN:
+    import sbfsm  # noqa: E402
+    from sbfronts import ChipCard, TSRCard  # noqa: E402
+    from tsremu import EmmCpu, EmuError  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(ROOT, "src")
+EXE = os.path.join(ROOT, "build", "essprobe.exe")
+AREA = 0x40000              # the DMA area, 64 KB in one page
+O_RECORD, O_SHORT, O_SILENT, O_TINY, O_LEVEL = 0x01, 0x02, 0x04, 0x08, 0x10
+G_ALL = 0x1FFF
+IDLE_US = 25                # the time an idle() of the cases takes
+GROUPS = ("env", "rst", "a1", "a2", "both", "h1", "h4", "stream", "fix",
+          "lvl", "mpu", "meas")
+OPTIN = ("typef",)          # only when named
+TYPEF = ["typef.m54_b2", "typef.m54_b0", "typef.m54_b1", "typef.m14_b0",
+         "typef.m14_b1", "typef.m14_b2", "typef.m14_hold1",
+         "typef.m14_linux"]
+MEAS = ["meas.torn1", "meas.torn2", "meas.agree1", "meas.agree2",
+        "meas.clk768", "meas.fmrate", "meas.fm4", "meas.fm5", "meas.adc52"]
+EXPECTS = {"tone", "left", "right", "dual", "low", "none", "pause", "lpause",
+           "glide", "loop", "clean", "any", "-"}
+# the cases that look for what the data sheet doesn't define
+WIDE = {"a2.wide", "a2.wide_packed", "stream.a2w"}
+WRONG = {"h4.wrong1", "h4.wrong2"}
+
+u8, u16, ul = ctypes.c_uint8, ctypes.c_uint16, ctypes.c_ulong
+
+
+class IO(ctypes.Structure):
+    _fields_ = [("kind", u8), ("value", u8), ("port", u16)]
+
+
+INB = ctypes.CFUNCTYPE(u8, u16)
+OUTB = ctypes.CFUNCTYPE(None, u16, u8)
+NOW = ctypes.CFUNCTYPE(ul)
+VOID = ctypes.CFUNCTYPE(None)
+MEM = ctypes.CFUNCTYPE(None, ul, ctypes.POINTER(u8), u16)
+HOOK = ctypes.CFUNCTYPE(None, u8)
+MASK = ctypes.CFUNCTYPE(None, ctypes.c_int)
+ASK = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_char_p, ctypes.c_char_p,
+                       ctypes.c_char_p)
+TEXT = ctypes.CFUNCTYPE(None, ctypes.c_char_p)
+ESC = ctypes.CFUNCTYPE(ctypes.c_int)
+KEEP = ctypes.CFUNCTYPE(None, ctypes.POINTER(u8), u16)
+PHYS = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(IO), u16)
+BRIDGE = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(u8))
+
+
+class HAL(ctypes.Structure):
+    _fields_ = [("inb", INB), ("outb", OUTB), ("now", NOW), ("idle", VOID),
+                ("poke", MEM), ("peek", MEM), ("lock", VOID),
+                ("unlock", VOID), ("hook", HOOK), ("irq_mask", MASK),
+                ("ask", ASK), ("line", TEXT), ("say", TEXT), ("esc", ESC),
+                ("keep", KEEP), ("phys", PHYS), ("bridge", BRIDGE)]
+
+
+class CARD(ctypes.Structure):
+    _fields_ = [("base", u16), ("hz", ul), ("area", ul), ("flags", u8),
+                ("env", ctypes.POINTER(ctypes.c_char_p)),
+                ("hung", ctypes.c_char_p)]
+
+
+_LIB = {}
+
+
+def library():
+    """src/essp.c built as a shared library, once"""
+    if "lib" not in _LIB:
+        tmp = _LIB["tmp"] = tempfile.TemporaryDirectory()
+        out = os.path.join(tmp.name, "libessp.so")
+        subprocess.run(["gcc", "-std=gnu99", "-Wall", "-Wextra", "-Werror",
+                        "-DESS_HOST", "-O1", "-fPIC", "-shared", "-I" + SRC,
+                        "-o", out, os.path.join(SRC, "essp.c"),
+                        os.path.join(SRC, "sbtsound.c"),
+                        os.path.join(SRC, "tears.c"), "-lm"],
+                       check=True, capture_output=True)
+        lib = ctypes.CDLL(out)
+        lib.esp_run.argtypes = [ctypes.POINTER(HAL), ctypes.POINTER(CARD),
+                                ctypes.c_uint, ctypes.c_uint,
+                                ctypes.c_char_p]
+        lib.esp_run.restype = ctypes.c_int
+        lib.esp_parse_check.argtypes = [ctypes.c_char_p]
+        lib.esp_parse_check.restype = ctypes.c_int
+        for name in ("esp_case_id", "esp_case_spec", "esp_case_expect"):
+            getattr(lib, name).argtypes = [u16]
+            getattr(lib, name).restype = ctypes.c_char_p
+        lib.esp_cases.restype = u16
+        _LIB["lib"] = lib
+    return _LIB["lib"]
+
+
+def cases():
+    """[(id, spec, expect)] of the table"""
+    lib = library()
+    return [(lib.esp_case_id(i).decode(), lib.esp_case_spec(i).decode(),
+             lib.esp_case_expect(i).decode())
+            for i in range(lib.esp_cases())]
+
+
+def results(lines):
+    """{case: [(result, details)]} of a report's lines"""
+    out = {}
+    for line in lines:
+        parts = line.split(None, 2)
+        if len(parts) >= 2 and parts[1] in ("PASS", "FAIL", "INFO", "SKIP"):
+            out.setdefault(parts[0], []).append(
+                (parts[1], parts[2] if len(parts) > 2 else ""))
+    return out
+
+
+def snapshot(card):
+    """what a run must give back"""
+    chip = card.chip
+    return {"mixer": [chip.mixer[r] for r in range(0x80) if r != 0x40],
+            "pnp": dict(chip.pnp), "cfg": list(chip.cfg_ports),
+            "dac": [list(e) for e in card.vga.dac]}
+
+
+class Run:
+    """the cases on a card; `phys` "direct" gives the window as real mode
+    has it (the ports themselves), "past" past emm386dma, None none; the
+    card's PCI bus (pcicfg) gives the bridge; `hung` as /K gives it, and
+    `keys` answer the questions (Enter, or 0 for Esc)"""
+
+    def __init__(self, card, opts=O_TINY, only=None, phys="direct",
+                 groups=G_ALL, timeline=False, hung=None, keys=13):
+        self.card = card
+        self.lines, self.errors, self.kept, self.hooked = [], [], [], []
+        self.asked = []
+        # (us, frames each DAC had played) where they changed, for a
+        # recording; (us, register, value) of the mixer's writes
+        self.timeline = [] if timeline else None
+        self.still = None
+        self.mix_log, self.index = [], 0
+        lib = library()
+        card.isr = lambda c: lib.esp_irq()
+        self.phys_mode = phys
+        self.hal = HAL(INB(self._inb), OUTB(self._outb), NOW(self._now),
+                       VOID(self._idle), MEM(self._poke), MEM(self._peek),
+                       VOID(lambda: None), VOID(lambda: None),
+                       HOOK(self._hook), MASK(lambda m: None),
+                       ASK(lambda i, q, k: self._ask(i, q, keys)),
+                       TEXT(self._line), TEXT(lambda s: None),
+                       ESC(lambda: 0), KEEP(self._keep),
+                       PHYS(self._phys) if phys else PHYS(),
+                       BRIDGE(self._bridge) if getattr(card, "pci", None)
+                       else BRIDGE())
+        env = (ctypes.c_char_p * 2)(b"machine: the host tests", None)
+        self.info = CARD(0x220, 1000000, AREA, 0, env,
+                         hung.encode() if hung else None)
+        self.failed = lib.esp_run(ctypes.byref(self.hal),
+                                  ctypes.byref(self.info), opts, groups,
+                                  only.encode() if only else None)
+        self.results = results(self.lines)
+
+    def _guard(fn):
+        def call(self, *a):
+            try:
+                return fn(self, *a)
+            except Exception as e:      # ctypes would swallow it
+                import traceback
+                self.errors.append("%s: %r\n%s" % (fn.__name__, e,
+                                                   traceback.format_exc()))
+                return 0
+        return call
+
+    @_guard
+    def _inb(self, port):
+        return self.card.inp(port) & 0xFF
+
+    @_guard
+    def _outb(self, port, v):
+        if port == 0x224:
+            self.index = v
+        elif port == 0x225:
+            self.mix_log.append((self.card.chip.clock.us, self.index, v))
+        self.card.out(port, v)
+
+    @_guard
+    def _now(self):
+        return self.card.chip.clock.us
+
+    @_guard
+    def _idle(self):
+        self.card.wait(IDLE_US)
+        if self.timeline is not None:
+            chip = self.card.chip
+            now, heard = chip.clock.us, (len(chip.played), len(chip.played2))
+            if not self.timeline or heard != self.timeline[-1][1]:
+                if self.still and self.still != self.timeline[-1]:
+                    self.timeline.append(self.still)
+                self.timeline.append((now, heard))
+                self.still = None
+            else:
+                self.still = (now, heard)
+
+    @_guard
+    def _poke(self, addr, src, n):
+        self.card.poke(addr, bytes(src[:n]))
+
+    @_guard
+    def _peek(self, addr, dst, n):
+        for i, b in enumerate(self.card.peek(addr, n)):
+            dst[i] = b
+
+    @_guard
+    def _hook(self, irq):
+        self.hooked.append(irq)
+
+    @_guard
+    def _line(self, s):
+        self.lines.append(s.decode("latin-1"))
+
+    @_guard
+    def _keep(self, data, n):
+        self.kept.append(bytes(data[:n]))
+
+    @_guard
+    def _phys(self, io, n):
+        past = self.phys_mode == "past"
+        for i in range(n):
+            if io[i].kind == 1:
+                io[i].value = (self.card.phys_in(io[i].port) if past else
+                               self.card.inp(io[i].port)) & 0xFF
+            else:
+                (self.card.phys_out if past else self.card.out)(
+                    io[i].port, io[i].value)
+        return 1
+
+    def _ask(self, cid, question, keys):
+        self.asked.append((cid.decode(), question.decode()))
+        return keys
+
+    @_guard
+    def _bridge(self, r):
+        from pcicfg import PIIX4_ID
+        bus = self.card.pci
+        for dev, d in bus.devices.items():
+            if (int.from_bytes(d.cfg[0:2], "little"),
+                    int.from_bytes(d.cfg[2:4], "little")) == PIIX4_ID:
+                r[0], r[1] = bus.cfg(dev, 0x76), bus.cfg(dev, 0x77)
+                return dev
+        return -1
+
+    def text(self, case):
+        return " / ".join(d for _r, d in self.results.get(case, []))
+
+
+class TornRun(Run):
+    """a run with one torn reading of each channel's count armed at every
+    idle (dma8237's tear)"""
+
+    def _idle(self):
+        self.card.chip.dmac.tear(range(8))
+        return Run._idle(self)
+
+
+class LogRun(Run):
+    """a run with every write of the cases' own to a port, in order"""
+
+    def __init__(self, *a, **kw):
+        self.outs = []
+        super().__init__(*a, **kw)
+
+    def _outb(self, port, v):
+        self.outs.append((port, v))
+        return Run._outb(self, port, v)
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class CasesTest(unittest.TestCase):
+    """the table: every spec parses, the ids are unique and grouped, and
+    each says what the recording should hold"""
+
+    def test_specs_parse(self):
+        lib = library()
+        for cid, spec, _e in cases():
+            self.assertEqual(lib.esp_parse_check(spec.encode()), 0, cid)
+        for bad in ("f=9x", "clk=mid", "fifo=more", "side=c", "zz",
+                    "run=nothing", "pause=x", "order=dos", "b7=twice",
+                    "m=64", "m", "amp=0", "amp=40000"):
+            self.assertGreater(lib.esp_parse_check(bad.encode()), 0, bad)
+
+    def test_ids(self):
+        ids = [c[0] for c in cases()]
+        self.assertEqual(len(ids), len(set(ids)))
+        for cid, spec, expect in cases():
+            self.assertIn(cid.split(".")[0], GROUPS + OPTIN, cid)
+            self.assertIn(expect, EXPECTS, cid)
+            self.assertLess(len(cid), 21, cid)
+
+    def test_short_run(self):
+        """the short run has cases of every group"""
+        short = {c[0].split(".")[0] for c in cases()
+                 if re.search(r"(^| )S( |$)", c[1])}
+        self.assertEqual(short, set(GROUPS))
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class ModelTest(unittest.TestCase):
+    """every case on the chip model, in real mode: the window is the
+    ports themselves, and the MPU-401 as the laptop's BIOS leaves it, with
+    a loopback cable"""
+
+    @classmethod
+    def setUpClass(cls):
+        from mpu401 import MPU401
+        cls.card = ChipCard(mpu=MPU401(loop=True))
+        cls.before = snapshot(cls.card)
+        cls.probe = Run(cls.card)
+
+    def test_no_errors(self):
+        self.assertEqual(self.probe.errors, [])
+        self.assertEqual(self.probe.hooked, [5, 0])
+
+    def test_level_timed(self):
+        """/L: the level tone plays its time, the short run's 0.2 s, and
+        the run goes on with no question"""
+        quick = Run(ChipCard(), opts=O_TINY | O_RECORD, only="a1.base")
+        timed = Run(ChipCard(), opts=O_TINY | O_RECORD | O_LEVEL,
+                    only="a1.base")
+        self.assertEqual([cid for cid, _q in quick.asked], ["r.level"])
+        self.assertEqual(timed.asked, [])
+        self.assertEqual(timed.errors, [])
+        self.assertIn("marker ABCD at 0 us", timed.text("rec.start"))
+        longer = timed.card.chip.clock.us - quick.card.chip.clock.us
+        self.assertTrue(190000 <= longer <= 260000, longer)
+
+    def test_every_case(self):
+        """every case runs, and fails only where the laptop's card failed
+        it each time: Audio 2 paused through 78h bit 0 alone, whose DMA
+        runs on through the pause"""
+        ran = set(self.probe.results)
+        for cid, _s, _e in cases():
+            if cid.split(".")[0] in OPTIN:
+                self.assertNotIn(cid, ran)
+            else:
+                self.assertIn(cid, ran)
+        fails = [(c, r) for c, rs in self.probe.results.items() for r in rs
+                 if r[0] == "FAIL"]
+        self.assertEqual(sorted(c for c, _r in fails),
+                         ["a2.pause_f", "fix.a2pf1", "fix.a2pf2"])
+        self.assertEqual(self.probe.failed, 3)
+        skips = sorted(c for c, rs in self.probe.results.items()
+                       if any(r[0] == "SKIP" for r in rs))
+        self.assertEqual(skips, [])
+
+    def test_undefined_uses(self):
+        """the chip sees only 78h bit 5, D0h and D4h in Extended mode and
+        B9h 11b, which the cases look for, and the DMA runs the wrong way
+        round only where h4.wrong asks for it"""
+        self.assertEqual({w for _t, w in self.card.chip.violations},
+                         {"78h bit 5, which the data sheet reserves",
+                          "Compatibility command D0h in Extended mode",
+                          "Compatibility command D4h in Extended mode",
+                          "B9h 11b, at which the DMA runs ahead of the rate "
+                          "(a1.b9_3)"})
+        self.assertEqual({(ch, mode & 0x0C) for ch, mode in
+                          self.card.chip.dmac.bad}, {(1, 0x04), (5, 0x04)})
+
+    def test_given_back(self):
+        """the mixer, the PnP registers, the interrupt mask and the VGA
+        DAC as before, and the restore list empty at the end"""
+        self.assertEqual(snapshot(self.card), self.before)
+        self.assertEqual(self.probe.kept[-1], b"")
+        self.assertGreater(max(len(k) for k in self.probe.kept), 100)
+
+    def test_resets(self):
+        self.assertIn("Compatibility mode; mixer kept; regs A1:6E>DC",
+                      self.probe.text("rst.ext"))
+        self.assertIn("mixer 14:99>88 36:77>88 38:66>00 3A:55>00 3E:33>00",
+                      self.probe.text("rst.mixer"))
+        self.assertIn("mixer kept; regs kept", self.probe.text("rst.fifo"))
+
+    def test_real_mode_dma(self):
+        """without a memory manager the 8237 has the programming at once,
+        a program reads it, and the flip-flop is the 8237's"""
+        for ch in "15":
+            self.assertIn("it gets it at once", self.probe.text("h1.reach" + ch))
+            self.assertIn("it follows the program at once",
+                          self.probe.text("h1.mask" + ch))
+            self.assertIn("the program reads the 8237",
+                          self.probe.text("h1.read" + ch))
+            self.assertIn("a read toggles the 8237's flip-flop, a write "
+                          "the 8237's", self.probe.text("h1.ff" + ch))
+            self.assertIn("(the program's buffer)",
+                          self.probe.text("h1.cross" + ch))
+        self.assertIn("(the game's)", self.probe.text("h1.stale"))
+
+    def test_machine(self):
+        self.assertRegex(self.probe.text("h4.idle"),
+                         r"the retrace every 142[6-9]\d us")
+        for c in ("h4.a1", "h4.a2s", "h4.pace", "h4.both"):
+            self.assertIn("0 DAC entries changed; 0 guard bytes changed",
+                          self.probe.text(c), c)
+        self.assertIn("wrote: FF FF FF FF", self.probe.text("h4.wrong1"))
+
+    def test_streams(self):
+        """the game's refills: its channel's count moves, but for the one
+        carried over to Audio 1's, which stands unless Audio 2 paces it"""
+        for c in ("stream.a1", "stream.a1_8", "stream.a2", "stream.pace",
+                  "stream.pacec", "stream.pacew"):
+            self.assertRegex(self.probe.text(c), r"in 8 ticks, [1-9]\d* laps",
+                             c)
+        self.assertIn("mixed 0 frames in 8 ticks, 0 laps",
+                      self.probe.text("stream.mirror"))
+
+    def test_pauses(self):
+        """the DMA stands in a pause but through 78h bit 0 alone, where it
+        runs on at about twice the rate, the FIFO dropping its bytes"""
+        for c in ("a1.pause_b2", "a1.pause_b8", "a2.pause_d"):
+            self.assertRegex(self.probe.text(c), r", \d moved in the pause", c)
+        self.assertRegex(self.probe.text("a2.pause_f"),
+                         r", \d{4,} moved in the pause")
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class TypefTest(unittest.TestCase):
+    """the typef group on the laptop's bus, which only runs when named:
+    Audio 1 records into its buffer through the channel in write mode, a
+    START line before each start, and the question first"""
+
+    @classmethod
+    def setUpClass(cls):
+        from pcicfg import laptop
+        cls.card = ChipCard(pci=laptop())
+        cls.before = snapshot(cls.card)
+        cls.probe = Run(cls.card, only="typef")
+
+    def test_every_case_passes(self):
+        res = self.probe.results
+        self.assertEqual(self.probe.errors, [])
+        self.assertEqual(sorted(res), sorted(TYPEF))
+        for cid in TYPEF:
+            self.assertEqual([r for r, _d in res[cid]], ["PASS"], cid)
+            text = self.probe.text(cid)
+            self.assertIn("77h=89h, Type F on for DMA 1", text)
+            self.assertRegex(text, r"44\d\d\d Hz measured, 44\d\d\d set")
+            self.assertRegex(text, r"(\d+) of the buffer's \1 bytes written")
+        self.assertEqual(self.card.chip.dmac.bad, [])
+        self.assertEqual(self.card.chip.violations, [])
+        self.assertEqual(self.card.pci.writes(), [])    # it only reads
+        self.assertEqual(snapshot(self.card), self.before)
+
+    def test_start_lines(self):
+        """each case's spec and START reach the report before its result,
+        in the table's order"""
+        order = []
+        for i, line in enumerate(self.probe.lines):
+            w = line.split()
+            if len(w) > 1 and w[1] == "START":
+                self.assertEqual(self.probe.lines[i - 1].split()[:2],
+                                 [w[0], "spec"])
+                self.assertEqual(self.probe.lines[i + 1].split()[:2],
+                                 [w[0], "PASS"])
+                order.append(w[0])
+        self.assertEqual(order, TYPEF)
+
+    def test_asks_once(self):
+        """one question before the first case, which names the setting"""
+        self.assertEqual(len(self.probe.asked), 1)
+        cid, question = self.probe.asked[0]
+        self.assertEqual(cid, "typef")
+        self.assertIn("77h=89h, Type F on for DMA 1", question)
+        self.assertIn("/K", question)
+
+    def test_only_by_name(self):
+        """a whole run, /C:t and /C:typ take none of them, a case's name
+        only its own"""
+        from pcicfg import laptop
+        for only in (None, "t", "typ", "a1.base,ty"):
+            run = Run(ChipCard(pci=laptop()), only=only, opts=O_TINY |
+                      O_SILENT, groups=0x400 if only is None else G_ALL)
+            self.assertFalse([c for c in run.results if c.startswith(
+                "typef")], only)
+            self.assertEqual(run.asked, [], only)
+        run = Run(ChipCard(pci=laptop()), only="typef.m14_b2")
+        self.assertEqual(list(run.results), ["typef.m14_b2"])
+
+    def test_esc(self):
+        """Esc at the question: no case runs"""
+        from pcicfg import laptop
+        run = Run(ChipCard(pci=laptop()), only="typef", keys=0)
+        self.assertEqual(run.results, {})
+        self.assertIn("pass=0 fail=0 info=0 skip=0 (stopped)", run.lines)
+
+    def test_hung(self):
+        """/K after typef.m14_b0 stopped the machine: the cases before it
+        are left out, it fails, and the rest run"""
+        from pcicfg import laptop
+        run = Run(ChipCard(pci=laptop()), only="typef",
+                  hung="typef.m14_b0")
+        self.assertEqual(sorted(run.results), sorted(TYPEF[3:]))
+        self.assertEqual(run.results["typef.m14_b0"],
+                         [("FAIL", "the machine stopped in this case; /K "
+                           "went on after it")])
+        for cid in TYPEF[4:]:
+            self.assertEqual(run.results[cid][0][0], "PASS", cid)
+        self.assertEqual(run.failed, 1)
+
+    def test_type_f_off_or_none(self):
+        """with Type F off the cases record as a comparison, and without
+        a PIIX4 they say so"""
+        from pcicfg import laptop
+        run = Run(ChipCard(pci=laptop(r77=0x09)), only="typef.m14_b2")
+        self.assertIn("77h=09h, Type F off for DMA 1",
+                      run.text("typef.m14_b2"))
+        self.assertIn("as a comparison", run.asked[0][1])
+        run = Run(ChipCard(), only="typef.m14_b2")
+        self.assertIn("no Intel PIIX4 on PCI bus 0",
+                      run.text("typef.m14_b2"))
+        self.assertEqual(run.results["typef.m14_b2"][0][0], "PASS")
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class MeasTest(unittest.TestCase):
+    """the meas group, what the drivers' fixes rest on, against the chip
+    model, which holds what the laptop's chip measured, and against models
+    where one of those doesn't hold; and both.go, the Windows player's dual
+    start"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.card = ChipCard()
+        cls.probe = Run(cls.card, only="meas")
+
+    def test_every_case_passes(self):
+        res = self.probe.results
+        self.assertEqual(self.probe.errors, [])
+        self.assertEqual(sorted(res), sorted(MEAS))
+        for c in MEAS:
+            want = "INFO" if c.startswith("meas.torn") else "PASS"
+            self.assertEqual([r for r, _d in res[c]], [want], c)
+        self.assertEqual(self.card.chip.violations, [])
+        self.assertEqual(self.card.chip.dmac.bad, [])
+
+    def test_measures(self):
+        """the clocks' ratio and the music DAC's within a few ppm, each side
+        of the FM where its bit says, the ADC's tone clean at 52,920 Hz"""
+        self.assertRegex(self.probe.text("meas.clk768"),
+                         r"1\.0887\d\d, [+-]\d ppm from 540/496")
+        self.assertRegex(self.probe.text("meas.fmrate"),
+                         r"records at 49819\.\d\d Hz")
+        self.assertRegex(self.probe.text("meas.fm4"),
+                         r"left -120\.0, right -12\.\d dBFS")
+        self.assertRegex(self.probe.text("meas.fm5"),
+                         r"left -12\.\d, right -120\.0 dBFS")
+        self.assertRegex(self.probe.text("meas.adc52"),
+                         r"records at 5292\d\.\d Hz \(52920 set\)")
+
+    def test_fm_left_as_found(self):
+        """the FM's note off, its operators silent, and native mode left"""
+        fm = self.card.chip.fm
+        self.assertFalse(fm.native)
+        self.assertEqual(fm.nat[0x240], 0)
+        self.assertEqual([fm.nat[r] for r in range(32) if r % 8 == 1],
+                         [0x3F] * 4)
+
+    def test_start_lines(self):
+        """each recording's spec and START come before its result"""
+        lines = self.probe.lines
+        for c in ("meas.fmrate", "meas.fm4", "meas.fm5", "meas.adc52"):
+            at = [w.split()[1] for w in lines if w.split()[:1] == [c]]
+            self.assertEqual(at, ["spec", "START", "PASS"], c)
+
+    def test_torn(self):
+        """a torn reading at every idle: the readings once each find them,
+        256 off, and the fixes' rule never keeps one"""
+        card = ChipCard()
+        run = TornRun(card, only="meas.torn,meas.agree")
+        self.assertEqual(run.errors, [])
+        for ch in "12":
+            m = re.search(r"(\d+) torn \(0 near 128, (\d+) near 256",
+                          run.text("meas.torn" + ch))
+            self.assertGreaterEqual(int(m.group(2)), 8, ch)
+            self.assertEqual(run.results["meas.agree" + ch][0][0], "PASS")
+            self.assertIn(", 0 torn", run.text("meas.agree" + ch))
+        self.assertGreater(len(card.chip.dmac.torn), 30)
+
+    def test_sides_swapped(self):
+        """a chip with register 6 bit 5 on the right: fm4 and fm5 fail,
+        which says TrueSides would be wrong on it"""
+        card = ChipCard()
+        frame = card.chip.fm_frame
+        card.chip.fm_frame = lambda: frame()[::-1]
+        run = Run(card, only="meas.fm")
+        for c in ("meas.fm4", "meas.fm5"):
+            self.assertEqual(run.results[c][0][0], "FAIL", c)
+            self.assertIn("not on its side alone: TrueSides would be wrong "
+                          "here", run.text(c))
+
+    def test_clocks_off(self):
+        """the 768 kHz clock at 768,000 Hz fails clk768 by its 252 ppm, and
+        the music DAC at an OPL3's 49,716 Hz fails fmrate"""
+        import esschip
+        old = esschip.CLOCK_768, esschip.FM_DAC_HZ
+        try:
+            esschip.CLOCK_768, esschip.FM_DAC_HZ = 768000.0, 49716.0
+            run = Run(ChipCard(), only="meas.clk768,meas.fmrate")
+        finally:
+            esschip.CLOCK_768, esschip.FM_DAC_HZ = old
+        self.assertEqual(run.results["meas.clk768"][0][0], "FAIL")
+        self.assertRegex(run.text("meas.clk768"), r"-25\d ppm from 540/496")
+        self.assertEqual(run.results["meas.fmrate"][0][0], "FAIL")
+        self.assertRegex(run.text("meas.fmrate"), r"-20\d\d ppm from 49819")
+
+    def test_no_record_path(self):
+        """record source 7 bringing nothing: adc52 fails on the level"""
+        card = ChipCard()
+        card.chip.mix_frame = lambda: (0, 0)
+        run = Run(card, only="meas.adc52")
+        self.assertEqual(run.results["meas.adc52"][0][0], "FAIL")
+        self.assertIn("the tone -120.0 dBFS", run.text("meas.adc52"))
+
+    def test_no_audio2(self):
+        """without Audio 2's channel the cases that need it skip"""
+        card = ChipCard()
+        card.chip.pnp[(1, 0x75)] = 4
+        run = Run(card, only="meas")
+        skips = sorted(c for c, rs in run.results.items()
+                       if rs[0][0] == "SKIP")
+        self.assertEqual(skips, ["meas.adc52", "meas.agree2", "meas.clk768",
+                                 "meas.fmrate", "meas.torn2"])
+
+    def test_go_start(self):
+        """both.go starts as the Windows player's a1_start: Audio 2's
+        channel unmasked, B8h's start with Audio 1's still masked, then
+        Audio 1's unmask and 78h's one write together"""
+        run = LogRun(ChipCard(), only="both.go1")
+        self.assertEqual(run.results["both.go1"][0][0], "PASS")
+        o = run.outs
+        i = o.index((0x0A, 0x01))           # Audio 1's channel unmasked
+        self.assertEqual(o[i + 1:i + 3], [(0x224, 0x78), (0x225, 0x93)])
+        self.assertEqual(o[i - 3:i], [(0xD4, 0x01), (0x22C, 0xB8),
+                                      (0x22C, 0x05)])
+        self.assertNotIn((0x0A, 0x01), o[:i])
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class MpuTest(unittest.TestCase):
+    """the mpu group as the laptop's BIOS leaves the MPU-401, without a
+    cable, with its IRQ elsewhere, and off"""
+
+    def mpu(self, loop=True, **kw):
+        from mpu401 import MPU401
+        card = ChipCard(mpu=MPU401(loop=loop), **kw)
+        before = snapshot(card)
+        run = Run(card, only="mpu")
+        self.assertEqual(run.errors, [])
+        self.assertEqual(snapshot(card), before)
+        self.assertEqual(run.kept[-1], b"")
+        return run, card
+
+    def test_loop(self):
+        """with the cable every byte comes back, polled and by interrupt,
+        a byte each 320 us, an interrupt each"""
+        run, card = self.mpu()
+        res = run.results
+        self.assertEqual(sorted(res), sorted(
+            ["mpu.cfg", "mpu.reset", "mpu.uart", "mpu.irq", "mpu.irq_64off",
+             "mpu.irq_7off", "mpu.loop", "mpu.loopi"]))
+        self.assertEqual(run.failed, 0)
+        self.assertIn("MPU-401 at 330h", run.text("mpu.cfg"))
+        self.assertIn("25h=80 (MPU-401 in LDN 1, on the audio IRQ)",
+                      run.text("mpu.cfg"))
+        for c in ("mpu.loop", "mpu.loopi"):
+            self.assertRegex(run.text(c), r"all 77 bytes came back in order; "
+                             r"the first 3\d\d us after the start, then "
+                             r"3[12]\d us a byte")
+        self.assertIn("77 interrupts for 77 bytes", run.text("mpu.loopi"))
+        self.assertIn("Config_Base+6 08 at it and 00 after the handler read "
+                      "1 byte (FE)", run.text("mpu.irq"))
+        self.assertEqual(card.chip.mpu.sent[-1][1], 0xF7)
+        self.assertEqual(card.chip.mpu.overruns, 0)
+
+    def test_no_cable(self):
+        """nothing comes back: INFO, not a failure, and the setup, the
+        acknowledges and the interrupt still pass"""
+        run, card = self.mpu(loop=False)
+        self.assertEqual(run.failed, 0)
+        for c in ("mpu.loop", "mpu.loopi"):
+            self.assertEqual(run.results[c][0][0], "INFO")
+            self.assertIn("nothing came back", run.text(c))
+        for c in ("mpu.reset", "mpu.uart", "mpu.irq", "mpu.irq_64off",
+                  "mpu.irq_7off"):
+            self.assertEqual(run.results[c][0][0], "PASS", c)
+        self.assertEqual(len(card.chip.mpu.sent), 2 * 77)
+
+    def test_irq_elsewhere(self):
+        """card 28h on IRQ 7: the interrupt cases take the audio IRQ, as
+        Linux would, and give 28h back"""
+        run, card = self.mpu(mpu_regs={(None, 0x28): 7})
+        self.assertEqual(run.failed, 0)
+        self.assertIn("28h=07 (its IRQ)", run.text("mpu.cfg"))
+        self.assertEqual(card.chip.pnp[(None, 0x28)], 7)
+
+    def test_irq_on_already(self):
+        """mixer 64h bit 6 on from the BIOS: each case turns the request
+        off while it reads the MPU-401 itself, so that the handler takes
+        no acknowledge and the polled loop gets every byte"""
+        from mpu401 import MPU401
+        card = ChipCard(mpu=MPU401(loop=True))
+        card.chip.mixer[0x64] |= 0x40
+        before = snapshot(card)
+        run = Run(card, only="mpu")
+        self.assertEqual(run.failed, 0)
+        self.assertEqual({r for rs in run.results.values() for r, _d in rs},
+                         {"PASS", "INFO"})
+        self.assertIn("mixer 64h=40 (bit 6, its IRQ mask: on)",
+                      run.text("mpu.cfg"))
+        self.assertEqual(snapshot(card), before)
+
+    def test_off(self):
+        """no base in LDN 1: every case skipped, the MPU-401 untouched"""
+        run = Run(ChipCard(), only="mpu")
+        self.assertEqual({r for rs in run.results.values() for r, _d in rs},
+                         {"SKIP"})
+        self.assertIn("the probe doesn't turn it on", run.text("mpu.cfg"))
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class EMM386Test(unittest.TestCase):
+    """the h1 cases with EMM386's DMA translation in front of the
+    controllers, the window past it"""
+
+    def h1(self, **kw):
+        card = ChipCard(emm386=kw)
+        return Run(card, only="h1", phys="past")
+
+    def test_at_unmask(self):
+        run = self.h1(at_unmask=True)
+        self.assertEqual(run.errors, [])
+        for ch in "15":
+            self.assertIn("it gets it at the unmask",
+                          run.text("h1.reach" + ch))
+            self.assertIn("it follows the program at once",
+                          run.text("h1.mask" + ch))
+        self.assertIn("(stale)", run.text("h1.stale"))
+        self.assertIn("(the game's)", run.text("h1.fresh"))
+
+    def test_pace(self):
+        """the pace under EMM386 as measured on the laptop, programming
+        at the unmask and a write's flip-flop its own: the game's channel
+        reaches the 8237 before the command, and its count moves"""
+        card = ChipCard(emm386={"at_unmask": True, "virtual_ff": True})
+        run = Run(card, only="stream.pace,stream.mirror", phys="past")
+        self.assertEqual(run.errors, [])
+        for c in ("stream.pace", "stream.pacec", "stream.pacew"):
+            self.assertRegex(run.text(c), r"in 8 ticks, [1-9]\d* laps", c)
+        self.assertIn("mixed 0 frames", run.text("stream.mirror"))
+
+    def test_flip_flop(self):
+        """a program's reads go to the 8237's flip-flop; its writes to
+        EMM386's own where it keeps one"""
+        own = self.h1(virtual_ff=True)
+        self.assertIn("a read toggles the 8237's flip-flop, a write the "
+                      "memory manager's own", own.text("h1.ff1"))
+        self.assertIn("a read toggles the 8237's flip-flop, a write the "
+                      "8237's", self.h1(virtual_ff=False).text("h1.ff5"))
+
+    def test_without_window(self):
+        card = ChipCard(emm386={})
+        run = Run(card, only="h1.reach,h1.ff,h1.mask", phys=None)
+        self.assertEqual({r for rs in run.results.values() for r, _d in rs},
+                         {"SKIP"})
+
+
+def written(run, tau, reg, first):
+    """mixer register reg at each time, as the run wrote it, `first`
+    before its first write"""
+    out = np.full(len(tau), first, dtype=int)
+    for us, r, v in run.mix_log:
+        if r == reg:
+            out[tau >= us] = v
+    return out
+
+
+def gains(run, tau, reg):
+    """a DAC's gain at each time, as the run wrote its level (14h or 7Ch,
+    four bits a side, 0 mutes) and the master (60h and 62h), on the chip's
+    scales (DS p.55, Table 21), over the tones' level (0Ch) at the master
+    the run found, which it puts back at the end"""
+    db = sbfsm.DB_A1 if reg == 0x14 else sbfsm.DB_A2
+    scale = np.array([db[n] if n else -np.inf for n in range(16)])
+    level = written(run, tau, reg, 0xCC)
+    out = np.zeros((len(tau), 2))
+    for c, mreg in enumerate((0x60, 0x62)):
+        found = run.card.chip.mixer[mreg] & 0x3F
+        m = written(run, tau, mreg, found)
+        g = scale[level >> 4 if c == 0 else level & 0x0F] - db[12] + \
+            0.75 * ((m & 0x3F) - found)
+        g[(m & 0x40) != 0] = -np.inf
+        out[:, c] = 10 ** (g / 20)
+    return out
+
+
+def synthesize(run, rate=48000):
+    """the recording of what the chip's DACs played, stereo at rate: each
+    stretch of playing, where the timeline saw the counts rise less than 1
+    ms apart, at even times, through the DAC's level and the master, with
+    the recorder's level set by the loudest, as the level tone has it"""
+    chip = run.card.chip
+    tl = run.timeline
+    times = np.array([t for t, _ in tl], dtype=float)
+    base = times[0] - 50000
+    n = int((times[-1] - base) * rate / 1e6) + rate // 20
+    out = np.zeros((n, 2))
+    tau = base + np.arange(n) * 1e6 / rate
+    for d, (frames, reg) in enumerate(((chip.played, 0x14),
+                                       (chip.played2, 0x7C))):
+        if not frames:
+            continue
+        arr = np.array([f if len(f) == 2 else (f[0], f[0]) for f in frames],
+                       dtype=float) / 32768
+        counts = np.array([c[d] for _, c in tl], dtype=float)
+        rose = np.nonzero(np.diff(counts) > 0)[0] + 1
+        ev_t, ev_n = times[rose], counts[rose]
+        dac = np.zeros((n, 2))
+        for seg in np.split(np.arange(len(rose)),
+                            np.nonzero(np.diff(ev_t) > 1000)[0] + 1):
+            if len(seg) < 2:
+                continue
+            t0, t1 = ev_t[seg[0]], ev_t[seg[-1]]
+            n0, n1 = counts[rose[seg[0]] - 1], ev_n[seg[-1]]
+            per = (t1 - t0) / (n1 - 1 - n0)
+            a = int(np.ceil((t0 - base) * rate / 1e6))
+            b = min(int((t1 + per - base) * rate / 1e6), n)
+            pos = n0 + ((base + np.arange(a, b) * 1e6 / rate) - t0) / per
+            k = np.clip(pos.astype(int), 0, len(arr) - 1)
+            k2 = np.clip(k + 1, 0, min(int(n1) - 1, len(arr) - 1))
+            frac = (pos - np.floor(pos))[:, None]
+            dac[a:b] += arr[k] * (1 - frac) + arr[k2] * frac
+        out += dac * gains(run, tau, reg)
+    return out * 0.9 / max(float(np.max(np.abs(out))), 1e-9), base
+
+
+# the recorded cases: one of each kind the recording should hold
+RECORDED = ("a1.base,a1.left,a1.right,a1.pause_b2,a1.muted,a2.base,"
+            "a2.slaved,both.base,both.muted2,both.go1,stream.a1,"
+            "stream.mirror,a2.wide_packed,fix.late100a,fix.a2pfd1,"
+            "fix.pb2late,fix.b2late1,fix.pb7a,fix.pb72a,fix.pb7wa,"
+            "meas.adc52")
+# those whose Audio 1 stream plays a byte off, its DMA running when its
+# start's first request came, as on the card (docs/ESS_EXTENDED.md); the
+# names are prefixes, so fix.pb2late runs fix.pb2late2 and 3 too
+BYTE_OFF = {"a1.base", "a1.left", "a1.right", "a1.pause_b2", "both.base",
+            "both.muted2", "stream.a1", "fix.b2late1"}
+
+
+class Recorded:
+    """a recorded run of the cases `ONLY` on the chip model, its master at
+    the power-on 54 (DS p.54), and essprec's verdicts on its recording"""
+
+    RATE = 48000
+    ONLY = None
+
+    @classmethod
+    def setUpClass(cls):
+        card = ChipCard()
+        card.chip.mixer[0x60] = card.chip.mixer[0x62] = 54
+        cls.probe = Run(card, opts=O_TINY | O_RECORD, only=cls.ONLY,
+                        timeline=True)
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.report = os.path.join(cls.tmp.name, "ESSPROBE.TXT")
+        with open(cls.report, "w") as f:
+            f.write("\n".join(cls.probe.lines) + "\n")
+        cls.frames, cls.base = synthesize(cls.probe, cls.RATE)
+        cls.verdicts = cls.analyze(cls.frames)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    @classmethod
+    def analyze(cls, frames):
+        """{case: (result, text)} of essprec on the recording"""
+        import io
+        import wave
+        path = os.path.join(cls.tmp.name, "run.wav")
+        data = np.clip(np.round(frames * 32767), -32768, 32767)
+        with wave.open(path, "wb") as w:
+            w.setnchannels(2)
+            w.setsampwidth(2)
+            w.setframerate(cls.RATE)
+            w.writeframes(data.astype("<i2").tobytes())
+        out = io.StringIO()
+        essprec.analyze(cls.report, path, out)
+        res = {}
+        for line in out.getvalue().splitlines():
+            parts = line.split(None, 2)
+            if len(parts) == 3 and parts[1] in ("PASS", "FAIL", "INFO"):
+                res[parts[0]] = (parts[1], parts[2])
+        res["_text"] = out.getvalue()
+        return res
+
+    def window(self, case):
+        """the samples of a case's sound in the recording"""
+        _c, sounds, _m = essprec.read_report(self.report)
+        on, off = sounds[case][2][0][0], sounds[case][2][-1][1]
+        clock = essprec.fit_clock(_m, essprec.markers(essprec.band_limit(
+            self.frames.mean(axis=1), self.RATE)))
+        a, b = clock[:2]
+        return (int((a * on / 1e6 + b) * self.RATE),
+                int((a * off / 1e6 + b) * self.RATE))
+
+    def broken(self, case, fn):
+        x = self.frames.copy()
+        a, b = self.window(case)
+        fn(x, a, b)
+        return self.analyze(x)[case]
+
+
+@unittest.skipUnless(HAVE_UNICORN and np is not None,
+                     "needs unicorn and numpy")
+class RecordedTest(Recorded, unittest.TestCase):
+    """a recorded run of the cases of each kind, on the chip model"""
+
+    ONLY = RECORDED
+
+    def test_every_sound(self):
+        v = self.verdicts
+        self.assertEqual(self.probe.errors, [])
+        for case in RECORDED.split(","):
+            self.assertIn(case, v, v["_text"])
+        bad = {c for c, r in v.items() if c != "_text" and r[0] == "FAIL"}
+        self.assertEqual(bad, BYTE_OFF, v["_text"])
+        self.assertRegex(v["fix.b2late1"][1], r"clean -?\d dB")
+        self.assertEqual(v["fix.pb2late"][0], "PASS")
+        self.assertEqual(v["a2.wide_packed"][0], "INFO")
+        self.assertEqual(v["both.go1"][0], "PASS")      # in step at once
+        self.assertEqual(v["meas.adc52"][0], "PASS")
+        self.assertIn("plays at 220", v["a2.slaved"][1])
+        self.assertIn("by spec key", v["_text"])
+
+    def test_level_tone(self):
+        """without the lvl cases, the level tone plays at the sounds' 14h,
+        and nothing writes the master"""
+        self.assertIn("at 14h CCh and the master as it was",
+                      self.probe.text("rec.start"))
+        self.assertEqual([w for w in self.probe.mix_log
+                          if w[1] in (0x60, 0x62)], [])
+
+    def test_a_flat_tone(self):
+        def flat(x, a, b):
+            x[a:b] = 0.2
+        self.assertEqual(self.broken("a2.base", flat)[0], "FAIL")
+
+    def test_another_rate(self):
+        """the tone an octave up: the rate it played at is twice"""
+        def octave(x, a, b):
+            t = np.arange(b - a) / self.RATE
+            x[a:b, 0] = x[a:b, 1] = 0.3 * np.sin(2 * np.pi * 882 * t)
+        res, text = self.broken("a2.base", octave)
+        self.assertEqual(res, "FAIL")
+        self.assertRegex(text, r"plays at 88[12]\d\d Hz")
+
+    def test_a_loop(self):
+        """the glide's first 40 ms over and over"""
+        def loop(x, a, b):
+            lap = int(0.040 * self.RATE)
+            for i in range(a + lap, b, lap):
+                x[i:min(i + lap, b)] = x[a:a + min(lap, b - i)]
+        self.assertEqual(self.verdicts["stream.a1_8"][0], "PASS")
+        res, text = self.broken("stream.a1_8", loop)
+        self.assertEqual(res, "FAIL", text)
+
+    def test_the_loop_found(self):
+        self.assertEqual(self.verdicts["stream.mirror"][0], "PASS")
+        self.assertRegex(self.verdicts["stream.mirror"][1],
+                         r"[2-9]\d* steps back|\d\d+ steps back")
+
+    def test_a_dead_side(self):
+        def dead(x, a, b):
+            x[a:b, 0] = 0
+        self.assertEqual(self.broken("fix.late100a", dead)[0], "FAIL")
+
+    def test_a_sound_where_none(self):
+        def tone(x, a, b):
+            t = np.arange(b - a) / self.RATE
+            x[a:b, 0] += 0.3 * np.sin(2 * np.pi * 441 * t)
+        self.assertEqual(self.broken("a1.muted", tone)[0], "FAIL")
+
+    def test_no_pause(self):
+        def fill(x, a, b):
+            t = np.arange(b - a) / self.RATE
+            x[a:b, 0] = x[a:b, 1] = 0.3 * np.sin(2 * np.pi * 441 * t)
+        self.assertEqual(self.broken("fix.pb7a", fill)[0], "FAIL")
+
+    def test_sides_swapped_after_a_pause(self):
+        """a stream two bytes off after the pause: the tone on the right"""
+        _c, sounds, _m = essprec.read_report(self.report)
+        a, b = self.window("fix.a2pfd1")
+        resume = sounds["fix.a2pfd1"][2][1][0]
+        first = sounds["fix.a2pfd1"][2][0][0]
+        cut = a + int((resume - first) * self.RATE / 1e6)
+
+        def swap(x, a, b):
+            x[cut:b] = x[cut:b, ::-1].copy()
+        res, text = self.broken("fix.a2pfd1", swap)
+        self.assertEqual(res, "FAIL", text)
+        self.assertEqual(self.verdicts["fix.a2pfd1"][0], "PASS")
+        self.assertIn("left", self.verdicts["fix.late100a"][1])
+
+
+@unittest.skipUnless(HAVE_UNICORN and np is not None,
+                     "needs unicorn and numpy")
+class LevelRecordedTest(Recorded, unittest.TestCase):
+    """a recorded run of the lvl cases: the level tone at their loudest
+    levels, each case's master put back after it, and essprec's clean
+    check and levels"""
+
+    ONLY = "lvl"
+    # each case's gain over lvl.base's, its 14h and master (DS p.55, p.56)
+    GAINS = {"lvl.base": 0.0, "lvl.pad": 4.5, "lvl.unity": 9.75,
+             "lvl.a1top": 11.25, "lvl.a1gain": 6.0}
+    MASTERS = (54, 56, 63, 63, 56)
+
+    def test_masters(self):
+        """the level tone at 14h FFh and the master at 63, then each case's
+        master, each put back to the power-on 54, as the end does again"""
+        log = self.probe.mix_log
+        self.assertEqual(self.probe.errors, [])
+        self.assertIn("at 14h FFh and the master at 63",
+                      self.probe.text("rec.start"))
+        self.assertEqual(next(v for _t, r, v in log if r == 0x14), 0xFF)
+        want = [63, 54] + [v for m in self.MASTERS for v in (m, 54)] + [54]
+        for reg in (0x60, 0x62):
+            self.assertEqual([v for _t, r, v in log if r == reg], want)
+
+    def test_clean(self):
+        """every case clean on the model, which doesn't clip, each at the
+        gain its spec sets over lvl.base's"""
+        v = self.verdicts
+        text = v["_text"]
+        for case in self.GAINS:
+            self.assertEqual(v[case][0], "PASS", text)
+        self.assertIn("the levels over lvl.base's, measured and set:", text)
+        for case, gain in self.GAINS.items():
+            m = re.search(r"^  %s +-?[\d.]+ dBFS +([+-][\d.]+) dB +"
+                          r"([+-][\d.]+) dB$" % re.escape(case), text, re.M)
+            self.assertIsNotNone(m, case)
+            self.assertAlmostEqual(float(m.group(2)), gain, places=2)
+            self.assertLess(abs(float(m.group(1)) - gain), 0.3, case)
+
+    def test_clipped(self):
+        """the loudest case clipped by half a dB: still a tone as the other
+        cases want it (25 dB), but not clean"""
+        def clip(x, a, b):
+            top = 0.95 * float(np.max(np.abs(x[a:b])))
+            np.clip(x[a:b], -top, top, out=x[a:b])
+        res, text = self.broken("lvl.a1top", clip)
+        self.assertEqual(res, "FAIL", text)
+        clean = float(re.search(r"clean (-?\d+) dB", text).group(1))
+        self.assertTrue(25 < clean < 40, text)
+
+
+class _Machine:
+    """what EmmCpu takes of tsremu's machine"""
+
+    def __init__(self, chip):
+        self.chip = chip
+        self.memory = ctypes.create_string_buffer(0x100000)
+        self.sharers = []
+
+
+class _Ports:
+    """a chip that logs the ports and answers each with its low byte"""
+
+    def __init__(self):
+        self.log = []
+
+    def inb(self, port):
+        self.log.append(("in", port))
+        return port & 0xFF
+
+    def outb(self, port, v):
+        self.log.append(("out", port, v))
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class WindowTest(unittest.TestCase):
+    """src/essp0.asm as EMM386 calls a trap handler: a 16-bit far call at
+    ring 0 with selectors as long as the block"""
+
+    SEG = 0x3000
+
+    def setUp(self):
+        import build_essp0
+        self.data, self.syms = build_essp0.build()
+        self.ports = _Ports()
+        self.m = _Machine(self.ports)
+        base = self.SEG * 16
+        self.m.memory[base:base + len(self.data)] = self.data
+        self.trap = {"ds": self.SEG, "size": len(self.data)}
+        self.cpu = EmmCpu(self.m, self.trap)
+
+    def poke(self, off, data):
+        base = self.SEG * 16 + off
+        self.m.memory[base:base + len(data)] = bytes(data)
+
+    def peek(self, off, n):
+        base = self.SEG * 16 + off
+        return bytes(self.m.memory[base:base + n])
+
+    def call(self):
+        return self.cpu.call(self.syms["handler"], self.syms["table"],
+                             0x22D, None, 0)
+
+    def test_header_current(self):
+        import build_essp0
+        text = build_essp0.header(self.data, self.syms)
+        with open(os.path.join(SRC, "essp0.h"), "rb") as f:
+            self.assertEqual(f.read(), text.replace("\n", "\r\n").encode())
+
+    def test_passes_unarmed(self):
+        al, cf = self.call()
+        self.assertTrue(cf)
+        self.assertEqual(self.ports.log, [])
+
+    def test_runs_the_list(self):
+        req = self.syms["req"]
+        self.poke(self.syms["armed"], [self.syms["ESSP0_ARMED"]])
+        self.poke(req, struct.pack("<BHB", 1, 0xC6, 0) +
+                  struct.pack("<BHB", 2, 0xD8, 0x5A) +
+                  struct.pack("<BHB", 1, 0x08, 0) + b"\0")
+        al, cf = self.call()
+        self.assertFalse(cf)
+        self.assertEqual(al, self.syms["ESSP0_DONE"])
+        self.assertEqual(self.ports.log, [("in", 0xC6), ("out", 0xD8, 0x5A),
+                                          ("in", 0x08)])
+        self.assertEqual(self.peek(self.syms["count"], 1), b"\x03")
+        self.assertEqual(self.peek(req + 3, 1), b"\xC6")
+        self.assertEqual(self.peek(req + 11, 1), b"\x08")
+
+    def test_full_list(self):
+        n = self.syms["ESSP0_NREQ"]
+        self.poke(self.syms["armed"], [self.syms["ESSP0_ARMED"]])
+        self.poke(self.syms["req"], struct.pack("<BHB", 1, 0x81, 0) * n)
+        al, cf = self.call()
+        self.assertFalse(cf)
+        self.assertEqual(len(self.ports.log), n)
+        self.assertEqual(self.peek(self.syms["count"], 1), bytes([n]))
+
+    def test_within_its_selectors(self):
+        """the handler and the table are inside the block EMM386 maps"""
+        self.assertLess(self.syms["handler"], len(self.data))
+        self.assertLessEqual(self.syms["table"] + 4, len(self.data))
+        self.assertEqual(struct.unpack_from("<H", self.data,
+                                            self.syms["table"] + 2)[0],
+                         self.syms["handler"])
+        with self.assertRaises(EmuError):     # beyond the limit: a fault
+            small = EmmCpu(_Machine(_Ports()),
+                           {"ds": self.SEG, "size": self.syms["handler"]})
+            small.call(self.syms["handler"], self.syms["table"], 0x22D,
+                       None, 0)
+
+
+@unittest.skipUnless(HAVE_UNICORN and os.path.exists(EXE),
+                     "needs unicorn and build/essprobe.exe")
+class ExeTest(unittest.TestCase):
+    """build/essprobe.exe in the DOS emulator"""
+
+    def exe(self):
+        with open(EXE, "rb") as f:
+            return f.read()
+
+    def dos(self, card, tail, env="BLASTER=A220 I5 D1 H5 P330 T6",
+            files=None, **kw):
+        from dosrun import Dos
+        d = Dos(self.exe(), card, env=env, **kw)
+        for name, data in (files or {}).items():
+            d.files[name] = bytearray(data)
+        code = d.run(tail)
+        return d, code
+
+    def report(self, d):
+        return bytes(d.files.get("ESSPROBE.TXT", b"")).decode(
+            "latin-1").splitlines()
+
+    def test_silent_run(self):
+        """/A /T: the cases without a sound, the machine's lines, the meas
+        cases' measures by the PIT, every register given back and the
+        restore file gone"""
+        card = ChipCard()
+        before = snapshot(card)
+        d, code = self.dos(card, "/A /T")
+        self.assertEqual(code, 0, d.output)
+        lines = self.report(d)
+        res = results(lines)
+        self.assertIn("h1.reach5", res)
+        self.assertNotIn("a1.base", res)
+        self.assertNotIn("meas.fm4", res)
+        for c in ("meas.agree1", "meas.agree2", "meas.clk768",
+                  "meas.fmrate"):
+            self.assertEqual(res[c][0][0], "PASS", c)
+        self.assertTrue(any("dos: " in t for _r, t in res["env.machine"]))
+        self.assertTrue(any("pci: none" in t for _r, t in
+                            res["env.machine"]))
+        self.assertIn("pass=4 fail=0", "\n".join(lines))
+        self.assertEqual(snapshot(card), before)
+        self.assertNotIn("ESSPROBE.RST", d.files)
+        self.assertNotIn("restart before", d.output)    # no window, no trap
+        self.assertNotIn("window: removed", lines)
+
+    def test_level_no_key(self):
+        """/R /L, as ESSCHECK runs it: the level tone goes on by itself,
+        and no key is read"""
+        d, code = self.dos(ChipCard(), "/R /L /T /C:a1.base")
+        self.assertEqual(code, 0, d.output)
+        self.assertIn("rec.start", results(self.report(d)))
+        self.assertIn("A full-scale tone plays 10 seconds", d.output)
+
+    def test_pci_bus(self):
+        """the laptop's bus 0 through the 32-bit accesses of CF8h and CFCh
+        (dosrun keeps their width): its bridges, as essprobe lists them,
+        and the PIIX4's Type F registers"""
+        from pcicfg import laptop
+        card = ChipCard(pci=laptop())
+        d, code = self.dos(card, "/A /T /C:env.machine")
+        self.assertEqual(code, 0, d.output)
+        res = results(self.report(d))
+        machine = [t for _r, t in res["env.machine"]]
+        self.assertIn("pci bus 0: 0:8086:7192/0600 7:8086:7110/0601 "
+                      "17:104C:AC1C/0607", machine)
+        self.assertIn("PIIX4 0:07.0: 76h=8Dh (Type F, DMA 5), 77h=89h "
+                      "(Type F, DMA 1)", machine)
+        self.assertEqual(card.pci.writes(), [])     # it only reads
+        self.assertEqual(card.pci.addr, 0)          # and puts CF8h back
+
+    def test_mpu_loop(self):
+        """the mpu group in the program, its handler on the shared IRQ:
+        with the cable everything comes back, polled and by interrupt"""
+        from mpu401 import MPU401
+        card = ChipCard(mpu=MPU401(loop=True))
+        before = snapshot(card)
+        d, code = self.dos(card, "/A /T /C:mpu")
+        self.assertEqual(code, 0, d.output)
+        res = results(self.report(d))
+        self.assertEqual(len(res), 8)
+        self.assertEqual({r for rs in res.values() for r, _d in rs},
+                         {"PASS", "INFO"})
+        for c in ("mpu.loop", "mpu.loopi"):
+            self.assertIn("all 77 bytes came back in order", res[c][0][1])
+        self.assertEqual(snapshot(card), before)
+
+    def test_typef_resumed(self):
+        """/C:typef /K after a run that stopped in typef.m14_b1: the old
+        report kept, that case failed, the cases after it run and added,
+        and without a START left /K runs them all"""
+        from pcicfg import laptop
+        old = ("essprobe 1.9: the ES1869 itself, without a front\r\n"
+               "typef.m14_b0         spec  dmd b9=0\r\n"
+               "typef.m14_b0         START 77h=89h, Type F on for DMA 1\r\n"
+               "typef.m14_b0         PASS  65536 bytes in\r\n"
+               "typef.m14_b1         spec  dmd b9=1\r\n"
+               "typef.m14_b1         START 77h=89h, Type F on for DMA 1\r\n")
+        card = ChipCard(pci=laptop())
+        d, code = self.dos(card, "/A /T /C:typef /K", keys="\r",
+                           files={"ESSPROBE.TXT": old.encode()})
+        self.assertEqual(code, 6, d.output)         # X_FAILED
+        self.assertIn("the last run stopped in typef.m14_b1", d.output)
+        lines = self.report(d)
+        self.assertEqual(lines[:6], old.split("\r\n")[:6])
+        res = results(lines[6:])
+        self.assertEqual(sorted(res), sorted(TYPEF[4:]))
+        self.assertEqual(res["typef.m14_b1"][0][0], "FAIL")
+        for cid in TYPEF[5:]:
+            self.assertEqual(res[cid][0][0], "PASS", cid)
+        self.assertEqual(card.pci.writes(), [])
+        d, code = self.dos(ChipCard(pci=laptop()), "/A /T /C:typef /K",
+                           keys="\r")
+        self.assertEqual(code, 0, d.output)
+        self.assertEqual(sorted(results(self.report(d))), sorted(TYPEF))
+
+    def test_under_emm386(self):
+        """/A /T under EMM386: V86 mode, EMMQXXX0's version, the window on
+        Audio_Base+Dh, the 8237 seen past EMM386's translation, which
+        programs it at the unmask, the counts read through the window, and
+        the trap removed at the end"""
+        card = ChipCard(emm386={})
+        before = snapshot(card)
+        d, code = self.dos(card, "/A /T /C:env.machine,h1,meas.agree",
+                           emm386=(4, 95), noems=True)
+        self.assertEqual(code, 0, d.output)
+        res = results(self.report(d))
+        machine = "\n".join(t for _r, t in res["env.machine"])
+        self.assertIn("V86 mode", machine)
+        self.assertIn("EMMXXXX0 4.95", machine)
+        self.assertIn("window: Audio_Base+Dh trapped", machine)
+        for ch in (1, 5):
+            reach = res["h1.reach%d" % ch][0][1]
+            self.assertIn("it gets it at the unmask", reach)
+        for c in ("meas.agree1", "meas.agree2"):
+            self.assertEqual(res[c][0][0], "PASS", c)
+            self.assertIn("400 readings", res[c][0][1])
+        self.assertEqual([b for b, _si in d.emm_calls], [0, 1])
+        self.assertEqual(d.emm_traps, [])
+        self.assertEqual(snapshot(card), before)
+        self.assertEqual(self.report(d)[-1], "window: removed")
+        self.assertNotIn("restart before", d.output)
+
+    def test_window_kept(self):
+        """an EMM386 that removes no trap: the window's block stays DOS's,
+        disarmed, and the report and the screen say to restart before
+        esssb16, which can't trap that port meanwhile"""
+        from dosrun import Dos
+        card = ChipCard(emm386={})
+        d = Dos(self.exe(), card, emm386=(4, 95))
+        d.emm_keep = True
+        code = d.run("/A /T /C:env.machine,h1.reach5")
+        self.assertEqual(code, 0, d.output)
+        self.assertEqual([b for b, _si in d.emm_calls], [0, 1])
+        self.assertEqual(len(d.emm_traps), 1)
+        self.assertEqual(self.report(d)[-1],
+                         "window: EMM386 kept its trap of 22Dh until a "
+                         "restart")
+        self.assertIn("EMM386 kept the window's port trap: restart before "
+                      "you load esssb16.", d.output)
+        trap = d.emm_traps[0]
+        self.assertEqual(d.mem((trap["ds"] - 1) * 16 + 1, 2), b"\x08\x00")
+
+    def test_window_refused(self):
+        """EMM386 refuses the trap: the 8237 as a program sees it"""
+        from dosrun import Dos
+        card = ChipCard(emm386={})
+        d = Dos(self.exe(), card, emm386=(4, 95))
+        d.emm_fail.add(0)
+        code = d.run("/A /T /C:env.machine,h1.reach5")
+        self.assertEqual(code, 0, d.output)
+        res = results(self.report(d))
+        self.assertIn("window: refused",
+                      "\n".join(t for _r, t in res["env.machine"]))
+        self.assertEqual(res["h1.reach5"][0][0], "SKIP")
+
+    def test_window_left(self):
+        """a run that didn't end left its window, DOS's block with its trap
+        still in: the next start removes that trap and frees the block
+        before it puts its own in"""
+        import build_essp0
+        from dosrun import ALLOC, MCB, SIZE, Dos
+        data, syms = build_essp0.build()
+        d = Dos(self.exe(), ChipCard(emm386={}), emm386=(4, 95))
+        old, paras = MCB + SIZE + 2, (len(data) + 15) >> 4
+        # in the free block after the program's: DOS's, and a free rest
+        d.mcb(old - 1, b"M", 0x0008, paras)
+        d.mcb(old + paras, b"M", 0, ALLOC - 1 - (old + paras) - 1)
+        image = bytearray(data)
+        struct.pack_into("<H", image, syms["handle"], 7)
+        image[syms["armed"]] = syms["ESSP0_ARMED"]
+        d.put(old * 16, bytes(image))
+        d.emm_traps.append({"first": 0x22D, "last": 0x22D, "count": 1,
+                            "ds": old, "si": syms["table"],
+                            "size": len(data), "handle": 7})
+        code = d.run("/A /T /C:env.machine")
+        self.assertEqual(code, 0, d.output)
+        self.assertEqual(d.emm_calls[:2], [(1, 7), (0, syms["table"])])
+        self.assertEqual(d.emm_traps, [])
+        self.assertEqual(d.mem(old * 16 + syms["armed"], 1), b"\0")
+
+    def test_no_chip(self):
+        d, code = self.dos(ChipCard(), "/A /T", env="BLASTER=A240 I5 D1")
+        self.assertEqual(code, 2)
+        self.assertIn("no ES1869 answers at 240h", d.output)
+
+    def test_windows(self):
+        d, code = self.dos(ChipCard(), "/A /T",
+                           vxd={"adi": bytes(0xE9), "info": None})
+        self.assertEqual(code, 3)
+        self.assertIn("needs real DOS", d.output)
+
+    def test_esssb16_resident(self):
+        d, code = self.dos(TSRCard("qpi"), "/A /T")
+        self.assertEqual(code, 4)
+        self.assertIn("esssb16 is resident", d.output)
+
+    def test_bad_option(self):
+        d, code = self.dos(ChipCard(), "/Q")
+        self.assertEqual(code, 1)
+        self.assertIn("usage: essprobe", d.output)
+
+    def test_restore_file(self):
+        """a run that didn't finish left ESSPROBE.RST: the next start puts
+        its registers back and removes it"""
+        from dosrun import Dos
+        card = ChipCard()
+        card.chip.mixer[0x14] = 0x00
+        rst = b"ESPRST1\0" + struct.pack("<HH", 0x220, 3) + b"M\x14\xEE"
+        d = Dos(self.exe(), card)
+        d.files["ESSPROBE.RST"] = bytearray(rst)
+        code = d.run("/A /T /C:env.machine")
+        self.assertEqual(code, 0, d.output)
+        self.assertEqual(card.chip.mixer[0x14], 0xEE)
+        self.assertNotIn("ESSPROBE.RST", d.files)
+        self.assertTrue(any("restored the chip" in line
+                            for line in self.report(d)))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,38 @@
+# Builds esswchk.exe, which checks the drivers' fixes on the card in
+# Windows 98 (16-bit Windows, large model).
+#
+# Notes:
+#
+# It uses WIN_CFLAGS and the w_ objects of essctl.mk1, so the Makefile
+# includes it after essctl.mk1.
+#
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+
+# the floating point keeps off FS and GS (-zfp -zgp): the 8087 emulator of
+# Windows has no fixups for their segment prefixes
+w_wchk.obj : src\wchk.c .AUTODEPEND
+ *wcc src\wchk.c $(WIN_CFLAGS) -zfp -zgp -fo=w_wchk.obj
+
+w_tears.obj : src\tears.c .AUTODEPEND
+ *wcc src\tears.c $(WIN_CFLAGS) -fo=w_tears.obj
+
+w_sbtsnd.obj : src\sbtsound.c .AUTODEPEND
+ *wcc src\sbtsound.c $(WIN_CFLAGS) -zfp -zgp -fo=w_sbtsnd.obj
+
+w_esswck.obj : src\win\esswchk.c .AUTODEPEND
+ *wcc src\win\esswchk.c $(WIN_CFLAGS) -zfp -zgp -fo=w_esswck.obj
+
+esswchk.res : src\win\esswchk.rc src\win\essctl.ico
+ *wrc -q -r -bt=windows -i="$(%watcom)/h;$(%watcom)/h/win;src\win" src\win\esswchk.rc -fo=esswchk.res
+
+esswchk.exe : w_esswck.obj w_wchk.obj w_tears.obj w_sbtsnd.obj w_winio.obj w_esfmlive.obj w_esfmbank.obj w_wavelive.obj w_wavestat.obj w_esshw.obj w_esscat.obj w_essio.obj w_simhw.obj w_vxdapi.obj w_vxdcall.obj esswchk.res nestamp.exe .AUTODEPEND
+ @%write esswchk.lk1 FIL w_esswck.obj,w_wchk.obj,w_tears.obj,w_sbtsnd.obj,w_winio.obj,w_esfmlive.obj,w_esfmbank.obj,w_wavelive.obj
+ @%append esswchk.lk1 FIL w_wavestat.obj,w_esshw.obj,w_esscat.obj,w_essio.obj,w_simhw.obj,w_vxdapi.obj,w_vxdcall.obj
+ @%append esswchk.lk1 LIBR toolhelp.lib,mmsystem.lib
+ @%append esswchk.lk1 SEGMENT CLASS 'CODE' MOVEABLE DISCARDABLE
+ @%append esswchk.lk1 OPTION DESCRIPTION 'ES1869 Windows checks'
+ *wlink name esswchk sys windows op m op maxe=10 op q op el op stack=8k op heapsize=4k @esswchk.lk1
+ *wrc -q -bt=windows esswchk.res esswchk.exe
+ nestamp esswchk.exe
