@@ -5,6 +5,8 @@
  * records Audio 1 through the record mixer, the ES1869's internal loop, with
  * the mixer and Audio 2's rate settings set for that and put back at the end.
  * From files, it takes a WAV of what was played and one of what came back.
+ * With a monitor, it takes what Audio 2 plays anyway, the music, as what went
+ * in, and leaves Audio 2 and the output alone.
  * Drawn: each channel's magnitude against 1 kHz, its phase past the delay,
  * what isn't the path (the incoherent part and the crosstalk), and the
  * impulse response.
@@ -21,9 +23,15 @@
 
 struct loopview_cfg {
 	const char *play, *capture, *ctl; /* live: the devices, the mixer */
+	/*
+	 * or what Audio 2 plays anyway, from the monitor (PCM device 3), in
+	 * place of the view's own noise
+	 */
+	const char *monitor;
 	const char *ref, *rec; /* or files: what was played, what came back */
 	unsigned int rate;
 	double level; /* the noise's rms, dBFS */
+	int gain[2]; /* "PCM Capture Volume" (69h) and "Capture Volume" */
 };
 
 struct loopview;

@@ -6,6 +6,7 @@
  *   es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]
  *               [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]
  *               [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL] [-T SECONDS]
+ *               [-m MONITOR] [-L DBFS] [-G PCM,ADC]
  *
  * Notes:
  *
@@ -30,8 +31,12 @@
  * loop, while it shows, and draws the loop's response (loopview.c): each
  * channel's magnitude and phase, what isn't the path, and the impulse
  * response. The keys c, t and o start it again, turn Audio 2's treble
- * correction over, and switch its output rate between 1x and 2x. With -x and
- * -i it takes what was played and what came back from two WAV files instead.
+ * correction over, and switch its output rate between 1x and 2x. -L sets the
+ * noise's rms level (-20 dBFS) and -G the record mixer's two gains, "PCM
+ * Capture Volume" and "Capture Volume" (8 and 4). With -m, the monitor's
+ * device (hw:CARD=ES1869,DEV=3), it takes what Audio 2 plays anyway in place
+ * of its noise, and leaves the output and Audio 2's settings alone. With -x
+ * and -i it takes what was played and what came back from two WAV files.
  *
  * Keys: q quits, 1, 2 and 3 choose the view, space holds the picture, r
  * redraws. -s draws once into a PPM file instead, at -W by -H (800 by 600),
@@ -630,7 +635,7 @@ static void usage(void)
 		"usage: es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]\n"
 		"                   [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]\n"
 		"                   [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL]\n"
-		"                   [-T SECONDS]\n");
+		"                   [-T SECONDS] [-m MONITOR] [-L DBFS] [-G PCM,ADC]\n");
 }
 
 int main(int argc, char **argv)
@@ -643,7 +648,8 @@ int main(int argc, char **argv)
 				   .capture = "hw:CARD=ES1869,DEV=0",
 				   .ctl = "hw:CARD=ES1869",
 				   .rate = 44100,
-				   .level = -20 };
+				   .level = -20,
+				   .gain = { -1, -1 } };
 	struct loopview *lv = NULL;
 	struct spectro *sp = NULL;
 	double secs = 12;
@@ -654,7 +660,8 @@ int main(int argc, char **argv)
 	struct fb fb;
 	int o, held = 0;
 
-	while ((o = getopt(argc, argv, "l:d:s:W:H:v:c:r:i:x:p:a:k:T:")) != -1) {
+	while ((o = getopt(argc, argv, "l:d:s:W:H:v:c:r:i:x:p:a:k:T:m:L:G:")) !=
+	       -1) {
 		switch (o) {
 		case 'l':
 			log = optarg;
@@ -702,6 +709,20 @@ int main(int argc, char **argv)
 			break;
 		case 'T':
 			secs = atof(optarg);
+			break;
+		case 'm':
+			lc.monitor = optarg;
+			view = 3;
+			break;
+		case 'L':
+			lc.level = atof(optarg);
+			break;
+		case 'G':
+			if (sscanf(optarg, "%d,%d", &lc.gain[0], &lc.gain[1]) !=
+			    2) {
+				usage();
+				return 1;
+			}
 			break;
 		default:
 			usage();

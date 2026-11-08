@@ -22,6 +22,13 @@
  * records, so Audio 2's output rate goes to 2x at most, and its rate
  * correction off, so that what plays is what was written.
  *
+ * With a monitor, what went in is what Audio 2's DAC took, read back by the
+ * driver (PCM device 3), and the view plays nothing: the music plays on, and
+ * the output and Audio 2's settings stay as they are. Audio 2 at 3x would
+ * stall while Audio 1 records, so the view doesn't start then. At 2x it takes
+ * every other frame of the monitor, which folds back only the images the
+ * driver's filter leaves between 22.05 and 24.1 kHz, to above 20 kHz.
+ *
  * At 1x the ADC samples in step with the DAC and folds the DAC's images back
  * into the band, so the top of the loop's response depends on where in a
  * frame the two sample, which moved by 0.44 of a frame between two starts on
@@ -76,7 +83,11 @@ struct loopview {
 	struct loop path[PATHS];
 	double *seg[4], *zs[4]; // x L, x R, y L, y R: a segment and its spectra
 	// live
-	snd_pcm_t *play, *cap;
+	snd_pcm_t *play, *cap, *mon;
+	unsigned int factor; // monitor frames a frame
+	uint64_t mon_frames;
+	uint64_t lag_at; // the frame of the last search for the lag
+	long long retry; // when to try the streams again
 	snd_ctl_t *ctl;
 	struct lv_saved saved[LV_SAVED];
 	int nsaved, treble, over;
@@ -308,34 +319,100 @@ static void lv_settings(struct loopview *v)
 			  (int)val[0];
 }
 
-// Audio 2 into Audio 1 through the record mixer, and nothing else
+// Audio 2 into Audio 1 through the record mixer, and nothing else. With the
+// view's own noise the master goes off, Audio 2's rate correction off and its
+// rate to 2x at most; with the music, those stay, and 3x refuses
 static int lv_route(struct loopview *v)
 {
 	static const char *const quiet[] = {
-		"Master Playback Switch", "Mic Capture Volume",
-		"Line Capture Volume",	  "FM Capture Volume",
-		"CD Capture Volume",	  "Aux Capture Volume",
-		"Mono Capture Volume",	  "Mic Boost (+26dB)",
+		"Mic Capture Volume", "Line Capture Volume",
+		"FM Capture Volume",  "CD Capture Volume",
+		"Aux Capture Volume", "Mono Capture Volume",
+		"Mic Boost (+26dB)",
 	};
+	int pcm = v->cfg.gain[0] >= 0 ? v->cfg.gain[0] : 8;
+	int adc = v->cfg.gain[1] >= 0 ? v->cfg.gain[1] : 4;
 	long val[2];
 	unsigned int i, n;
 	int item;
 
+	if (v->mon && !ctl_read(v->ctl, "Audio 2 Output Rate", val, &n) &&
+	    val[0] > 1) {
+		fprintf(stderr,
+			"es1869scope: Audio 2 runs at 3x, which Audio 1's recording "
+			"would stall: set \"Audio 2 Output Rate\" to 2x\n");
+		return -2;
+	}
+	if (!v->mon)
+		lv_set(v, "Master Playback Switch", 0, 0);
 	for (i = 0; i < sizeof(quiet) / sizeof(quiet[0]); i++)
 		lv_set(v, quiet[i], 0, 0);
 	item = ctl_item(v->ctl, "Capture Source", "Mix");
 	if (item < 0 || lv_set(v, "Capture Source", item, item) ||
 	    lv_set(v, "Capture Switch", 1, 1) ||
-	    lv_set(v, "Capture Volume", 4, 4) ||
-	    lv_set(v, "PCM Capture Volume", 8, 8))
+	    lv_set(v, "Capture Volume", adc, adc) ||
+	    lv_set(v, "PCM Capture Volume", pcm, pcm))
 		return -1;
-	item = ctl_item(v->ctl, "Audio 2 Rate Correction", "Off");
-	if (item >= 0)
-		lv_set(v, "Audio 2 Rate Correction", item, item);
-	if (!ctl_read(v->ctl, "Audio 2 Output Rate", val, &n) && val[0] > 1)
-		lv_set(v, "Audio 2 Output Rate", 1, 1);
+	if (!v->mon) {
+		item = ctl_item(v->ctl, "Audio 2 Rate Correction", "Off");
+		if (item >= 0)
+			lv_set(v, "Audio 2 Rate Correction", item, item);
+		if (!ctl_read(v->ctl, "Audio 2 Output Rate", val, &n) &&
+		    val[0] > 1)
+			lv_set(v, "Audio 2 Output Rate", 1, 1);
+	}
 	lv_settings(v);
 	return 0;
+}
+
+// the monitor at the rate it offers, which is Audio 2's ring's while Audio 2
+// is prepared: Audio 1's rate, or twice that
+static int lv_mon_open(struct loopview *v)
+{
+	snd_pcm_hw_params_t *hw;
+	snd_pcm_uframes_t frames;
+	unsigned int rate = v->rate;
+	int err;
+
+	if (v->mon)
+		snd_pcm_close(v->mon);
+	v->mon = NULL;
+	snd_pcm_hw_params_alloca(&hw);
+	err = snd_pcm_open(&v->mon, v->cfg.monitor, SND_PCM_STREAM_CAPTURE,
+			   SND_PCM_NONBLOCK);
+	if (err < 0) {
+		v->mon = NULL;
+		goto bad;
+	}
+	frames = v->rate / 5;
+	if ((err = snd_pcm_hw_params_any(v->mon, hw)) < 0 ||
+	    (err = snd_pcm_hw_params_set_access(
+		     v->mon, hw, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0 ||
+	    (err = snd_pcm_hw_params_set_format(v->mon, hw,
+						SND_PCM_FORMAT_S16_LE)) < 0 ||
+	    (err = snd_pcm_hw_params_set_channels(v->mon, hw, 2)) < 0 ||
+	    (err = snd_pcm_hw_params_set_rate_near(v->mon, hw, &rate, NULL)) <
+		    0 ||
+	    (err = snd_pcm_hw_params_set_buffer_size_near(v->mon, hw,
+							  &frames)) < 0 ||
+	    (err = snd_pcm_hw_params(v->mon, hw)) < 0)
+		goto bad;
+	if (rate % v->rate || rate / v->rate > 2) {
+		snprintf(
+			v->why, sizeof(v->why),
+			"the monitor runs at %u Hz: Audio 2 at 1x or 2x, please",
+			rate);
+		return -1;
+	}
+	v->factor = rate / v->rate;
+	return 0;
+bad:
+	snprintf(v->why, sizeof(v->why), "%s: %s", v->cfg.monitor,
+		 snd_strerror(err));
+	if (v->mon)
+		snd_pcm_close(v->mon);
+	v->mon = NULL;
+	return -1;
 }
 
 // --- the streams ---------------------------------------------------------------
@@ -424,9 +501,12 @@ static int lv_lag(struct loopview *v, const double *x, const double *y,
 	return 0;
 }
 
+// the lag from the latest frames of each, so that it doesn't matter when
+// either began: y's frame is x's plus the lag
 static int lv_live_lag(struct loopview *v)
 {
 	unsigned int n = 1u << LV_LAG_LOG2N, k;
+	uint64_t x0 = v->played - n, y0 = v->captured - n;
 	double *x = malloc(2 * (size_t)n * sizeof(double)), *y;
 	int r;
 
@@ -434,13 +514,16 @@ static int lv_live_lag(struct loopview *v)
 		return -1;
 	y = x + n;
 	for (k = 0; k < n; k++) {
-		x[k] = v->xring[2 * k];
-		y[k] = v->yring[2 * k];
+		x[k] = v->xring[2 * ((x0 + k) % LV_RING)];
+		y[k] = v->yring[2 * ((y0 + k) % LV_RING)];
 	}
+	v->lag_at = v->captured;
 	r = lv_lag(v, x, y, LV_LAG_LOG2N);
 	free(x);
-	if (!r)
-		v->next = v->lag > 0 ? (uint64_t)v->lag : 0;
+	if (!r) {
+		v->lag += (long)(int64_t)(y0 - x0);
+		v->next = y0;
+	}
 	return r;
 }
 
@@ -450,8 +533,12 @@ static void lv_live_segments(struct loopview *v)
 	unsigned int n = v->n, k;
 
 	if (!v->lagged) {
-		if (v->captured < (1u << LV_LAG_LOG2N) || v->why[0] ||
-		    v->played > LV_RING)
+		// both a window's worth in, and half a window since a search
+		// that found nothing, as music may be quiet for a while
+		if (v->captured < (1u << LV_LAG_LOG2N) ||
+		    v->played < (1u << LV_LAG_LOG2N) ||
+		    (v->lag_at &&
+		     v->captured - v->lag_at < (1u << (LV_LAG_LOG2N - 1))))
 			return;
 		if (lv_live_lag(v))
 			return;
@@ -511,6 +598,31 @@ static int lv_feed(struct loopview *v)
 	}
 }
 
+// what the monitor has, every factor-th frame of it
+static int lv_take(struct loopview *v)
+{
+	int16_t buf[2 * LV_CHUNK];
+
+	for (;;) {
+		snd_pcm_sframes_t r = snd_pcm_readi(v->mon, buf, LV_CHUNK), i;
+
+		if (r == -EAGAIN)
+			return 0;
+		if (r < 0)
+			return (int)r;
+		for (i = 0; i < r; i++, v->mon_frames++) {
+			int16_t *at;
+
+			if (v->mon_frames % v->factor)
+				continue;
+			at = &v->xring[2 * (v->played % LV_RING)];
+			at[0] = buf[2 * i];
+			at[1] = buf[2 * i + 1];
+			v->played++;
+		}
+	}
+}
+
 static int lv_pull(struct loopview *v)
 {
 	int16_t buf[2 * LV_CHUNK];
@@ -534,8 +646,22 @@ static int lv_pull(struct loopview *v)
 static int lv_start(struct loopview *v)
 {
 	lv_reset(v);
-	v->played = v->captured = v->next = 0;
+	v->played = v->captured = v->next = v->mon_frames = v->lag_at = 0;
 	v->why[0] = 0;
+	if (v->cfg.monitor) {
+		// a new monitor each time, at whatever rate Audio 2 runs now
+		if (lv_mon_open(v))
+			return -1;
+		snd_pcm_drop(v->cap);
+		if (snd_pcm_prepare(v->mon) < 0 ||
+		    snd_pcm_prepare(v->cap) < 0 || snd_pcm_start(v->mon) < 0 ||
+		    snd_pcm_start(v->cap) < 0) {
+			snprintf(v->why, sizeof(v->why),
+				 "the streams didn't start");
+			return -1;
+		}
+		return 0;
+	}
 	snd_pcm_drop(v->play);
 	snd_pcm_drop(v->cap);
 	if (snd_pcm_prepare(v->play) < 0 || snd_pcm_prepare(v->cap) < 0 ||
@@ -730,16 +856,25 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 	}
 	journal_apply(v->ctl, v->journal);
 	// the devices first, so that a busy one leaves the mixer as it was
-	if (lv_pcm(&v->cap, cfg->capture, SND_PCM_STREAM_CAPTURE, v->rate) ||
-	    lv_pcm(&v->play, cfg->play, SND_PCM_STREAM_PLAYBACK, v->rate))
+	if (lv_pcm(&v->cap, cfg->capture, SND_PCM_STREAM_CAPTURE, v->rate))
 		goto bad;
-	if (lv_route(v)) {
-		fprintf(stderr,
-			"es1869scope: the record mixer can't take the loop\n");
+	if (cfg->monitor ? lv_mon_open(v) :
+			   lv_pcm(&v->play, cfg->play, SND_PCM_STREAM_PLAYBACK,
+				  v->rate)) {
+		if (v->why[0])
+			fprintf(stderr, "es1869scope: %s\n", v->why);
+		goto bad;
+	}
+	i = (unsigned int)-lv_route(v);
+	if (i) {
+		if (i == 1)
+			fprintf(stderr, "es1869scope: the record mixer can't "
+					"take the loop\n");
 		goto bad;
 	}
 	if (lv_start(v)) {
-		fprintf(stderr, "es1869scope: the streams didn't start\n");
+		fprintf(stderr, "es1869scope: %s\n",
+			v->why[0] ? v->why : "the streams didn't start");
 		goto bad;
 	}
 	return v;
@@ -756,6 +891,8 @@ void loopview_close(struct loopview *v)
 		return;
 	if (v->play)
 		snd_pcm_close(v->play);
+	if (v->mon)
+		snd_pcm_close(v->mon);
 	if (v->cap)
 		snd_pcm_close(v->cap);
 	if (v->ctl) {
@@ -1108,8 +1245,12 @@ static void lv_status(struct loopview *v, struct canvas *c)
 	int fh = c->font->h;
 	char set[64] = "";
 
+	const char *what = v->mon  ? "the music into Audio 1" :
+			   v->play ? "Audio 2 into Audio 1" :
+				     "files";
+
 	fill(c, 0, 0, c->w, 2 * fh + 6, C_BACK);
-	if (v->play)
+	if (v->play || v->mon)
 		snprintf(set, sizeof(set), "treble %s, %s, restarts %u",
 			 v->treble < 0 ? "?" :
 			 v->treble     ? "on" :
@@ -1117,15 +1258,16 @@ static void lv_status(struct loopview *v, struct canvas *c)
 			 v->over >= 0 && v->over < 3 ? rates[v->over] : "?",
 			 v->restarts);
 	if (!v->lagged) {
-		textf(c, 6, 2, C_TEXT, "es1869scope  loop  %s",
-		      v->why[0] ? v->why : "finding the lag...");
+		textf(c, 6, 2, C_TEXT, "es1869scope  loop  %s: %s", what,
+		      v->why[0]		   ? v->why :
+		      v->mon && !v->played ? "waiting for Audio 2 to play" :
+					     "finding the lag...");
 		text(c, 6, 4 + fh, C_DIM, set);
 		return;
 	}
 	textf(c, 6, 2, C_TEXT,
 	      "es1869scope  loop  %s, %u Hz, %u-point Welch, %.1f s, lag %ld %+.3f%s",
-	      v->play ? "Audio 2 into Audio 1" : "files", v->rate, v->n,
-	      loopview_seconds(v), v->lag, v->delay[0],
+	      what, v->rate, v->n, loopview_seconds(v), v->lag, v->delay[0],
 	      v->invert[0] ? ", inverted" : "");
 	textf(c, 6, 4 + fh, C_DIM,
 	      "1 kHz %.2f %.2f dB, coherence %.5f %.5f, R after L %+.2f us  %s",
@@ -1160,16 +1302,34 @@ int loopview_step(struct loopview *v, struct canvas *c)
 	unsigned long before = v->path[LL].segments;
 	int lagged = v->lagged;
 
-	if (v->play) {
-		int err = lv_feed(v);
+	// the music stopped or changed its rate: try again each second
+	if (v->retry) {
+		if (lv_now() < v->retry)
+			return 0;
+		v->retry = lv_start(v) ? lv_now() + 1000000000LL : 0;
+		lv_draw(v, c);
+		return 1;
+	}
+	if (v->play || v->mon) {
+		int err = v->mon ? lv_take(v) : lv_feed(v);
+		char what[48];
 
 		if (err >= 0)
 			err = lv_pull(v);
 		if (err < 0) {
-			snprintf(v->why, sizeof(v->why), "%s, started again",
-				 snd_strerror(err));
-			if (++v->restarts > LV_RESTARTS || lv_start(v))
+			snprintf(what, sizeof(what), "%s", snd_strerror(err));
+			v->restarts++;
+			if (v->cfg.monitor) {
+				// a pause or a stop of the music, as often as
+				// it comes
+				if (lv_start(v))
+					v->retry = lv_now() + 1000000000LL;
+			} else if (v->restarts > LV_RESTARTS || lv_start(v)) {
 				return -1;
+			}
+			if (!v->retry)
+				snprintf(v->why, sizeof(v->why),
+					 "%s, started again", what);
 			lv_draw(v, c);
 			return 1;
 		}
@@ -1187,7 +1347,8 @@ void loopview_key(struct loopview *v, int key)
 	long val[2];
 	unsigned int n;
 
-	if (!v->play)
+	// the music's settings are its own
+	if (!v->play && !(v->mon && key == 'c'))
 		return;
 	if (key == 't' &&
 	    !ctl_read(v->ctl, "Audio 2 Treble Correction Playback Switch", val,

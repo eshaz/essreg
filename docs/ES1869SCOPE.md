@@ -76,6 +76,7 @@ against the raw clock.
 es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]
             [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]
             [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL] [-T SECONDS]
+            [-m MONITOR] [-L DBFS] [-G PCM,ADC]
 ```
 
 It takes a virtual terminal's framebuffer, `/dev/fb0` by default, gives the
@@ -137,6 +138,33 @@ changes. The view puts the controls back when it closes, also after a
 signal, and the next start puts back what a run that ended without doing so
 left in that file. The device that is busy, as Audio 2 is while MPD plays,
 stops the view before anything changes.
+
+`-L` sets the noise's rms level, -20 dBFS by default. `-G PCM,ADC` sets the
+record mixer's two gains, "PCM Capture Volume" (69h) and "Capture Volume", 8
+and 4 by default, so that a level calibration can bring the loop's level up
+to the headroom it leaves.
+
+`-m MONITOR` takes what Audio 2 plays anyway as what went in, from the
+monitor, PCM device 3 (`hw:CARD=ES1869,DEV=3`,
+[LINUX_MONITOR.md](LINUX_MONITOR.md)), in place of the view's own noise. The
+view then plays nothing:
+* **What stays:** the music plays on, and the master, Audio 2's rate
+  correction and its treble correction stay as they are, so the keys `t` and
+  `o` do nothing.
+* **What it sets:** only the record mixer, as above.
+* **3x:** Audio 2 at 3x would stall while Audio 1 records, so the view
+  doesn't start then.
+* **2x:** the view takes every other frame of the monitor. That folds back
+  only the images the driver's filter leaves between 22.05 and 24.1 kHz, to
+  above 20 kHz.
+* **Pauses:** a pause or a stop of the music stops the monitor, and the view
+  starts again once it plays.
+* **The lag:** it comes from the latest 65536 frames of each stream, once
+  the music has played that long, and again every 32768 frames while the
+  music is too quiet or too narrow to give one.
+* **Music in mono:** where the two sides of the music are nearly one, the
+  four paths can't be told apart. Each side's path is then taken alone, and
+  the crosstalk isn't shown at those frequencies.
 
 The view finds the lag between the two streams once, from the
 cross-correlation of their first 65536 frames, either way up, since this

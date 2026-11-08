@@ -65,4 +65,6 @@ __pycache__/
 /linux/tools/essreg/essreg
 /linux/test/es1869test
 /linux/tools/es1869ctl/es1869ctl
+/linux/tools/es1869scope/es1869clock
+/linux/tools/es1869scope/es1869scope
 /linux/es1869test-*.tar.gz
