@@ -31,8 +31,8 @@ if [ "${1:-}" = off ]; then
 	exit 0
 fi
 
-if grep -q -E '^(parport_pc|snd_mtpav) ' /proc/modules; then
-	echo "mqengine-up: parport_pc or snd-mtpav has the port" >&2
+if grep -q -E '^(parport_pc|snd_mtpav|snd_flyer) ' /proc/modules; then
+	echo "mqengine-up: parport_pc, snd-mtpav or snd-flyer has the port" >&2
 	exit 2
 fi
 if ! grep -q '^state = active' "$NODE/resources" ||

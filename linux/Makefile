@@ -6,8 +6,10 @@
 #   make                  the modules, in es1869/
 #   make clean
 #   make mqengine         the MIDIEngine's module, in mqengine/
+#   make flyer            the PC-MIDI Flyer's module, in flyer/
 #   make patch            es1869-driver.patch: the driver as sound/isa/es1869,
-#                         and mqengine-driver.patch: sound/drivers/mqengine
+#                         mqengine-driver.patch: sound/drivers/mqengine, and
+#                         flyer-driver.patch: sound/drivers/flyer
 #   make deploy HOST=...  build on that machine over SSH and copy the result
 #   make dist             es1869test-VERSION.tar.gz: the test suite and the
 #                         Linux essreg with the essreg files they build
@@ -26,15 +28,21 @@ mqengine:
 	$(MAKE) -C $(KDIR) ARCH=$(ARCH) M=$(CURDIR)/mqengine \
 		CONFIG_SND_MQENGINE=m modules
 
+flyer:
+	$(MAKE) -C $(KDIR) ARCH=$(ARCH) M=$(CURDIR)/flyer \
+		CONFIG_SND_FLYER=m modules
+
 clean:
 	$(MAKE) -C $(KDIR) ARCH=$(ARCH) M=$(CURDIR)/es1869 clean
 	$(MAKE) -C $(KDIR) ARCH=$(ARCH) M=$(CURDIR)/mqengine clean
+	$(MAKE) -C $(KDIR) ARCH=$(ARCH) M=$(CURDIR)/flyer clean
 
 # against a kernel source tree, as KSRC (by default the build tree)
 KSRC ?= $(KDIR)
 patch:
 	python3 ../tools/es1869patch.py --ksrc $(KSRC) -o es1869-driver.patch
 	python3 ../tools/mqenginepatch.py --ksrc $(KSRC) -o mqengine-driver.patch
+	python3 ../tools/flyerpatch.py --ksrc $(KSRC) -o flyer-driver.patch
 
 # the sources to HOST over SSH, built there against its running kernel
 deploy:
@@ -50,7 +58,7 @@ deploy:
 # in the unpacked tree
 VERSION := $(shell sed -n 's/.*ET_VERSION "\(.*\)".*/\1/p' test/et.h)
 DIST := es1869test-$(VERSION)
-DIST_FILES := LICENSE docs/ES1869TEST.md docs/LINUX.md \
+DIST_FILES := LICENSE docs/ES1869TEST.md docs/LINUX.md docs/FLYER.md \
 	linux/test/Makefile $(wildcard test/*.c test/*.h test/baseline/*) \
 	linux/tools/essreg/Makefile linux/tools/essreg/esshw_linux.c \
 	linux/tools/essreg/shim/i86.h \
@@ -58,6 +66,7 @@ DIST_FILES := LICENSE docs/ES1869TEST.md docs/LINUX.md \
 	linux/tools/a2stall.c \
 	linux/tools/mqengine.c linux/tools/mqengine-up.sh \
 	linux/mqengine/proto.h \
+	linux/tools/flyer.c linux/tools/flyer-up.sh linux/flyer/proto.h \
 	linux/es1869/settings.def linux/es1869/settings_kinds.h \
 	linux/es1869/resample.c linux/es1869/resample.h \
 	linux/es1869/hw_compat.h \
@@ -68,5 +77,5 @@ dist:
 	tar -C .. --transform 's,^,$(DIST)/,' -czf $(DIST).tar.gz \
 		$(patsubst test/%,linux/test/%,$(DIST_FILES))
 
-# mqengine is a directory too
-.PHONY: modules mqengine clean patch deploy dist
+# mqengine and flyer are directories too
+.PHONY: modules mqengine flyer clean patch deploy dist

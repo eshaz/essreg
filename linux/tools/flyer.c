@@ -25,7 +25,9 @@
  *   flyer [-p PORT] alive             whether the unit's pulse is there
  *
  * -g US spaces the bytes of send and loop; 0, the default for loop, leaves it
- * to the unit's room flag, FL_BURST bytes each time.
+ * to the unit's room flag, FL_BURST bytes each time. -i 0 leaves control bit 4,
+ * the port's interrupt enable, clear in the protocol's writes, as the driver
+ * does while no input is open.
  *
  * The protocol is in linux/flyer/proto.h. This is for looking at a unit without
  * the driver, so don't run the two together.
@@ -40,12 +42,14 @@
 #include <time.h>
 #include <unistd.h>
 
-static unsigned int base = 0x378, gap;
+static unsigned int base = 0x378, gap, irq_bit = 1;
+
+static void wait_us(unsigned int n);
 
 #define fl_out(io, reg, v) outb(v, (io)->base + (reg))
 #define fl_in(io, reg) inb((io)->base + (reg))
 #define fl_ms(n) usleep((n) * 1000)
-#define fl_us(n) usleep(n)
+#define fl_us(n) wait_us(n)
 #include "../flyer/proto.h"
 
 #define ROOM_S 0.05 // a full FIFO drains in 3 ms
@@ -457,16 +461,19 @@ int main(int argc, char **argv)
 	const char *c;
 	int o;
 
-	while ((o = getopt(argc, argv, "p:g:")) != -1) {
+	while ((o = getopt(argc, argv, "p:g:i:")) != -1) {
 		if (o == 'p')
 			base = strtoul(optarg, NULL, 0);
 		else if (o == 'g')
 			gap = strtoul(optarg, NULL, 0);
+		else if (o == 'i')
+			irq_bit = atoi(optarg);
 		else
 			return 1;
 	}
 	if (optind >= argc) {
-		fprintf(stderr, "usage: flyer [-p PORT] [-g US] look | raw TOKEN..."
+		fprintf(stderr, "usage: flyer [-p PORT] [-g US] [-i 0|1] look"
+				" | raw TOKEN..."
 				" | id | init | cmd XX | send OUT BYTE..."
 				" | recv SECONDS | watch SECONDS | trace OUT N"
 				" | lat OUT | loop OUT N | fill OUT N"
@@ -479,6 +486,7 @@ int main(int argc, char **argv)
 		return 2;
 	}
 	io.base = base;
+	io.irq = irq_bit ? FL_C_IRQ : 0;
 	argc -= optind;
 	argv += optind;
 	c = argv[0];

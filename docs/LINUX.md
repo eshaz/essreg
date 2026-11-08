@@ -583,24 +583,6 @@ first. `activate` fills in a DMA channel of its own if none is set, and DMA
 with its own choice of resources, which is why the laptop blacklists it, and
 it can't share the port with snd-mtpav.
 
-A MOTU PC-MIDI Flyer, two inputs and two outputs, answers the protocol of
-the MIDI Timepiece AV. `modprobe snd-mtpav port=0x378 irq=7 hwports=2`
-drives it: a byte played into input B comes up exactly on subdevice 4,
-`hw:CARD=port,0,4`, "MTP computer", since the Flyer sends no port number
-ahead of it. Its interrupt line works, and it also ticks every 16.38 ms, the
-overflow of a 16-bit timer at 4 MHz, so the unit is a microcontroller. It
-takes bytes for its outputs at MIDI's own speed, about 3,000 a second, with
-a pulse of the interrupt line after each, so it does send them. On the
-Armada no value of the port number after 0xF5, of all 256, brought a byte
-out at the MPU-401's input or a CH345 USB adapter's. Neither of those inputs
-has been shown to work on its own, and an output fed by a laptop's parallel
-port may drive too little current, so this is still open. A loop of one MIDI
-cable from a device's output to its input would settle each of them.
-
-`linux/tools/flyer.c` talks to such a unit from user space by port I/O, as
-root, with no driver and no interrupt: it reads the lines, sends and
-receives, and times how fast a unit takes bytes.
-
 An Opcode MIDIEngine 2Port/SE, a Music Quest design with its own power, has
 a driver of its own, snd-mqengine, in `linux/mqengine/`. Its two inputs and
 two outputs are one raw MIDI device, subdevice 0 for A and 1 for B, and the
@@ -618,9 +600,9 @@ sudo linux/tools/mqengine-up.sh off
 Where the module is part of the kernel's build, `mqengine-up.sh` alone loads
 it. Its parameters are `port`, 0x378 by default, `irq`, 7 by default or -1
 to poll at each timer tick, `index` and `id`. It takes the port itself, as
-snd-mtpav does, so parport_pc and snd-mtpav have to stay out of it, and it
-refuses to load unless the port answers as the unit does. It handles no
-suspend, so unload it and load it again after one.
+snd-mtpav does, so parport_pc, snd-mtpav and snd-flyer have to stay out of
+it, and it refuses to load unless the port answers as the unit does. It
+handles no suspend, so unload it and load it again after one.
 
 On the Armada, 1024 bytes came back exact through a cable from output B to
 input B, by interrupt and polled, also with 1024 bytes coming in on input A
@@ -637,6 +619,11 @@ cover: a gap of 30 us stayed exact and 20 us lost bytes, so the driver
 leaves 60 us. Its output buffer holds about 64 bytes, and it raises its
 interrupt once for each byte in either direction. `linux/tools/mqengine.c`
 reaches the unit without the driver, by port I/O as root.
+
+A MOTU PC-MIDI Flyer, two inputs and two outputs that take their power from
+the port, has a driver of its own too, snd-flyer in `linux/flyer/`, which
+`linux/tools/flyer-up.sh` loads in the same way. [FLYER.md](FLYER.md)
+describes it, the unit's protocol and its tests.
 
 ## Tools
 

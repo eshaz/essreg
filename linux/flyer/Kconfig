@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+config SND_FLYER
+	tristate "MOTU PC-MIDI Flyer on a parallel port"
+	depends on HAS_IOPORT
+	select SND_RAWMIDI
+	help
+	  To use a MOTU PC-MIDI Flyer connected to the parallel port, say
+	  Y here and keep the port's own driver off it: this takes the
+	  port itself. Its two inputs and two outputs appear as one
+	  rawmidi device.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called snd-flyer.

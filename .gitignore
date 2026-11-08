@@ -61,6 +61,7 @@ __pycache__/
 /linux/**/.tmp_versions/
 /linux/es1869-driver.patch
 /linux/mqengine-driver.patch
+/linux/flyer-driver.patch
 /linux/tools/essreg/essreg
 /linux/test/es1869test
 /linux/tools/es1869ctl/es1869ctl
