@@ -74,6 +74,7 @@ against the raw clock.
 
 ```
 es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]
+            [-v 1|2] [-c CAPTURE] [-r RATE] [-i FILE.wav]
 ```
 
 It takes a virtual terminal's framebuffer, `/dev/fb0` by default, gives the
@@ -96,6 +97,23 @@ A stream's restart, or a stall of its DAC, leaves a gap that the master's
 ticks don't count, so the lateness is taken against a line for each stretch
 between them. The line goes through the earliest interrupt of each second,
 since lateness only ever adds.
+
+## The spectrogram
+
+`es1869scope -v 2`, or the key 2, shows a capture as a spectrogram: `-c`
+names the device, the VX by default, and `-r` its rate, 48000 Hz by default,
+and `-i FILE.wav` takes a recording instead. The capture is opened only
+while the view shows, so it doesn't hold a device es1869clock needs. The
+frequency runs across to half the rate and the time down, in a waterfall
+that wraps, with a line at the newest row and the latest spectrum under it.
+A block of 1024 samples goes through a fixed-point FFT, `fft.c`, whose
+butterflies run two at a time in MMX: one pmaddwd gives the real parts of
+both products and another the imaginary ones. Its C loop does the same
+arithmetic, and `tests/test_es1869scope.py` holds the two to the bit. The
+magnitudes go to dB through a bit scan and a table, with no floating point
+per bin, from 0 dB for a full-scale sine down to the colour map's black at
+-100 dB. A 1024-point FFT takes 8 us on Ethan's PC; the status line shows
+its time on the machine it runs on.
 
 ## On the Armada
 

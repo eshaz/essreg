@@ -4,6 +4,7 @@
  * terminal of its own, and redrawn as the log grows.
  *
  *   es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]
+ *               [-v 1|2] [-c CAPTURE] [-r RATE] [-i FILE.wav]
  *
  * Notes:
  *
@@ -19,9 +20,13 @@
  * The status line has chronyd's view, the driver's fits and the pilots'
  * levels.
  *
- * Keys: q quits, space holds the picture, r redraws. -s draws the log once
- * into a PPM file instead, at -W by -H (800 by 600), for tests and for
- * pictures of a run.
+ * The spectrogram view, -v 2 or the key 2, takes a capture (-c, the VX by
+ * default, at -r Hz, 48000) only while it shows, or a WAV file with -i, and
+ * draws it as a waterfall through the MMX FFT of fft.c (spectro.c).
+ *
+ * Keys: q quits, 1 and 2 choose the view, space holds the picture, r redraws.
+ * -s draws once into a PPM file instead, at -W by -H (800 by 600), for tests
+ * and for pictures of a run.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
@@ -38,6 +43,7 @@
 #include "draw.h"
 #include "fb.h"
 #include "plot.h"
+#include "spectro.h"
 #include "tie.h"
 
 #define PAIRS 4
@@ -47,6 +53,7 @@
 
 static const uint32_t pair_rgb[PAIRS] = { 0x5aa9ff, 0xffa64d, 0xd383ff,
 					  0x7fd17f };
+#define UTC_RGB 0xb0b8c0 // the raw clock against UTC
 // the crystals of the three-cornered hat, apart from the pairs
 static const uint32_t hat_rgb[3] = { 0x41c7b9, 0xff7eb6, 0xe8d04a };
 
@@ -82,6 +89,9 @@ struct data {
 	struct vec irq_t[SOURCES], irq_ticks[SOURCES]; // raw s, ticks so far
 	double ticks_sum[SOURCES];
 	struct vec sys_t, sys_freq; // raw s, kernel ppb
+	// the raw clock against UTC, as chronyd sees it: raw - real + its offset
+	struct vec utc_x;
+	double utc_off; // chronyd's last offset of the system's clock, s
 	long long master_ppb, steered_ppb;
 	int have_k;
 	char chrony[160];
@@ -111,6 +121,29 @@ static double t_of(struct data *d, long long raw)
 		d->have_t0 = 1;
 	}
 	return raw * 1e-9 - d->t0;
+}
+
+// chronyc -c tracking's fields, split at commas, empty ones kept
+static int chrony_fields(const char *line, char *buf, size_t size, char **f,
+			 int max)
+{
+	char *rest = buf;
+	int n = 0;
+
+	snprintf(buf, size, "%s", line);
+	while (n < max && (f[n] = strsep(&rest, ",")))
+		n++;
+	return n;
+}
+
+// its system time offset, field 4, while it has a source (stratum, field 2)
+static void chrony_offset(struct data *d)
+{
+	char buf[160], *f[16];
+
+	if (chrony_fields(d->chrony, buf, sizeof(buf), f, 16) > 4 &&
+	    atoi(f[2]) > 0)
+		d->utc_off = atof(f[4]);
 }
 
 static void parse(struct data *d, char *line)
@@ -151,6 +184,7 @@ static void parse(struct data *d, char *line)
 			   &freq) == 4) {
 			push(&d->sys_t, t_of(d, raw));
 			push(&d->sys_freq, freq);
+			push(&d->utc_x, (raw - real) * 1e-9 + d->utc_off);
 		}
 		break;
 	case 'k':
@@ -163,6 +197,7 @@ static void parse(struct data *d, char *line)
 	case 't':
 		snprintf(d->chrony, sizeof(d->chrony), "%.159s", line + 2);
 		d->chrony[strcspn(d->chrony, "\n")] = 0;
+		chrony_offset(d);
 		break;
 	}
 }
@@ -252,9 +287,9 @@ static void panel_dev(struct canvas *c, struct data *d, int bx, int by, int bw,
 		      int bh)
 {
 	struct axes a = { .logx = 1, .logy = 1, .xunit = "s", .yunit = NULL };
-	double tau[TAUS], dev[PAIRS + 3][TAUS], all[(PAIRS + 3) * TAUS];
-	const char *names[PAIRS + 3];
-	uint32_t rgb[PAIRS + 3];
+	double tau[TAUS], dev[PAIRS + 4][TAUS], all[(PAIRS + 4) * TAUS];
+	const char *names[PAIRS + 4];
+	uint32_t rgb[PAIRS + 4];
 	int i, k, rows = 0, n = 0;
 	size_t m;
 
@@ -291,6 +326,18 @@ static void panel_dev(struct canvas *c, struct data *d, int bx, int by, int bw,
 								NAN;
 		}
 		rows += 3;
+	}
+	// the raw clock, the chip's crystal, against UTC through chronyd, a
+	// sample a second, so from 1 s up
+	if (d->utc_x.n > 3) {
+		for (k = 0, m = 1; k < TAUS; k++, m *= 2)
+			dev[rows][k] = tau[k] < 1 ?
+					       NAN :
+					       tie_adev(d->utc_x.v, d->utc_x.n,
+							1.0,
+							(size_t)lrint(tau[k]));
+		names[rows] = "raw-utc";
+		rgb[rows++] = UTC_RGB;
 	}
 	for (i = 0; i < rows; i++)
 		for (k = 0; k < TAUS; k++)
@@ -531,15 +578,8 @@ static void status(struct canvas *c, struct data *d, int y)
 	// last offset, rms offset, frequency ppm, ...
 	if (d->chrony[0]) {
 		char *f[16], buf[160];
-		int n = 0;
+		int n = chrony_fields(d->chrony, buf, sizeof(buf), f, 16);
 
-		snprintf(buf, sizeof(buf), "%s", d->chrony);
-		char *rest = buf;
-
-		// strsep, since a field can be empty, as the source's name is
-		// while chronyd has none
-		while (n < 16 && (f[n] = strsep(&rest, ",")))
-			n++;
 		if (n >= 8) {
 			snprintf(
 				line, sizeof(line),
@@ -576,21 +616,25 @@ static void on_signal(int sig)
 static void usage(void)
 {
 	fprintf(stderr,
-		"usage: es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]\n");
+		"usage: es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]\n"
+		"                   [-v 1|2] [-c CAPTURE] [-r RATE] [-i FILE.wav]\n");
 }
 
 int main(int argc, char **argv)
 {
 	const char *log = "/var/tmp/es1869clock.log", *dev = "/dev/fb0";
-	const char *shot = NULL;
-	unsigned int w = 800, h = 600;
+	const char *shot = NULL, *cdev = "plughw:CARD=VXPocket,DEV=0";
+	const char *wav = NULL;
+	unsigned int w = 800, h = 600, rate = 48000;
+	struct spectro *sp = NULL;
+	int view = 1;
 	static struct data d;
 	struct canvas c;
 	struct font font;
 	struct fb fb;
 	int o, held = 0;
 
-	while ((o = getopt(argc, argv, "l:d:s:W:H:")) != -1) {
+	while ((o = getopt(argc, argv, "l:d:s:W:H:v:c:r:i:")) != -1) {
 		switch (o) {
 		case 'l':
 			log = optarg;
@@ -607,6 +651,19 @@ int main(int argc, char **argv)
 		case 'H':
 			h = atoi(optarg);
 			break;
+		case 'v':
+			view = atoi(optarg) == 2 ? 2 : 1;
+			break;
+		case 'c':
+			cdev = optarg;
+			break;
+		case 'r':
+			rate = atoi(optarg);
+			break;
+		case 'i':
+			wav = optarg;
+			view = 2;
+			break;
 		default:
 			usage();
 			return 1;
@@ -616,7 +673,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "es1869scope: no console font found\n");
 		return 2;
 	}
-	if (follow(&d, log) < 0) {
+	if (follow(&d, log) < 0 && view == 1) {
 		fprintf(stderr, "es1869scope: %s: %s\n", log, strerror(errno));
 		return 2;
 	}
@@ -624,7 +681,22 @@ int main(int argc, char **argv)
 		if (canvas_init(&c, w, h))
 			return 2;
 		c.font = &font;
-		draw(&c, &d);
+		if (view == 2) {
+			sp = spectro_open(cdev, rate, wav, 10, 1);
+			if (!sp)
+				return 2;
+			spectro_frame(sp, &c);
+			// a device for two seconds, a file whole
+			for (o = 0; o < (wav ? 1 : 200); o++) {
+				if (spectro_step(sp, &c) < 0)
+					break;
+				if (!wav)
+					usleep(10000);
+			}
+			spectro_close(sp);
+		} else {
+			draw(&c, &d);
+		}
 		if (canvas_ppm(&c, shot)) {
 			perror(shot);
 			return 2;
@@ -652,7 +724,33 @@ int main(int argc, char **argv)
 			held = !held;
 		if (k == 'r')
 			fb.redraw = 1;
+		if ((k == '2' || (view == 2 && !sp)) && !sp) {
+			// the capture is taken only while the view shows
+			sp = spectro_open(cdev, rate, wav, 10, 1);
+			view = sp ? 2 : 1;
+			if (sp)
+				spectro_frame(sp, &c);
+			fb.redraw = 1;
+		} else if (k == '1' && sp) {
+			spectro_close(sp);
+			sp = NULL;
+			view = 1;
+			fb.redraw = 1;
+		}
 		fb_poll_switch(&fb);
+		if (view == 2) {
+			if (fb.redraw)
+				spectro_frame(sp, &c);
+			if (!held && spectro_step(sp, &c) < 0) {
+				spectro_close(sp);
+				sp = NULL;
+				view = 1;
+			}
+			if (fb.shown)
+				fb_present(&fb, &c);
+			usleep(10000);
+			continue;
+		}
 		if (!held && follow(&d, log) >= 0 && fb.shown) {
 			draw(&c, &d);
 			fb_present(&fb, &c);
@@ -661,6 +759,7 @@ int main(int argc, char **argv)
 		}
 		usleep(fb.redraw ? 1000 : 500000);
 	}
+	spectro_close(sp);
 	fb_close(&fb);
 	canvas_free(&c);
 	return 0;

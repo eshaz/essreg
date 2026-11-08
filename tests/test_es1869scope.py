@@ -30,6 +30,14 @@ DP = ctypes.POINTER(D)
 SZ = ctypes.c_size_t
 
 
+class Fft(ctypes.Structure):
+    _fields_ = [("log2n", ctypes.c_uint), ("n", ctypes.c_uint),
+                ("tw", ctypes.POINTER(ctypes.c_int16)),
+                ("window", ctypes.POINTER(ctypes.c_int16)),
+                ("rev", ctypes.POINTER(ctypes.c_uint16)),
+                ("mmx", ctypes.c_int)]
+
+
 class PhEst(ctypes.Structure):
     _fields_ = [("f", D), ("rate", D), ("cycles", D),
                 ("at", ctypes.c_ulonglong), ("started", ctypes.c_int)]
@@ -51,7 +59,8 @@ class Lib:
             subprocess.check_call(
                 ["gcc", "-shared", "-fPIC", "-O2", "-Wall", "-Wextra",
                  "-Werror", "-o", so, os.path.join(SCOPE, "tie.c"),
-                 os.path.join(SCOPE, "phase.c"), "-lm"])
+                 os.path.join(SCOPE, "phase.c"), os.path.join(SCOPE, "fft.c"),
+                 "-lm"])
             lib = ctypes.CDLL(so)
             for name in ("tie_adev", "tie_mdev", "tie_tdev", "tie_acov"):
                 getattr(lib, name).restype = D
@@ -71,6 +80,15 @@ class Lib:
             lib.ph_block.argtypes = [ctypes.POINTER(PhEst),
                                      ctypes.POINTER(ctypes.c_short), SZ, SZ,
                                      DP]
+            lib.fft_init.argtypes = [ctypes.POINTER(Fft), ctypes.c_uint,
+                                     ctypes.c_int]
+            lib.fft_run.argtypes = [ctypes.POINTER(Fft),
+                                    ctypes.POINTER(ctypes.c_int16),
+                                    ctypes.POINTER(ctypes.c_int16)]
+            lib.fft_db.argtypes = [ctypes.POINTER(Fft),
+                                   ctypes.POINTER(ctypes.c_int16),
+                                   ctypes.POINTER(ctypes.c_int16)]
+            lib.fft_free.argtypes = [ctypes.POINTER(Fft)]
             cls.lib = lib
         return cls.lib
 
@@ -329,6 +347,71 @@ class PeriodTest(unittest.TestCase):
         self.assertEqual(self.period([0.1, 0.2, 0.3])[0], 0)
 
 
+class FftTest(unittest.TestCase):
+    """the spectrogram's FFT: MMX and C alike to the bit, numpy's within
+    the rounding of its stages, and the dB scale"""
+
+    I16 = ctypes.POINTER(ctypes.c_int16)
+
+    def run_fft(self, x, mmx, log2n=10):
+        lib = Lib.get()
+        f = Fft()
+        self.assertEqual(lib.fft_init(ctypes.byref(f), log2n, mmx), 0)
+        xs = np.ascontiguousarray(x, dtype=np.int16)
+        z = np.zeros(2 << log2n, dtype=np.int16)
+        db = np.zeros(1 << (log2n - 1), dtype=np.int16)
+        lib.fft_run(ctypes.byref(f), xs.ctypes.data_as(self.I16),
+                    z.ctypes.data_as(self.I16))
+        lib.fft_db(ctypes.byref(f), z.ctypes.data_as(self.I16),
+                   db.ctypes.data_as(self.I16))
+        used = f.mmx
+        lib.fft_free(ctypes.byref(f))
+        return z, db, used
+
+    def test_mmx_and_c_agree_to_the_bit(self):
+        x = np.random.default_rng(21).integers(-32768, 32767, 1024)
+        zc, dc, _ = self.run_fft(x, 0)
+        zm, dm, used = self.run_fft(x, 1)
+        if not used:
+            self.skipTest("no MMX on this machine")
+        np.testing.assert_array_equal(zc, zm)
+        np.testing.assert_array_equal(dc, dm)
+
+    def test_numpys_spectrum(self):
+        n = 1024
+        x = np.random.default_rng(22).integers(-20000, 20000, n)
+        z, _, _ = self.run_fft(x, 1)
+        w = np.round(32767 * (0.5 - 0.5 * np.cos(2 * np.pi *
+                                                 np.arange(n) / n)))
+        xw = np.floor(x * w / 32768)
+        want = np.fft.fft(xw) / n
+        got = z[0::2] + 1j * z[1::2]
+        # ten stages of rounding, half an LSB each
+        self.assertLess(np.max(np.abs(got - want)), 8)
+
+    def test_levels_in_db(self):
+        n = 1024
+        k = np.arange(n)
+        for level, cycles in ((0, 64), (-40, 100.5)):
+            amp = 32767 * 10 ** (level / 20)
+            x = np.round(amp * np.sin(2 * np.pi * cycles * k / n))
+            _, db, _ = self.run_fft(x, 1)
+            peak = db.max() / 10
+            # half a bin off costs Hann 1.4 dB, which the peak shows
+            want = level - (1.42 if cycles % 1 else 0)
+            self.assertAlmostEqual(peak, want, delta=0.5)
+            # half-way between two bins, either may come out on top
+            self.assertIn(int(np.argmax(db)),
+                          (int(np.floor(cycles)), int(np.ceil(cycles))))
+
+    def test_a_tone_leaves_a_low_floor(self):
+        n = 1024
+        x = np.round(30000 * np.sin(2 * np.pi * 64 * np.arange(n) / n))
+        _, db, _ = self.run_fft(x, 1)
+        far = np.r_[db[:40], db[90:]] / 10
+        self.assertLess(np.median(far), -80)
+
+
 class ShotTest(unittest.TestCase):
     """es1869scope draws a log into a picture: two pairs that share the
     Focusrite, interrupts with pulses, and the system's lines"""
@@ -342,10 +425,11 @@ class ShotTest(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp()
         cls.prog = os.path.join(cls.tmp, "es1869scope")
         src = [os.path.join(SCOPE, f) for f in
-               ("es1869scope.c", "tie.c", "draw.c", "fb.c", "plot.c")]
+               ("es1869scope.c", "tie.c", "draw.c", "fb.c", "plot.c",
+                "fft.c", "spectro.c")]
         subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall",
                                "-Wextra", "-Werror", "-o", cls.prog] + src +
-                              ["-lz", "-lm"])
+                              ["-lasound", "-lz", "-lm"])
 
     @classmethod
     def tearDownClass(cls):
@@ -402,6 +486,35 @@ class ShotTest(unittest.TestCase):
         seen = self.colours(ppm)
         for rgb in self.PAIR + self.HAT + (self.LATE,):
             self.assertIn(rgb, seen, "%06x missing" % rgb)
+
+    def test_the_spectrogram_puts_a_tone_where_it_belongs(self):
+        import wave
+        rate, f0 = 48000, 6000.0
+        x = 0.5 * np.sin(2 * np.pi * f0 * np.arange(2 * rate) / rate)
+        wav = os.path.join(self.tmp, "tone.wav")
+        w = wave.open(wav, "wb")
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes((x * 32767).astype(np.int16).tobytes())
+        w.close()
+        ppm = os.path.join(self.tmp, "spec.ppm")
+        r = subprocess.run([self.prog, "-i", wav, "-s", ppm],
+                           capture_output=True, text=True)
+        if r.returncode == 2 and "no console font" in r.stderr:
+            self.skipTest("no console font on this machine")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(ppm, "rb") as fh:
+            for _ in range(3):
+                fh.readline()
+            img = np.frombuffer(fh.read(), dtype=np.uint8).reshape(600, 800,
+                                                                   3)
+        # the waterfall's rows hold the tone as their brightest column, a
+        # quarter of the way from 0 to 24 kHz across the area from x = 48
+        rows = img[60:200].astype(int).sum(axis=2)
+        cols = rows.argmax(axis=1)
+        want = 48 + f0 / 24000 * (800 - 48 - 8)
+        self.assertLess(abs(np.median(cols) - want), 4)
 
     def test_an_empty_log_still_draws(self):
         logf = os.path.join(self.tmp, "empty.log")
