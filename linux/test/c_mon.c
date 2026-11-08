@@ -328,7 +328,7 @@ enum et_result c_mon(struct et_ctx *c, const struct et_case *k)
 		ref = dig_ref;
 		rf = (struct et_fmt){ ET_S16, 2, mf.rate };
 	} else if (t->mode || t->over > 1) {
-		ref = sim_rs_over(d, n, f.channels, t->ppb, t->over, &made);
+		ref = sim_rs_over(d, n, f.channels, t->ppb, t->over, 0, &made);
 		rf = (struct et_fmt){ ET_S16, f.channels, mf.rate };
 	}
 
