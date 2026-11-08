@@ -107,6 +107,14 @@ struct es1869_mirror {
 	u32 clk_period; // the master's ticks to a period of this stream
 };
 
+// an interrupt of a stream whose clock counts, as the handler stamped it
+#define ES_IRQLOG 512
+struct es1869_irqlog {
+	u64 raw; // ns on the raw clock at the handler's start, 0 for a later pass
+	u32 ticks; // the master's ticks the period took
+	u8 src; // ES_IRQ_A1 or ES_IRQ_A2
+};
+
 struct es1869 {
 	struct snd_card *card;
 	struct device *dev;
@@ -152,6 +160,9 @@ struct es1869 {
 	u32 clk_a1, clk_a2; // the master's ticks to a period; 0 doesn't count
 	u8 clk_src; // the source that feeds it, 0 to begin a new stretch
 	s32 clk_offset; // what the step takes for it, 32 bits
+	// every interrupt that counts, for es1869_irqs in /proc
+	struct es1869_irqlog irqlog[ES_IRQLOG];
+	u32 irqlog_seq; // entries written; the newest at (seq - 1) % ES_IRQLOG
 
 	// Audio 2
 	enum es1869_owner a2_owner;
@@ -251,6 +262,8 @@ void es1869_clock_setup(struct es1869 *chip);
 u32 es1869_clock_period(u32 num, u32 den, u32 frames);
 void es1869_clock_tick(struct es1869 *chip, u8 source, u64 raw);
 void es1869_clock_proc(struct es1869 *chip, struct snd_info_buffer *buf);
+void es1869_irqlog_proc(struct snd_info_entry *entry,
+			struct snd_info_buffer *buf);
 
 // mirror.c
 extern const struct snd_pcm_ops es1869_a2_ops;

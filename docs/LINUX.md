@@ -375,6 +375,9 @@ The Clock mode follows a chain of two measures, which
   leaves the kernel's frequency at 0, and the stream then locks to the
   laptop's own crystal.
 
+`/proc/asound/card0/es1869_irqs` lists the last 512 interrupts that feed the
+first, for es1869clock ([ES1869SCOPE.md](ES1869SCOPE.md)).
+
 The two are measured apart and nothing feeds back from the filter into them,
 so the correction can't hunt. A new stream starts from what the last one
 measured. The very first stream after a load has no slopes yet, and takes
@@ -669,6 +672,10 @@ ISA bus, the chip's or the game port's, against 0.72 us for one the bridge
 answers itself. Index and data take 3.1 us as two OUTs and 2.3 us as one
 16-bit OUT at the index, which reaches both ports and can't be split by an
 interrupt, and data alone 1.6 us.
+
+`linux/tools/es1869scope` holds es1869clock, which logs the chip's clock
+against the machine's, real time and other cards' crystals, and es1869scope,
+which draws the log on the framebuffer: [ES1869SCOPE.md](ES1869SCOPE.md).
 
 ## The test suite
 

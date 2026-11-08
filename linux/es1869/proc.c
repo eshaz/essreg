@@ -125,4 +125,6 @@ static void es1869_proc_read(struct snd_info_entry *entry,
 void es1869_proc_init(struct es1869 *chip)
 {
 	snd_card_ro_proc_new(chip->card, "es1869", chip, es1869_proc_read);
+	snd_card_ro_proc_new(chip->card, "es1869_irqs", chip,
+			     es1869_irqlog_proc);
 }

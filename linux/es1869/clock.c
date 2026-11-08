@@ -20,6 +20,7 @@
  */
 
 #include <linux/ktime.h>
+#include <linux/slab.h>
 #include <linux/timekeeping.h>
 #include <sound/info.h>
 
@@ -43,9 +44,14 @@ void es1869_clock_tick(struct es1869 *chip, u8 source, u64 raw)
 {
 	u32 ticks = source == ES_IRQ_A2 ? chip->clk_a2 : chip->clk_a1;
 	struct system_time_snapshot snap;
+	struct es1869_irqlog *e;
 
 	if (!ticks)
 		return;
+	e = &chip->irqlog[chip->irqlog_seq++ % ES_IRQLOG];
+	e->raw = raw;
+	e->ticks = ticks;
+	e->src = source;
 	if (source == ES_IRQ_A1 && chip->clk_a2 && chip->a2_running)
 		return;
 	if (chip->clk_src != source) {
@@ -81,4 +87,31 @@ void es1869_clock_proc(struct es1869 *chip, struct snd_info_buffer *buf)
 	if (chip->mirror.rs.on)
 		snd_iprintf(buf, "clock: Audio 2's stream takes %+lld ppb more of itself a frame\n",
 			    ((s64)READ_ONCE(chip->mirror.rs.step) * 1000000000) >> 32);
+}
+
+// es1869_irqs: the last ES_IRQLOG interrupts that count, oldest first, a
+// line each: the sequence number, the source, the master's ticks the period
+// took and the raw clock's ns at the handler's start (0 for a later pass)
+void es1869_irqlog_proc(struct snd_info_entry *entry,
+			struct snd_info_buffer *buf)
+{
+	struct es1869 *chip = entry->private_data;
+	struct es1869_irqlog *copy;
+	unsigned long flags;
+	u32 seq, i;
+
+	copy = kmalloc_array(ES_IRQLOG, sizeof(*copy), GFP_KERNEL);
+	if (!copy)
+		return;
+	spin_lock_irqsave(&chip->reg_lock, flags);
+	memcpy(copy, chip->irqlog, sizeof(chip->irqlog));
+	seq = chip->irqlog_seq;
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	for (i = seq - min_t(u32, seq, ES_IRQLOG); i != seq; i++) {
+		const struct es1869_irqlog *e = &copy[i % ES_IRQLOG];
+
+		snd_iprintf(buf, "%u %u %u %llu\n", i + 1, e->src, e->ticks,
+			    e->raw);
+	}
+	kfree(copy);
 }
