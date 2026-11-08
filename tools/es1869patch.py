@@ -29,7 +29,8 @@ snd-es18xx, which stays built and is blacklisted where snd-es1869 is used:
 * full duplex, every rate of the chip's clocks, the record mixer, the 3-D
   effect, the DAC stages, the hardware volume, power save;
 * the music DAC recorded digitally (PCM device 1), dual playback (device
-  2), OPL3 and a native ESFM GM synth with ESS's bank as firmware;
+  2), what Audio 2's DAC took (device 3), OPL3 and a native ESFM GM synth
+  with ESS's bank as firmware;
 * on PIIX4 machines whose BIOS sets Type F DMA timing on Audio 1's channel,
   that timing turned off, since a recording then hangs the machine;
 * every setting a module parameter writable at runtime, an ALSA control

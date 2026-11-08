@@ -79,6 +79,7 @@ static void es1869_proc_read(struct snd_info_entry *entry,
 			    chip->mirror.stream.rate_num /
 				    chip->mirror.stream.rate_den,
 			    chip->mirror.over, chip->mirror.lap);
+	es1869_mon_proc(chip, buf);
 	// what the driver costs: TSC cycles a call, and the 8237's readings
 	snd_iprintf(buf, "cost: interrupts %u, %llu cycles each; ring ticks %u, %llu cycles each; ring copies %u, %llu cycles each; 8237 readings %u\n",
 		    chip->isr_calls,

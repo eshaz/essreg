@@ -425,6 +425,9 @@ Parameters only:
 * **Dual** (`Dual Playback Switch`, F3): 0 to 1, default 0. PCM device 2,
   both DACs as four channels, opens. Parameter `dual_playback`. It takes
   effect at the next open.
+* **Audio 2 Monitor** (`Audio 2 Monitor Capture Switch`, F4): 0 to 1,
+  default 1. PCM device 3, the frames Audio 2's DAC took, opens. Parameter
+  `monitor_device`. It takes effect at the next open.
 
 Parameters only:
 

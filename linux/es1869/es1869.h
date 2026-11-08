@@ -13,7 +13,9 @@
  * Audio 1 plays, records, or records the music DAC, one at a time
  * (a1_owner). Audio 2 plays (a2_owner). On a 16-bit DMA channel, Audio 2
  * plays from a ring of words that mirror.c fills from the application's
- * buffer, each byte in a word's low byte.
+ * buffer, each byte in a word's low byte. The monitor (monitor.c) reads back
+ * what Audio 2's DMA took and owns no engine; its lock comes after a stream's
+ * lock and before reg_lock.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
@@ -107,6 +109,40 @@ struct es1869_mirror {
 	u32 clk_period; // the master's ticks to a period of this stream
 };
 
+enum es1869_mon_state {
+	ES_MON_OFF,
+	ES_MON_WAIT, // started, for Audio 2's next start at its rate
+	ES_MON_ON, // taking what Audio 2's DMA takes
+	ES_MON_GAP, // the frames broke off: an xrun to come from the timer
+};
+
+// PCM device 3: what Audio 2's DAC took, read back from what its DMA reads
+// (monitor.c), all of it under lock but pcm and tick
+struct es1869_mon {
+	struct snd_pcm *pcm;
+	struct hrtimer tick;
+	spinlock_t lock;
+	u8 state; // enum es1869_mon_state
+	// what Audio 2's DMA runs through, while a2_on
+	bool a2_on;
+	const u8 *src; // the ring, or the application's buffer on an 8-bit channel
+	u8 word; // the bytes a chip byte takes there, 2 in the ring's words
+	u8 fb; // a frame's bytes in the stream's format
+	u8 bits;
+	bool is_signed, stereo;
+	u32 lap; // the frames the DMA runs through
+	u32 num, den; // the ring's rate, num / den Hz, as prepared; 0 for none
+	unsigned long at; // the ring's frame the monitor has taken up to
+	// the monitor's stream, from its start
+	struct snd_pcm_runtime *rt;
+	unsigned long pos; // the frames taken, as hw_ptr counts them
+	unsigned long next; // where its next period ends
+	struct snd_ratnum rat; // its rate as this open allows it
+	struct snd_pcm_hw_constraint_ratnums rats;
+	u64 frames; // taken since the load, for /proc
+	u32 gaps, overruns; // the frames broken off by Audio 2, by the reader
+};
+
 // an interrupt of a stream whose clock counts, as the handler stamped it
 #define ES_IRQLOG 512
 struct es1869_irqlog {
@@ -174,6 +210,7 @@ struct es1869 {
 	struct snd_pcm *pcm; // device 0
 	struct snd_pcm *pcm_fm; // device 1
 	struct es1869_dual dual;
+	struct es1869_mon mon; // device 3
 	struct snd_kcontrol *kctl[ES_S_COUNT];
 	struct snd_kcontrol *hwvol_kctl[2];
 	struct snd_kcontrol *adc_kctl; // the ADC's input as a plain list
@@ -291,6 +328,21 @@ void es1869_power_save_changed(struct es1869 *chip);
 // dual.c
 int es1869_dual_new(struct es1869 *chip);
 void es1869_dual_settled(struct es1869 *chip);
+
+// monitor.c: Audio 2's side calls these under its stream's lock
+int es1869_mon_new(struct es1869 *chip);
+void es1869_mon_take(struct es1869 *chip, u32 frame);
+void es1869_mon_a2_rate(struct es1869 *chip, u32 num, u32 den);
+void es1869_mon_a2_go(struct es1869 *chip, struct snd_pcm_runtime *rt,
+		      bool fresh);
+void es1869_mon_a2_stop(struct es1869 *chip);
+void es1869_mon_proc(struct es1869 *chip, struct snd_info_buffer *buf);
+
+// whether the monitor takes what Audio 2's DMA takes
+static inline bool es1869_mon_taking(struct es1869 *chip)
+{
+	return READ_ONCE(chip->mon.state) == ES_MON_ON;
+}
 
 // esfm.c
 #define ES1869_ESFM_SEQ_ID "es1869-esfm"

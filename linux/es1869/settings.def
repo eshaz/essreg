@@ -300,6 +300,9 @@ ES1869_SET(fmdig_device, FMDIG_DEVICE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
 ES1869_SET(dual_playback, DUAL_PLAYBACK, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
 	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "Dual Playback Switch", "",
 	   "PCM device 2, both DACs as four channels, opens")
+ES1869_SET(monitor_device, MONITOR_DEVICE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
+	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "Audio 2 Monitor Capture Switch", "",
+	   "PCM device 3, the frames Audio 2's DAC took, opens")
 ES1869_SET(irq_sources, IRQ_SOURCES, S_INT, B_NONE, 0, 0, 0, 0, 15, 15,
 	   T_NONE, F_PARAM | F_HOOK, 0, "", "",
 	   "the sources the line carries: 1 Audio 1, 2 Audio 2, 4 the buttons, 8 the MPU-401")

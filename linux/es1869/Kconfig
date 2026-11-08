@@ -874,6 +874,16 @@ config SND_ES1869_DEFAULT_DUAL_PLAYBACK
 	  dual_playback sets it at load and at runtime, through
 	  /sys/module/snd_es1869/parameters/dual_playback.
 
+config SND_ES1869_DEFAULT_MONITOR_DEVICE
+	int "monitor_device"
+	range 0 1
+	default 1
+	help
+	  PCM device 3, the frames Audio 2's DAC took, opens. The ALSA
+	  control "Audio 2 Monitor Capture Switch". The module parameter
+	  monitor_device sets it at load and at runtime, through
+	  /sys/module/snd_es1869/parameters/monitor_device.
+
 config SND_ES1869_DEFAULT_IRQ_SOURCES
 	int "irq_sources"
 	range 0 15

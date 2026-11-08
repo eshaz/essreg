@@ -803,6 +803,7 @@ static int es1869_suspend(struct snd_card *card)
 	hrtimer_cancel(&chip->mirror.tick);
 	hrtimer_cancel(&chip->mirror.period);
 	hrtimer_cancel(&chip->dual.tick);
+	hrtimer_cancel(&chip->mon.tick);
 	cancel_work_sync(&chip->mirror.copy_work);
 	cancel_work_sync(&chip->dual.copy_work);
 	spin_lock_irqsave(&chip->reg_lock, flags);

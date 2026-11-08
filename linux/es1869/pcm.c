@@ -9,6 +9,8 @@
  * subdevice 1 Audio 1, and capture subdevice 0 Audio 1. Device 1 records
  * the music DAC on Audio 1 (mixer 7Fh bit 4): 16-bit stereo at 49716 Hz.
  * Audio 1 does one of the three at a time, and the others get -EBUSY.
+ * Device 2 is both DACs at once (dual.c), and device 3 what Audio 2's DAC
+ * took (monitor.c).
  *
  * Every rate of the chip's clocks is offered, from 3101 Hz (396.9 kHz /
  * 128) up to the limit the settings give (rate.max in es1869test measures
@@ -819,6 +821,9 @@ int es1869_pcm_new(struct es1869 *chip)
 		return err;
 
 	err = es1869_dual_new(chip);
+	if (err < 0)
+		return err;
+	err = es1869_mon_new(chip);
 	if (err < 0)
 		return err;
 

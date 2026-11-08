@@ -122,6 +122,11 @@ programs that set the master still work.
   and from -15 to +15 at 22050 Hz, not the same at every rate or every start
   (es1869test's dual.align). It opens with `dual_playback=1`, and needs both
   engines free and Audio 2 on a 16-bit DMA channel.
+* PCM device 3, capture: the monitor, the frames Audio 2's DAC took, read
+  back from what its DMA reads, as 16-bit stereo at the DAC's rate. It is
+  the reference for a recording of the analog loop on Audio 1, takes no
+  engine, and follows Audio 2's stream, with an xrun at each break in it
+  ([LINUX_MONITOR.md](LINUX_MONITOR.md)).
 * hwdep 0 and the sequencer's "OPL3 FM" synth: the FM in its OPL3 mode.
 * hwdep 1, "ES1869 ESFM": the FM in its native ESFM mode, for programs that
   write its registers themselves (ioctls in `uapi/es1869.h`).
@@ -938,6 +943,9 @@ saved state wins over a parameter. The defaults are the Kconfig options
   next open.
 * `dual_playback` ("Dual Playback Switch"): 0 to 1, default 0. PCM device 2,
   both DACs as four channels, opens. It takes effect at the next open.
+* `monitor_device` ("Audio 2 Monitor Capture Switch"): 0 to 1, default 1.
+  PCM device 3, the frames Audio 2's DAC took, opens. It takes effect at the
+  next open.
 * `irq_sources`: 0 to 15, default 15. The sources the line carries: 1 Audio
   1, 2 Audio 2, 4 the buttons, 8 the MPU-401.
 * `irq_mode`: 0 to 1, default 0. 0 the sources polled where they live, as
