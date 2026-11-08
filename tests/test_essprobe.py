@@ -60,14 +60,16 @@ SRC = os.path.join(ROOT, "src")
 EXE = os.path.join(ROOT, "build", "essprobe.exe")
 AREA = 0x40000              # the DMA area, 64 KB in one page
 O_RECORD, O_SHORT, O_SILENT, O_TINY = 0x01, 0x02, 0x04, 0x08
-G_ALL = 0xFFF
+G_ALL = 0x1FFF
 IDLE_US = 25                # the time an idle() of the cases takes
 GROUPS = ("env", "rst", "a1", "a2", "both", "h1", "h4", "stream", "fix",
-          "lvl", "mpu")
+          "lvl", "mpu", "meas")
 OPTIN = ("typef",)          # only when named
 TYPEF = ["typef.m54_b2", "typef.m54_b0", "typef.m54_b1", "typef.m14_b0",
          "typef.m14_b1", "typef.m14_b2", "typef.m14_hold1",
          "typef.m14_linux"]
+MEAS = ["meas.torn1", "meas.torn2", "meas.agree1", "meas.agree2",
+        "meas.clk768", "meas.fmrate", "meas.fm4", "meas.fm5", "meas.adc52"]
 EXPECTS = {"tone", "left", "right", "dual", "low", "none", "pause", "lpause",
            "glide", "loop", "clean", "any", "-"}
 # the cases that look for what the data sheet doesn't define
@@ -122,7 +124,8 @@ def library():
         subprocess.run(["gcc", "-std=gnu99", "-Wall", "-Wextra", "-Werror",
                         "-DESS_HOST", "-O1", "-fPIC", "-shared", "-I" + SRC,
                         "-o", out, os.path.join(SRC, "essp.c"),
-                        os.path.join(SRC, "sbtsound.c"), "-lm"],
+                        os.path.join(SRC, "sbtsound.c"),
+                        os.path.join(SRC, "tears.c"), "-lm"],
                        check=True, capture_output=True)
         lib = ctypes.CDLL(out)
         lib.esp_run.argtypes = [ctypes.POINTER(HAL), ctypes.POINTER(CARD),
@@ -294,6 +297,27 @@ class Run:
 
     def text(self, case):
         return " / ".join(d for _r, d in self.results.get(case, []))
+
+
+class TornRun(Run):
+    """a run with one torn reading of each channel's count armed at every
+    idle (dma8237's tear)"""
+
+    def _idle(self):
+        self.card.chip.dmac.tear(range(8))
+        return Run._idle(self)
+
+
+class LogRun(Run):
+    """a run with every write of the cases' own to a port, in order"""
+
+    def __init__(self, *a, **kw):
+        self.outs = []
+        super().__init__(*a, **kw)
+
+    def _outb(self, port, v):
+        self.outs.append((port, v))
+        return Run._outb(self, port, v)
 
 
 @unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
@@ -529,6 +553,130 @@ class TypefTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
+class MeasTest(unittest.TestCase):
+    """the meas group, what the drivers' fixes rest on, against the chip
+    model, which holds what the laptop's chip measured, and against models
+    where one of those doesn't hold; and both.go, the Windows player's dual
+    start"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.card = ChipCard()
+        cls.probe = Run(cls.card, only="meas")
+
+    def test_every_case_passes(self):
+        res = self.probe.results
+        self.assertEqual(self.probe.errors, [])
+        self.assertEqual(sorted(res), sorted(MEAS))
+        for c in MEAS:
+            want = "INFO" if c.startswith("meas.torn") else "PASS"
+            self.assertEqual([r for r, _d in res[c]], [want], c)
+        self.assertEqual(self.card.chip.violations, [])
+        self.assertEqual(self.card.chip.dmac.bad, [])
+
+    def test_measures(self):
+        """the clocks' ratio and the music DAC's within a few ppm, each side
+        of the FM where its bit says, the ADC's tone clean at 52,920 Hz"""
+        self.assertRegex(self.probe.text("meas.clk768"),
+                         r"1\.0887\d\d, [+-]\d ppm from 540/496")
+        self.assertRegex(self.probe.text("meas.fmrate"),
+                         r"records at 49819\.\d\d Hz")
+        self.assertRegex(self.probe.text("meas.fm4"),
+                         r"left -120\.0, right -12\.\d dBFS")
+        self.assertRegex(self.probe.text("meas.fm5"),
+                         r"left -12\.\d, right -120\.0 dBFS")
+        self.assertRegex(self.probe.text("meas.adc52"),
+                         r"records at 5292\d\.\d Hz \(52920 set\)")
+
+    def test_fm_left_as_found(self):
+        """the FM's note off, its operators silent, and native mode left"""
+        fm = self.card.chip.fm
+        self.assertFalse(fm.native)
+        self.assertEqual(fm.nat[0x240], 0)
+        self.assertEqual([fm.nat[r] for r in range(32) if r % 8 == 1],
+                         [0x3F] * 4)
+
+    def test_start_lines(self):
+        """each recording's spec and START come before its result"""
+        lines = self.probe.lines
+        for c in ("meas.fmrate", "meas.fm4", "meas.fm5", "meas.adc52"):
+            at = [w.split()[1] for w in lines if w.split()[:1] == [c]]
+            self.assertEqual(at, ["spec", "START", "PASS"], c)
+
+    def test_torn(self):
+        """a torn reading at every idle: the readings once each find them,
+        256 off, and the fixes' rule never keeps one"""
+        card = ChipCard()
+        run = TornRun(card, only="meas.torn,meas.agree")
+        self.assertEqual(run.errors, [])
+        for ch in "12":
+            m = re.search(r"(\d+) torn \(0 near 128, (\d+) near 256",
+                          run.text("meas.torn" + ch))
+            self.assertGreaterEqual(int(m.group(2)), 8, ch)
+            self.assertEqual(run.results["meas.agree" + ch][0][0], "PASS")
+            self.assertIn(", 0 torn", run.text("meas.agree" + ch))
+        self.assertGreater(len(card.chip.dmac.torn), 30)
+
+    def test_sides_swapped(self):
+        """a chip with register 6 bit 5 on the right: fm4 and fm5 fail,
+        which says TrueSides would be wrong on it"""
+        card = ChipCard()
+        frame = card.chip.fm_frame
+        card.chip.fm_frame = lambda: frame()[::-1]
+        run = Run(card, only="meas.fm")
+        for c in ("meas.fm4", "meas.fm5"):
+            self.assertEqual(run.results[c][0][0], "FAIL", c)
+            self.assertIn("not on its side alone: TrueSides would be wrong "
+                          "here", run.text(c))
+
+    def test_clocks_off(self):
+        """the 768 kHz clock at 768,000 Hz fails clk768 by its 252 ppm, and
+        the music DAC at an OPL3's 49,716 Hz fails fmrate"""
+        import esschip
+        old = esschip.CLOCK_768, esschip.FM_DAC_HZ
+        try:
+            esschip.CLOCK_768, esschip.FM_DAC_HZ = 768000.0, 49716.0
+            run = Run(ChipCard(), only="meas.clk768,meas.fmrate")
+        finally:
+            esschip.CLOCK_768, esschip.FM_DAC_HZ = old
+        self.assertEqual(run.results["meas.clk768"][0][0], "FAIL")
+        self.assertRegex(run.text("meas.clk768"), r"-25\d ppm from 540/496")
+        self.assertEqual(run.results["meas.fmrate"][0][0], "FAIL")
+        self.assertRegex(run.text("meas.fmrate"), r"-20\d\d ppm from 49819")
+
+    def test_no_record_path(self):
+        """record source 7 bringing nothing: adc52 fails on the level"""
+        card = ChipCard()
+        card.chip.mix_frame = lambda: (0, 0)
+        run = Run(card, only="meas.adc52")
+        self.assertEqual(run.results["meas.adc52"][0][0], "FAIL")
+        self.assertIn("the tone -120.0 dBFS", run.text("meas.adc52"))
+
+    def test_no_audio2(self):
+        """without Audio 2's channel the cases that need it skip"""
+        card = ChipCard()
+        card.chip.pnp[(1, 0x75)] = 4
+        run = Run(card, only="meas")
+        skips = sorted(c for c, rs in run.results.items()
+                       if rs[0][0] == "SKIP")
+        self.assertEqual(skips, ["meas.adc52", "meas.agree2", "meas.clk768",
+                                 "meas.fmrate", "meas.torn2"])
+
+    def test_go_start(self):
+        """both.go starts as the Windows player's a1_start: Audio 2's
+        channel unmasked, B8h's start with Audio 1's still masked, then
+        Audio 1's unmask and 78h's one write together"""
+        run = LogRun(ChipCard(), only="both.go1")
+        self.assertEqual(run.results["both.go1"][0][0], "PASS")
+        o = run.outs
+        i = o.index((0x0A, 0x01))           # Audio 1's channel unmasked
+        self.assertEqual(o[i + 1:i + 3], [(0x224, 0x78), (0x225, 0x93)])
+        self.assertEqual(o[i - 3:i], [(0xD4, 0x01), (0x22C, 0xB8),
+                                      (0x22C, 0x05)])
+        self.assertNotIn((0x0A, 0x01), o[:i])
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
 class MpuTest(unittest.TestCase):
     """the mpu group as the laptop's BIOS leaves the MPU-401, without a
     cable, with its IRQ elsewhere, and off"""
@@ -728,9 +876,10 @@ def synthesize(run, rate=48000):
 
 # the recorded cases: one of each kind the recording should hold
 RECORDED = ("a1.base,a1.left,a1.right,a1.pause_b2,a1.muted,a2.base,"
-            "a2.slaved,both.base,both.muted2,stream.a1,stream.mirror,"
-            "a2.wide_packed,fix.late100a,fix.a2pfd1,fix.pb2late,"
-            "fix.b2late1,fix.pb7a,fix.pb72a,fix.pb7wa")
+            "a2.slaved,both.base,both.muted2,both.go1,stream.a1,"
+            "stream.mirror,a2.wide_packed,fix.late100a,fix.a2pfd1,"
+            "fix.pb2late,fix.b2late1,fix.pb7a,fix.pb72a,fix.pb7wa,"
+            "meas.adc52")
 # those whose Audio 1 stream plays a byte off, its DMA running when its
 # start's first request came, as on the card (docs/ESS_EXTENDED.md); the
 # names are prefixes, so fix.pb2late runs fix.pb2late2 and 3 too
@@ -818,6 +967,8 @@ class RecordedTest(Recorded, unittest.TestCase):
         self.assertRegex(v["fix.b2late1"][1], r"clean -?\d dB")
         self.assertEqual(v["fix.pb2late"][0], "PASS")
         self.assertEqual(v["a2.wide_packed"][0], "INFO")
+        self.assertEqual(v["both.go1"][0], "PASS")      # in step at once
+        self.assertEqual(v["meas.adc52"][0], "PASS")
         self.assertIn("plays at 220", v["a2.slaved"][1])
         self.assertIn("by spec key", v["_text"])
 
@@ -1067,8 +1218,9 @@ class ExeTest(unittest.TestCase):
             "latin-1").splitlines()
 
     def test_silent_run(self):
-        """/A /T: the cases without a sound, the machine's lines, every
-        register given back and the restore file gone"""
+        """/A /T: the cases without a sound, the machine's lines, the meas
+        cases' measures by the PIT, every register given back and the
+        restore file gone"""
         card = ChipCard()
         before = snapshot(card)
         d, code = self.dos(card, "/A /T")
@@ -1077,10 +1229,14 @@ class ExeTest(unittest.TestCase):
         res = results(lines)
         self.assertIn("h1.reach5", res)
         self.assertNotIn("a1.base", res)
+        self.assertNotIn("meas.fm4", res)
+        for c in ("meas.agree1", "meas.agree2", "meas.clk768",
+                  "meas.fmrate"):
+            self.assertEqual(res[c][0][0], "PASS", c)
         self.assertTrue(any("dos: " in t for _r, t in res["env.machine"]))
         self.assertTrue(any("pci: none" in t for _r, t in
                             res["env.machine"]))
-        self.assertIn("pass=0 fail=0", "\n".join(lines))
+        self.assertIn("pass=4 fail=0", "\n".join(lines))
         self.assertEqual(snapshot(card), before)
         self.assertNotIn("ESSPROBE.RST", d.files)
         self.assertNotIn("restart before", d.output)    # no window, no trap
@@ -1151,11 +1307,12 @@ class ExeTest(unittest.TestCase):
     def test_under_emm386(self):
         """/A /T under EMM386: V86 mode, EMMQXXX0's version, the window on
         Audio_Base+Dh, the 8237 seen past EMM386's translation, which
-        programs it at the unmask, and the trap removed at the end"""
+        programs it at the unmask, the counts read through the window, and
+        the trap removed at the end"""
         card = ChipCard(emm386={})
         before = snapshot(card)
-        d, code = self.dos(card, "/A /T /C:env.machine,h1", emm386=(4, 95),
-                           noems=True)
+        d, code = self.dos(card, "/A /T /C:env.machine,h1,meas.agree",
+                           emm386=(4, 95), noems=True)
         self.assertEqual(code, 0, d.output)
         res = results(self.report(d))
         machine = "\n".join(t for _r, t in res["env.machine"])
@@ -1165,6 +1322,9 @@ class ExeTest(unittest.TestCase):
         for ch in (1, 5):
             reach = res["h1.reach%d" % ch][0][1]
             self.assertIn("it gets it at the unmask", reach)
+        for c in ("meas.agree1", "meas.agree2"):
+            self.assertEqual(res[c][0][0], "PASS", c)
+            self.assertIn("400 readings", res[c][0][1])
         self.assertEqual([b for b, _si in d.emm_calls], [0, 1])
         self.assertEqual(d.emm_traps, [])
         self.assertEqual(snapshot(card), before)
@@ -1209,13 +1369,13 @@ class ExeTest(unittest.TestCase):
         still in: the next start removes that trap and frees the block
         before it puts its own in"""
         import build_essp0
-        from dosrun import Dos
+        from dosrun import ALLOC, MCB, SIZE, Dos
         data, syms = build_essp0.build()
         d = Dos(self.exe(), ChipCard(emm386={}), emm386=(4, 95))
-        old, paras = 0x3800, (len(data) + 15) >> 4
+        old, paras = MCB + SIZE + 2, (len(data) + 15) >> 4
         # in the free block after the program's: DOS's, and a free rest
         d.mcb(old - 1, b"M", 0x0008, paras)
-        d.mcb(old + paras, b"M", 0, 0x3FFF - (old + paras) - 1)
+        d.mcb(old + paras, b"M", 0, ALLOC - 1 - (old + paras) - 1)
         image = bytearray(data)
         struct.pack_into("<H", image, syms["handle"], 7)
         image[syms["armed"]] = syms["ESSP0_ARMED"]

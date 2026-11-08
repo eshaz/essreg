@@ -193,6 +193,7 @@ class ES1869Audio:
         self.loads = []             # holding-register loads (B7h bit 0)
         self.recorded = []
         self.source = None          # callable(n) -> n frames for the ADC
+        self.mix_out = (None, (0, 0))   # (us, frame) Audio 2 last played
         self.violations = []        # (us, what): undefined uses
         self.irq_edges = []         # us of each rising edge of game_irq
         self.irq_line = False
@@ -412,9 +413,12 @@ class ES1869Audio:
                 frame = self.fm_frame()
                 if not stereo:
                     frame = ((frame[0] + frame[1]) // 2,)
+            elif self.source:
+                frame = self.source(1)[0]
             else:
-                frame = self.source(1)[0] if self.source else \
-                    (0,) * (2 if stereo else 1)
+                frame = self.mix_frame()
+                if not stereo:
+                    frame = ((frame[0] + frame[1]) // 2,)
             data = encode([frame], bits, signed, stereo)
             if len(s.fifo) + len(data) <= s.size:
                 s.fifo += data
@@ -433,8 +437,20 @@ class ES1869Audio:
         else:
             self.muted.append(frame)
 
+    def mix_frame(self):
+        """what record source 7 (1Ch bits 2:0 = 7), the mixer's output
+        before the master, gives the ADC without a test's source: here
+        Audio 2's last frame while 7Ch lets it through, unscaled, for one
+        of its sample periods; silence from any other source"""
+        us, frame = self.mix_out
+        if self.mixer[0x1C] & 0x07 != 0x07 or us is None or \
+                self.a_us - us > 1e6 / max(self.a2_rate(), 1) + 1:
+            return (0, 0)
+        return frame if len(frame) == 2 else (frame[0], frame[0])
+
     def _heard2(self, frame):
         if self.mixer[0x7C]:
+            self.mix_out = (self.a_us, frame)
             self.played2.append(frame)
             self.heard.append(frame)
         else:

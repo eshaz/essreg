@@ -13,7 +13,9 @@
  * memory manager where the platform has a window, else as a game reads
  * them. The rates the cases ask for are computed with the clocks the
  * first report measured, 793.8 and 396.9 kHz for A1h, 793.8 and 768 kHz
- * for 70h.
+ * for 70h; the meas group checks what the drivers' fixes rest on against
+ * what Linux's driver measured (the 768 kHz clock at 768,193.5 Hz, the
+ * music DAC at 49,819.5 Hz, the ADC clean up to 52,920 Hz).
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -29,6 +31,7 @@
 #include "essp.h"
 #include "piix4.h"
 #include "sbtsound.h"
+#include "tears.h"
 
 #ifdef ESS_HOST
 #define esp_vfmt vsnprintf
@@ -755,7 +758,8 @@ enum {
   RUN_MASK,    // when a program's mask and unmask reach the 8237's mask
   RUN_PACE,    // the same with esssb16's pace on the game's channel
   RUN_TYPEF,   // a recording under the PIIX4's Type F timing
-  RUN_MPU      // the MPU-401 (k: what of it)
+  RUN_MPU,     // the MPU-401 (k: what of it)
+  RUN_MEAS     // what the drivers' fixes rest on (k: what of it)
 };
 
 #define E1 0x01 // Audio 1
@@ -794,6 +798,7 @@ struct pc {
   u8 order;         // Audio 1's registers in the Windows player's order
   u8 b7;            // B7h's first write: 0 as Table 16, 1 none, 2 bit 0 clear
   u8 start2;        // Audio 2 started in two steps: 78h bit 1, then bit 0
+  u8 go;            // both: the Windows player's dual start (a1_start)
   u8 pv;            // the pace: 0 as esssb16's, 1 with 74h-76h, 2 with Audio 1
   u16 ms;           // how long it plays
   u16 masked;       // typef: the channel unmasked this many ms after B8h
@@ -896,6 +901,13 @@ static const struct ecase cases[] = {
     {"both.dmd", "dmd=3", "dual"},
     {"both.muted2", "v2=0 t2=0", "low"},
     {"both.pace", "v2=0 t2=0 slaved f2=8s irq2=0 S", "low"},
+    // the Windows player's dual start (ES1869.DRV's a1_start): Audio 2's
+    // channel unmasked, Audio 1 started with its own masked, a1_settle's
+    // polls, then Audio 1's channel unmasked and 78h written once with
+    // interrupts off; Audio 2 on Audio 1's clock without its interrupt
+    {"both.go1", "slaved order=win go irq2=0 S", "dual"},
+    {"both.go2", "slaved order=win go irq2=0 r=22050", "dual"},
+    {"both.go3", "slaved order=win go irq2=0 f=8s", "dual"},
     // the DMA controllers behind the memory manager
     {"h1.reach1", "run=reach ch=1 S", "-"},
     {"h1.reach5", "run=reach ch=5 S", "-"},
@@ -1031,6 +1043,23 @@ static const struct ecase cases[] = {
     {"mpu.irq_7off", "run=mpu k=5", "-"},
     {"mpu.loop", "run=mpu k=6", "-"},
     {"mpu.loopi", "run=mpu k=7", "-"},
+    // what the drivers' fixes rest on, measured on the chip: a channel's
+    // count read as a game reads it, once (torn), and as the fixes read it,
+    // until two readings agree within 32 (agree), while it moves at 176,400
+    // bytes a second; Audio 1's clock against Audio 2's 768 kHz one and the
+    // PIT (clk768); the music DAC's rate and the FM's sides, recorded on
+    // Audio 1 through mixer 7Fh bit 4 (fmrate, fm4 for register 6 bit 4,
+    // fm5 for bit 5); and the ADC at its top rate through record source 7
+    // (adc52). Audio 1 records as typef.m54_b2 does, a START line first
+    {"meas.torn1", "k=1 e=1 S", "-"},
+    {"meas.torn2", "k=1 e=2", "-"},
+    {"meas.agree1", "k=2 e=1 S", "-"},
+    {"meas.agree2", "k=2 e=2", "-"},
+    {"meas.clk768", "k=3 e=3 r2=48000 S", "-"},
+    {"meas.fmrate", "k=4 e=3", "-"},
+    {"meas.fm4", "k=5 ms=1000 S", "right"},
+    {"meas.fm5", "k=6 ms=1000", "left"},
+    {"meas.adc52", "k=7 e=3 r1=52920 clk=hi v2=204 S", "tone"},
     // Audio 1 records 16-bit stereo at 44100 Hz under the PIIX4's Type F
     // timing, which stopped the Armada under Linux: only when named
     // (/C:typef), the safest first. m54 is the 8237 in single mode, as DOS
@@ -1101,6 +1130,11 @@ static void spec_base(struct pc *p, const char *id) {
   } else if (!strncmp(id, "typef.", 6)) { // a recording, as Windows starts it
     p->run = RUN_TYPEF;
     p->eng = E1;
+  } else if (!strncmp(id, "meas.", 5)) { // muted but where a spec says
+    p->run = RUN_MEAS;
+    p->eng = E1;
+    p->vol1 = p->vol2 = 0;
+    p->ms = 3000;
   }
 }
 
@@ -1113,9 +1147,9 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
     p->sh = 1;
   else if (IS("run") && v != NULL) {
     static const char *const runs[] = {
-        "play",   "machine", "card", "mixer", "dma",   "rst",
-        "reach",  "read",    "ff",   "cross", "stale", "load",
-        "stream", "mirror",  "mask", "pace",  "typef", "mpu"};
+        "play", "machine", "card",  "mixer", "dma",  "rst",    "reach",
+        "read", "ff",      "cross", "stale", "load", "stream", "mirror",
+        "mask", "pace",    "typef", "mpu",   "meas"};
     unsigned i;
     for (i = 0; i < ESS_ARRAY_SIZE(runs); i++)
       if (!strcmp(v, runs[i]))
@@ -1223,7 +1257,10 @@ static int spec_key(struct pc *p, const char *k, const char *v) {
     p->b7 = (u8)(!strcmp(v, "once") ? 1 : 2);
   else if (IS("start2"))
     p->start2 = 1;
-  else if (IS("pv"))
+  else if (IS("go")) {
+    p->go = 1;
+    p->after = 1;
+  } else if (IS("pv"))
     p->pv = (u8)(n & 3);
   else if (IS("ms"))
     p->ms = (u16)n;
@@ -1516,11 +1553,34 @@ static void eng_masks(int masked) {
       dma_mask(en[i].ch, masked);
 }
 
+// Audio_Base+Ch read 64 + 4,000,000 / rate times, as the Windows
+// player's a1_settle lets Audio 1's start settle before its channel is
+// unmasked
+static void settle_polls(double rate) {
+  u16 i, n = (u16)(64 + 4000000.0 / rate);
+
+  for (i = 0; i < n; i++)
+    H->inb((u16)(B + 0x0C));
+}
+
 // the engines start: Audio 2's DMA first, its FIFO off the DAC, then
-// Audio 1 and the FIFO onto the DAC with interrupts off, as ES1869.DRV's
-// dual playback starts them. With b2late, Audio 1 starts without its DMA
-// requests, which come that much later
+// Audio 1 and the FIFO onto the DAC with interrupts off, as ESS's dual
+// playback starts them; with go as the Windows player's a1_start: Audio
+// 2's channel unmasked, Audio 1 started with its own masked, the settle's
+// polls, then with interrupts off Audio 1's channel unmasked and 78h
+// written once, the DMA and the FIFO onto the DAC together. With b2late,
+// Audio 1 starts without its DMA requests, which come that much later
 static void eng_start(const struct pc *p) {
+  if (p->go && en[1].on && en[0].on) {
+    dma_mask(en[1].ch, 0);
+    reg_w(0xB8, (u8)(b8_run | 1));
+    settle_polls(en[0].rate);
+    H->lock();
+    dma_mask(en[0].ch, 0);
+    mix_w(0x78, r78_run);
+    H->unlock();
+    return;
+  }
   if (en[1].on && en[0].on) {
     mix_w(0x78, (u8)(r78_run & ~0x01));
     pass_time(2000);
@@ -1889,6 +1949,14 @@ static int eng_text(char *q, const char *name, const struct eng *e, u16 nirq,
   return ok;
 }
 
+// SKIP where Audio 2 has no channel; 1 then
+static int no_a2(const struct ecase *c) {
+  if (dma2 < 8 && dma2 != 4 && dma2 != 2)
+    return 0;
+  res(c->id, R_SKIP, "Audio 2 has no channel (PnP 75h %u)", dma2);
+  return 1;
+}
+
 static void run_play(const struct ecase *c, const struct pc *spec) {
   static char syms[8], line[200];
   struct pc q = *spec, *p = &q;
@@ -1899,10 +1967,8 @@ static void run_play(const struct ecase *c, const struct pc *spec) {
   double t;
 
   if (p->eng & E2) {
-    if (dma2 >= 8 || dma2 == 4 || dma2 == 2) {
-      res(c->id, R_SKIP, "Audio 2 has no channel (PnP 75h %u)", dma2);
+    if (no_a2(c))
       return;
-    }
     if ((p->packed || p->wide) && dma2 < 4) {
       res(c->id, R_SKIP,
           "Audio 2 is on the 8-bit channel %u, as the card is configured",
@@ -2864,33 +2930,15 @@ static int typef_ask(void) {
   return H->ask("typef", q, "\r") != 0;
 }
 
-// typef: Audio 1 records into its buffer as ES1869.DRV starts a recording
-// (6:28A4): the FIFO emptied, B9h, A4h and A5h, A8h, B1h and B2h, B7h
-// once, then B8h = 0Fh with the channel unmasked before it, or, with
-// masked=, that many ms after it, as Linux's driver did. The START line
-// reaches the disk before the start: a report that ends with one names the
-// case that stopped the machine (/K)
-static void run_typef(const struct ecase *c, const struct pc *p) {
+// Audio 1 set to record into its buffer as ES1869.DRV starts a recording
+// (6:28A4), not going yet: A1h and A2h, the FIFO emptied, B9h, A4h and
+// A5h, A8h, B1h and B2h, B7h once, and its channel in write mode, masked
+// unless unmask; the buffer filled with TF_FILL and the guards set first
+static void rec_program(const struct pc *p, struct eng *e, int unmask) {
   static u8 buf[256];
-  static char tf[48], line[200];
-  struct eng *e = &en[0];
-  u32 t0, ms = p->ms, hold = p->masked, first;
-  u16 i, j, n, wrote = 0, bad;
-  int r, ok;
-  double got;
+  u16 i, n;
+  int r;
 
-  if (dma1 >= 4) {
-    res(c->id, R_SKIP, "Audio 1 is on the 16-bit channel %u", dma1);
-    return;
-  }
-  if (O & ESP_O_TINY) {
-    ms = ms / 8 < 80 ? 80 : ms / 8;
-    if (hold > 8)
-      hold /= 8;
-  }
-  chip_reset(3);
-  ext_on();
-  plan(p);
   e->frames = most_frames(e->fmt, 0, BUF1_MAX);
   e->sbytes = (u16)(e->frames * frame_bytes(e->fmt));
   e->units = e->sbytes;
@@ -2918,7 +2966,36 @@ static void run_typef(const struct ecase *c, const struct pc *p) {
         (u8)(((e->fmt & FST) ? 0x98 : 0x90) + ((e->fmt & F16) ? 0x24 : 0)));
   dma_set(dma1, e->addr, e->units,
           (u8)(((p->dmd & 1) ? DMA_DEMAND : DMA_SINGLE) | DMA_AUTO | DMA_WRITE),
-          !hold);
+          unmask);
+}
+
+// typef: Audio 1 records into its buffer as ES1869.DRV starts a recording
+// (rec_program), then B8h = 0Fh with the channel unmasked before it, or,
+// with masked=, that many ms after it, as Linux's driver did. The START
+// line reaches the disk before the start: a report that ends with one
+// names the case that stopped the machine (/K)
+static void run_typef(const struct ecase *c, const struct pc *p) {
+  static u8 buf[256];
+  static char tf[48], line[200];
+  struct eng *e = &en[0];
+  u32 t0, ms = p->ms, hold = p->masked, first;
+  u16 i, j, n, wrote = 0, bad;
+  int ok;
+  double got;
+
+  if (dma1 >= 4) {
+    res(c->id, R_SKIP, "Audio 1 is on the 16-bit channel %u", dma1);
+    return;
+  }
+  if (O & ESP_O_TINY) {
+    ms = ms / 8 < 80 ? 80 : ms / 8;
+    if (hold > 8)
+      hold /= 8;
+  }
+  chip_reset(3);
+  ext_on();
+  plan(p);
+  rec_program(p, e, !hold);
   typef_of(tf);
   put("%-20s spec  %s", c->id, c->spec);
   put("%-20s START %s", c->id, tf);
@@ -3271,12 +3348,460 @@ static void run_mpu(const struct ecase *c, const struct pc *p) {
   chip_reset(3);
 }
 
+// --- what the drivers' fixes rest on -----------------------------------------
+
+#define CLK_768 768193.5  // the "768 kHz" clock as measured: the master / 31
+#define FM_HZ 49819.5     // the music DAC's rate, the master / 478
+#define FM 0x388          // the FM's ports (ESFM)
+#define READINGS 100000UL // count readings a case takes (400 in the short)
+#define PIECE 32          // readings in a row, time between them
+#define SKIP 256          // a recording's bytes left out by its end
+#define RATIO_PPM 50      // two of the chip's rates against each other
+#define PIT_PPM 150       // a rate against the PIT, whose crystal is off too
+
+// the case kinds (k)
+enum { K_TORN = 1, K_AGREE, K_CLK, K_FMRATE, K_FM4, K_FM5, K_ADC };
+
+// a channel's count read once as a game reads it: the flip-flop cleared,
+// the low byte, the high byte, interrupts off; past the memory manager
+// where there is a window
+static u16 count_once(u8 ch) {
+  static struct esp_io io[3];
+  u16 n = 0, c;
+
+  if (window) {
+    io_add(io, &n, ESP_OUT, ff_port(ch), 0);
+    io_add(io, &n, ESP_IN, count_port(ch), 0);
+    io_add(io, &n, ESP_IN, count_port(ch), 0);
+    if (H->phys(io, n))
+      return (u16)(io[1].value | (io[2].value << 8));
+  }
+  H->lock();
+  H->outb(ff_port(ch), 0);
+  c = H->inb(count_port(ch));
+  c |= (u16)(H->inb(count_port(ch)) << 8);
+  H->unlock();
+  return c;
+}
+
+// the count as the fixes read it (esssb16's ch8_read, the VxD's and
+// ES1869.DRV's DmaCountTwice and a1_count): until two readings in a row
+// agree within 32, four at most, the last kept
+static u16 count_agree(u8 ch) {
+  u16 x = count_once(ch), old;
+  int i;
+
+  for (i = 0; i < 3; i++) {
+    old = x;
+    x = count_once(ch);
+    if ((u16)(x - old + 32) <= 64)
+      break;
+  }
+  return x;
+}
+
+// the position a count gives in a ring of units, from 0
+static u16 count_pos(u16 count, u16 units) {
+  long p = (long)units - 1 - (long)count;
+
+  p %= (long)units;
+  return (u16)(p < 0 ? p + units : p);
+}
+
+// a least-squares line through (time, units moved): its slope is a rate
+struct fit {
+  double n, t, m, tt, tm;
+};
+
+static void fit_add(struct fit *f, double t, double m) {
+  f->n += 1;
+  f->t += t;
+  f->m += m;
+  f->tt += t * t;
+  f->tm += t * m;
+}
+
+static double fit_slope(const struct fit *f) {
+  double d = f->n * f->tt - f->t * f->t;
+
+  return f->n < 3 || d <= 0 ? 0 : (f->n * f->tm - f->t * f->m) / d;
+}
+
+// a case's time, its sounds' shorter
+static u32 meas_ms(const struct pc *p) {
+  u32 ms = p->ms;
+
+  if (O & ESP_O_TINY)
+    ms = ms / 8 < 80 ? 80 : ms / 8;
+  return ms;
+}
+
+// the engines' counts read every millisecond for ms, from when the FIFOs
+// had their fill on, through a least-squares line each: their rates in
+// frames a second into rate; when it began and ended into parts
+static void meas_rates(u32 ms, double *rate, u32 *parts) {
+  static struct fit f[2];
+  u32 t0 = H->now(), t;
+  int i;
+
+  memset(f, 0, sizeof(f));
+  settle = tk(60000UL);
+  parts[0] = t0;
+  while (since(t0) < tk(ms * 1000UL)) {
+    t = since(t0);
+    eng_sample(t0);
+    if (t >= settle)
+      for (i = 0; i < 2; i++)
+        if (en[i].on)
+          fit_add(&f[i], (double)us_of(t) / 1e6, (double)en[i].moved);
+    if (!pass_time(1000))
+      break;
+  }
+  parts[1] = H->now();
+  for (i = 0; i < 2; i++)
+    rate[i] = en[i].on
+                  ? fit_slope(&f[i]) * en[i].per_unit / frame_bytes(en[i].fmt)
+                  : 0;
+}
+
+// how far a from b, in parts a million
+static double ppm(double a, double b) { return b ? (a / b - 1) * 1e6 : 0; }
+
+// torn and agree: the engine's channel read READINGS times while it plays,
+// muted, PIECE readings in a row with time between, once each (a game's
+// way) or until two agree (the fixes'); the torn readings among them
+// (tears.c), and steps back of more than 2 units
+static void meas_count(const struct ecase *c, const struct pc *p) {
+  static u16 pos[PIECE];
+  static struct tears t;
+  struct eng *e = &en[(p->eng & E2) ? 1 : 0];
+  u32 n = (O & ESP_O_TINY) ? 400 : READINGS, i;
+  u16 j, k;
+  int agree = p->kind == K_AGREE, ok;
+
+  chip_reset(3);
+  ext_on();
+  plan(p);
+  fill_tone(e, p->hz1, 0, p->amp);
+  set_71(p);
+  ack1 = ack2 = 1;
+  if (e == &en[0])
+    a1_program(p, e);
+  else
+    a2_program(p, e);
+  eng_dma(p, e, 1);
+  irq_clear();
+  eng_start(p);
+  pass_time(60000UL);
+  tears_init(&t, e->units, 2, 256);
+  for (i = 0; i < n && !escaped(); i += k) {
+    k = (u16)(n - i < PIECE ? n - i : PIECE);
+    for (j = 0; j < k; j++)
+      pos[j] =
+          count_pos(agree ? count_agree(e->ch) : count_once(e->ch), e->units);
+    tears_add(&t, pos, k);
+    H->idle();
+  }
+  eng_stop();
+  ok = !tears_torn(&t) && !t.back;
+  res(c->id, agree ? (ok ? R_PASS : R_FAIL) : R_INFO,
+      "%lu readings of channel %u's count %s, %lu torn (%lu near 128, %lu "
+      "near 256, %lu more), the worst %ld off; %lu steps back, %lu jumps; "
+      "a ring of %u",
+      (unsigned long)t.readings, e->ch,
+      agree ? "until two agree within 32" : "once each, as a game reads it",
+      (unsigned long)tears_torn(&t), (unsigned long)t.torn128,
+      (unsigned long)t.torn256, (unsigned long)t.torn_other, (long)t.worst,
+      (unsigned long)t.back, (unsigned long)t.jumps, e->units);
+}
+
+// clk768: Audio 1 at 44,100 Hz on the 793.8 kHz clock (A1h EEh) and Audio
+// 2 at 48 kHz on the 768 kHz one (70h F0h) together, muted: their rates by
+// the PIT, and against each other, which the PIT doesn't enter
+static void meas_clock(const struct ecase *c, const struct pc *p) {
+  u32 parts[2];
+  double rate[2], r, dr, da;
+  int ok;
+
+  if (no_a2(c))
+    return;
+  chip_reset(3);
+  ext_on();
+  plan(p);
+  fill_tone(&en[0], p->hz1, 0, p->amp);
+  fill_tone(&en[1], p->hz2, 0, p->amp);
+  set_71(p);
+  ack1 = ack2 = 1;
+  a1_program(p, &en[0]);
+  eng_dma(p, &en[0], 1);
+  a2_program(p, &en[1]);
+  eng_dma(p, &en[1], 1);
+  eng_first_counts();
+  irq_clear();
+  eng_start(p);
+  meas_rates(meas_ms(p), rate, parts);
+  eng_stop();
+  r = rate[0] ? rate[1] / rate[0] : 0;
+  dr = ppm(r, 540.0 / 496.0);
+  da = ppm(rate[1], CLK_768 / 16);
+  ok = r && fabs(dr) <= RATIO_PPM && fabs(da) <= PIT_PPM;
+  res(c->id, ok ? R_PASS : R_FAIL,
+      "Audio 1 %.2f Hz, Audio 2 %.2f Hz by the clock; Audio 2 / Audio 1 "
+      "%.6f, %+.0f ppm from 540/496 (the clocks 30/31 apart); Audio 2 %+.0f "
+      "ppm from 768193.5/16 Hz, %+.0f ppm from 48000 Hz",
+      rate[0], rate[1], r, dr, da, ppm(rate[1], 48000.0));
+}
+
+// a register of the FM in ESFM's native mode: its address's low and high
+// bytes at 388h+2 and +3, its value at +1
+static void fm_w(u16 reg, u8 v) {
+  H->outb(FM + 2, (u8)reg);
+  H->outb(FM + 3, (u8)(reg >> 8));
+  H->outb(FM + 1, v);
+}
+
+// voice 0's operator 0 alone keyed on, a sine at full level at 440.9 Hz
+// (F-number 580 and block 4 at 49,819.5 Hz) on the sides that register 6
+// bits 5:4 give it (sides), its other operators silent; with sides 0 the
+// key off, every operator silent, and native mode left. Native mode comes
+// with 105h = 80h through the OPL3's second bank (the Linux report), and
+// ends with a write to 388h
+static void fm_note(u8 sides) {
+  static const u8 op0[8] = {0x21, 0x00, 0xF0, 0x0F, 0x44, 0x12, 0x00, 0xE0};
+  u16 op, r;
+  u8 v;
+
+  H->outb(FM + 2, 0x05);
+  H->outb(FM + 3, 0x80);
+  if (!sides)
+    fm_w(0x240, 0x00);
+  for (op = 0; op < 4; op++)
+    for (r = 0; r < 8; r++) {
+      v = (u8)(r == 1 ? 0x3F : 0x00);
+      if (op == 0 && sides)
+        v = (u8)(r == 6 ? sides : op0[r]);
+      fm_w((u16)(op * 8 + r), v);
+    }
+  if (sides)
+    fm_w(0x240, 0x01);
+  else
+    H->outb(FM, 0x00);
+}
+
+// what a recording holds: each side's level and the tone's, in dBFS (a
+// full-scale sine at 0), the means taken out, and how far the tone is over
+// the rest of the sound
+struct heard {
+  u16 frames;
+  double lv[2], tone, snr;
+};
+
+static double dbfs(double power) {
+  power /= 32768.0 * 32768.0 / 2;
+  return power > 1e-12 ? 10 * log10(power) : -120;
+}
+
+// the last lap of Audio 1's ring of 16-bit frames, from the oldest frame
+// on (SKIP bytes after where the DMA stood at count, to SKIP before it),
+// whole cycles of hz at rate where it can: its levels and hz's
+static void listen(const struct eng *e, u16 count, double hz, double rate,
+                   struct heard *h) {
+  static u8 buf[256];
+  u16 fb = frame_bytes(e->fmt), at, len, j, n, cyc;
+  double s[2], ss[2], x, m, c1, s1, cr = 1, ci = 0, t, re = 0, im = 0;
+  double sc = 0, ssn = 0, smm = 0, tot, a2;
+  int k, chans = (e->fmt & FST) ? 2 : 1;
+
+  memset(h, 0, sizeof(*h));
+  s[0] = s[1] = ss[0] = ss[1] = 0;
+  n = (u16)((e->units - 2 * SKIP) / fb);
+  cyc = (u16)(rate / hz + 0.5);
+  if (cyc && fabs(rate / hz - cyc) < 1e-6 && n >= cyc)
+    n = (u16)(n - n % cyc);
+  at = (u16)((count_pos(count, e->units) + SKIP + fb - 1) / fb * fb);
+  c1 = cos(2 * 3.14159265358979 * hz / rate);
+  s1 = sin(2 * 3.14159265358979 * hz / rate);
+  for (h->frames = 0; h->frames < n;) {
+    at = (u16)(at % e->units);
+    len = (u16)(sizeof(buf) - sizeof(buf) % fb);
+    if (len > e->units - at)
+      len = (u16)(e->units - at);
+    if (len > (u16)((n - h->frames) * fb))
+      len = (u16)((n - h->frames) * fb);
+    H->peek(e->addr + at, buf, len);
+    for (j = 0; j < len; j = (u16)(j + fb), h->frames++) {
+      m = 0;
+      for (k = 0; k < chans; k++) {
+        x = (double)(s16)(buf[j + 2 * k] | (buf[j + 2 * k + 1] << 8));
+        s[k] += x;
+        ss[k] += x * x;
+        m += x / chans;
+      }
+      smm += m * m;
+      re += m * cr;
+      im += m * ci;
+      sc += cr;
+      ssn += ci;
+      t = cr * c1 - ci * s1;
+      ci = cr * s1 + ci * c1;
+      cr = t;
+    }
+    at = (u16)(at + len);
+  }
+  if (!h->frames)
+    return;
+  for (k = 0; k < 2; k++) {
+    m = s[k < chans ? k : 0] / h->frames;
+    h->lv[k] = dbfs(ss[k < chans ? k : 0] / h->frames - m * m);
+  }
+  // the tone's amplitude from the sound with its mean out, and its share
+  m = (s[0] + (chans > 1 ? s[1] : 0)) / chans / h->frames;
+  re -= m * sc;
+  im -= m * ssn;
+  a2 = 4 * (re * re + im * im) / ((double)h->frames * h->frames);
+  tot = smm - (double)h->frames * m * m;
+  h->tone = dbfs(a2 / 2);
+  t = tot - a2 / 2 * h->frames;
+  h->snr = t > 0 ? 10 * log10(a2 / 2 * h->frames / t) : 99;
+}
+
+// fmrate, fm4, fm5 and adc52: Audio 1 records 16-bit stereo as
+// typef.m54_b2 does, the music DAC's samples through 7Fh bit 4 (bit 0
+// clear, the DAC the FM's) with the FM at 36h CCh and, for fm4 and fm5, a
+// note on the side its register 6 says; for adc52 at 52,920 Hz through
+// record source 7, Audio 2's tone, with B4h at 0 dB and the mixer's other
+// inputs muted. Audio 2 plays against it where the spec has it, for
+// fmrate muted, as the rates' reference
+static void meas_rec(const struct ecase *c, const struct pc *p) {
+  static const u8 inputs[] = {0x14, 0x1A, 0x36, 0x38, 0x3A, 0x3C, 0x3E, 0x6D};
+  static char syms[8], tf[48];
+  static u8 old_in[sizeof(inputs)];
+  struct eng *a = &en[0], *b = &en[1];
+  struct heard h;
+  u32 parts[2], tm = 0;
+  double rate[2], r, dr, da;
+  u8 old7f = 0, old36 = 0, old1c = 0, sides = 0;
+  u16 count, i;
+  int b4 = -1, adc = p->kind == K_ADC, ok;
+
+  if (dma1 >= 4) {
+    res(c->id, R_SKIP, "Audio 1 is on the 16-bit channel %u", dma1);
+    return;
+  }
+  if ((p->eng & E2) && no_a2(c))
+    return;
+  if (p->kind == K_FM4)
+    sides = 0x10;
+  else if (p->kind == K_FM5)
+    sides = 0x20;
+  if (strcmp(c->expect, "-"))
+    tm = sound_marker(syms);
+  chip_reset(3);
+  ext_on();
+  plan(p);
+  ack1 = ack2 = 1;
+  set_71(p);
+  if (b->on) {
+    fill_tone(b, p->hz2, 0, p->amp);
+    a2_program(p, b);
+    eng_dma(p, b, 1);
+  }
+  rec_program(p, a, 1);
+  if (adc) {
+    b4 = reg_r(0xB4);
+    reg_w(0xB4, 0x44);
+    old1c = mix_r(0x1C);
+    mix_w(0x1C, (u8)((old1c & ~0x17) | 0x07));
+    for (i = 0; i < sizeof(inputs); i++) {
+      old_in[i] = mix_r(inputs[i]);
+      mix_w(inputs[i], 0x00);
+    }
+  } else {
+    old7f = mix_r(0x7F);
+    mix_w(0x7F, (u8)((old7f | 0x10) & ~0x01));
+    old36 = mix_r(0x36);
+    mix_w(0x36, 0xCC);
+  }
+  typef_of(tf);
+  put("%-20s spec  %s", c->id, c->spec);
+  put("%-20s START %s", c->id, tf);
+  eng_first_counts();
+  irq_clear();
+  if (b->on)
+    mix_w(0x78, r78_run);
+  reg_w(0xB8, 0x0F);
+  if (sides)
+    fm_note(sides);
+  meas_rates(meas_ms(p), rate, parts);
+  if (sides)
+    fm_note(0);
+  reg_w(0xB8, 0x00);
+  count = dma_left(dma1);
+  eng_stop();
+  if (adc) {
+    ext_on();
+    if (b4 >= 0)
+      reg_w(0xB4, (u8)b4);
+    for (i = sizeof(inputs); i--;)
+      mix_w(inputs[i], old_in[i]);
+    mix_w(0x1C, old1c);
+  } else {
+    mix_w(0x36, old36);
+    mix_w(0x7F, old7f);
+  }
+  listen(a, count, adc ? SND_HZ : 440.9, adc ? a->rate : FM_HZ, &h);
+  if (adc) {
+    ok = h.tone >= -40 && h.snr >= 30 && fabs(ppm(rate[0], a->rate)) <= 5000;
+    res(c->id, ok ? R_PASS : R_FAIL,
+        "Audio 1 records at %.1f Hz (%.0f set) by the clock; %u frames: the "
+        "tone %.1f dBFS, %.1f dB over the rest; left %.1f, right %.1f dBFS",
+        rate[0], a->rate, h.frames, h.tone, h.snr, h.lv[0], h.lv[1]);
+  } else if (p->kind == K_FMRATE) {
+    r = rate[1] ? rate[0] / rate[1] : 0;
+    dr = ppm(r, 540.0 / 478.0);
+    da = ppm(rate[0], FM_HZ);
+    ok = r && fabs(dr) <= RATIO_PPM && fabs(da) <= PIT_PPM;
+    res(c->id, ok ? R_PASS : R_FAIL,
+        "the music DAC records at %.2f Hz, Audio 2 plays at %.2f by the "
+        "clock; their ratio %.6f, %+.0f ppm from 540/478; the music DAC %+.0f "
+        "ppm from 49819.5 Hz",
+        rate[0], rate[1], r, dr, da);
+  } else {
+    // the note's side 20 dB over the other: the side ESFM.DRV's TrueSides
+    // puts a channel panned that way on
+    double lv = sides == 0x20 ? h.lv[0] : h.lv[1];
+    double other = sides == 0x20 ? h.lv[1] : h.lv[0];
+    ok = lv >= -50 && lv - other >= 20;
+    res(c->id, ok ? R_PASS : R_FAIL,
+        "register 6 %02Xh: left %.1f, right %.1f dBFS, the tone %.1f dBFS, "
+        "%u frames at %.1f Hz%s",
+        sides, h.lv[0], h.lv[1], h.tone, h.frames, rate[0],
+        ok ? ""
+        : lv < -50 && other < -50
+            ? "; no FM in the recording"
+            : "; not on its side alone: TrueSides would be wrong here");
+  }
+  if (strcmp(c->expect, "-"))
+    sound_line(c->id, syms, tm, parts, 2, c->expect);
+}
+
+static void run_meas(const struct ecase *c, const struct pc *p) {
+  if (p->kind == K_TORN || p->kind == K_AGREE) {
+    if ((p->eng & E2) && no_a2(c))
+      return;
+    meas_count(c, p);
+  } else if (p->kind == K_CLK)
+    meas_clock(c, p);
+  else
+    meas_rec(c, p);
+}
+
 // --- the run -----------------------------------------------------------------
 
 static unsigned group_of(const char *id) {
-  static const char *const names[] = {"env",  "rst", "a1",    "a2",
-                                      "both", "h1",  "h4",    "stream",
-                                      "fix",  "lvl", "typef", "mpu"};
+  static const char *const names[] = {"env",   "rst", "a1",     "a2",  "both",
+                                      "h1",    "h4",  "stream", "fix", "lvl",
+                                      "typef", "mpu", "meas"};
   unsigned i, n;
 
   for (i = 0; i < ESS_ARRAY_SIZE(names); i++) {
@@ -3388,6 +3913,9 @@ static void run_case(const struct ecase *c) {
   case RUN_MPU:
     run_mpu(c, &p);
     break;
+  case RUN_MEAS:
+    run_meas(c, &p);
+    break;
   }
 }
 
@@ -3419,9 +3947,9 @@ static void summary(void) {
 
 int esp_run(const struct esp_hal *hal, const struct esp_card *card,
             unsigned opts, unsigned groups, const char *only) {
-  static const char *const gname[] = {"env",  "rst", "a1",    "a2",
-                                      "both", "h1",  "h4",    "stream",
-                                      "fix",  "lvl", "typef", "mpu"};
+  static const char *const gname[] = {"env",   "rst", "a1",     "a2",  "both",
+                                      "h1",    "h4",  "stream", "fix", "lvl",
+                                      "typef", "mpu", "meas"};
   static const char *const gwhat[] = {
       "the machine and the card",
       "what each reset clears",
@@ -3436,7 +3964,9 @@ int esp_run(const struct esp_hal *hal, const struct esp_card *card,
       "recordings under the PIIX4's Type F timing, which can stop the "
       "machine",
       "the MPU-401: its setup, its interrupt, and MIDI through a loopback "
-      "cable"};
+      "cable",
+      "what the drivers' fixes rest on: torn count readings, the clocks, the "
+      "FM's sides and rate, the ADC's top rate"};
   u16 i;
   unsigned g, last_g = 0;
   int v, loud = 0, asked = 0, skip = 0;

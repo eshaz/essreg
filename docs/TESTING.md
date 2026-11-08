@@ -120,6 +120,7 @@ The Python tests, in `tests/test_*.py`, cover the following:
   a trap handler, `build/essprobe.exe` itself, in real mode and under
   EMM386, where its window traps a port, and `tools/essprec.py` on a
   recording of the model's run and broken ones ([ESSPROBE.md](ESSPROBE.md)).
+  The meas cases also run on models where a fact the fixes rest on fails.
 * Other tests run `esfmpat` on copies of `ESFM.DRV` and check that the
   generated documentation is current.
 

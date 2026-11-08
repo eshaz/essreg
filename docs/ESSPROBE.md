@@ -47,7 +47,11 @@ such as `t2=0` for Audio 2's single transfers.
   These three run only where the card has Audio 2 on a 16-bit channel.
 * **both**: Audio 1 at 294 Hz and Audio 2 at 882 Hz at once, on their own
   clocks or slaved, in mixed formats and transfer types, and with Audio 2
-  muted, as `esssb16`'s pace runs it.
+  muted, as `esssb16`'s pace runs it. Version 2.0 adds the dual start of
+  `build/ES1869.DRV`'s player (`both.go1` to `both.go3`): Audio 2's channel
+  unmasked, Audio 1 started with its own channel masked, the player's polls
+  of Audio_Base+Ch, then with interrupts off Audio 1's channel unmasked and
+  78h written once, so that both streams start in step.
 * **h1**: the DMA controllers behind the memory manager. When the 8237 gets
   what a program programmed while the channel is masked, and when its mask
   gets the program's mask and unmask (`h1.mask1`, `h1.mask5`, read where the
@@ -119,6 +123,26 @@ such as `t2=0` for Audio 2's single transfers.
   loopback cable, polled and by interrupt. Without a cable, `mpu.loop` and
   `mpu.loopi` say that nothing came back. [MPU401.md](MPU401.md) explains
   each line. Version 1.9 adds the group.
+* **meas**: what the drivers' fixes rest on, measured on the chip. A
+  channel's count read 100,000 times while it moves at 176,400 bytes a
+  second, once each as a game reads it (`meas.torn1`, `meas.torn2`), which
+  reports the torn readings, 256 off when a byte comes between the reads of
+  the low and the high byte, and as `esssb16`, the VxD and ES1869.DRV read
+  it, until two readings agree within 32 (`meas.agree1`, `meas.agree2`),
+  which fails on a torn reading or a step back. Audio 1 at 44100 Hz on the
+  793.8 kHz clock against Audio 2 at 48 kHz on the 768 kHz one for 3 seconds
+  (`meas.clk768`): their ratio within 50 ppm of 540/496, since both clocks
+  come from the 23.814 MHz master, over 30 and over 31, and Audio 2 within
+  150 ppm of 48,012.1 Hz by the PIT. The music DAC's samples recorded on
+  Audio 1 through mixer 7Fh bit 4, against Audio 2 at 44100 Hz
+  (`meas.fmrate`): 540/478, and 49,819.5 Hz. One FM operator in ESFM's
+  native mode with register 6 at 10h (`meas.fm4`) and at 20h (`meas.fm5`),
+  recorded the same way: on the right and on the left, 20 dB over the other
+  side, the sides ESFM.DRV's TrueSides gives a panned channel. And Audio 2's
+  tone recorded at 52,920 Hz (A1h F1h) through record source 7
+  (`meas.adc52`): 30 dB over the rest, at the ADC's top clean rate. Each
+  recording starts as `typef.m54_b2` does, after its `START` line. Version
+  2.0 adds the group.
 * **typef**: recordings under the Intel PIIX4's Type F DMA timing, which
   stopped the laptop under Linux
   ([ESS_EXTENDED.md](ESS_EXTENDED.md#type-f-dma-on-the-piix4)). Audio 1
@@ -166,6 +190,9 @@ restart`, and so does the screen. `/N` runs without the window.
 * The mpu cases send 77 bytes of MIDI out of the MIDI port, a note on and
   off on channel 16 and a SysEx with the non-commercial ID 7Dh, and change
   card 28h, mixer 64h and Config_Base+7 only for the case.
+* The meas cases that record change mixer 7Fh, 36h, 1Ch and the levels of
+  the mixer's inputs only for the case, and the FM ones leave ESFM's native
+  mode with the note off and every operator silent.
 * The typef cases can stop the machine until a power cycle. They run only
   when named, ask before the first, and write each case's `START` line to
   the disk before its recording starts, so that the report's last line names
@@ -178,7 +205,7 @@ restart`, and so does the screen. `/N` runs without the window.
    `esssb16`. Set `BLASTER` with the card's base, such as
    `SET BLASTER=A220 I5 D1 H5 P330 T6`.
 2. Run `ESSPROBE /S` for the short run, about a minute, then `ESSPROBE` for
-   all 187 cases, about five minutes. Each writes `ESSPROBE.TXT`; `/O:file`
+   all 207 cases, about six minutes. Each writes `ESSPROBE.TXT`; `/O:file`
    names another, such as `/O:FULL.TXT`. Esc stops at any time. The report
    is on the disk after every line, so a run that stops the machine keeps
    what it measured until then.
@@ -263,4 +290,9 @@ has it, and the program itself in the DOS emulator; it makes a recording
 from what the model's DACs played and checks that `essprec.py` passes it and
 fails it broken ([TESTING.md](TESTING.md)). The typef cases record on the
 model with the laptop's PCI bus (`tests/pcicfg.py`), and `/K` resumes a
-report in the emulator.
+report in the emulator. The meas cases pass on the model, which holds what
+Linux's driver measured, find a torn reading armed at every pause between
+readings, and fail on models where a fact doesn't hold: a 768 kHz clock at
+768,000 Hz, the music DAC at an OPL3's 49,716 Hz, the FM's sides swapped,
+and a record source that brings nothing. Since version 2.0, essprobe is
+built in the medium model, each module with a code segment of its own.

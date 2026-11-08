@@ -1,25 +1,38 @@
 # Builds essprobe.exe, which measures the ES1869 itself in real DOS and
-# writes a report (DOS, small model).
+# writes a report (DOS, medium model).
 #
 # Notes:
 #
 # No stack checks, because the interrupt handler runs on whatever stack it
-# interrupts. sbtsound.obj and dosplat.obj are sb16test.mk1's, and
-# piix4.obj is essreg.mk1's.
+# interrupts. The medium model gives each module a code segment of its
+# own, since the cases outgrew the small model's one, so the shared
+# modules are built again for it, as e_*.obj.
 #
 # (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 #
 # Licensed under GPL Version 3.0
 
-ESSP_FLAGS=-5 -osbhl+kp -fpi87 -s
+ESSP_FLAGS=-5 -osbhl+kp -fpi87 -s -w4 -e10 -d1 -bt=dos -mm
 
-essp.obj : src\essp.c .AUTODEPEND
- *wcc src\essp.c -i="$(%watcom)/h" $(ESSP_FLAGS) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+e_essp.obj : src\essp.c .AUTODEPEND
+ *wcc src\essp.c -i="$(%watcom)/h" $(ESSP_FLAGS) -fo=e_essp.obj
 
-essprobe.obj : src\essprobe.c .AUTODEPEND
- *wcc src\essprobe.c -i="$(%watcom)/h" $(ESSP_FLAGS) -w4 -e10 -d1 -bt=dos -fo=.obj -ms
+e_probe.obj : src\essprobe.c .AUTODEPEND
+ *wcc src\essprobe.c -i="$(%watcom)/h" $(ESSP_FLAGS) -fo=e_probe.obj
 
-essprobe.exe : essp.obj essprobe.obj sbtsound.obj dosplat.obj piix4.obj .AUTODEPEND
- @%write essprobe.lk1 FIL essprobe.obj,essp.obj,sbtsound.obj,dosplat.obj,piix4.obj
+e_sbtsnd.obj : src\sbtsound.c .AUTODEPEND
+ *wcc src\sbtsound.c -i="$(%watcom)/h" $(ESSP_FLAGS) -fo=e_sbtsnd.obj
+
+e_tears.obj : src\tears.c .AUTODEPEND
+ *wcc src\tears.c -i="$(%watcom)/h" $(ESSP_FLAGS) -fo=e_tears.obj
+
+e_dosplt.obj : src\dosplat.c .AUTODEPEND
+ *wcc src\dosplat.c -i="$(%watcom)/h" $(ESSP_FLAGS) -fo=e_dosplt.obj
+
+e_piix4.obj : src\piix4.c .AUTODEPEND
+ *wcc src\piix4.c -i="$(%watcom)/h" $(ESSP_FLAGS) -fo=e_piix4.obj
+
+essprobe.exe : e_essp.obj e_probe.obj e_sbtsnd.obj e_tears.obj e_dosplt.obj e_piix4.obj .AUTODEPEND
+ @%write essprobe.lk1 FIL e_probe.obj,e_essp.obj,e_sbtsnd.obj,e_tears.obj,e_dosplt.obj,e_piix4.obj
  @%append essprobe.lk1
- *wlink name essprobe sys dos op m libf cstart_t op maxe=10 op q op DOSSEG op STACK=4096 op el sort @essprobe.lk1
+ *wlink name essprobe sys dos op m op maxe=10 op q op DOSSEG op STACK=4096 op el sort @essprobe.lk1
