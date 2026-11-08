@@ -344,6 +344,14 @@ class SignalsTest(unittest.TestCase):
         self.assertEqual(ts.find("noise-white-32k"),
                          (ts.BY_NAME["noise-white"], 32000, None))
         self.assertEqual(ts.find("pilot-12000")[1], 48000)
+        # a directory after --only is a name that matches nothing
+        with open(os.devnull, "w") as null:
+            old, sys.stderr = sys.stderr, null
+            try:
+                with self.assertRaises(SystemExit):
+                    ts.main(["--only", "cal-44k", "out/elsewhere"])
+            finally:
+                sys.stderr = old
 
     def test_manifest(self):
         pairs = [(ts.BY_NAME["cal"], 44100, None),

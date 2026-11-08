@@ -13,6 +13,7 @@ says how to set each path's levels.
 ```
 python3 tools/testsig.py                    every file, into out/testsig
 python3 tools/testsig.py --only sweep cal   two signals, all their files
+python3 tools/testsig.py -o /var/tmp/ts --only cal-44k sweep-l-44k
 python3 tools/testsig.py --only 'noise-*' --rate 32000
 python3 tools/testsig.py --side r --only steps-44k
 python3 tools/testsig.py --list

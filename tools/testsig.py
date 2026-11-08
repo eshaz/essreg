@@ -5,12 +5,12 @@
 """Make the test signals that measure the ES1869's audio paths.
 
 usage:
-  python3 tools/testsig.py [OUTDIR]           every signal, into out/testsig
-  python3 tools/testsig.py --only NAME... [OUTDIR]
-  python3 tools/testsig.py --rate HZ [--only NAME...] [OUTDIR]
-  python3 tools/testsig.py --side l|r [--only NAME...] [OUTDIR]
-  python3 tools/testsig.py --list             the signals, one a line
-  python3 tools/testsig.py --doc [--check]    docs/TEST_SIGNALS.md's tables
+  python3 tools/testsig.py [-o OUTDIR]        every signal, into out/testsig
+  python3 tools/testsig.py [-o OUTDIR] --only NAME...
+  python3 tools/testsig.py --rate HZ [--only NAME...]
+  python3 tools/testsig.py --side l|r [--only NAME...]
+  python3 tools/testsig.py --list [--only NAME...]
+  python3 tools/testsig.py --doc [--check]    the docs' generated tables
 
 SIGNALS is the one list of them: each signal's family, rates, level and
 parameters, and what it measures, from which docs/TEST_SIGNALS.md takes its
@@ -1527,7 +1527,9 @@ def doc(check):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("outdir", nargs="?", default=OUT)
+    ap.add_argument("outdir", nargs="?")
+    ap.add_argument("-o", dest="out", metavar="OUTDIR",
+                    help="the directory, out/testsig by default")
     ap.add_argument("--only", nargs="+", metavar="NAME", default=[])
     ap.add_argument("--rate", type=int, metavar="HZ")
     ap.add_argument("--side", choices=("l", "r"),
@@ -1538,15 +1540,18 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.doc:
         return doc(args.check)
+    # every pattern names something, so that a directory after --only,
+    # which takes it as a name, is an error and not the default directory
+    for p in args.only:
+        if not wanted([p], args.rate, args.side):
+            ap.error("no signal matches %s (give the directory with -o)" % p)
     pairs = wanted(args.only, args.rate, args.side)
-    if not pairs:
-        ap.error("no signal matches %s" % " ".join(args.only))
     if args.list:
         for s, r, d in pairs:
             print("%-24s %-9s %s" % (file_name(s, r, d), s.family,
                                      s.what.split(".")[0]))
         return 0
-    write_all(args.outdir, pairs)
+    write_all(args.out or args.outdir or OUT, pairs)
     return 0
 
 
