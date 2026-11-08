@@ -25,6 +25,7 @@
 
 #include "sb16t.h"
 #include "sbtsound.h"
+#include "tears.h"
 
 #ifdef ESS_HOST
 #define sbt_vfmt vsnprintf
@@ -1321,6 +1322,70 @@ static void check_count(int sixteen) {
   quiet();
 }
 
+// a game polls its 16-bit count during a fast transfer, one reading at a
+// time, as most games read it. Behind a front each reading is answered
+// from the channel the transfer runs on, which the fronts read until two
+// readings agree, so none may be 128 words off (a torn reading of an 8-bit
+// channel, halved) or step back; where the game reads the 8237 itself
+// (EMM386), its count torn between the bytes, 256 words off, is the
+// card's, and only counted
+#define POLL_N 100000UL
+#define POLL_PIECE 32
+static void check_poll16(void) {
+  struct xfer x;
+  struct meas m;
+  struct tears t;
+  u16 pos[POLL_PIECE], ring, cp, k, v, last = 0, d0;
+  u32 i, n = (O & SBT_O_SHORT) ? 400 : POLL_N, moves = 0;
+  int r;
+
+  dsp_reset(NULL);
+  rate41(44100);
+  x_init(&x, 0xB6, 0x30, F16 | FST | FSG, 44100);
+  x.frames = 2048; // the 16 KB buffer, 8192 words
+  ring = (u16)(x.frames * x.nb * 2);
+  cp = (u16)(0xC2 + 4 * (x.ch - 4));
+  x_tone(&x, 44100);
+  counters();
+  memset(&m, 0, sizeof(m));
+  m.started = x_start(&x) == 0;
+  wait_n(&n16, 1, 300000UL);
+  d0 = dma_left(C->dma8);
+  tears_init(&t, ring, 2, 512);
+  for (i = 0; i < n; i += k) {
+    for (k = 0; k < POLL_PIECE && i + k < n; k++) {
+      H->lock();
+      H->outb(0xD8, 0);
+      v = H->inb(cp);
+      v |= (u16)H->inb(cp) << 8;
+      H->unlock();
+      pos[k] = (u16)(ring - 1 - v);
+      if (i + k && pos[k] != last)
+        moves++;
+      last = pos[k];
+    }
+    tears_add(&t, pos, k);
+  }
+  m.moving = moves >= n / 64;
+  m.moving8 = dma_left(C->dma8) != d0;
+  if (!front)
+    r = R_INFO; // the game reads the card's 8237 itself
+  else if (!m.started)
+    r = R_FAIL;
+  else if (!m.moving)
+    r = still_known(&m) ? R_KNOWN : R_FAIL;
+  else
+    r = t.torn128 || t.torn_other || t.back ? R_FAIL : R_PASS;
+  res("ctl.poll16", r,
+      "channel %u, %lu readings: torn by 128 %lu, by 256 %lu, more %lu; "
+      "back %lu, jumps %lu, worst %+ld, dma=%s",
+      x.ch, (unsigned long)n, (unsigned long)t.torn128,
+      (unsigned long)t.torn256, (unsigned long)t.torn_other,
+      (unsigned long)t.back, (unsigned long)t.jumps, (long)t.worst,
+      dma_word(&m));
+  quiet();
+}
+
 // the handler doesn't acknowledge: the next block waits for it
 static void check_stall(void) {
   struct xfer x;
@@ -1356,6 +1421,7 @@ static void check_control(void) {
     check_exit(1);
     check_queue(1);
     check_count(1);
+    check_poll16();
   }
   check_stall();
 }

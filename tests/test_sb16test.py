@@ -24,6 +24,7 @@ unicorn for the fronts and the program)
 """
 
 import ctypes
+import functools
 import math
 import os
 import re
@@ -97,7 +98,8 @@ def library():
         subprocess.run(["gcc", "-std=gnu99", "-Wall", "-Wextra", "-Werror",
                         "-DESS_HOST", "-O1", "-fPIC", "-shared", "-I" + SRC,
                         "-o", out, os.path.join(SRC, "sb16t.c"),
-                        os.path.join(SRC, "sbtsound.c"), "-lm"],
+                        os.path.join(SRC, "sbtsound.c"),
+                        os.path.join(SRC, "tears.c"), "-lm"],
                        check=True, capture_output=True)
         lib = ctypes.CDLL(out)
         lib.sbt_run.argtypes = [ctypes.POINTER(HAL), ctypes.POINTER(CARD),
@@ -212,6 +214,7 @@ class Run:
 
     # --- the hardware layer --------------------------------------------------
     def _guard(fn):
+        @functools.wraps(fn)
         def call(self, *a):
             try:
                 return fn(self, *a)
@@ -583,6 +586,91 @@ class VxDTest(Checks, unittest.TestCase):
 
     def card(self):
         return VxDCard(dma2=3)
+
+
+class TornRun(Run):
+    """the checks with the game's readings of its 16-bit count (C6h,
+    channel 5) tampered with once ctl.poll16's polling starts, past the
+    other checks' few readings: "tear" arms a torn reading of the card's
+    8-bit channels before every `every`th reading, which a front reads the
+    count from, "tear16" one of channel 5 itself, which the game reads
+    under EMM386, and "old" hands every `every`th reading over 128 words
+    short, as a front without the two-readings rule handed the game a torn
+    reading of the 8-bit channel, halved"""
+
+    def __init__(self, card, front, mode, every=8, **kw):
+        self.mode, self.every = mode, every
+        self.reads, self.low_next, self.borrow = 0, True, 0
+        super().__init__(card, front, **kw)
+
+    @Run._guard
+    def _outb(self, port, v):
+        if port == 0xD8:
+            self.low_next = True
+        Run._outb.__wrapped__(self, port, v)
+
+    @Run._guard
+    def _inb(self, port):
+        if port != 0xC6:
+            return Run._inb.__wrapped__(self, port)
+        low, self.low_next = self.low_next, not self.low_next
+        self.reads += low
+        on = self.reads > 50 and self.reads % self.every == 0
+        if on and low and self.mode.startswith("tear"):
+            dmac = self.card.chip.dmac
+            dmac.tear((5,) if self.mode == "tear16" else (0, 1, 2, 3))
+        v = Run._inb.__wrapped__(self, port)
+        if on and self.mode == "old":
+            if low:
+                self.borrow = int(v < 0x80)
+                v = (v - 0x80) & 0xFF
+            else:
+                v = (v - self.borrow) & 0xFF
+        return v
+
+
+@unittest.skipUnless(HAVE_UNICORN and have_nasm(), "needs nasm and unicorn")
+class Poll16Test(unittest.TestCase):
+    """ctl.poll16: a game's single readings of its 16-bit count through a
+    front never come 128 words off nor step back, though the front's own
+    readings of the channel it carries the transfer on tear; under EMM386
+    the game reads the 8237 itself, and its tears of 256 words are only
+    counted; an old front's reading, 128 words short, fails"""
+
+    def poll(self, card, mode, front=True):
+        run = TornRun(card, front, mode)
+        self.assertEqual(run.errors, [])
+        return run, run.results()["ctl.poll16"]
+
+    def counts(self, text):
+        m = re.search(r"torn by 128 (\d+), by 256 (\d+), more (\d+); "
+                      r"back (\d+)", text)
+        return tuple(int(x) for x in m.groups())
+
+    def test_fronts_absorb_tears(self):
+        for card in (TSRCard("qpi", dma2=3), VxDCard(dma2=3)):
+            with self.subTest(card=type(card).__name__):
+                run, res = self.poll(card, "tear")
+                self.assertEqual(res[0], "PASS", res)
+                self.assertEqual(self.counts(res[1]), (0, 0, 0, 0))
+                self.assertTrue(card.chip.dmac.torn)    # the front's took them
+
+    def test_emm386_counts_the_8237s_own(self):
+        card = TSRCard("emm", dma2=5)
+        run, res = self.poll(card, "tear16")
+        self.assertEqual(res[0], "PASS", res)
+        torn128, torn256, more, back = self.counts(res[1])
+        self.assertEqual((torn128, more, back), (0, 0, 0))
+        self.assertGreater(torn256, 10)
+
+    def test_old_front_fails(self):
+        run, res = self.poll(TSRCard("qpi", dma2=3), "old")
+        self.assertEqual(res[0], "FAIL", res)
+        self.assertGreater(self.counts(res[1])[0], 10)
+
+    def test_model_is_info(self):
+        run, res = self.poll(ModelCard(), "old", front=False)
+        self.assertEqual(res[0], "INFO", res)   # not behind a front
 
 
 # --- the program --------------------------------------------------------------

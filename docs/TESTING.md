@@ -397,7 +397,11 @@ so set the speakers to a normal level first.
    `dma=still, ch 1 moved`, but for the auto-initialized ones where Audio 2
    moves the count (`dma=moving`). On a card whose Audio 2 has no 8-bit
    channel of its own (`route.audio2`), the two transfers at once are KNOWN,
-   `one at a time on Audio 1`.
+   `one at a time on Audio 1`. `ctl.poll16` reads a fast 16-bit transfer's
+   count 100,000 times, as a game reads it, and fails behind a front on a
+   reading 128 words off or one that goes back; where the game reads the
+   8237 itself, under EMM386, the 8237's own torn readings, 256 words off,
+   are only counted.
 4. If a tone sounded distorted or looping, restart, load `ESSSB16 /S` and
    run `SB16TEST /L /O:SB16S.TXT`, and send both reports.
 5. A recorded run measures what reaches the speakers, without a person.
