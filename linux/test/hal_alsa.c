@@ -102,6 +102,8 @@ static const char *role_dev(struct alsa *a, enum et_role r)
 		return "hw:CARD=" CARD_ID ",DEV=1";
 	case ET_DUAL:
 		return "hw:CARD=" CARD_ID ",DEV=2";
+	case ET_MON:
+		return "hw:CARD=" CARD_ID ",DEV=3";
 	case ET_REC2:
 		return a->rec2[0] ? a->rec2 : NULL;
 	default:
@@ -253,6 +255,14 @@ static snd_pcm_sframes_t xfer(struct et_stream *s, snd_pcm_t *pcm,
 
 	if (s->flags & ET_POLLED)
 		return polled(s, pcm, frames);
+	// the monitor gives frames only while Audio 2 plays, and its reads
+	// wait for as long: a wait here that the stream's end bounds
+	if (s->role == ET_MON) {
+		int w = snd_pcm_wait(pcm, 100);
+
+		if (w <= 0)
+			return w ? w : -EAGAIN;
+	}
 	if (s->capture)
 		return s->flags & ET_MMAP ? snd_pcm_mmap_readi(pcm, p, frames) :
 					    snd_pcm_readi(pcm, p, frames);
@@ -275,7 +285,8 @@ static double trigger_time(struct alsa *a, snd_pcm_t *pcm)
 }
 
 // where a running stream is, and when: what was written less what is still
-// to play, at the time of that reading of the pointer
+// to play, or what was read and what waits to be, at the time of that
+// reading of the pointer
 static void stamp(struct et_stream *s, snd_pcm_t *pcm)
 {
 	snd_pcm_status_t *st;
@@ -293,8 +304,9 @@ static void stamp(struct et_stream *s, snd_pcm_t *pcm)
 	s->stamps[s->stamped].raw = s->stamps[s->stamped].t +
 		(raw.tv_sec + raw.tv_nsec * 1e-9) -
 		(now.tv_sec + now.tv_nsec * 1e-9);
-	s->stamps[s->stamped].frame = (double)s->done -
-				      snd_pcm_status_get_delay(st);
+	s->stamps[s->stamped].frame =
+		s->capture ? (double)s->done + snd_pcm_status_get_delay(st) :
+			     (double)s->done - snd_pcm_status_get_delay(st);
 	s->stamped++;
 }
 
@@ -429,7 +441,7 @@ static void *stream_thread(void *arg)
 		err = snd_pcm_open(&pcm, dev,
 				   s->capture ? SND_PCM_STREAM_CAPTURE :
 						SND_PCM_STREAM_PLAYBACK,
-				   0);
+				   s->role == ET_MON ? SND_PCM_NONBLOCK : 0);
 	if (err >= 0)
 		err = setup(s, pcm);
 	// the first buffer of playback, so that the start has data
@@ -574,11 +586,15 @@ static int alsa_has(void *ctx, enum et_role r)
 	if (!a->ctl)
 		return 0;
 	snd_pcm_info_alloca(&info);
-	snd_pcm_info_set_device(info, r == ET_FMC ? 1 : r == ET_DUAL ? 2 : 0);
+	snd_pcm_info_set_device(info, r == ET_FMC  ? 1 :
+				      r == ET_DUAL ? 2 :
+				      r == ET_MON  ? 3 :
+						     0);
 	snd_pcm_info_set_subdevice(info, r == ET_A1P ? 1 : 0);
-	snd_pcm_info_set_stream(info, r == ET_A1C || r == ET_FMC ?
-					      SND_PCM_STREAM_CAPTURE :
-					      SND_PCM_STREAM_PLAYBACK);
+	snd_pcm_info_set_stream(info,
+				r == ET_A1C || r == ET_FMC || r == ET_MON ?
+					SND_PCM_STREAM_CAPTURE :
+					SND_PCM_STREAM_PLAYBACK);
 	return snd_ctl_pcm_info(a->ctl, info) >= 0;
 }
 

@@ -32,6 +32,7 @@ enum et_role {
 	ET_REC2, // the second card's capture, through the cable
 	ET_CMD, // a shell command, run at the stream's start
 	ET_CTL, // a control written at the stream's start, cmd to value
+	ET_MON, // what Audio 2's DAC took, PCM 3 capture
 	ET_NROLES
 };
 

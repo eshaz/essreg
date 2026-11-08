@@ -14,7 +14,9 @@
  * and the second card hears its left side, on a clock 800 ppm off. A note
  * from --fm-note is a sine on the sides its bits give. Record source 7
  * goes through src/s3dsim.c's 3-D effect, with the registers that the 3-D
- * controls hold, without its path's gain of 0.5.
+ * controls hold, without its path's gain of 0.5. PCM 3, the monitor, gets
+ * Audio 2's ring as the DMA took it, from its frame at the monitor's start,
+ * and a pause of Audio 2 is an xrun there.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
@@ -693,12 +695,73 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 	}
 }
 
+// Audio 2's playback in a run, or NULL
+static const struct et_stream *sim_a2(const struct et_stream *s, int n)
+{
+	int i;
+
+	for (i = 0; i < n; i++)
+		if (s[i].role == ET_A2 && !s[i].capture)
+			return &s[i];
+	return NULL;
+}
+
+// the monitor: Audio 2's ring as the DMA took it, as 16-bit stereo, from the
+// frame the DMA took at the monitor's start, or from Audio 2's first. At
+// another rate its prepare fails, and a pause of Audio 2 is a gap with an
+// xrun, after which the frames go on from the paused one
+static void sim_monitor(struct et_stream *r, struct et_stream *s, int n)
+{
+	const struct et_stream *a2 = sim_a2(s, n), *ring;
+	unsigned long i, k0 = 0;
+	unsigned int over;
+	double paused;
+
+	r->done = 0;
+	if (!a2) {
+		r->err = -ETIMEDOUT;
+		return;
+	}
+	ring = sim_resampled(a2, s, n);
+	over = ring->fmt.rate / a2->fmt.rate;
+	if (r->fmt.rate != a2->fmt.rate * over) {
+		r->err = -EBUSY;
+		return;
+	}
+	if (sim.faults & SIM_MON_APPL)
+		ring = a2;
+	if (r->start > a2->start)
+		k0 = (unsigned long)((r->start - a2->start) * r->fmt.rate);
+	if (sim.faults & SIM_MON_LAP)
+		k0 += a2->buffer_got * over;
+	for (i = 0; i < r->frames && k0 + i < ring->frames; i++) {
+		const char *p = (const char *)ring->data +
+				(k0 + i) * et_fmt_bytes(&ring->fmt);
+		double v[2];
+
+		et_unpack(&ring->fmt, p, 1, 0, &v[0]);
+		if (ring->fmt.channels > 1)
+			et_unpack(&ring->fmt, p, 1, 1, &v[1]);
+		else
+			v[1] = v[0];
+		et_pack1(&r->fmt, r->data, i, 0, v[0]);
+		et_pack1(&r->fmt, r->data, i, 1, v[1]);
+	}
+	r->done = i;
+	if (r->done < r->frames)
+		r->err = -ETIMEDOUT;
+	paused = a2->pause_at * r->fmt.rate;
+	if (a2->pause_at > 0 && paused > k0 && paused < k0 + r->done)
+		r->xruns = 1;
+}
+
 static int sim_ctl_set(void *ctx, const char *name, int index, const long *v,
 		       int n);
 
 static int sim_run(void *ctx, struct et_stream *s, int n)
 {
-	double end = 0;
+	const struct et_stream *a2 = sim_a2(s, n);
+	double end = 0, a2_start = a2 ? a2->start : 0;
 	int i;
 
 	(void)ctx;
@@ -753,12 +816,16 @@ static int sim_run(void *ctx, struct et_stream *s, int n)
 					(sim.faults & SIM_RS_REAL_TIME ? 5e-6 : 0) :
 					SIM_MASTER_PPB * 1e-9 +
 					(x->fmt.rate % 8000 ? 0 : 251.95e-6);
+				double t0 = x->t_trigger;
 
+				// the monitor's frames come as Audio 2 plays them
+				if (x->role == ET_MON && a2_start > x->start)
+					t0 = a2_start;
 				while (x->stamped < x->max_stamps &&
 				       x->stamped * x->period_got < x->frames) {
 					struct et_stamp *t = &x->stamps[x->stamped];
 
-					t->t = x->t_trigger + x->stamped *
+					t->t = t0 + x->stamped *
 						(double)x->period_got / x->fmt.rate;
 					t->raw = t->t;
 					t->frame = (double)x->stamped * x->period_got *
@@ -785,7 +852,9 @@ static int sim_run(void *ctx, struct et_stream *s, int n)
 			end = x->t_end;
 	}
 	for (i = 0; i < n; i++)
-		if (s[i].capture)
+		if (s[i].role == ET_MON)
+			sim_monitor(&s[i], s, n);
+		else if (s[i].capture)
 			fill(&s[i], s, n);
 	for (i = 0; i < n; i++)
 		if (s[i].role == ET_CTL)
@@ -822,7 +891,8 @@ static int sim_run(void *ctx, struct et_stream *s, int n)
 static int sim_has(void *ctx, enum et_role r)
 {
 	(void)ctx;
-	return r != ET_DUAL || param("dual_playback");
+	return (r != ET_DUAL || param("dual_playback")) &&
+	       (r != ET_MON || param("monitor_device"));
 }
 
 static const char *sim_rec2(void *ctx)

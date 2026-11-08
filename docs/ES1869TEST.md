@@ -126,6 +126,10 @@ The cases reach the chip four ways:
 * **The cable.** The second card hears the left output, for Audio 1's
   playback and the cases that need the analog output.
 
+PCM device 3, the monitor, reads back what Audio 2's DMA took from the
+driver's side, without an engine of its own, and the `mon` group holds it
+against the stream, the filter's C code and the dig path.
+
 ## The groups
 
 * `cal`: the second card hears the left output, its level and its clock, and
@@ -271,6 +275,15 @@ The cases reach the chip four ways:
   after a pause's release, against the tone's peak, six times.
 * `dual`: the four-channel device's channels on their DACs and one clock,
   and when each DAC began, from the phase of its own tone, at three rates.
+* `mon`: the monitor, PCM device 3
+  ([LINUX_MONITOR.md](LINUX_MONITOR.md#tests)). A pattern played on Audio 2
+  comes back exactly, in 16-bit stereo and in 8-bit mono, with timestamps at
+  the ring's rate; through the rate correction, and with the ring at 2x,
+  every frame is the filter's C code's; in the Clock mode the monitor and
+  the dig path's PCM 1 agree frame for frame; a pause is one xrun with the
+  frames in order on both sides; and beside it Audio 1 records the analog
+  loop, on the same clock to a frame, with the delay between the two by
+  their timestamps.
 * `latency`: the smallest period of four that each engine plays without an
   xrun.
 * `music`: aplay plays a file on Audio 2, checked frame by frame.

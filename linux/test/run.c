@@ -118,8 +118,8 @@ void *et_alloc_frames(const struct et_fmt *f, unsigned long frames)
 	return p;
 }
 
-static const char *const role_names[] = { "a2",	 "a1p",	 "a1c", "fmc",
-					  "dual", "rec2", "cmd" };
+static const char *const role_names[] = { "a2",	  "a1p", "a1c", "fmc", "dual",
+					  "rec2", "cmd", "ctl", "mon" };
 
 int et_run(struct et_ctx *c, struct et_stream *s, int n)
 {

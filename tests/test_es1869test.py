@@ -59,6 +59,8 @@ FAULTS = {
     0x40000000: "rs.over.2",       # the ring stays at the stream's rate
     0x80000000: "mix.scale",       # the record level's scale follows the source
     0x100000000: "dac.over.quality",  # the ring gets noise above 1x
+    0x200000000: "mon.exact",      # the monitor reads the ring a lap late
+    0x400000000: "mon.trim",       # the monitor reads the application's
 }
 
 # the cases that run only when named, or with someone at the machine

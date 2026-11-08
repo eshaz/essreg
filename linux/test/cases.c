@@ -75,6 +75,7 @@ FN(c_mix)
 FN(c_mix_scale)
 FN(c_mix_adc)
 FN(c_dual_map)
+FN(c_mon)
 FN(c_dual_align)
 FN(c_both_restart)
 FN(c_rate_max)
@@ -111,6 +112,8 @@ FN(c_stress_all)
 #define N ET_NEW
 #define DESTR (ET_OPTIN | ET_DESTR | ET_ROOT | N)
 
+// a table of macro rows, which clang-format would run together
+// clang-format off
 const struct et_case et_cases[] = {
 	CASE("cal.rec2", Q, c_cal_rec2, 0,
 	     "the second card hears the left output through the cable")
@@ -357,6 +360,21 @@ const struct et_case et_cases[] = {
 	CASE("dual.align.48000", R | ET_ROOT | N, c_dual_align, 2,
 	     "the same at 48000 Hz")
 
+	CASE("mon.exact", Q | N, c_mon, 0,
+	     "PCM 3 returns Audio 2's 16-bit stereo pattern exactly, from its first frame")
+	CASE("mon.fmt.u8m", N, c_mon, 1,
+	     "the same, 8-bit unsigned mono as 16-bit stereo")
+	CASE("mon.trim", N, c_mon, 2,
+	     "through the rate correction, +1000 ppm: every frame the filter's C code's")
+	CASE("mon.over.2", N, c_mon, 3,
+	     "the ring at 2x: the monitor at 88200 Hz, every frame the C code's")
+	CASE("mon.clock", N, c_mon, 4,
+	     "the Clock mode: the monitor and the dig path's PCM 1 agree frame for frame")
+	CASE("mon.pause", N, c_mon, 5,
+	     "a pause of Audio 2 is one xrun, the frames in order on both sides of it")
+	CASE("mon.loop", N, c_mon, 6,
+	     "beside Audio 1 recording the analog loop: both whole, on one clock")
+
 	CASE("both.a1play", R | N, c_both_restart, 0,
 	     "Audio 2 plays on while Audio 1 starts and stops eight times")
 	CASE("both.a1rec", R | N, c_both_restart, 1,
@@ -428,5 +446,6 @@ const struct et_case et_cases[] = {
 	CASE("midi.soft", ET_MIDI | R, c_midi_soft, 0,
 	     "WildMidi on Audio 1, heard by the second card")
 };
+// clang-format on
 
 const int et_ncases = sizeof(et_cases) / sizeof(et_cases[0]);
