@@ -169,7 +169,7 @@ static double ctl_gain(const char *name, int index, int ch)
 	return cdb == ET_DB_MUTE ? 0 : pow(10, cdb / 2000.0);
 }
 
-#define DAC_LAST 0.062 // of the last sample, in what the DAC puts out
+#define DAC_LAST sim_rs_dac_last() // of the last sample, in what it puts out
 #define OVER_LIVE 6 // frames to a stream frame that hold 1x, 2x and 3x
 
 // Audio 2's real rate: slaved to the FM, the FM's; with the data sheet's
@@ -337,7 +337,9 @@ static const struct et_stream *sim_over_live(const struct et_stream *a2,
 	int r, c, j;
 
 	for (r = 0; r < 3; r++)
-		ring[r] = sim_rs_over(a2->data, a2->frames, ch, 0, r + 1, &len[r]);
+		ring[r] = sim_rs_over(a2->data, a2->frames, ch, 0, r + 1,
+				      sim_setting("a2_treble") &&
+				      !(sim.faults & SIM_RS_TREBLE), &len[r]);
 	free(data);
 	data = malloc(made * ch * sizeof(*data));
 	if (!data)
@@ -394,7 +396,7 @@ static const struct et_stream *sim_resampled(const struct et_stream *a2,
 	parts[0].ppb = sim_rs_ppb(mode, item, a2, &parts[0].on);
 	parts[0].dither = sim_setting("a2_resample_dither");
 	parts[0].over = sim_rs_ring(a2->fmt.rate);
-	parts[0].treble = sim_setting("a2_treble") && parts[0].over == 1 &&
+	parts[0].treble = sim_setting("a2_treble") &&
 			  !(sim.faults & SIM_RS_TREBLE);
 	parts[0].on |= parts[0].over > 1;
 	any = parts[0].on && (parts[0].ppb || mode == 2 || parts[0].treble ||

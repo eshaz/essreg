@@ -58,7 +58,7 @@ struct es1869_rs_job {
 // in the buffer
 struct es1869_rs {
 	s16 *tab; // the filter, made for the first stream that uses it
-	s16 *flat; // and with the DAC's hold corrected, when that's asked for
+	s16 *flat[ES_RS_OVER]; // and with the DAC's hold corrected, at each rate
 	bool treble; // the stream goes through that one
 	bool on; // this stream goes through it
 	bool mmx; // the CPU has MMX
@@ -92,7 +92,7 @@ struct es1869_rs_stream {
 	bool mmx; // the caller holds the FPU
 };
 
-void es1869_rs_table(s16 *tab, bool flat);
+void es1869_rs_table(s16 *tab, unsigned int flat);
 void es1869_rs_split(s16 *l, s16 *r, const void *src, u32 frames, bool stereo);
 void es1869_rs_shift(struct es1869_rs *rs, struct es1869_rs_job *j, u32 n,
 		     bool stereo);

@@ -337,18 +337,29 @@ late three times, by about 5 ms each.
 With its stages off, the DAC holds each sample for a whole sample period,
 and each sample keeps about 6 % of the one before
 ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter)).
-At 44.1 kHz that takes 1.2 dB off 10 kHz, 2.8 dB off 16 kHz and 4.2 dB off
-20 kHz. `a2_treble` ("Audio 2 Treble Correction") takes a stream through a
-second table of the filter, with or without a change of rate, that gives
-that back. Seven taps folded into the filter's own do it, so a frame costs
-what it did. Read back from the chip's data path at 44.1 kHz, tones stay
-within 0.15 dB of the level that response calls for up to 20 kHz, with THD+N
-of -90 dB or better. At the jack, through a recorder, a 44.1 kHz stream
-stays within -0.12 and +0.21 dB of the DAC at 132.3 kHz up to 19.4 kHz. The
-gain near 20 kHz is 4 dB, so a stream that is that loud up there clips, and
-the correction only fits a DAC with its stages off (`audio2_oversampling=0`,
-`audio2_filter=0`). It is for a stream at 1x: `a2_oversample` above that
-leaves it out, with 1.2 dB left to lose at 20 kHz at 2x and 0.5 dB at 3x.
+At 44.1 kHz that takes 1.2 dB off 10 kHz, 4.2 dB off 20 kHz and 5 dB off
+22.05 kHz, and with the DAC at 2x or 3x 1.4 or 0.65 dB off 22.05 kHz.
+`a2_treble` ("Audio 2 Treble Correction") gives that back through a table of
+the filter for each rate of the DAC, with or without a change of rate. Its
+16 taps a side, which `tools/es1869treble.py` fits to that model, go on the
+filter's sinc before the window, so a frame costs what it did. They hold the
+response within 0.05 dB up to 22.05 kHz at 1x and within 0.015 dB at 2x. The
+first version had 7 taps a side and left 0.75 dB at 22.05 kHz, because a
+short symmetric filter is flat at half the rate, where the hold still falls.
+The gain reaches 4.95 dB at 22.05 kHz, so a stream that is that loud up
+there clips, and the correction only fits a DAC with its stages off
+(`audio2_oversampling=0`, `audio2_filter=0`). To follow a new measurement of
+the DAC, change `LAST` in the tool and run it.
+
+Where the filter moves the samples, at 1x with a change of rate and at 2x
+and 3x, the top of the band is the filter's own edge, which no correction
+moves without letting images through: 0.4 dB down at 21 kHz, 1.8 dB at 21.5
+kHz and 5.5 dB at 22 kHz, with a tone's image 51 dB down at 20.5 kHz and 27
+dB at 21 kHz. Only at 1x with no change of rate do the samples keep their
+places and the response its 0.05 dB up to 22.05 kHz, which `rs.treble` reads
+back from the chip's data path. With the first version, a 44.1 kHz stream at
+the jack stayed within -0.12 and +0.21 dB of the DAC at 132.3 kHz up to 19.4
+kHz, through a recorder.
 
 A stream's period no longer matches the ring's, so a timer wakes the client
 on the stream's own period boundaries, and the chip's interrupts stay as the
@@ -921,8 +932,9 @@ saved state wins over a parameter. The defaults are the Kconfig options
   Audio 1 records.
 * `a2_treble` ("Audio 2 Treble Correction Playback Switch"): 0 to 1,
   default 0. Audio 2 through the filter with the DAC's own response taken
-  back, at 1x: flat to 20 kHz within 0.15 dB at 44.1 kHz, with the DAC's
-  stages off, for 4 dB less headroom there.
+  back, at 1x, 2x and 3x: within 0.05 dB up to half the stream's rate, or up
+  to the filter's edge at 20 kHz where it moves the samples, with the DAC's
+  stages off, for 5 dB less headroom at the top.
 * `a1p_max_rate`: 3101 to 793800, default 48000. Audio 1 playback's highest
   rate (Hz). It takes effect at the next prepare.
 * `a1c_max_rate`: 3101 to 793800, default 52920. Audio 1 recording's highest

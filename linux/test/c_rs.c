@@ -45,8 +45,9 @@
 #define RS_CTL_DITHER "Audio 2 Rate Dither Playback Switch"
 #define RS_THDN_BAND -85.0 // dB, to 20 kHz
 #define RS_SPUR_BAND -90.0
-#define RS_TREBLE_FLAT 0.2 // dB, the DAC's response taken back to 20 kHz
-#define RS_DAC_LAST 0.062 // of the last sample, in what the DAC puts out
+#define RS_TREBLE_FLAT 0.1 // dB, the DAC's response taken back
+#define RS_TREBLE_AMP 16000 // under full scale by the most the correction adds
+#define RS_DAC_LAST sim_rs_dac_last() // of the last sample, in what it puts out
 
 enum { RS_OFF, RS_TRIM, RS_CLOCK };
 
@@ -246,7 +247,8 @@ enum et_result c_rs_exact(struct et_ctx *c, const struct et_case *k)
 		free(d);
 		return ET_ERROR;
 	}
-	ref = sim_rs_over(d, n, f.channels, t[k->arg].ppb, t[k->arg].over, &made);
+	ref = sim_rs_over(d, n, f.channels, t[k->arg].ppb, t[k->arg].over, 0,
+			  &made);
 	r = rs_dig(c, &f, d, n, &tune, NULL, 0, &rec, &nrec);
 	rs_ring_over = 1;
 	if (r != ET_PASS)
@@ -386,20 +388,22 @@ enum et_result c_rs_band(struct et_ctx *c, const struct et_case *k)
 
 // rs.treble: the DAC's response taken back, in the samples, on the dig path:
 // each tone comes up by what the hold and the last sample's share take from
-// it, on its own or at a step, and the correction adds nothing but its gain
+// it, and the correction adds nothing but its gain. On its own every frame
+// keeps its place, so that it holds to half the rate; at a step the filter's
+// edge takes the top from 20 kHz
 enum et_result c_rs_treble(struct et_ctx *c, const struct et_case *k)
 {
 	static const double hz[] = { 997, 5000.7, 10000.9, 15000.1, 18000.3,
-				     20000.3 };
+				     20000.3, 21000.7, 21999.1 };
 	static const struct et_fmt f = { ET_S16, 2, 44100 };
 	long ppb = k->arg ? 30000 : 0;
+	unsigned int i, tones = sizeof(hz) / sizeof(hz[0]) - (k->arg ? 2 : 0);
 	char name[64];
-	unsigned int i;
 
 	if (rs_mode(c, k->arg ? RS_TRIM : RS_OFF, ppb) ||
 	    et_param_set(c, "a2_treble", 1))
 		return ET_ERROR;
-	for (i = 0; i < sizeof(hz) / sizeof(hz[0]); i++) {
+	for (i = 0; i < tones; i++) {
 		double x = M_PI * hz[i] / f.rate;
 		double dac = 20 * log10(sin(x) / x *
 					sqrt(1 + 2 * RS_DAC_LAST * cos(2 * x) +
@@ -408,7 +412,7 @@ enum et_result c_rs_treble(struct et_ctx *c, const struct et_case *k)
 		struct rs_tone o;
 		enum et_result r;
 
-		r = rs_tone(c, &f, hz[i], 20000, ppb, RS_BAND_FRAMES, &o);
+		r = rs_tone(c, &f, hz[i], RS_TREBLE_AMP, ppb, RS_BAND_FRAMES, &o);
 		if (r != ET_PASS)
 			return r;
 		snprintf(name, sizeof(name), "level over the DAC at %.0f Hz", hz[i]);

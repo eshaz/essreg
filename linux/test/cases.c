@@ -190,8 +190,9 @@ const struct et_case et_cases[] = {
 	     "tones to 20 kHz at 30 ppm: level, THD+N and the worst spur")
 	CASE("rs.band.48", N, c_rs_band, 1, "the same at 48 kHz, -252 ppm")
 	CASE("rs.treble", N, c_rs_treble, 0,
-	     "the hold taken back: tones to 20 kHz at their full level")
-	CASE("rs.treble.30", N, c_rs_treble, 1, "the same at a step of 30 ppm")
+	     "the hold taken back: tones to 22 kHz at their full level")
+	CASE("rs.treble.30", N, c_rs_treble, 1,
+	     "the same to 20 kHz at a step of 30 ppm")
 	CASE("rs.imd.ccif", N, c_rs_imd, 0,
 	     "19 and 20 kHz: what falls between them")
 	CASE("rs.imd.smpte", N, c_rs_imd, 1,

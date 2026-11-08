@@ -63,7 +63,8 @@
  * cost ten times the filter's share of the CPU at each tick.
  *
  * a2_treble takes the same way with a table that gives back what the DAC's hold
- * takes from the top of the band, with or without a change of rate.
+ * takes from the top of the band, with or without a change of rate, one for
+ * each rate of the ring, since the hold takes less at 2x and 3x.
  *
  * a2_oversample plays the ring at two or three times the stream's rate, a write
  * to it taking effect under a playing stream, which starts afresh as at a
@@ -670,8 +671,9 @@ static void rs_free(void *tab)
 	kvfree(tab);
 }
 
-// a table of the filter
-static s16 *rs_table_new(struct es1869 *chip, bool flat)
+// a table of the filter, with the correction of the DAC at flat times the
+// stream's rate or none for 0
+static s16 *rs_table_new(struct es1869 *chip, unsigned int flat)
 {
 	s16 *tab = kvmalloc_array(ES_RS_TABLE, sizeof(s16), GFP_KERNEL);
 
@@ -683,16 +685,21 @@ static s16 *rs_table_new(struct es1869 *chip, bool flat)
 	return tab;
 }
 
-// the filter's tables, each made once, when the settings first ask for it
+// the filter's tables, each made once, when the settings first ask for it:
+// a2_treble's for each rate of the DAC that a2_oversample allows
 static void rs_table(struct es1869 *chip)
 {
 	struct es1869_rs *rs = &chip->mirror.rs;
+	int k, most = -1;
 
 	if (!rs->tab && (es1869_val(ES_S_a2_resample) ||
 			 es1869_val(ES_S_a2_oversample)))
-		rs->tab = rs_table_new(chip, false);
-	if (!rs->flat && es1869_val(ES_S_a2_treble))
-		rs->flat = rs_table_new(chip, true);
+		rs->tab = rs_table_new(chip, 0);
+	if (es1869_val(ES_S_a2_treble))
+		most = es1869_val(ES_S_a2_oversample);
+	for (k = 0; k <= most && k < ES_RS_OVER; k++)
+		if (!rs->flat[k])
+			rs->flat[k] = rs_table_new(chip, k + 1);
 }
 
 // the ring frames to a stream frame: what a2_oversample asks for, where a
@@ -768,7 +775,7 @@ static void rs_apply(struct es1869 *chip, struct snd_pcm_runtime *rt)
 	struct es1869_mirror *m = &chip->mirror;
 	struct es1869_rs *rs = &m->rs;
 	u32 mode = es1869_val(ES_S_a2_resample);
-	bool treble = es1869_val(ES_S_a2_treble) && rs->flat && m->over == 1;
+	bool treble = es1869_val(ES_S_a2_treble) && rs->flat[m->over - 1];
 	bool want = (mode || m->over > 1 ? treble || rs->tab : treble) &&
 		    m->spread && rt->format == SNDRV_PCM_FORMAT_S16_LE &&
 		    rt->buffer_size >= MIRROR_RS_MIN;

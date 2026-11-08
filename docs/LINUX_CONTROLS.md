@@ -387,9 +387,10 @@ Parameters only:
   while Audio 1 records. Parameter `a2_oversample`.
 * **Audio 2 Treble Correction** (`Audio 2 Treble Correction Playback
   Switch`, F3): 0 to 1, default 0. Audio 2 through the filter with the DAC's
-  own response taken back, at 1x: flat to 20 kHz within 0.15 dB at 44.1 kHz,
-  with the DAC's stages off, for 4 dB less headroom there. Parameter
-  `a2_treble`.
+  own response taken back, at 1x, 2x and 3x: within 0.05 dB up to half the
+  stream's rate, or up to the filter's edge at 20 kHz where it moves the
+  samples, with the DAC's stages off, for 5 dB less headroom at the top.
+  Parameter `a2_treble`.
 
 Parameters only:
 

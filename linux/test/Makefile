@@ -27,10 +27,12 @@ $(OBJS): et.h hal.h an.h cases.h run.h settab.h \
 	../es1869/settings.def ../es1869/settings_kinds.h
 
 # the driver's rate correction, which the simulated chip runs as it is
-resample.o: $(DRV)/resample.c $(DRV)/resample.h $(DRV)/hw_compat.h
+resample.o: $(DRV)/resample.c $(DRV)/resample.h $(DRV)/hw_compat.h \
+	$(DRV)/treble.h
 	$(CC) $(CFLAGS) -I$(DRV) -c -o $@ $<
 
-sim_rs.o: sim_rs.c sim_rs.h $(DRV)/resample.h $(DRV)/hw_compat.h
+sim_rs.o: sim_rs.c sim_rs.h $(DRV)/resample.h $(DRV)/hw_compat.h \
+	$(DRV)/treble.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 hal_sim.o c_rs.o c_mon.o: sim_rs.h

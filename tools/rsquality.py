@@ -9,7 +9,8 @@ a sweep, with a perfect filter as the reference, by numpy's FFT.
 The measures are those of tests/test_es1869rs.py, which holds the filter to
 them, on finer grids. A second resample.c (--against DIR, that directory
 holding its resample.c, resample.h and hw_compat.h) goes through the same
-grids, for a comparison.
+grids, for a comparison; a tree with the DAC's correction has treble.h
+there too.
 
 usage: tools/rsquality.py [-o report.json] [--against DIR]
 """

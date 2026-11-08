@@ -7,7 +7,8 @@
 resample.c is built for this machine and called through ctypes. The tests
 hold its integer table to a Kaiser-windowed sinc from numpy, its C and MMX
 runs to the same bytes, on the worst signals for the 32-bit sums too, its
-noise on tones to what docs/LINUX.md says of it, and its clock fit, on
+noise on tones to what docs/LINUX.md says of it, the tables with the DAC's
+correction to the model of tools/es1869treble.py, and its clock fit, on
 interrupts that come late, to the rate they were made with.
 
 usage: python3 -m unittest tests.test_es1869rs   (needs gcc and numpy)
@@ -19,6 +20,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -83,7 +85,7 @@ class Clock(ctypes.Structure):
 
 
 class RS(ctypes.Structure):
-    _fields_ = [("tab", s16p), ("flat", s16p), ("treble", ctypes.c_bool),
+    _fields_ = [("tab", s16p), ("flat", s16p * 3), ("treble", ctypes.c_bool),
                 ("on", ctypes.c_bool), ("mmx", ctypes.c_bool),
                 ("clock", ctypes.c_bool), ("dither", ctypes.c_bool),
                 ("lined", ctypes.c_bool),
@@ -127,7 +129,7 @@ def library():
                         os.path.join(DRV, "hw.c")],
                        check=True, capture_output=True)
         lib = ctypes.CDLL(out)
-        lib.es1869_rs_table.argtypes = [s16p, ctypes.c_bool]
+        lib.es1869_rs_table.argtypes = [s16p, ctypes.c_uint]
         lib.es1869_rs_table.restype = None
         lib.es1869_rs_run_c.argtypes = [ctypes.POINTER(Job)]
         lib.es1869_rs_run_c.restype = ctypes.c_uint32
@@ -182,7 +184,9 @@ def library():
     return _LIB["lib"]
 
 
-def table(flat=False):
+def table(flat=0):
+    """the plain filter, or with the DAC's correction at flat times the rate"""
+    flat = int(flat)
     if ("tab", flat) not in _LIB:
         tab = (ctypes.c_int16 * TABLE)()
         library().es1869_rs_table(tab, flat)
@@ -816,75 +820,207 @@ class OverTest(unittest.TestCase):
         self.assertGreater(len(y), 1000)
 
 
-DAC_LAST = 0.062  # the share of the last sample in what the DAC puts out
+def treble():
+    """tools/es1869treble.py, which holds the DAC's model and fits treble.h"""
+    if "treble" not in _LIB:
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import es1869treble
+        _LIB["treble"] = es1869treble
+    return _LIB["treble"]
+
+
+def dac_db(f, over=1):
+    """the DAC's gain at f, in dB, with the ring at over times the stream"""
+    return float(20 * np.log10(treble().dac(2 * np.pi * f / FS, over)))
+
+
+def kaiser(t):
+    """the window at t frames from the place"""
+    u = np.clip(1 - (t / (TAPS / 2)) ** 2, 0, 1)
+    return np.where(np.abs(t) < TAPS / 2, np.i0(BETA * np.sqrt(u)), 0) / \
+        np.i0(BETA)
+
+
+def flat_row(i, side):
+    """the filter with the DAC's correction at the place i, by numpy: the
+    correction's taps on the sinc, over the window at their frames, then
+    the window"""
+    k = np.arange(1, len(side) + 1)
+    t = np.arange(TAPS) - BEHIND - i / ROWS
+    s = (1 - 2 * np.sum(side)) * np.sinc(t)
+    for kk, c in zip(k, side / kaiser(k.astype(float))):
+        s = s + c * (np.sinc(t - kk) + np.sinc(t + kk))
+    return s * kaiser(t)
+
+
+def header_taps():
+    """treble.h's side taps for each rate, as fractions"""
+    with open(os.path.join(DRV, "treble.h"), encoding="utf-8") as f:
+        text = f.read()
+    rows = re.findall(r"\{([-\d,\s]+)\}", text.split("= {", 1)[1])
+    return [np.array([int(v) for v in r.split(",")]) / 2.0 ** 30
+            for r in rows]
 
 
 @unittest.skipUnless(np is not None and shutil.which("gcc"), "needs numpy, gcc")
 class TrebleTest(unittest.TestCase):
-    """the table with the DAC's response taken back: flat with it, at the
-    same cost, and no less sound than the plain one for what it is"""
+    """the tables with the DAC's response taken back, at 1x, 2x and 3x:
+    flat with the DAC up to half the stream's rate where every frame keeps
+    its place, and up to the filter's own edge where the filter moves them,
+    at the same cost a frame, as clean as the plain table, and on the worst
+    signal clipped, not wrapped"""
 
-    def level(self, f, eps=30e-6, mmx=False):
+    AMP = 16000  # 4.95 dB under full scale: the most the correction adds
+
+    def level(self, f, eps=30e-6, over=1, mmx=False, flat=None):
+        """a tone's level through the table and the DAC in dB, its THD+N,
+        and the worst of the rest up to the ring's Nyquist, images included"""
         n = 1 << 17
-        t = np.arange(n + 200)
-        x = np.round(20000 * np.sin(2 * np.pi * f * t / FS))
-        y = through(x, q32(eps), flat=True, mmx=mmx)
-        y = y[1024:-1024]
-        k = np.arange(len(y)) * (1 + exact(eps)) * 2 * np.pi * f / FS
+        x = np.round(self.AMP * np.sin(2 * np.pi * f * np.arange(n + 200) /
+                                       FS))
+        flat = over if flat is None else flat
+        y = through(x, q32(eps), flat=flat, mmx=mmx, over=over)
+        y = y[1024:-1024].astype(float)
+        k = np.arange(len(y)) * (1 + exact(eps)) / over * 2 * np.pi * f / FS
         b = np.stack([np.cos(k), np.sin(k), np.ones(len(y))], 1)
-        co = np.linalg.lstsq(b, y.astype(float), rcond=None)[0]
+        co = np.linalg.lstsq(b, y, rcond=None)[0]
         r = y - b @ co
-        db = 20 * np.log10(np.hypot(co[0], co[1]) / 20000)
-        w = 2 * np.pi * f / FS
-        dac = abs(1 + DAC_LAST * np.exp(-1j * w)) / (1 + DAC_LAST)
-        dac = 20 * np.log10(np.sinc(f / FS) * dac)
-        return db + dac, 20 * np.log10(r.std() / (np.hypot(co[0], co[1]) / 2 ** 0.5))
+        a = np.hypot(co[0], co[1])
+        w = np.blackman(len(r)) ** 2
+        top = np.abs(np.fft.rfft(r * w)).max() / (w.sum() / 2)
+        db = 20 * np.log10(a / self.AMP) + (dac_db(f, over) if flat else 0)
+        return (db, 20 * np.log10(r.std() / (a / 2 ** 0.5)),
+                20 * np.log10(top / a))
 
-    def test_flat_with_the_dac(self):
+    def rows(self, flat):
+        return np.ctypeslib.as_array(table(flat)).reshape(ROWS, STRIDE)
+
+    def test_header_is_current(self):
+        r = subprocess.run([sys.executable, os.path.join(
+            ROOT, "tools", "es1869treble.py"), "--check"],
+            capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_flat_to_half_the_rate(self):
+        """at 1x with no change of rate every frame stays on its place, the
+        first row's: with the DAC within 0.06 dB up to 22.05 kHz, where 7
+        taps a side left 0.75 dB"""
+        g = row_taps(self.rows(1), 0, 1)
+        f = np.linspace(0, FS / 2, 2206)
+        w = 2 * np.pi * f / FS
+        h = np.abs(np.exp(-1j * np.outer(w, np.arange(TAPS) - BEHIND)) @ g)
+        db = 20 * np.log10(h) + 20 * np.log10(treble().dac(w, 1))
+        self.assertLess(np.abs(db).max(), 0.06)
+        for hz in (997.3, 15000.1, 21000.7, 21999.1):
+            got, thdn, _ = self.level(hz, eps=0.0)
+            self.assertLess(abs(got), 0.06, f"{hz} Hz")
+            self.assertLess(thdn, -86.0, f"{hz} Hz")
+
+    def test_with_a_step(self):
+        """the filter moves the frames: flat with the DAC within 0.06 dB up
+        to 20 kHz, and above that the plain filter's own edge"""
         for f in (100.1, 997.3, 5000.7, 10000.9, 15000.1, 18000.3, 20000.3):
-            db, _ = self.level(f)
-            self.assertLess(abs(db), 0.16, f"{f} Hz")
+            db, _, _ = self.level(f)
+            self.assertLess(abs(db), 0.06, f"{f} Hz")
+        for f in (21000.7, 21500.3):
+            db, _, _ = self.level(f)
+            edge, _, _ = self.level(f, flat=0)
+            self.assertLess(edge, -0.3, f"{f} Hz")
+            self.assertAlmostEqual(db, edge, delta=0.05, msg=f"{f} Hz")
+
+    def test_oversampled(self):
+        """against the DAC at the ring's rate: flat within 0.02 dB up to 20
+        kHz, the plain filter's edge above, and images as far down as the
+        fixed places' rounding allows"""
+        for over in (2, 3):
+            for f in (997.3, 10000.9, 15000.1, 20000.3):
+                db, _, top = self.level(f, eps=0.0, over=over)
+                self.assertLess(abs(db), 0.02, (over, f))
+                self.assertLess(top, -84.0, (over, f))
+            db, _, _ = self.level(21000.7, eps=0.0, over=over)
+            edge, _, _ = self.level(21000.7, eps=0.0, over=over, flat=0)
+            self.assertAlmostEqual(db, edge, delta=0.05, msg=over)
 
     def test_clean(self):
-        for f in (997.3, 10000.9, 20000.3):
-            _, thdn = self.level(f)
-            self.assertLess(thdn, -84.0, f"{f} Hz")
+        """at a step, as the Clock mode plays: THD+N within a few dB of the
+        plain table's, and no spur over -88 dB below the tone"""
+        for over, most in ((1, -85.0), (2, -83.0), (3, -83.0)):
+            for f in (997.3, 10000.9, 20000.3):
+                _, thdn, top = self.level(f, over=over)
+                self.assertLess(thdn, most, (over, f))
+                self.assertLess(top, -88.0, (over, f))
+
+    def test_peak_gain(self):
+        """what the correction adds at most, which a loud top end loses as
+        headroom: at half the rate, as treble.h has it"""
+        fit = treble().taps()
+        f = np.linspace(0, FS / 2, 2206)
+        w = 2 * np.pi * f / FS
+        for flat in (1, 2, 3):
+            g = row_taps(self.rows(flat), 0, flat)
+            db = 20 * np.log10(np.abs(
+                np.exp(-1j * np.outer(w, np.arange(TAPS) - BEHIND)) @ g))
+            self.assertAlmostEqual(db.max(), fit[flat - 1][2], delta=0.01)
+            self.assertGreater(f[np.argmax(db)], 0.49 * FS, flat)
+        self.assertLess(fit[0][2], 5.0)
+
+    def test_header_fits_the_model(self):
+        """treble.h's taps with the DAC as tools/es1869treble.py has it"""
+        w = np.linspace(0, np.pi, 4097)
+        for over, side in zip((1, 2, 3), header_taps()):
+            db = 20 * np.log10(treble().response(side, w) *
+                               treble().dac(w, over))
+            self.assertLess(np.abs(db).max(), (0.06, 0.02, 0.01)[over - 1])
+
+    def test_rows_are_the_windowed_correction(self):
+        """every coefficient within what the rounding and the sum's fix
+        leave, against numpy's"""
+        for flat, side in zip((1, 2, 3), header_taps()):
+            rows = self.rows(flat)
+            for i in range(0, ROWS, 3):
+                err = np.abs(row_taps(rows, i, flat) - flat_row(i, side))
+                self.assertLess(np.max(np.delete(err, [BEHIND, BEHIND + 1])),
+                                5e-5, (flat, i))
+                self.assertLess(np.max(err), 1.1e-4, (flat, i))
 
     def test_gain_is_one(self):
-        rows = np.array(table(True), dtype=np.int64).reshape(ROWS, STRIDE)
-        for i in range(0, ROWS, 7):
-            total = float((rows[i, :TAPS] / 2.0 ** scales(1)).sum()) + 1
-            self.assertAlmostEqual(total, 1.0, places=3)
+        for flat in (1, 2, 3):
+            rows = np.array(table(flat), dtype=np.int64).reshape(ROWS, STRIDE)
+            for i in range(0, ROWS, 7):
+                total = float((rows[i, :TAPS] / 2.0 ** scales(flat)).sum())
+                self.assertAlmostEqual(total + 1, 1.0, places=3)
 
     def test_fits_its_words(self):
         """no tap met the 16 bits, which would be a clamp and a click"""
-        rows = np.array(table(True), dtype=np.int16).reshape(ROWS, STRIDE)
-        self.assertLess(int(np.abs(rows.astype(int)[:, :TAPS]).max()), 32760)
+        for flat in (1, 2, 3):
+            rows = self.rows(flat).astype(int)
+            self.assertLess(int(np.abs(rows[:, :TAPS]).max()), 32760)
 
     def test_sums_stay_in_32_bits(self):
         """the correction lifts the tails by its gain near half the rate, so
         that every word but the centre one is a bit less fine than the plain
         table's, and the sum ends on 13 bits"""
-        rows = np.ctypeslib.as_array(table(True)).reshape(ROWS, STRIDE)
-        self.assertLess(worst_sums(rows, 1), 1.0)
+        for flat in (1, 2, 3):
+            self.assertLess(worst_sums(self.rows(flat), flat), 1.0, flat)
 
     def test_worst_signal_clips(self):
         """the signs of a row's taps at full scale come to over 4 times full
-        scale, which a sum on 14 bits wrapped: it clips, in C and MMX"""
-        rows = np.ctypeslib.as_array(table(True)).reshape(ROWS, STRIDE)
+        scale at 1x, which a sum on 14 bits wrapped: it clips, in C and MMX"""
         most = 0
-        for place in range(0, ROWS, 4):
-            c = rows[place, :TAPS].astype(np.int64)
-            x = np.zeros(300 + TAPS + 8, dtype=np.int64)
-            x[:TAPS] = np.where(c >= 0, 32767, -32768)
-            want = float(np.sum(row_taps(rows, place, 1) * x[:TAPS]))
-            most = max(most, want)
-            for mmx in (False, True) if X86 else (False,):
-                raw, _, _ = run(x, x, 4, place << 25, 0, stereo=False,
-                                mmx=mmx, flat=True)
-                got = samples(raw, False)[0][0]
-                self.assertLess(abs(np.clip(want, -32768, 32767) - got), 64,
-                                (place, mmx))
+        for flat in (1, 2, 3):
+            rows = self.rows(flat)
+            for place in range(0, ROWS, 4):
+                c = rows[place, :TAPS].astype(np.int64)
+                x = np.zeros(300 + TAPS + 8, dtype=np.int64)
+                x[:TAPS] = np.where(c >= 0, 32767, -32768)
+                want = float(np.sum(row_taps(rows, place, flat) * x[:TAPS]))
+                most = max(most, want)
+                for mmx in (False, True) if X86 else (False,):
+                    raw, _, _ = run(x, x, 4, place << 25, 0, stereo=False,
+                                    mmx=mmx, flat=flat)
+                    got = samples(raw, False)[0][0]
+                    self.assertLess(abs(np.clip(want, -32768, 32767) - got),
+                                    64, (flat, place, mmx))
         self.assertGreater(most, 4 * 32768)
 
     def test_mmx_is_the_c_run(self):
@@ -897,10 +1033,16 @@ class TrebleTest(unittest.TestCase):
             for stereo in (True, False):
                 for dither in (False, True):
                     c = run(x, y, 256, 12345, q32(eps), stereo,
-                            dither=dither, flat=True)
+                            dither=dither, flat=1)
                     m = run(x, y, 256, 12345, q32(eps), stereo, mmx=True,
-                            dither=dither, flat=True)
+                            dither=dither, flat=1)
                     self.assertEqual(c, m, (eps, stereo, dither))
+        z = np.pad(rng.integers(-32768, 32768, 2000), (40, 40))
+        for over in (2, 3):
+            for eps in (0.0, 30e-6, -252e-6):
+                c = through(z, q32(eps), flat=over, over=over)
+                m = through(z, q32(eps), flat=over, over=over, mmx=True)
+                self.assertTrue(np.array_equal(c, m), (over, eps))
 
 
 @unittest.skipUnless(np is not None and shutil.which("gcc"), "needs numpy, gcc")

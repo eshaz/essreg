@@ -39,20 +39,27 @@
  * of a place 2^-12 of a frame wide: they are small, and their error is under the
  * 16-bit noise at any step, which at 30 ppm leaves them 8 frames unchanged.
  *
- * A DAC that holds each sample loses the top of the band, 3.2 dB at 20 kHz at
- * 44.1 kHz. A second table has that taken back, with seven taps folded into
- * the filter's, which holds it to about 0.15 dB, so that it costs no cycles a
- * frame. The gain near 20 kHz is 4 dB, which a loud enough top end clips, and
- * the taps lift the filter's tails by about as much, so that the worst signal
- * comes to 4 times full scale. For its sums to fit in 32 bits every word but
- * the centre one has a bit less in that table, the centre word 15 bits, since
- * its taps around the place still don't fit in 16 once they give up 1/2, and
- * a frame's sum ends 13 bits under the sample, not 14.
- *
  * The ring can also run at two or three times the stream's rate, which the same
  * filter serves by taking a half or a third of a frame a ring frame. Each of
  * those places then has its own outer words, held as before, so that a ring
  * frame costs what a frame does at the stream's own rate.
+ *
+ * The DAC holds each sample for a period of the ring's rate and keeps a little
+ * of the one before, which takes 4.2 dB from 20 kHz at 44.1 kHz and 5 dB from
+ * half the rate, 1.4 dB at 2x and 0.65 at 3x. A table for each rate takes that
+ * back by treble.h's taps, 16 a side a frame apart, which tools/es1869treble.py
+ * fits to that model to 0.05 dB up to half the stream's rate at 1x. They go on
+ * the sinc before its window, so that the table's 68 taps hold all of them and
+ * a frame costs what it did: folded into the windowed sinc they reach past it,
+ * and what the table couldn't hold of 12 a side let the image of a 20 kHz tone
+ * up from -94 to -87 dB. The correction adds 4.95 dB at half the rate, which
+ * a loud enough top end clips, and lifts the filter's tails by about as much,
+ * so that the worst signal comes to 4.2 times full scale. For its sums to fit
+ * in 32 bits every word but the centre one has a bit less in these tables, the
+ * centre word 15 bits, since its taps around the place still don't fit in 16
+ * once they give up 1/2, and a frame's sum ends 13 bits under the sample, not
+ * 14. That rounding leaves the images at 3x, where the places stand still with
+ * no change of rate, at -85 dB to the plain table's -100.
  *
  * es1869_rs_run_c() and es1869_rs_run_mmx() give the same bytes.
  *
@@ -72,6 +79,10 @@
  */
 
 #include "resample.h"
+#include "treble.h"
+
+_Static_assert(ARRAY_SIZE(es1869_treble) == ES_RS_OVER,
+	       "a correction for each rate of the DAC");
 
 // the words' scales in bits, outside in and out again, a bit less in a table
 // with the DAC's correction but for the centre word
@@ -138,59 +149,89 @@ static s64 kaiser(const s64 *c, s64 d)
 	return v;
 }
 
-// the windowed sinc at m frames from the frame the place follows, the place i
-// rows past that frame; s is sin(pi i / rows). Past the window there is nothing
+// the sinc at m frames from the frame the place follows, the place i rows
+// past that frame, before the window; s is sin(pi i / rows)
+static s64 rs_bare(s64 s, int m, unsigned int i)
+{
+	s64 d = (s64)m * ES_RS_ROWS - i, h;
+
+	if (!d)
+		return Q30;
+	// sin(pi d / rows) over pi d / rows, the sine's sign from the whole
+	// frames between the tap and the place
+	h = div_s64(s * RS_ROWS_PI_Q20, d) >> 20;
+	return m & 1 ? h : -h;
+}
+
+// and in the window, past which there is nothing
 static s64 rs_sinc(const s64 *series, s64 s, int m, unsigned int i)
 {
-	s64 d = (s64)m * ES_RS_ROWS - i, h = Q30;
+	s64 d = (s64)m * ES_RS_ROWS - i;
 
 	if (d >= RS_SPAN || d <= -RS_SPAN)
 		return 0;
-	if (d) {
-		// sin(pi d / rows) over pi d / rows, the sine's sign from the
-		// whole frames between the tap and the place
-		h = div_s64(s * RS_ROWS_PI_Q20, d) >> 20;
-		if (!(m & 1))
-			h = -h;
-	}
-	return q30_mul(h, kaiser(series, d));
+	return q30_mul(rs_bare(s, m, i), kaiser(series, d));
 }
 
-// a tap of the filter with the DAC's response taken back: the sinc at the tap,
-// and at the frames around it. The DAC holds a sample and keeps 0.062 of the
-// last one, and these taps, over the rate, fit the inverse of that up to 0.45
-// of the rate; what they sum to with the centre's is 1
-static s64 rs_flat(const s64 *series, s64 s, int m, unsigned int i)
+// the correction of the DAC at flat times the stream's rate as taps on the
+// sinc before its window: treble.h's over the window at their frames, so
+// that at a frame's own place the filter is treble.h's taps, and a centre
+// that makes their sum 1
+static void rs_side(s32 *side, const s64 *series, unsigned int flat)
 {
-	static const s32 side[] = { -157010000, 37290000, -12550000 };
-	s64 centre = Q30, v = 0;
-	unsigned int k;
+	const s32 *fit = es1869_treble[flat - 1];
+	s64 centre = Q30;
+	int k;
 
-	for (k = 0; k < ARRAY_SIZE(side); k++) {
-		centre -= 2LL * side[k];
-		v += q30_mul(rs_sinc(series, s, m - (int)k - 1, i) +
-			     rs_sinc(series, s, m + (int)k + 1, i), side[k]);
+	for (k = 1; k <= ES_TREBLE_SIDES; k++) {
+		centre -= 2LL * fit[k - 1];
+		side[k] = div_s64(fit[k - 1] * Q30,
+				  kaiser(series, (s64)k * ES_RS_ROWS));
 	}
-	return v + q30_mul(rs_sinc(series, s, m, i), centre);
+	side[0] = div_s64(centre * Q30, kaiser(series, 0));
 }
 
-// one row at the place i of ES_RS_ROWS past a frame. The two taps around the
-// place give up 1/2, which makes the gain 1, so that the rest sums to 0, and
-// the tap nearest the place takes what the rounding left of that
-static void rs_row(s16 *row, unsigned int i, const s64 *series, bool flat)
+// a tap of the filter with the DAC's response taken back: the correction's
+// taps on the sinc, then the window, so that none of it reaches past the
+// table. bare is the sinc from ES_TREBLE_SIDES frames before the first tap
+static s64 rs_flat(const s64 *series, const s32 *bare, const s32 *side,
+		   unsigned int n, unsigned int i)
+{
+	s64 d = ((s64)n - ES_RS_BEHIND) * ES_RS_ROWS - i, v;
+	const s32 *b = bare + ES_TREBLE_SIDES + n;
+	int k;
+
+	if (d >= RS_SPAN || d <= -RS_SPAN)
+		return 0;
+	v = q30_mul(b[0], side[0]);
+	for (k = 1; k <= ES_TREBLE_SIDES; k++)
+		v += q30_mul((s64)b[-k] + b[k], side[k]);
+	return q30_mul(v, kaiser(series, d));
+}
+
+// one row at the place i of ES_RS_ROWS past a frame, with the correction of
+// the DAC by side, or none for NULL. The two taps around the place give up
+// 1/2, which makes the gain 1, so that the rest sums to 0, and the tap
+// nearest the place takes what the rounding left of that. Apart from the
+// table's own frame, which holds it, since the two are too large together
+static noinline_for_stack void rs_row(s16 *row, unsigned int i,
+				      const s64 *series, const s32 *side)
 {
 	s64 s = q30_sin(div_s64(RS_PI_Q30 * i, ES_RS_ROWS));
-	unsigned int centre = flat ? RS_CENTRE_FLAT : RS_CENTRE;
-	s32 taps[ES_RS_TAPS];
+	unsigned int centre = side ? RS_CENTRE_FLAT : RS_CENTRE;
+	s32 bare[ES_RS_TAPS + 2 * ES_TREBLE_SIDES], taps[ES_RS_TAPS];
 	s64 sum = 0;
 	unsigned int n;
 	int c;
 
+	for (n = 0; side && n < ARRAY_SIZE(bare); n++)
+		bare[n] = rs_bare(s, (int)n - ES_RS_BEHIND - ES_TREBLE_SIDES, i);
 	for (n = 0; n < ES_RS_TAPS; n++) {
 		int m = (int)n - ES_RS_BEHIND;
 		unsigned int bits = n / 4 == RS_WORD_CENTRE ? centre :
-				    rs_scale[n / 4] - (flat ? 1U : 0U);
-		s64 v = flat ? rs_flat(series, s, m, i) : rs_sinc(series, s, m, i);
+				    rs_scale[n / 4] - (side ? 1U : 0U);
+		s64 v = side ? rs_flat(series, bare, side, n, i) :
+			       rs_sinc(series, s, m, i);
 
 		if (n == ES_RS_BEHIND || n == ES_RS_BEHIND + 1)
 			v -= Q30 / 2;
@@ -215,16 +256,20 @@ static s16 rs_up(s16 v)
 // The second half of the places are the first's taps the other way round.
 // PMULHW rounds down, by half a unit of each tap on average, a little gain
 // lost at the low end, so every other tap has one unit more, the same ones
-// at every place: anything that changed with the place would be a spur
-void es1869_rs_table(s16 *tab, bool flat)
+// at every place: anything that changed with the place would be a spur. flat
+// is the DAC's rate over the stream's, for its correction, or 0
+void es1869_rs_table(s16 *tab, unsigned int flat)
 {
 	s16 end[ES_RS_TAPS];
 	s64 series[RS_TERMS];
+	s32 side[ES_TREBLE_SIDES + 1];
 	unsigned int i, n;
 
 	kaiser_series(series);
+	if (flat)
+		rs_side(side, series, flat);
 	for (i = 0; i < RS_PLACES; i++)
-		rs_row(tab + i * ES_RS_STRIDE, i, series, flat);
+		rs_row(tab + i * ES_RS_STRIDE, i, series, flat ? side : NULL);
 	for (i = RS_PLACES; i < ES_RS_ROWS; i++)
 		for (n = 0; n < ES_RS_TAPS; n++)
 			tab[i * ES_RS_STRIDE + n] =
@@ -726,7 +771,7 @@ static u32 rs_chunk(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 		    u32 n)
 {
 	struct es1869_rs_job j = {
-		.tab = rs->treble ? rs->flat : rs->tab,
+		.tab = rs->treble ? rs->flat[rs->over - 1] : rs->tab,
 		.scale = rs->treble ? ES_RS_SUM_FLAT : ES_RS_SUM,
 		.dst = s->ring + 2 * rs->w * (s->stereo ? 4 : 2),
 		.frames = n,

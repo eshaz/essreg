@@ -45,6 +45,7 @@ typedef int64_t s64;
 
 #define S64_MAX INT64_MAX
 #define __aligned(n) __attribute__((aligned(n)))
+#define noinline_for_stack __attribute__((noinline))
 
 static inline u64 div_u64(u64 n, u32 d) { return n / d; }
 static inline s64 div_s64(s64 n, s32 d) { return n / d; }

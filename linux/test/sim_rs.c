@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "../es1869/resample.h"
+#include "../es1869/treble.h"
 #include "sim_rs.h"
 
 // a2_trim's item in ppb
@@ -18,9 +19,16 @@ long sim_rs_trim(int item)
 	return es1869_trim_ppb(item);
 }
 
-static s16 *rs_tab(int flat)
+// the DAC's share of the last sample, as the driver's correction has it
+double sim_rs_dac_last(void)
 {
-	static s16 *tab[2];
+	return ES_TREBLE_LAST_PPM / 1e6;
+}
+
+// the filter, or with the DAC's correction at flat times the stream's rate
+static s16 *rs_tab(unsigned int flat)
+{
+	static s16 *tab[ES_RS_OVER + 1];
 
 	if (!tab[flat]) {
 		tab[flat] = malloc(ES_RS_TABLE * sizeof(*tab[flat]));
@@ -78,7 +86,7 @@ short *sim_rs_parts(const short *src, unsigned long frames,
 		j.whole = adv >> 32;
 		j.step = (u32)adv;
 		j.dither = parts[at].dither;
-		j.tab = rs_tab(parts[at].treble);
+		j.tab = rs_tab(parts[at].treble ? over : 0);
 		j.scale = parts[at].treble ? ES_RS_SUM_FLAT : ES_RS_SUM;
 		// the frames around the run, silence before and after the stream
 		for (i = 0; i < ES_RS_WINDOW; i++) {
@@ -118,11 +126,12 @@ short *sim_rs_stream(const short *src, unsigned long frames,
 	return sim_rs_parts(src, frames, channels, &part, 1, made);
 }
 
-// the same with the ring at over times the stream's rate
+// the same with the ring at over times the stream's rate, and treble the
+// DAC's correction
 short *sim_rs_over(const short *src, unsigned long frames, unsigned int channels,
-		   long ppb, int over, unsigned long *made)
+		   long ppb, int over, int treble, unsigned long *made)
 {
-	struct sim_rs_part part = { 0, ppb, 1, 0, 0, over };
+	struct sim_rs_part part = { 0, ppb, 1, 0, treble, over };
 
 	return sim_rs_parts(src, frames, channels, &part, 1, made);
 }

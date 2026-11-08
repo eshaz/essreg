@@ -27,7 +27,9 @@ short *sim_rs_parts(const short *src, unsigned long frames,
 		    unsigned int channels, const struct sim_rs_part *parts,
 		    int n, unsigned long *made);
 short *sim_rs_over(const short *src, unsigned long frames, unsigned int channels,
-		   long ppb, int over, unsigned long *made);
+		   long ppb, int over, int treble, unsigned long *made);
+// the DAC's share of the last sample, which its correction takes back
+double sim_rs_dac_last(void);
 // what the filter costs on this CPU, in cycles a frame, by MMX or C, or 0
 double sim_rs_cycles(unsigned int channels, int mmx);
 
