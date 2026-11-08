@@ -366,6 +366,23 @@ class PlayTest(A1Case):
         self.assertEqual(e.done(), hdrs + [later])
         self.assertEqual(e.getpos(user)[2], len(data))
 
+    def test_torn_getpos(self):
+        """a torn reading of the count at GETPOS, 256 off either way: the
+        player reads until two readings agree, so the position neither
+        steps back nor jumps ahead"""
+        e, user = self.opened(rate=44100)
+        block = e.dev16(A1_BLOCK)
+        data = pattern(block * 6)
+        for i in range(0, len(data), block):
+            e.write(user, e.header(data[i:i + block]))
+        self.play(e, 2)
+        e.dma(block // 2)
+        right = e.getpos(user)[2]
+        for tear in (-256, 256):
+            e.vxd_tear = [tear]
+            self.assertEqual(e.getpos(user)[2], right, tear)
+            self.assertEqual(e.vxd_tear, [], tear)
+
     def test_samples(self):
         e, user = self.opened(rate=22050, channels=2, bits=16)
         e.write(user, e.header(pattern(4000)))
@@ -547,6 +564,48 @@ class PlayTest(A1Case):
         e, user = self.opened()
         e.interrupt()
         self.assertEqual(e.done(), [])
+
+
+class DrainTimeTest(A1Case):
+    """the drain in time, as esswchk's a1.drain measures it: 8 kHz 8-bit
+    mono, eight headers of 500 bytes written at once, the DMA a FIFO ahead
+    of the DAC from the start, a millisecond's bytes at a time, and an
+    interrupt each time the DMA took a block"""
+
+    RATE = 8000
+
+    def drain(self):
+        """{header: the ms it came back}, the headers, a block's ms"""
+        e, user = self.opened(rate=self.RATE, channels=1, bits=8)
+        hdrs = [e.header(pattern(500, i + 1)) for i in range(8)]
+        for h in hdrs:
+            e.write(user, h)
+        block, per_ms = e.dev16(A1_BLOCK), self.RATE // 1000
+        e.dma(A1_FIFO)                  # the FIFO fills at the start
+        moved, ms, times = A1_FIFO, 0, {}
+        while len(times) < len(hdrs) and ms < 2000:
+            ms += 1
+            e.dma(per_ms)
+            if (moved + per_ms) // block > moved // block:
+                e.interrupt()
+            moved += per_ms
+            for h in e.done():
+                times.setdefault(h, ms)
+        return times, hdrs, block * 1000 // self.RATE
+
+    def test_last_once_played(self):
+        """the last header comes back once the DAC played its end, 500 ms
+        after the start, within a block of it, where its DMA's end alone
+        would give it back at 468 ms; each other one once the DMA took its
+        end"""
+        times, hdrs, block_ms = self.drain()
+        last = times[hdrs[-1]]
+        self.assertGreaterEqual(last, 500)
+        self.assertLessEqual(last, 500 + block_ms + 1)
+        for i, h in enumerate(hdrs[:-1]):
+            took = (500 * (i + 1) - A1_FIFO) // (self.RATE // 1000)
+            self.assertGreaterEqual(times[h], took, i)
+            self.assertLessEqual(times[h], took + block_ms + 1, i)
 
 
 class StartTest(A1Case):
