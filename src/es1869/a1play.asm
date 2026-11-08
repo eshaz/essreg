@@ -154,9 +154,17 @@ a1_gap:
 .ok:    ret
 
 ; give back, oldest first, the headers the DMA played past; SI = dev.
-; A loop's first header stays until the loop's last pass is copied
-; (a1_next clears A1_LOOPHDR), as each pass copies the loop's headers
-; again, and so do those after it in the queue
+; The last header queued comes back once the DMA is A1_FIFO past its end:
+; the chip takes its bytes up to a FIFO before the DAC plays them, so a
+; program that closes the device at its last WOM_DONE would cut the FIFO's
+; last bytes, 32 ms at 8 kHz (Linux's driver measured it; ESS's own player
+; stops at the interrupt that ends the block holding the data's end,
+; 1:1782).  One that another follows comes back once the DMA took its
+; end, so a program that streams gets it back as soon as before.  A loop's
+; first header stays until the loop's last pass is copied (a1_next clears
+; A1_LOOPHDR), as each pass copies the loop's headers again, and so do
+; those after it in the queue
+A1_FIFO         equ 256
 a1_retire:
 .next:  pushf
         cli
@@ -181,7 +189,12 @@ a1_retire:
         mov     ax,[si+A1_PPOS]
         sub     ax,[es:bx+WH_END]
         js      .none                   ; not played yet
-        mov     ax,[es:bx+WH_NEXT]
+        mov     cx,[es:bx+WH_NEXT]
+        or      cx,[es:bx+WH_NEXT+2]
+        jnz     .back                   ; another follows
+        cmp     ax,A1_FIFO
+        jb      .none                   ; the last: its end in the FIFO
+.back:  mov     ax,[es:bx+WH_NEXT]
         mov     cx,[es:bx+WH_NEXT+2]
         mov     [si+A1_HEAD],ax
         mov     [si+A1_HEAD+2],cx

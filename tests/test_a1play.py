@@ -42,6 +42,7 @@ MMSYSERR_ALLOCATED, MMSYSERR_NOTSUPPORTED = 4, 8
 MMSYSERR_INVALPARAM = 11
 WAVERR_BADFORMAT, WAVERR_STILLPLAYING, WAVERR_UNPREPARED = 32, 33, 34
 A1_BASE = 0x132
+A1_FIFO = 256               # Audio 1's FIFO: the DAC plays this far behind
 A1_STATE, A1_BLOCK, A1_RING = A1_BASE + 0x12, A1_BASE + 0x1A, A1_BASE + 0x1C
 
 
@@ -258,6 +259,9 @@ class PlayTest(A1Case):
         self.assertEqual(e.getpos(user)[1:], (TIME_BYTES, len(data)))
 
     def test_done_only_once_played(self):
+        """a header that another follows comes back once the DMA took its
+        end, and the last one once the DAC played it too, a FIFO later: a
+        program that closes at its last WOM_DONE cuts nothing"""
         e, user = self.opened(rate=22050)
         block = e.dev16(A1_BLOCK)
         first, second = e.header(pattern(block)), e.header(pattern(block, 2))
@@ -268,10 +272,17 @@ class PlayTest(A1Case):
         self.assertEqual(e.done(), [])
         e.dma(4)
         e.interrupt()
-        self.assertEqual(e.done(), [first])
+        self.assertEqual(e.done(), [first])             # another follows
         e.dma(block)
         e.interrupt()
+        self.assertEqual(e.done(), [first])             # the last: its end
+        e.dma(A1_FIFO - 1)                              # in the FIFO
+        e.interrupt()
+        self.assertEqual(e.done(), [first])
+        e.dma(1)
+        e.interrupt()
         self.assertEqual(e.done(), [first, second])
+        self.assertEqual(e.getpos(user)[2], 2 * block)
 
     def test_eight_bit_silence(self):
         e, user = self.opened(rate=11025, channels=1, bits=8)

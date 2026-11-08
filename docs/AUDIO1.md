@@ -185,7 +185,14 @@ DMA, and the position that the program reads doesn't count the silence.
 `WODM_GETPOS` reports the position in bytes, or in samples for any other
 time format, as ESS's device 0 does. It counts what the DMA has taken, so a
 buffer comes back once it has been played rather than once it has been
-copied.
+copied. The chip takes its bytes up to a FIFO, 256 bytes, before the DAC
+plays them, so the last buffer queued comes back only once the DMA is 256
+bytes past its end, and a program that closes the device at its last
+`WOM_DONE` cuts nothing. Without the wait, the close cut up to 32 ms at 8
+kHz, as Linux's driver measured. ESS's own player waits as well: it stops at
+the interrupt that ends the block holding the data's end (1:1782). A buffer
+that another follows comes back once the DMA has taken its end, so a program
+that streams gets it back as soon as before.
 
 The player supports loops (`WHDR_BEGINLOOP`, `WHDR_ENDLOOP` and `dwLoops`)
 and `WODM_BREAKLOOP`, as well as pause (B8h bit 0), restart and reset.
