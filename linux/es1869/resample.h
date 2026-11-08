@@ -21,6 +21,8 @@
 #define ES_RS_WINDOW (ES_RS_CHUNK + ES_RS_TAPS + 2) // the frames it may read
 #define ES_RS_ROOM 64 // the frames kept clear ahead of the DMA, at the least
 #define ES_RS_OVER 3 // the most ring frames to a stream frame
+#define ES_RS_SUM 14 // the bits of a frame's sum below a sample
+#define ES_RS_SUM_FLAT 13 // with the DAC's correction, whose sums get larger
 
 // a run's last frame reads the taps from there on, so its copies need no more
 // than the window, in the words es1869_rs_shift copies
@@ -34,7 +36,7 @@ _Static_assert((ES_RS_CHUNK + ES_RS_TAPS + 3) / 4 * 4 <= ES_RS_WINDOW,
 // one run through the filter
 struct es1869_rs_job {
 	const s16 *tab; // es1869_rs_table's
-	u32 centre; // what brings the centre word to the sum's scale, in bits
+	u32 scale; // the bits of the sum below a sample, ES_RS_SUM or _FLAT
 	const s16 *ch[2]; // the channels, from the first frame's first tap
 	const s16 *odd[2][3]; // and from their 2nd to 4th sample, for MMX
 	u8 *dst; // the ring: each byte in the low byte of a word

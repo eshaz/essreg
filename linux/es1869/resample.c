@@ -42,9 +42,12 @@
  * A DAC that holds each sample loses the top of the band, 3.2 dB at 20 kHz at
  * 44.1 kHz. A second table has that taken back, with seven taps folded into
  * the filter's, which holds it to about 0.15 dB, so that it costs no cycles a
- * frame. Those taps give up the same 1/2 and still don't fit in 16 bits, so the
- * centre word has a bit less there, and only that word's shift differs, set
- * once a run. The gain near 20 kHz is 3 dB, which a loud enough top end clips.
+ * frame. The gain near 20 kHz is 4 dB, which a loud enough top end clips, and
+ * the taps lift the filter's tails by about as much, so that the worst signal
+ * comes to 4 times full scale. For its sums to fit in 32 bits every word but
+ * the centre one has a bit less in that table, the centre word 15 bits, since
+ * its taps around the place still don't fit in 16 once they give up 1/2, and
+ * a frame's sum ends 13 bits under the sample, not 14.
  *
  * The ring can also run at two or three times the stream's rate, which the same
  * filter serves by taking a half or a third of a frame a ring frame. Each of
@@ -70,14 +73,15 @@
 
 #include "resample.h"
 
-// the words' scales in bits, outside in and out again
+// the words' scales in bits, outside in and out again, a bit less in a table
+// with the DAC's correction but for the centre word
 static const u8 rs_scale[ES_RS_TAPS / 4] = {
 	24, 24, 23, 21, 20, 19, 18, 17, 16, 17, 18, 19, 20, 21, 23, 24, 24
 };
 
 #define RS_FINE 24 // the finest scale, on which a row's sum is taken
-#define RS_CENTRE 16 // the centre word's
-#define RS_CENTRE_FLAT 15 // and with the correction of the DAC
+#define RS_CENTRE (ES_RS_SUM + 2) // the centre word's, 2 bits over the sum's
+#define RS_CENTRE_FLAT (ES_RS_SUM_FLAT + 2) // and with the DAC's correction
 #define RS_WORD_CENTRE (ES_RS_TAPS / 8) // which word that is
 
 // --- the table, in integers ----------------------------------------------------
@@ -184,7 +188,8 @@ static void rs_row(s16 *row, unsigned int i, const s64 *series, bool flat)
 
 	for (n = 0; n < ES_RS_TAPS; n++) {
 		int m = (int)n - ES_RS_BEHIND;
-		unsigned int bits = n / 4 == RS_WORD_CENTRE ? centre : rs_scale[n / 4];
+		unsigned int bits = n / 4 == RS_WORD_CENTRE ? centre :
+				    rs_scale[n / 4] - (flat ? 1U : 0U);
 		s64 v = flat ? rs_flat(series, s, m, i) : rs_sinc(series, s, m, i);
 
 		if (n == ES_RS_BEHIND || n == ES_RS_BEHIND + 1)
@@ -302,7 +307,6 @@ static inline u32 rs_blend_bits(u32 frac)
 	return (frac >> 10) & 0x7FFF;
 }
 
-#define RS_HALF (1 << 13) // the 1/2 that the taps around the place gave up
 #define RS_HELD (1U << 20) // the width in frac of a place of the outer words
 #define RS_INNER 16 // the taps that take every frame's own place start here
 #define RS_OUTER 52 // and end here
@@ -312,16 +316,16 @@ static inline const s16 *rs_place(const s16 *tab, u32 frac)
 	return tab + (frac >> 25) * ES_RS_STRIDE;
 }
 
-// the rounding of a sample: without dither one half, with it a triangle of
-// 1 LSB each way, from the difference of two uniform values, one frame's
-// from the last's, which shifts the noise up the band
+// the rounding of a sample on the sum's scale: without dither one half, with
+// it a triangle of 1 LSB each way, from the difference of two uniform values,
+// one frame's from the last's, which shifts the noise up the band
 static inline void rs_round(struct es1869_rs_job *j, s32 *rnd)
 {
-	u32 x = j->seed;
+	u32 x = j->seed, down = ES_RS_SUM - j->scale;
 	s32 l, r;
 
 	if (!j->dither) {
-		rnd[0] = rnd[1] = 1 << 13;
+		rnd[0] = rnd[1] = 1 << (j->scale - 1);
 		return;
 	}
 	x ^= x << 13;
@@ -330,8 +334,8 @@ static inline void rs_round(struct es1869_rs_job *j, s32 *rnd)
 	j->seed = x;
 	l = x & 0x3FFF;
 	r = (x >> 14) & 0x3FFF;
-	rnd[0] = (1 << 13) + l - j->last[0];
-	rnd[1] = (1 << 13) + r - j->last[1];
+	rnd[0] = ((1 << 13) + l - j->last[0]) >> down;
+	rnd[1] = ((1 << 13) + r - j->last[1]) >> down;
 	j->last[0] = l;
 	j->last[1] = r;
 }
@@ -369,8 +373,9 @@ static void rs_blend_c(s16 *c, const s16 *row, s32 f, unsigned int from,
 	b >>= n; \
 } while (0)
 
-// the taps' sum on the scale of 14 bits, the shifts per MMX lane as there
-static s32 rs_sum_c(const s16 *x, const s16 *c, u32 centre)
+// the taps' sum on the scale of the job's bits, the shifts per MMX lane as
+// there, and the 1/2 of the taps around the place on that scale
+static s32 rs_sum_c(const s16 *x, const s16 *c, u32 scale)
 {
 	s32 a = 0, b = 0, p = 0, q = 0;
 
@@ -394,7 +399,8 @@ static s32 rs_sum_c(const s16 *x, const s16 *c, u32 centre)
 	RS_WORD_C(a, b, 6);
 	RS_WORD_C(a, b, 10);
 	RS_SHIFT_C(a, b, 2);
-	// 17 bits don't fit under the sum so far: down to its 16 first
+	// the words beside the centre don't fit under the sum so far: down to
+	// the centre word's scale first
 	RS_WORD_C(p, q, 7);
 	RS_WORD_C(p, q, 9);
 	RS_SHIFT_C(p, q, 1);
@@ -404,15 +410,15 @@ static s32 rs_sum_c(const s16 *x, const s16 *c, u32 centre)
 	p = 0;
 	q = 0;
 	RS_WORD_C(p, q, 8);
-	RS_SHIFT_C(p, q, centre);
-	a += p + x[ES_RS_BEHIND] * RS_HALF;
-	b += q + x[ES_RS_BEHIND + 1] * RS_HALF;
+	RS_SHIFT_C(p, q, 2);
+	a += p + x[ES_RS_BEHIND] * (1 << (scale - 1));
+	b += q + x[ES_RS_BEHIND + 1] * (1 << (scale - 1));
 	return a + b;
 }
 
-static inline s32 rs_clip(s32 v)
+static inline s32 rs_clip(s32 v, u32 scale)
 {
-	v >>= 14;
+	v >>= scale;
 	return v > 32767 ? 32767 : v < -32768 ? -32768 : v;
 }
 
@@ -439,14 +445,16 @@ u32 es1869_rs_run_c(struct es1869_rs_job *j)
 		rs_blend_c(c, rs_place(j->tab, j->frac), rs_blend_bits(j->frac),
 			   RS_INNER, RS_OUTER);
 		rs_round(j, rnd);
-		v = rs_clip(rs_sum_c(j->ch[0] + i, c, j->centre) + rnd[0]);
+		v = rs_clip(rs_sum_c(j->ch[0] + i, c, j->scale) + rnd[0],
+			    j->scale);
 		d[0] = v;
 		d[1] = 0;
 		d[2] = v >> 8;
 		d[3] = 0;
 		d += 4;
 		if (j->stereo) {
-			v = rs_clip(rs_sum_c(j->ch[1] + i, c, j->centre) + rnd[1]);
+			v = rs_clip(rs_sum_c(j->ch[1] + i, c, j->scale) + rnd[1],
+				    j->scale);
 			d[0] = v;
 			d[1] = 0;
 			d[2] = v >> 8;
@@ -503,11 +511,15 @@ static inline void rs_blend_outer(s16 *c, const s16 *row, u32 f)
 	"pmaddwd " w "(%1),%%mm1\n\t" \
 	"paddd %%mm1,%%mm0\n\t"
 
-// the half for the taps around the place, the second and third of their word
-static const u64 rs_half __aligned(8) = (u64)RS_HALF << 16 | (u64)RS_HALF << 32;
+// the half for the taps around the place, the second and third of their word,
+// on the sum's scale of 14 bits and of 13
+static const u64 rs_half[2] __aligned(8) = {
+	1ULL << (13 + 16) | 1ULL << (13 + 32),
+	1ULL << (12 + 16) | 1ULL << (12 + 32),
+};
 
-// the taps' sum into mm0, its low 32 bits, with mm6 the centre word's shift
-static inline void rs_sum_mmx(const s16 *x, const s16 *c)
+// the taps' sum into mm0, its low 32 bits
+static inline void rs_sum_mmx(const s16 *x, const s16 *c, const u64 *half)
 {
 	asm volatile("pxor %%mm0,%%mm0\n\t"
 		     RS_WORD("0") RS_WORD("128") RS_WORD("8") RS_WORD("120")
@@ -534,22 +546,23 @@ static inline void rs_sum_mmx(const s16 *x, const s16 *c)
 		     "movq %%mm2,%%mm1\n\t"
 		     "pmaddwd 64(%1),%%mm1\n\t"
 		     "pmaddwd %2,%%mm2\n\t"
-		     "psrad %%mm6,%%mm1\n\t"
+		     "psrad $2,%%mm1\n\t"
 		     "paddd %%mm1,%%mm0\n\t"
 		     "paddd %%mm2,%%mm0\n\t"
 		     "movq %%mm0,%%mm1\n\t"
 		     "psrlq $32,%%mm1\n\t"
 		     "paddd %%mm1,%%mm0\n\t"
-		     : : "r" (x), "r" (c), "m" (rs_half)
+		     : : "r" (x), "r" (c), "m" (*half)
 		     : "memory");
 }
 
-// mm0 and the channel before it, in mm5, to words of the ring
+// mm0 and the channel before it, in mm5, to words of the ring, with mm6 the
+// sum's scale
 static inline void rs_out_stereo(u8 *d, const s32 *rnd)
 {
 	asm volatile("punpckldq %%mm0,%%mm5\n\t"
 		     "paddd %1,%%mm5\n\t"
-		     "psrad $14,%%mm5\n\t"
+		     "psrad %%mm6,%%mm5\n\t"
 		     "packssdw %%mm5,%%mm5\n\t"
 		     "pxor %%mm1,%%mm1\n\t"
 		     "punpcklbw %%mm1,%%mm5\n\t"
@@ -560,7 +573,7 @@ static inline void rs_out_stereo(u8 *d, const s32 *rnd)
 static inline void rs_out_mono(u8 *d, const s32 *rnd)
 {
 	asm volatile("paddd %1,%%mm0\n\t"
-		     "psrad $14,%%mm0\n\t"
+		     "psrad %%mm6,%%mm0\n\t"
 		     "packssdw %%mm0,%%mm0\n\t"
 		     "pxor %%mm1,%%mm1\n\t"
 		     "punpcklbw %%mm1,%%mm0\n\t"
@@ -581,11 +594,12 @@ static inline const s16 *rs_taps(const struct es1869_rs_job *j, unsigned int c,
 u32 es1869_rs_run_mmx(struct es1869_rs_job *j)
 {
 	s16 rows[ES_RS_OVER][ES_RS_TAPS] __aligned(8);
+	const u64 *half = &rs_half[j->scale != ES_RS_SUM];
 	u32 held[ES_RS_OVER] = { 0 };
 	u32 i = 0, o = 0, ph = 0;
 	u8 *d = j->dst;
 
-	asm volatile("movd %0,%%mm6" : : "r" (j->centre));
+	asm volatile("movd %0,%%mm6" : : "r" (j->scale));
 	while (i < j->frames && o < j->room) {
 		u32 at = rs_held(j->frac);
 		s16 *c = rows[ph];
@@ -598,10 +612,10 @@ u32 es1869_rs_run_mmx(struct es1869_rs_job *j)
 		rs_blend_inner(c, rs_place(j->tab, j->frac),
 			       rs_blend_bits(j->frac));
 		rs_round(j, rnd);
-		rs_sum_mmx(rs_taps(j, 0, i), c);
+		rs_sum_mmx(rs_taps(j, 0, i), c, half);
 		if (j->stereo) {
 			asm volatile("movq %%mm0,%%mm5" : : );
-			rs_sum_mmx(rs_taps(j, 1, i), c);
+			rs_sum_mmx(rs_taps(j, 1, i), c, half);
 			rs_out_stereo(d, rnd);
 			d += 8;
 		} else {
@@ -713,7 +727,7 @@ static u32 rs_chunk(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 {
 	struct es1869_rs_job j = {
 		.tab = rs->treble ? rs->flat : rs->tab,
-		.centre = rs->treble ? RS_CENTRE_FLAT - 14 : RS_CENTRE - 14,
+		.scale = rs->treble ? ES_RS_SUM_FLAT : ES_RS_SUM,
 		.dst = s->ring + 2 * rs->w * (s->stereo ? 4 : 2),
 		.frames = n,
 		.room = s->lap - rs->w,

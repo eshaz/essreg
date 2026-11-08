@@ -36,7 +36,7 @@ BAND = (20.0, 20000.0)
 
 class Job(ctypes.Structure):
     s16p = ctypes.POINTER(ctypes.c_int16)
-    _fields_ = [("tab", s16p), ("centre", ctypes.c_uint32),
+    _fields_ = [("tab", s16p), ("scale", ctypes.c_uint32),
                 ("ch", s16p * 2), ("odd", (s16p * 3) * 2),
                 ("dst", ctypes.POINTER(ctypes.c_uint8)),
                 ("frames", ctypes.c_uint32), ("room", ctypes.c_uint32),
@@ -63,6 +63,9 @@ class Filter:
         self.taps = int(text.split("#define ES_RS_TAPS")[1].split()[0])
         self.behind = int(text.split("#define ES_RS_BEHIND")[1].split()[0])
         rows = int(text.split("#define ES_RS_ROWS")[1].split()[0])
+        # the job's word after the table: the sum's bits below a sample, or
+        # in an older tree the centre word's shift
+        self.scale = 14 if "u32 scale;" in text else 2
         self.tab = (ctypes.c_int16 * (rows * 2 * self.taps))()
         self.lib.es1869_rs_table(self.tab, False)
         self.lib.es1869_rs_run_c.argtypes = [ctypes.POINTER(Job)]
@@ -76,7 +79,7 @@ class Filter:
         a = np.asarray(x, dtype=np.int16)
         j = Job()
         j.tab = ctypes.cast(self.tab, Job.s16p)
-        j.centre = 2
+        j.scale = self.scale
         j.ch[0] = a.ctypes.data_as(Job.s16p)
         j.ch[1] = a.ctypes.data_as(Job.s16p)
         j.dst = out.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8))

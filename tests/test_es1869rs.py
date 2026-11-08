@@ -46,7 +46,7 @@ s16p = ctypes.POINTER(ctypes.c_int16)
 
 
 class Job(ctypes.Structure):
-    _fields_ = [("tab", s16p), ("centre", ctypes.c_uint32),
+    _fields_ = [("tab", s16p), ("scale", ctypes.c_uint32),
                 ("ch", s16p * 2), ("odd", (s16p * 3) * 2),
                 ("dst", ctypes.POINTER(ctypes.c_uint8)),
                 ("frames", ctypes.c_uint32), ("room", ctypes.c_uint32),
@@ -197,13 +197,69 @@ def ideal_row(i):
     return np.sinc(t) * w / np.i0(BETA)
 
 
-def row_taps(rows, i):
+def sum_scale(flat=0):
+    """the bits of a frame's sum below a sample, as the driver's job has
+    them: one less with the DAC's correction, whose worst signal comes to
+    over 4 times full scale"""
+    return 13 if flat else 14
+
+
+def scales(flat=0):
+    """each tap's scale in bits: a table with the DAC's correction has every
+    word a bit less fine, but for the centre word, which has 15"""
+    s = np.array(SCALE)
+    if flat:
+        s = s - 1
+        s[32:36] = 15
+    return s
+
+
+def row_taps(rows, i, flat=0):
     """a row of the table as the taps' values, with the 1/2 of the two taps
     around the place, which rs_half adds"""
-    v = rows[i, :TAPS] / 2.0 ** np.array(SCALE)
+    v = rows[i, :TAPS] / 2.0 ** scales(flat)
     v[BEHIND] += 0.5
     v[BEHIND + 1] += 0.5
     return v
+
+
+STAGES = (((0, 16, 1, 15), 1), ((2, 14), 2), ((3, 13), 1), ((4, 12), 1),
+          ((5, 11), 1), ((6, 10), 2))
+
+
+def worst_sums(rows, flat=0):
+    """the largest of a run's sums on the worst signal over 2^31: lane by
+    lane at each stage of the shifts, and the two lanes added with the
+    rounding at the end, on the sum's scale of 14 bits, or 13 with the
+    DAC's correction. Below 1 nothing wraps"""
+    scale = sum_scale(flat)
+    most = 0
+    for i in range(ROWS):
+        for f in (0, 16384, 32767):
+            c = rows[i, :TAPS].astype(np.int64) + \
+                (rows[i, TAPS:].astype(np.int64) * f >> 16)
+            end = 2 << scale  # the rounding, with dither at its largest
+            for n in (0, 1):
+                def lane(w):
+                    a = 4 * w + 2 * n
+                    return 32768 * int(np.abs(c[a:a + 2]).sum())
+
+                acc = 0
+                for words, shift in STAGES:
+                    for w in words:
+                        most = max(most, lane(w), acc + lane(w))
+                        acc += lane(w)
+                    acc >>= shift
+                near = lane(7) + lane(9)
+                acc += near >> 1
+                most = max(most, near, acc)
+                acc >>= 2
+                most = max(most, lane(8))
+                acc += (lane(8) >> 2) + 32768 * (1 << (scale - 1))
+                most = max(most, acc)
+                end += acc
+            most = max(most, end)
+    return most / 2 ** 31
 
 
 def shifted(j, chans):
@@ -228,7 +284,7 @@ def run(x, y, frames, frac, step, stereo=True, mmx=False, dither=False,
     b = np.array(y, dtype=np.int16)
     j = Job()
     j.tab = ctypes.cast(table(flat), s16p)
-    j.centre = 1 if flat else 2
+    j.scale = sum_scale(flat)
     j.ch[0] = a.ctypes.data_as(s16p)
     j.ch[1] = b.ctypes.data_as(s16p)
     alive = shifted(j, (a, b))
@@ -258,7 +314,7 @@ def through(x, step, y=None, frac=0, mmx=False, dither=False, seed=12345,
     b = np.asarray(y if stereo else x, dtype=np.int16)
     j = Job()
     j.tab = ctypes.cast(table(flat), s16p)
-    j.centre = 1 if flat else 2
+    j.scale = sum_scale(flat)
     j.ch[0] = a.ctypes.data_as(s16p)
     j.ch[1] = b.ctypes.data_as(s16p)
     alive = shifted(j, (a, b)) if mmx else None
@@ -381,36 +437,8 @@ class TableTest(unittest.TestCase):
     def test_sums_stay_in_32_bits(self):
         """on the worst signal, lane by lane, each sum as the shifts leave it"""
         rows = self.rows()
-        limit = 2 ** 31
-        blends = [rows[i, :TAPS].astype(np.int64) +
-                  (rows[i, TAPS:].astype(np.int64) * f >> 16)
-                  for i in range(ROWS) for f in (0, 16384, 32767)]
-
-        def lane(c, word, n):
-            a = 4 * word + 2 * n
-            return 32768 * int(np.abs(c[a:a + 2]).sum())
-
-        for c in blends:
-            self.assertLess(int(np.abs(c).max()), 32769)
-            for n in (0, 1):
-                acc = 0
-                for words, shift in (((0, 16, 1, 15), 1), ((2, 14), 2),
-                                     ((3, 13), 1), ((4, 12), 1), ((5, 11), 1),
-                                     ((6, 10), 2)):
-                    for w in words:
-                        self.assertLess(lane(c, w, n), limit)
-                        acc += lane(c, w, n)
-                        self.assertLess(acc, limit)
-                    acc >>= shift
-                near = lane(c, 7, n) + lane(c, 9, n)
-                self.assertLess(near, limit)
-                acc += near >> 1
-                self.assertLess(acc, limit)
-                acc >>= 2
-                centre = lane(c, 8, n)
-                self.assertLess(centre, limit)
-                acc += (centre >> 2) + 32768 * (1 << 13) + (1 << 14)
-                self.assertLess(acc, limit)
+        self.assertLess(int(np.abs(rows[:, :TAPS].astype(int)).max()), 32769)
+        self.assertLess(worst_sums(rows), 1.0)
 
 
 @unittest.skipUnless(np is not None and shutil.which("gcc"), "needs numpy, gcc")
@@ -470,7 +498,7 @@ class RunTest(unittest.TestCase):
         a = (ctypes.c_int16 * len(x))(*[int(v) for v in x])
         j = Job()
         j.tab = ctypes.cast(table(), s16p)
-        j.centre = 2
+        j.scale = 14
         j.pace(0)
         j.ch[0] = j.ch[1] = ctypes.cast(a, s16p)
         j.dst = ctypes.cast(out, ctypes.POINTER(ctypes.c_uint8))
@@ -824,18 +852,40 @@ class TrebleTest(unittest.TestCase):
 
     def test_gain_is_one(self):
         rows = np.array(table(True), dtype=np.int64).reshape(ROWS, STRIDE)
-        scale = list(SCALE)
-        for n in range(32, 36):
-            scale[n] = 15
-        scale = 2.0 ** np.array(scale)
         for i in range(0, ROWS, 7):
-            total = float((rows[i, :TAPS] / scale).sum()) + 1
+            total = float((rows[i, :TAPS] / 2.0 ** scales(1)).sum()) + 1
             self.assertAlmostEqual(total, 1.0, places=3)
 
     def test_fits_its_words(self):
         """no tap met the 16 bits, which would be a clamp and a click"""
         rows = np.array(table(True), dtype=np.int16).reshape(ROWS, STRIDE)
         self.assertLess(int(np.abs(rows.astype(int)[:, :TAPS]).max()), 32760)
+
+    def test_sums_stay_in_32_bits(self):
+        """the correction lifts the tails by its gain near half the rate, so
+        that every word but the centre one is a bit less fine than the plain
+        table's, and the sum ends on 13 bits"""
+        rows = np.ctypeslib.as_array(table(True)).reshape(ROWS, STRIDE)
+        self.assertLess(worst_sums(rows, 1), 1.0)
+
+    def test_worst_signal_clips(self):
+        """the signs of a row's taps at full scale come to over 4 times full
+        scale, which a sum on 14 bits wrapped: it clips, in C and MMX"""
+        rows = np.ctypeslib.as_array(table(True)).reshape(ROWS, STRIDE)
+        most = 0
+        for place in range(0, ROWS, 4):
+            c = rows[place, :TAPS].astype(np.int64)
+            x = np.zeros(300 + TAPS + 8, dtype=np.int64)
+            x[:TAPS] = np.where(c >= 0, 32767, -32768)
+            want = float(np.sum(row_taps(rows, place, 1) * x[:TAPS]))
+            most = max(most, want)
+            for mmx in (False, True) if X86 else (False,):
+                raw, _, _ = run(x, x, 4, place << 25, 0, stereo=False,
+                                mmx=mmx, flat=True)
+                got = samples(raw, False)[0][0]
+                self.assertLess(abs(np.clip(want, -32768, 32767) - got), 64,
+                                (place, mmx))
+        self.assertGreater(most, 4 * 32768)
 
     def test_mmx_is_the_c_run(self):
         if not X86:
@@ -845,9 +895,12 @@ class TrebleTest(unittest.TestCase):
         y = rng.integers(-20000, 20000, 256 + TAPS + 8)
         for eps in (0, 30e-6, -252e-6, 1e-3):
             for stereo in (True, False):
-                c = run(x, y, 256, 12345, q32(eps), stereo, flat=True)
-                m = run(x, y, 256, 12345, q32(eps), stereo, mmx=True, flat=True)
-                self.assertEqual(c, m)
+                for dither in (False, True):
+                    c = run(x, y, 256, 12345, q32(eps), stereo,
+                            dither=dither, flat=True)
+                    m = run(x, y, 256, 12345, q32(eps), stereo, mmx=True,
+                            dither=dither, flat=True)
+                    self.assertEqual(c, m, (eps, stereo, dither))
 
 
 @unittest.skipUnless(np is not None and shutil.which("gcc"), "needs numpy, gcc")

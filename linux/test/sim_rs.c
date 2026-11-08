@@ -79,7 +79,7 @@ short *sim_rs_parts(const short *src, unsigned long frames,
 		j.step = (u32)adv;
 		j.dither = parts[at].dither;
 		j.tab = rs_tab(parts[at].treble);
-		j.centre = parts[at].treble ? 1 : 2;
+		j.scale = parts[at].treble ? ES_RS_SUM_FLAT : ES_RS_SUM;
 		// the frames around the run, silence before and after the stream
 		for (i = 0; i < ES_RS_WINDOW; i++) {
 			long f = (long)(pos + i) - ES_RS_BEHIND;
@@ -148,7 +148,7 @@ double sim_rs_cycles(unsigned int channels, int mmx)
 			j.odd[c][k] = ch[c][k + 1];
 	}
 	j.tab = rs_tab(0);
-	j.centre = 2;
+	j.scale = ES_RS_SUM;
 	j.over = 1;
 	j.dst = ring;
 	j.frames = 4096;
