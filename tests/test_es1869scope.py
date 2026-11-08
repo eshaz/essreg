@@ -30,6 +30,12 @@ DP = ctypes.POINTER(D)
 SZ = ctypes.c_size_t
 
 
+class Loop(ctypes.Structure):
+    _fields_ = [("log2n", ctypes.c_uint), ("n", ctypes.c_uint),
+                ("win", DP), ("sxx", DP), ("syy", DP), ("sxy", DP),
+                ("zx", DP), ("zy", DP), ("segments", ctypes.c_ulong)]
+
+
 class Fft(ctypes.Structure):
     _fields_ = [("log2n", ctypes.c_uint), ("n", ctypes.c_uint),
                 ("tw", ctypes.POINTER(ctypes.c_int16)),
@@ -60,7 +66,7 @@ class Lib:
                 ["gcc", "-shared", "-fPIC", "-O2", "-Wall", "-Wextra",
                  "-Werror", "-o", so, os.path.join(SCOPE, "tie.c"),
                  os.path.join(SCOPE, "phase.c"), os.path.join(SCOPE, "fft.c"),
-                 "-lm"])
+                 os.path.join(SCOPE, "loop.c"), "-lm"])
             lib = ctypes.CDLL(so)
             for name in ("tie_adev", "tie_mdev", "tie_tdev", "tie_acov"):
                 getattr(lib, name).restype = D
@@ -89,6 +95,13 @@ class Lib:
                                    ctypes.POINTER(ctypes.c_int16),
                                    ctypes.POINTER(ctypes.c_int16)]
             lib.fft_free.argtypes = [ctypes.POINTER(Fft)]
+            lib.loop_init.argtypes = [ctypes.POINTER(Loop), ctypes.c_uint]
+            lib.loop_add.argtypes = [ctypes.POINTER(Loop), DP, DP]
+            lib.loop_bin.argtypes = [ctypes.POINTER(Loop), ctypes.c_uint,
+                                     DP, DP, DP]
+            lib.loop_free.argtypes = [ctypes.POINTER(Loop)]
+            lib.loop_lag.restype = ctypes.c_long
+            lib.loop_lag.argtypes = [DP, DP, ctypes.c_uint, DP]
             cls.lib = lib
         return cls.lib
 
@@ -410,6 +423,65 @@ class FftTest(unittest.TestCase):
         _, db, _ = self.run_fft(x, 1)
         far = np.r_[db[:40], db[90:]] / 10
         self.assertLess(np.median(far), -80)
+
+
+class LoopTest(unittest.TestCase):
+    """a path's response from music-like noise through it, as Audio 2 into
+    Audio 1 will be measured"""
+
+    def response(self, x, y, log2n=12):
+        lib = Lib.get()
+        lp = Loop()
+        self.assertEqual(lib.loop_init(ctypes.byref(lp), log2n), 0)
+        n = 1 << log2n
+        for s in range(0, len(x) - n + 1, n // 2):
+            xs = np.ascontiguousarray(x[s:s + n])
+            ys = np.ascontiguousarray(y[s:s + n])
+            lib.loop_add(ctypes.byref(lp), dp(xs), dp(ys))
+        out = []
+        m, ph, co = D(), D(), D()
+        for k in range(n // 2 + 1):
+            lib.loop_bin(ctypes.byref(lp), k, ctypes.byref(m),
+                         ctypes.byref(ph), ctypes.byref(co))
+            out.append((m.value, ph.value, co.value))
+        lib.loop_free(ctypes.byref(lp))
+        return np.array(out)
+
+    def test_a_known_filter(self):
+        rng = np.random.default_rng(31)
+        x = rng.normal(0, 1, 1 << 18)
+        h = np.array([0.25, 0.5, 0.25])      # a gentle low-pass, 1 sample late
+        y = np.convolve(x, h)[:len(x)] + rng.normal(0, 1e-3, len(x))
+        r = self.response(x, y)
+        n = 1 << 12
+        w = 2 * np.pi * np.arange(n // 2 + 1) / n
+        want = np.abs(0.25 + 0.5 * np.exp(-1j * w) + 0.25 * np.exp(-2j * w))
+        band = slice(10, int(n * 0.4))
+        db = 20 * np.log10(r[band, 0] / want[band])
+        self.assertLess(np.max(np.abs(db)), 0.05)
+        # its phase is a delay of one sample
+        np.testing.assert_allclose(np.unwrap(r[band, 1]), -w[band],
+                                   atol=0.01)
+        self.assertGreater(r[band, 2].min(), 0.99)
+
+    def test_nothing_in_common_has_no_coherence(self):
+        rng = np.random.default_rng(32)
+        x = rng.normal(0, 1, 1 << 17)
+        y = rng.normal(0, 1, 1 << 17)
+        r = self.response(x, y)
+        self.assertLess(np.median(r[5:-5, 2]), 0.05)
+
+    def test_the_lag_between_two_captures(self):
+        lib = Lib.get()
+        rng = np.random.default_rng(33)
+        x = rng.normal(0, 1, 1 << 14)
+        frac = D()
+        for lag in (0, 37, -120, 900):
+            y = np.roll(x, lag) + rng.normal(0, 0.1, len(x))
+            got = lib.loop_lag(dp(x), dp(np.ascontiguousarray(y)), 14,
+                               ctypes.byref(frac))
+            self.assertEqual(got, lag)
+            self.assertLess(abs(frac.value), 0.5)
 
 
 class ShotTest(unittest.TestCase):

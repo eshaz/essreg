@@ -16,7 +16,7 @@ all: es1869clock es1869scope
 es1869clock: es1869clock.o phase.o
 	$(CC) $(LDFLAGS) -o $@ $^ -lasound -lm
 
-es1869scope: es1869scope.o tie.o draw.o fb.o plot.o fft.o spectro.o
+es1869scope: es1869scope.o tie.o draw.o fb.o plot.o fft.o spectro.o loop.o
 	$(CC) $(LDFLAGS) -o $@ $^ -lasound -lz -lm
 
 es1869clock.o: es1869clock.c phase.h
@@ -27,6 +27,7 @@ draw.o: draw.c draw.h
 fb.o: fb.c fb.h draw.h
 plot.o: plot.c plot.h draw.h
 fft.o: fft.c fft.h
+loop.o: loop.c loop.h tie.h
 spectro.o: spectro.c spectro.h fft.h draw.h plot.h
 
 clean:
