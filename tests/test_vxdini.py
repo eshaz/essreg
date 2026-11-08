@@ -24,7 +24,8 @@ WINDOWS = test_vxddos.DosMixerTest.WINDOWS
 
 if HAVE_UNICORN:
     from vxdemu import (VM_SYS, VM_DOS, VM_DOS2, ADI_FM_OWNER,  # noqa: E402
-                        ADI_DSP_OWNER, ADI_MPU_OWNER)
+                        ADI_DSP_OWNER, ADI_MPU_OWNER, ADI, ADI_DMA1, ADI_DMA2,
+                        DMA1, DMA2, STACK, SVC_VDMAD_GET_PHYS_COUNT)
     from sbfronts import VxDCard, play16  # noqa: E402
 
 VXD, DRV = "ES1869.VXD", "ES1869.DRV"
@@ -46,13 +47,22 @@ KEYS = {                            # key: its bit in ESSREG_Opts
     (VXD, "SoundBlaster16"): 0x4000,
 }
 DEFAULT, READ = 0x48FF, 0x8000
-# the keys without a bit: the Sound Blaster 16's channel and Audio 2
-OTHER = ((VXD, "SoundBlaster16DMA"), (VXD, "SoundBlaster16Audio2"))
+# the keys without a bit: the Sound Blaster 16's channel and Audio 2, and
+# ESS's looks at a DMA count
+OTHER = ((VXD, "SoundBlaster16DMA"), (VXD, "SoundBlaster16Audio2"),
+         (VXD, "DmaCountTwice"))
 # every change off: ESS's driver
 ESS = {key: "0" for key in KEYS}
 ESS.update({(DRV, "Audio2Oversampling"): "1", (DRV, "Audio2Filter"): "1",
-            (DRV, "Audio1Filter"): "1", (VXD, "SoundBlaster16Audio2"): "0"})
+            (DRV, "Audio1Filter"): "1", (VXD, "SoundBlaster16Audio2"): "0",
+            (VXD, "DmaCountTwice"): "0"})
 WIN_AUDIO = 0x220
+
+
+def ds_count(m, handle):
+    """DirectSound's look at a channel's count (L5_326E, cdecl)"""
+    m.emu.write32(STACK - 0x100 + 4, handle)
+    return m.emu.run(m.syms["L5_326E"], {})["EAX"] & 0xFFFF
 
 
 def dos_mixer(m, vm=None):
@@ -319,6 +329,32 @@ class EachSettingTest(VxDBuilds, unittest.TestCase):
                 self.assertEqual(c.chip.dma[ch]["addr"], 0x4680)
                 self.assertEqual(c.errors, [])
 
+    def test_dma_count_twice(self):
+        # on, the default: ESS's looks at a moving count, function 0004
+        # (ES1869.DRV's positions) and DirectSound's position, read until
+        # two readings agree within 32, four at most, and the last is kept;
+        # 0: ESS's one reading. The emulated count moves `step` a look
+        for ini, step, looks in (
+                ({}, 0x123, 4), ({}, 0x10, 2),
+                ({(VXD, "DmaCountTwice"): "0"}, 0x123, 1),
+                ({(VXD, "DmaCountTwice"): "0"}, 0x10, 1),
+                ({(VXD, "DmaCountTwice"): "2"}, 0x10, 2)):
+            m = self.machine_with(ini)
+            e = m.emu
+            e.write32(ADI + ADI_DMA1, DMA1)
+            e.write32(ADI + ADI_DMA2, DMA2)
+            e.dma_step = step
+            for name, read in (
+                    ("0004", lambda: m.api(VM_SYS, 0x0004,
+                                           EBX=1)[0]["EAX"] & 0xFFFF),
+                    ("DirectSound", lambda: ds_count(m, DMA2))):
+                with self.subTest(ini=ini, step=step, at=name):
+                    e.dma_count = 0x2000
+                    n = e.services.count(SVC_VDMAD_GET_PHYS_COUNT)
+                    self.assertEqual(read(), 0x2000 - looks * step)
+                    self.assertEqual(
+                        e.services.count(SVC_VDMAD_GET_PHYS_COUNT) - n, looks)
+
     def test_reset_dos_fm(self):
         m = self.machine_with({(VXD, "ResetDosFM"): "0"})
         note(m, VM_DOS)
@@ -439,6 +475,8 @@ class AllOffTest(VxDBuilds, unittest.TestCase):
             ("program ends", lambda: m.program_end(VM_DOS)),
             ("Windows sound", lambda: api(0x0002, EBX=1, EAX=WIN_AUDIO)),
             ("Windows done", lambda: api(0x0003, EBX=1, EAX=WIN_AUDIO)),
+            ("position", lambda: api(0x0004, EBX=1)),
+            ("DirectSound position", lambda: ds_count(m, DMA2)),
             ("box closes", lambda: m.vm_close(VM_DOS2)),
         ]
         out = []
@@ -466,6 +504,11 @@ class AllOffTest(VxDBuilds, unittest.TestCase):
                          [(0x5555, True), (0, False), False, (0, False),
                           True])
         self.assertTrue(any(s[4] for s in stock))
+        # and the positions looked at the count, once
+        for s in stock:
+            if s[0] in ("position", "DirectSound position"):
+                self.assertEqual(s[3].count(SVC_VDMAD_GET_PHYS_COUNT), 1,
+                                 s[0])
 
 
 if __name__ == "__main__":

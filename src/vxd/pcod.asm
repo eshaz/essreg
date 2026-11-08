@@ -2068,7 +2068,11 @@ L5_14D6:
         or_ eax,eax                                     ; 14D6
         jz short L5_14E9                                ; 14D8
         push ecx                                        ; 14DA
+%if ESSREG_EXT
+        ds call ESSREG_Count            ; essreg: readings that agree (6 bytes)
+%else
         VxDCall VDMAD_Get_Phys_Count                    ; 14DB
+%endif
         mov [ebp+Client_EAX],cx                         ; 14E1
         pop ecx                                         ; 14E5
 L5_14E6:
@@ -5121,7 +5125,11 @@ L5_326E:
         push ecx                                        ; 3272
         mov eax,[ebp+0x8]                               ; 3273
         VxDCall Get_Sys_VM_Handle                       ; 3276
+%if ESSREG_EXT
+        ds call ESSREG_Count            ; essreg: readings that agree (6 bytes)
+%else
         VxDCall VDMAD_Get_Phys_Count                    ; 327C
+%endif
         movzx eax,cx                                    ; 3282
         pop ecx                                         ; 3285
         pop ebx                                         ; 3286

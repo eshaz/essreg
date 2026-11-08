@@ -167,8 +167,12 @@ allocated for Audio 2's DMA channel (ADI 86h, its linear address, 82h its
 physical address and 8Ah its size, 32 KB). DirectSound writes into this
 buffer. `SetFormat` (o5:2F10) and `SetFrequency` (o5:2F90) program the rate
 through `L5_34F6`, and `GetPosition` (o5:2FF0) reads the DMA count
-(`VDMAD_Get_Phys_Count`) and reports it as both cursors. `Lock` and `Unlock`
-return E_NOTIMPL, which the DONTNEEDPRIMARYLOCK flag allows.
+(`VDMAD_Get_Phys_Count`) and reports it as both cursors. With
+`DmaCountTwice=1`, the default, it reads the count until two readings agree
+within 32, four times at most (`ESSREG_Count`), as function 0004 does, since
+a reading taken while a byte comes between the count's low and high byte is
+256 short and puts the cursors ahead of the DMA. `Lock` and `Unlock` return
+E_NOTIMPL, which the DONTNEEDPRIMARYLOCK flag allows.
 
 `Play` (o5:30D0) depends on the channel. On an 8-bit DMA channel (0 to 3)
 the DMA plays DirectSound's buffer itself. On a 16-bit channel (5) the chip
@@ -750,13 +754,18 @@ under `%if ESSREG_EXT` and each keeping its length:
 * four entries of the DirectSound vtables in PDAT: GetDriverDesc (0494),
   Lock (04D4), Unlock (04D8) and Play (04F0), which are now `ESSREG_DS_*`
   ([DirectSound](#directsound))
+* the two calls of `VDMAD_Get_Phys_Count`, in function 0004 (o5:14DB) and in
+  DirectSound's position (o5:327C), each a 6-byte `VxDCall` that is now a
+  call of `ESSREG_Count` with a DS prefix, one instruction of the same
+  length
 
 Everything else is appended, so ESS's code stays at its addresses, and
 Windows' sound, DirectSound and the interrupt handlers run the same bytes as
 in ESS's driver. `EssCodeTest` in `tests/test_vxdext.py` compares the two
 builds after their fixups, and a new hook goes in its list. `PcmPathTest`
 runs ES1869.DRV's calls around a wave device, and DirectSound's acquire and
-release, in both builds and compares the port accesses.
+release, in both builds and compares the port accesses, with
+`DmaCountTwice=0`, since the emulated count moves at every look.
 
 ### Settings
 

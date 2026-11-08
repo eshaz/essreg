@@ -773,6 +773,14 @@ ESS's driver:
   a 16-bit channel, or none, the key changes nothing. With 0, the 16-bit
   sound plays on Audio 1, and a transfer of one kind ends the other kind's,
   one at a time, as with version 1.16. It needs `SoundBlaster16=1`.
+* **DmaCountTwice** (default 1). ESS's two looks at a DMA channel's count,
+  function 0004, which ES1869.DRV's positions come from, and DirectSound's
+  position, read the count until two readings agree within 32, four times at
+  most, and keep the last. A byte that comes between the reads of the
+  count's low and high byte leaves a reading 256 short, which Linux's driver
+  measured on a fast channel, and a position 256 ahead lets a program write
+  over what hasn't played yet. With 0, ESS's code reads the count once.
+  essctl doesn't show this key.
 
 ### 6.2 [ES1869.DRV]
 

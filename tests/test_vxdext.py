@@ -356,9 +356,11 @@ HOOKS = [
     (5, 0x122A, 0x122D),    # Acquire_Resources, FM: ESSREG_FM_Reset
     (5, 0x127A, 0x127D),    # Acquire_Resources, DSP: ESSREG_DSP_Save
     (5, 0x127F, 0x1282),    # its untrapping: ESSREG_DSP_Untrap
+    (5, 0x14DB, 0x14E0),    # 0004's count: ESSREG_Count
     (5, 0x1362, 0x1362),    # the API's groups: 0-4
     (5, 0x136D, 0x1370),    # and their table
     (5, 0x198D, 0x1990),    # a VM takes the DSP, 71h: ESSREG_A2_Mode
+    (5, 0x327C, 0x3281),    # DirectSound's count: ESSREG_Count
     (5, 0x3604, 0x3607),    # the VxD's Audio 2 start, 71h: ESSREG_A2_Mode
     (7, 0x0043, 0x0043),    # the per-VM node's size
     (6, 0x0368, 0x036B),    # the audio IRQ's EOI: ESSREG_EOI
@@ -423,6 +425,11 @@ class PcmPathTest(VxDBuilds, unittest.TestCase):
     def run_steps(self, ext):
         import vxdemu
         m = self.machine(ext)
+        if ext:
+            # one look at a count, as ESS's: the emulated count moves at
+            # every look, and DmaCountTwice=1 looks until two agree
+            # (test_vxdini's test_dma_count_twice)
+            m.start({("ES1869.VXD", "DmaCountTwice"): "0"})
         e = m.emu
         e.write32(vxdemu.ADI + 0x4D, 0x7100)    # the DMA channels' handles
         e.write32(vxdemu.ADI + 0x7A, 0x7101)
@@ -531,7 +538,8 @@ class DirectSoundTest(VxDBuilds, unittest.TestCase):
     DRV = "ES1869.DRV"
     # the keys a DirectSound playback goes through, at ESS's values
     ESS = {(VXD, "DirectSoundLock"): "0", (DRV, "Audio2Oversampling"): "1",
-           (DRV, "Audio2Filter"): "1", (DRV, "Audio1Filter"): "1"}
+           (DRV, "Audio2Filter"): "1", (DRV, "Audio1Filter"): "1",
+           (VXD, "DmaCountTwice"): "0"}
     E_NOTIMPL = 0x80004001
     DSERR_INVALIDPARAM = 0x80070057
     LOCK = {(VXD, "DirectSoundLock"): "1"}

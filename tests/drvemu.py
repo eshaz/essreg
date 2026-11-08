@@ -272,6 +272,9 @@ class DrvEmu:
         self.callbacks = []     # (msg, dwInstance, dw1)
         self.vxd_calls = []     # (DX, BX)
         self.vxd_fail = set()   # functions that answer with the carry set
+        # added to VxD 0004's next answers, one each: a reading of the
+        # 8237's count that a byte tore between its low and high byte
+        self.vxd_tear = []
         self.dsp_taken = []     # ECX of each call to 040D
         self.heap = HEAP_OFF
         self.app = APP_PARA * 16
@@ -631,6 +634,8 @@ class DrvEmu:
         elif dx == 0x0004:
             ch = A1_DMA if bx == 0 else self.a2_dma
             ax = self.chip.dma_count(ch)
+            if self.vxd_tear:
+                ax = (ax + self.vxd_tear.pop(0)) & 0xFFFF
         elif dx == 0x040D:
             # a DOS program gave up the DSP
             self.dsp_taken.append(uc.reg_read(UC_X86_REG_ECX))

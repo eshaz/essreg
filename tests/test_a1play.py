@@ -331,6 +331,30 @@ class PlayTest(A1Case):
                 self.assertGreaterEqual(pos, last)
                 last = pos
 
+    def test_torn_count(self):
+        """a reading of the 8237's count torn at an interrupt, 256 short as
+        when a byte comes between its low and high byte, and a program's
+        write right after it: the player reads until two readings agree,
+        so the write doesn't take the moment's DMA for a wrap"""
+        e, user = self.opened(rate=44100)
+        block = e.dev16(A1_BLOCK)
+        data = pattern(block * 8)
+        hdrs = [e.header(data[i:i + block])
+                for i in range(0, 4 * block, block)]
+        for h in hdrs:
+            e.write(user, h)
+        self.play(e, 1)
+        e.dma(block)
+        e.vxd_tear = [-256]
+        e.interrupt()
+        self.assertEqual(e.vxd_tear, [])
+        later = e.header(data[4 * block:])
+        e.write(user, later)
+        self.play(e, 10)
+        self.assertEqual(bytes(e.played[:len(data)]), data)
+        self.assertEqual(e.done(), hdrs + [later])
+        self.assertEqual(e.getpos(user)[2], len(data))
+
     def test_samples(self):
         e, user = self.opened(rate=22050, channels=2, bits=16)
         e.write(user, e.header(pattern(4000)))

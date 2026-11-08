@@ -53,12 +53,7 @@ a1_isr:
 
 ; the DMA's offset in the ring, frame aligned, to AX; SI = dev
 a1_offset:
-        push    word [si+DEV_DEVNODE+2]
-        push    word [si+DEV_DEVNODE]
-        xor     ax,ax                   ; Audio 1
-        push    ax
-        push    cs
-        call    vxd_dma_pos             ; the 8237's count: bytes left - 1
+        call    a1_count
         inc     ax
         mov     dx,[si+A1_RING]
         sub     dx,ax
@@ -71,6 +66,44 @@ a1_offset:
         and     ax,dx
         ret
 .start: xor     ax,ax
+        ret
+
+; the 8237's count of Audio 1's channel, bytes left - 1, to AX: VxD 0004
+; until two readings agree within A1_AGREE, A1_TRIES at most, the last
+; kept.  A byte that comes between the reads of the count's low and high
+; byte leaves a reading 256 short (Linux's driver measured it on a fast
+; channel), and a torn reading at an interrupt, followed by a program's
+; write a moment later, would look like a wrap and add a ring to PPOS.
+; Keeps BX, CX and DX, as vxd_dma_pos keeps BX and ECX; SI = dev
+A1_AGREE        equ 32
+A1_TRIES        equ 4
+a1_count:
+        push    cx
+        push    dx
+        call    a1_count1
+        mov     cx,A1_TRIES - 1
+.again: mov     dx,ax
+        push    dx
+        call    a1_count1
+        pop     dx
+        push    ax
+        sub     ax,dx
+        add     ax,A1_AGREE
+        cmp     ax,2 * A1_AGREE
+        pop     ax
+        jbe     .out
+        loop    .again
+.out:   pop     dx
+        pop     cx
+        ret
+
+a1_count1:
+        push    word [si+DEV_DEVNODE+2]
+        push    word [si+DEV_DEVNODE]
+        xor     ax,ax                   ; Audio 1
+        push    ax
+        push    cs
+        call    vxd_dma_pos             ; the 8237's count: bytes left - 1
         ret
 
 ; PPOS from the DMA; SI = dev

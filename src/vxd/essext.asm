@@ -5914,6 +5914,17 @@ ESSREG_S16_Position:
 .done:  popad
 .out:   ret
 
+; ESS's two looks at a DMA channel's count, function 0004 (5:14DB, ES1869.DRV's
+; positions) and DirectSound's position (5:327C), each a 6-byte instruction
+; in place of ESS's VxDCall: with DmaCountTwice, readings until two agree
+; (ESSREG_Phys_Count), else ESS's one reading. EAX = the VDMAD handle, EBX
+; = the VM; ECX = its count
+ESSREG_Count:
+        cmp     dword [ESSREG_Count_Twice],0
+        jne     ESSREG_Phys_Count
+        VxDCall VDMAD_Get_Phys_Count
+        ret
+
 ; ECX = the count of VDMAD channel EAX, which moves: VDMAD_Get_Phys_Count
 ; until two readings agree within ESSREG_COUNT_AGREE,
 ; ESSREG_COUNT_TRIES at most, the last kept, as esssb16's ch8_read reads
@@ -6516,8 +6527,12 @@ ESSREG_Read_Settings:
 .set:   mov     [ESSREG_S16_Chan],ecx
         jmp     .skip
 .a2:    cmp     dword [ebx],ESSREG_Key_S16A2
-        jne     .bit
+        jne     .twice
         mov     [ESSREG_S16_Audio2],eax ; SoundBlaster16Audio2: 0 or not
+        jmp     .skip
+.twice: cmp     dword [ebx],ESSREG_Key_Twice
+        jne     .bit
+        mov     [ESSREG_Count_Twice],eax ; DmaCountTwice: 0 or not
         jmp     .skip
 .bit:   mov     ecx,[ebx+8]             ; its bit
         or      eax,eax
@@ -6927,6 +6942,8 @@ ESSREG_S16_Virt:        dd 0            ; its VDMAD handle, once taken (not
                                         ; Audio 2's channel)
 ESSREG_S16_Audio2:      dd 1            ; SoundBlaster16Audio2: the 16-bit
                                         ; playback on Audio 2, 0 for Audio 1
+ESSREG_Count_Twice:     dd 1            ; DmaCountTwice: ESS's looks at a
+                                        ; count until two readings agree
 
 section PDAT
 
@@ -7003,6 +7020,7 @@ ESSREG_Settings:
         dd ESSREG_Key_SB16, ESSREG_Sec_VxD, OPT_SB16
         dd ESSREG_Key_S16DMA, ESSREG_Sec_VxD, 0 ; the channel, no bit
         dd ESSREG_Key_S16A2, ESSREG_Sec_VxD, 0  ; no bit either
+        dd ESSREG_Key_Twice, ESSREG_Sec_VxD, 0  ; nor here
         dd 0
 ESSREG_Sec_VxD:         db "ES1869.VXD", 0
 ESSREG_Sec_Drv:         db "ES1869.DRV", 0
@@ -7023,3 +7041,4 @@ ESSREG_Key_Latch:       db "DrqLatch", 0
 ESSREG_Key_SB16:        db "SoundBlaster16", 0
 ESSREG_Key_S16DMA:      db "SoundBlaster16DMA", 0
 ESSREG_Key_S16A2:       db "SoundBlaster16Audio2", 0
+ESSREG_Key_Twice:       db "DmaCountTwice", 0

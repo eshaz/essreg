@@ -170,6 +170,14 @@ the ring. A buffer that a program writes while the device is playing goes
 into the ring at once, as ESS's write does for Audio 2 (6:2FC1), in pieces
 of 2 KB with interrupts off.
 
+The player reads the DMA's count until two readings agree within 32 bytes,
+four times at most, and keeps the last (`a1_count`), with ESS's VxD as with
+the rebuilt one. A byte that comes between the reads of the count's low and
+high byte leaves a reading 256 short, as Linux's driver measured on a fast
+channel. Read once, such a reading at an interrupt, followed a moment later
+by the program's next write, looked like a wrap of the ring, and the player
+then wrote a ring's worth over data that hadn't played.
+
 When the program runs out of data, the player writes silence and lets the
 DMA run on. Stopping the DMA would take DSP commands, and ESS's driver never
 sends those at interrupt time. New data then goes in 1/128 s ahead of the

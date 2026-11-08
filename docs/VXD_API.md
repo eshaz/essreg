@@ -182,7 +182,10 @@ when the device is closed.
 In: BX = 0 for Audio 1 or 1 for Audio 2, and ECX = devnode.
 
 Out: AX = the physical count from VDMAD, or an emulated count in no-DMA
-mode. On failure, CF is set and AX = FFFFh.
+mode. On failure, CF is set and AX = FFFFh. From version 1.26, with
+`DmaCountTwice=1`, the default, the extended driver reads the count until
+two readings agree within 32, four times at most, and returns the last
+([DRIVER_CONFIG.md](DRIVER_CONFIG.md#61-es1869vxd)).
 
 ### 0005: GPO pins
 
