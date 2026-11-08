@@ -431,8 +431,14 @@ so set the speakers to a normal level first.
 
 `essprobe.exe` measures the chip itself, without `esssb16`. Run and record
 it as [ESSPROBE.md](ESSPROBE.md#running-it) says, and send the reports and
-recordings back. `build\ESSCHECK.BAT` runs D2 to D4 with the games in one go
+recordings back. `build\ESSCHECK.BAT` runs D2 to D5 with the games in one go
 ([ESSSB16.md](ESSSB16.md#checking-it-on-the-machine)).
+
+### D5. esswchk
+
+`esswchk.exe /auto` checks the drivers' fixes in Windows 98 by itself
+([ESSWCHK.md](ESSWCHK.md)); ESSCHECK starts it after its DOS part. Send
+`WCHECK.TXT` back, with the recording of a recorded run.
 
 ### E0. Installing with essinst
 

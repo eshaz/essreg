@@ -16,7 +16,9 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   its data segment for essctl), `drvinst` (essinst's checks of the drivers,
   and its staging through WININIT.INI), `sb16t` (sb16test's checks of a
   Sound Blaster 16, which the tests also run on the host), `essp`
-  (essprobe's cases of the bare chip, also run on the host), `sbtsound` (the
+  (essprobe's cases of the bare chip, also run on the host), `tears` (the
+  torn readings of a DMA count, for sb16test, essprobe and esswchk), `wchk`
+  (esswchk's measures and verdicts, also run on the host), `sbtsound` (the
   tones and DTMF markers of the recorded runs), `dosplat` (the DOS programs'
   clock, interrupt, report and crash-safe files) and `piix4` (the Intel
   PIIX4's Type F DMA registers, read for the machine lines of essprobe and
@@ -31,8 +33,9 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   `tools/ess3dico.py`, and `ess3dms.c` its measurement of the 3-D effect,
   played on Audio 2 and recorded from record source 7. `esfmrec.c` records
   the FM digitally to a WAV file, and `essinst.c` installs the rebuilt
-  drivers and restarts Windows. `wheel.c` gives the sliders of essctl and
-  ess3d the mouse wheel.
+  drivers and restarts Windows. `esswchk.c` checks the drivers' fixes on the
+  card in Windows 98, which ESSCHECK starts through the StartUp folder.
+  `wheel.c` gives the sliders of essctl and ess3d the mouse wheel.
 * `src/vxd/` holds `ES1869.VXD` as NASM source, made by `tools/vxd2asm.py`.
   `essext.asm` adds the register API, the DOS box improvements (the virtual
   FM chip, Windows' mixer around a DOS program, the DACs' modes for it, and
@@ -54,11 +57,11 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   byte-identical rebuilds, with ESS's ES1869F driver sets for Windows 3.1,
   NT 4.0, Windows 95 and OS/2 in `driver/es1869f/`, and `build/` the
   committed binaries, with `ESSCHECK.BAT`, which runs the checks of a
-  machine in one go (essprobe, esssb16, sb16test and the games).
-  `third_party/hdpmi32i/` holds `HDPMI32i.EXE` as HX released it but for the
-  fix of `tools/hdpmifix.py` (its emulation of STI before IRETD), for
-  esssb16's protected-mode games, with its origin, the fix and the hashes in
-  its README.
+  machine in one go (essprobe, esssb16, sb16test and the games, then Windows
+  with esswchk). `third_party/hdpmi32i/` holds `HDPMI32i.EXE` as HX released
+  it but for the fix of `tools/hdpmifix.py` (its emulation of STI before
+  IRETD), for esssb16's protected-mode games, with its origin, the fix and
+  the hashes in its README.
 * `src/esssb16.asm` is `esssb16.com`, the DOS TSR that answers games as a
   Sound Blaster 16 and plays their sound on Audio 1, through the port traps
   of EMM386, QPI (QEMM, JEMM with QPIEMU) and HDPMI32i. It is the VxD's
@@ -69,24 +72,25 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   no transfer may go to a 16-bit channel as words.
 * `tools/` holds the builders, the RE tools, `guard.py`, `wineshot.sh`,
   `dualwav.py`, which makes 4-channel files for dual playback,
-  `hdpmifix.py`, which fixes HDPMI32i, and `sb16rec.py` and `essprec.py`,
-  which analyze a recording of `SB16TEST /R` and `ESSPROBE /R` against its
-  report, on `recan.py`'s markers, clock and measures. `tests/` holds the
-  Python tests (`esfmemu.py`, `vxdemu.py` and `drvemu.py` run the drivers in
-  a CPU emulator, `tsremu.py` runs `esssb16.com` in one, with DOS, the
-  memory managers and the DPMI host in Python, and `dosrun.py` a DOS
-  program, `sb16test.exe` or `essprobe.exe`, in front of a card), and
-  `tests/host/` the C tests. `sb16.py` is the Sound Blaster 16 that the
-  fronts are tested against, `esschip.py` the chip's audio behind them,
-  `dma8237.py` the DMA controllers, `sbgame.py` and `sbscenes.py` what games
-  do, and `sbfronts.py` the fronts as cards, with a model of VDMAD for the
-  VxD's, and the bare chip with a VGA (`ChipCard`); `emm386dma.py` is
-  EMM386's DMA translation, `pcicfg.py` the PCI configuration space with the
-  laptop's PIIX4, and `mpu401.py` the chip's MPU-401 UART with a loopback
-  cable. `sbfsm.py` is the front as a state machine in Python, the reference
-  of [SB16_FRONT.md](docs/SB16_FRONT.md), and `sbops.py` the operations that
-  the chip's model records. `sbfuzz.py` makes random games, which
-  `tests/test_sbfsm.py` plays on the fronts and the reference alike.
+  `hdpmifix.py`, which fixes HDPMI32i, and `sb16rec.py`, `essprec.py` and
+  `wchkrec.py`, which analyze a recording of `SB16TEST /R`, `ESSPROBE /R`
+  and `ESSWCHK /R` against its report, on `recan.py`'s markers, clock and
+  measures. `tests/` holds the Python tests (`esfmemu.py`, `vxdemu.py` and
+  `drvemu.py` run the drivers in a CPU emulator, `tsremu.py` runs
+  `esssb16.com` in one, with DOS, the memory managers and the DPMI host in
+  Python, and `dosrun.py` a DOS program, `sb16test.exe` or `essprobe.exe`,
+  in front of a card), and `tests/host/` the C tests. `sb16.py` is the Sound
+  Blaster 16 that the fronts are tested against, `esschip.py` the chip's
+  audio behind them, `dma8237.py` the DMA controllers, `sbgame.py` and
+  `sbscenes.py` what games do, and `sbfronts.py` the fronts as cards, with a
+  model of VDMAD for the VxD's, and the bare chip with a VGA (`ChipCard`);
+  `emm386dma.py` is EMM386's DMA translation, `pcicfg.py` the PCI
+  configuration space with the laptop's PIIX4, and `mpu401.py` the chip's
+  MPU-401 UART with a loopback cable. `sbfsm.py` is the front as a state
+  machine in Python, the reference of [SB16_FRONT.md](docs/SB16_FRONT.md),
+  and `sbops.py` the operations that the chip's model records. `sbfuzz.py`
+  makes random games, which `tests/test_sbfsm.py` plays on the fronts and
+  the reference alike.
 * `docs/` holds [TESTING.md](docs/TESTING.md),
   [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md),
   [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md),
@@ -95,11 +99,12 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   [DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md),
   [AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md), [AUDIO1.md](docs/AUDIO1.md),
   [SB16.md](docs/SB16.md), [ESSSB16.md](docs/ESSSB16.md),
-  [ESSPROBE.md](docs/ESSPROBE.md), [ESS_EXTENDED.md](docs/ESS_EXTENDED.md),
-  [MPU401.md](docs/MPU401.md), [SB16_FRONT.md](docs/SB16_FRONT.md),
-  [RE_NOTES.md](docs/RE_NOTES.md) and [STYLE.md](docs/STYLE.md).
-  `REGISTERS.md` and the `REG_*.md` pages are generated, and
-  `docs/datasheet/` has the ES1869, ES938 and ES1868 data sheets.
+  [ESSPROBE.md](docs/ESSPROBE.md), [ESSWCHK.md](docs/ESSWCHK.md),
+  [ESS_EXTENDED.md](docs/ESS_EXTENDED.md), [MPU401.md](docs/MPU401.md),
+  [SB16_FRONT.md](docs/SB16_FRONT.md), [RE_NOTES.md](docs/RE_NOTES.md) and
+  [STYLE.md](docs/STYLE.md). `REGISTERS.md` and the `REG_*.md` pages are
+  generated, and `docs/datasheet/` has the ES1869, ES938 and ES1868 data
+  sheets.
 
 ## Environment
 
@@ -258,9 +263,11 @@ tools/wineshot.sh run ess3d.exe /sim tray
   `build/esssb16.com` is current.
 * **ESSCHECK.BAT** runs on MS-DOS 7's COMMAND.COM: CR LF, no command of
   Windows NT's, labels that differ in their first eight characters, and the
-  programs' own options and case names. `tests/test_esscheck.py` checks
-  that, and its way through each case on a model of COMMAND.COM, so a change
-  to an option or a case it uses goes into it too.
+  programs' own options and case names, each line within 127 characters once
+  its variables are in. `tests/test_esscheck.py` checks that, and its way
+  through each case on a model of COMMAND.COM to the StartUp batch it writes
+  for esswchk and to WIN, so a change to an option or a case it uses goes
+  into it too.
 * **sb16test.** Its checks (`src/sb16t.c`) reach the card only through
   `struct sbt_hal`: `src/sb16test.c` on the machine, and
   `tests/test_sb16test.py` on the model and on both fronts. The handler's
@@ -289,12 +296,13 @@ tools/wineshot.sh run ess3d.exe /sim tray
   that can stop the machine goes in an opt-in group (`ESP_G_OPTIN`, as
   typef), which runs only when named and asks first, and writes its `START`
   line before the risk, so that `/K` can go on after it; it only reads the
-  PCI bridge (`esp_hal.bridge`).
+  PCI bridge (`esp_hal.bridge`). It is built in the medium model, with its
+  own objects of the shared modules (`essprobe.mk1`).
 * **Committed binaries.** After changing their sources, rebuild
   `build/ESFM.DRV`, `build/ES1869.VXD`, `build/ES1869.DRV` or
   `build/esssb16.com`, and copy the changed programs from `out/ow2/` to
-  `build/`, `essprobe.exe` among them. `test_build_is_current` checks
-  `ESFM.DRV` and `ES1869.DRV`.
+  `build/`, `essprobe.exe` and `esswchk.exe` among them.
+  `test_build_is_current` checks `ESFM.DRV` and `ES1869.DRV`.
 * **ESFM_FIX code:**
   * A label at a relocation site is a `..@` name, so that it doesn't end
     NASM's local label scope.
@@ -338,7 +346,8 @@ tools/wineshot.sh run ess3d.exe /sim tray
   [VXD_API.md](docs/VXD_API.md#ownership-and-port-trapping) describes. It
   never calls 0006, 0007, 0009, 000B, 0200 or 0201, because they register
   callbacks into the caller's code.
-* **Windows 98 robustness** (essctl, ess3d, esfmrec and the DOS programs):
+* **Windows 98 robustness** (essctl, ess3d, esfmrec, esswchk and the DOS
+  programs):
   * Show no message box where nobody may be looking, such as from the tray,
     a hotkey, a recording or a timer, because it waits behind a full-screen
     game. Log the problem instead, or use ess3d's box.

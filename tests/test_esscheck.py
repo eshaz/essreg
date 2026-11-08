@@ -6,8 +6,10 @@ MS-DOS 7's COMMAND.COM reads it: CR LF lines it can take, no command of
 Windows NT's, every label it jumps to there once in its first eight
 characters and none the start of another, the programs it runs in build/
 and the options those take, the essprobe cases named, prompts and lines
-that COMMAND.COM and CHOICE pass on as they are written, and its way
-through each case on a model of COMMAND.COM.
+that COMMAND.COM and CHOICE pass on as they are written, each line within
+COMMAND.COM's 127 characters once its variables are in, and its way
+through each case on a model of COMMAND.COM, to the batch it leaves in
+Windows' StartUp folder for esswchk and to WIN.
 
 usage: python3 -m unittest tests.test_esscheck
 """
@@ -23,9 +25,11 @@ NT_ONLY = (r"\bSETLOCAL\b", r"\bENDLOCAL\b", r"\bPUSHD\b", r"\bPOPD\b",
            r"\bFOR\s+/[FDRL]\b", r"\bEXIT\s+/B\b", r"\bGOTO\s+:EOF\b",
            r"&&", r"\|\|", r"\(\s*$", r"^\s*\)", r"!\w+!")
 # what each program takes, as its own parser does
-OPTIONS = {"ESSPROBE": re.compile(r"^/(R|S|A|N|T|C:[\w.,]+|O:\S+)$"),
+OPTIONS = {"ESSPROBE": re.compile(r"^(/(R|S|A|N|T|C:[\w.,]+|O:\S+)|%RC%)$"),
            "SB16TEST": re.compile(r"^/(A|L|Q|R|T|H:[0-7]|O:\S+)$"),
-           "ESSSB16": re.compile(r"^(/H[0567]|%H%)$")}
+           "ESSSB16": re.compile(r"^(/H[0567]|%H%)$"),
+           "ESSWCHK": re.compile(r"^(/(auto|R|q|nobox|sim)|/(out|once|log)="
+                                 r"\S+|%RC%|%W%)$")}
 
 
 def lines(bat=BAT):
@@ -96,7 +100,8 @@ class BatchChecks:
         comes from third_party/), with options they take"""
         seen = set()
         for c in commands(self.bat):
-            run = re.sub(r"^IF\s+(NOT\s+)?EXIST\s+\S+\s+", "", c, flags=re.I)
+            run = re.sub(r'^IF\s+(NOT\s+)?(EXIST\s+\S+|"[^"]*"=="[^"]*")\s+',
+                         "", c, flags=re.I)
             run = re.sub(r"^LH\s+", "", run, flags=re.I)
             m = re.match(r"%ESSDIR%\\(\w+)(\.\w+)?((?:\s+[^\s>]+)*)", run)
             if m:
@@ -142,7 +147,8 @@ class BatchTest(BatchChecks, unittest.TestCase):
                 for prefix in m.group(1).split(","):
                     picked[prefix] = sorted(n for n in names
                                             if n.startswith(prefix))
-        self.assertEqual(list(picked), ["env.machine", "stream", "lvl", "mpu"])
+        self.assertEqual(list(picked), ["env.machine", "stream", "lvl", "mpu",
+                                        "meas", "both.go"])
         self.assertEqual(picked["env.machine"], ["env.machine"])
         self.assertEqual(picked["mpu"], [
             "mpu.cfg", "mpu.irq", "mpu.irq_64off", "mpu.irq_7off", "mpu.loop",
@@ -152,6 +158,22 @@ class BatchTest(BatchChecks, unittest.TestCase):
                          "stream.pacew"} <= set(picked["stream"]))
         self.assertEqual(picked["lvl"], ["lvl.a1gain", "lvl.a1top",
                                          "lvl.base", "lvl.pad", "lvl.unity"])
+        self.assertEqual(len(picked["meas"]), 9)
+        self.assertEqual(picked["both.go"], ["both.go1", "both.go2",
+                                             "both.go3"])
+
+    def test_startup_batch(self):
+        """the line of the StartUp batch runs build/esswchk.exe with the
+        options it takes"""
+        self.assertTrue(os.path.exists(os.path.join(ROOT, "build",
+                                                    "esswchk.exe")))
+        runs = [c for c in commands() if "\\ESSWCHK.EXE " in c and
+                c.startswith("ECHO %ESSDIR%")]
+        self.assertEqual(len(runs), 1)
+        args = runs[0].split(">>")[0].split()[2:]
+        self.assertEqual(args[0], "/auto")
+        for a in args:
+            self.assertRegex(a.replace("%%", "%"), OPTIONS["ESSWCHK"])
 
     def test_probe_without_window(self):
         """essprobe runs without its window (/N), so that EMM386 keeps no
@@ -186,6 +208,7 @@ class Command:
         self.level = 0
         self.cwd = "C:\\"
         self.ran, self.log, self.out = [], list(log), []
+        self.files = {}                 # the lines ECHO wrote to a file
         self.stopped = False
 
     def expand(self, line):
@@ -195,8 +218,12 @@ class Command:
                 i = int(name) - 1
                 return self.args[i] if 0 <= i < len(self.args) else ""
             return self.env.get(name.upper(), "")
-        return re.sub(r"%(\w+)%|%(\d)", lambda m: var(
-            re.match(r"(\w+)", m.group(1) or m.group(2))), line)
+
+        def one(m):
+            if m.group(0) == "%%":
+                return "%"
+            return var(re.match(r"(\w+)", m.group(1) or m.group(2)))
+        return re.sub(r"%%|%(\w+)%|%(\d)", one, line)
 
     def run(self):
         text = [s for s in lines(self.bat).decode("ascii").split("\r\n")]
@@ -213,8 +240,11 @@ class Command:
             if not line.strip() or line.startswith(":") or \
                     line.upper().startswith("REM") or line == "@ECHO OFF":
                 continue
+            line = self.expand(line)
+            if len(line) > 127:
+                raise AssertionError("over 127 characters: " + line)
             try:
-                target = self.do(self.expand(line))
+                target = self.do(line)
             except Stopped:
                 self.stopped = True
                 break
@@ -258,6 +288,11 @@ class Command:
             said = line[4:].lstrip(" .")
             if redirect and redirect.group(2) == self.env.get("L"):
                 self.log.append(said)
+            elif redirect:
+                name = redirect.group(2).upper()
+                if redirect.group(1) == ">":
+                    self.files[name] = []
+                self.files.setdefault(name, []).append(said)
             else:
                 self.out.append(said)
             return None
@@ -317,44 +352,74 @@ class Command:
 
 
 ESS = ("C:\\ESS\\ESSSB16.COM", "C:\\ESS\\HDPMI32I.EXE",
-       "C:\\ESS\\RESULTS\\NUL", "C:\\CONFIG.SYS", "C:\\AUTOEXEC.BAT")
+       "C:\\ESS\\ESSWCHK.EXE", "C:\\ESS\\RESULTS\\NUL", "C:\\CONFIG.SYS",
+       "C:\\AUTOEXEC.BAT", "C:\\WINDOWS\\STARTM~1\\PROGRAMS\\STARTUP\\NUL")
 GAMES = ("C:\\21STCENT\\PWORLD\\SETSND.EXE", "C:\\DREAMS\\PD.EXE",
          "C:\\DREAMS\\SOUND.CFG", "C:\\21STCENT\\ABSOLUTE\\ABS.EXE")
+STARTUP = "C:\\WINDOWS\\STARTM~1\\PROGRAMS\\STARTUP"
+
+# the probe's runs, recorded and silent
+CASES = "/C:env.machine,stream,lvl,mpu,meas,both.go"
+PROBE_R = "ESSPROBE /R /N " + CASES
+PROBE_Q = "ESSPROBE /N " + CASES
+# the end: HDPMI32i out, then Windows
+WINDOWS = ["HDPMI32I -u", "WIN"]
+# sb16test both times
+SB16TEST = ["ESSSB16", "SB16TEST /A /Q", "ESSSB16 /H5",
+            "SB16TEST /A /Q /H:5", "ESSSB16 /H5"]
 
 
-# the probe's runs, recorded and quiet
-PROBE_R = "ESSPROBE /R /N /C:env.machine,stream,lvl,mpu"
-PROBE_Q = "ESSPROBE /N /C:env.machine,stream,lvl,mpu"
+def startup(c):
+    """the StartUp batch's lines, their words"""
+    return [" ".join(t.split()) for t in c.files[STARTUP + "\\ESSWCHK.BAT"]]
 
 
 class FlowTest(unittest.TestCase):
     """the batch's way through each case, on a model of COMMAND.COM"""
 
     def test_everything(self):
-        """the probe recorded, both loads, sb16test with BLASTER's DMA and
-        on 5, then the games on 5: Pinball World's SETSND and the game,
-        Pinball Dreams, Absolute Pinball's SETUP and the game; the answers
-        logged"""
+        """recorded: the probe, both loads, sb16test with BLASTER's DMA
+        and on 5, the games on 5: Pinball World's SETSND and the game,
+        Pinball Dreams, Absolute Pinball's SETUP and the game, the answers
+        logged; then the StartUp batch for esswchk /R, HDPMI32i out, and
+        Windows, last"""
         c = Command([], ESS + GAMES, {"ESSSB16": [0] + [5] * 7},
                     "RYYYNY").run()
         self.assertEqual(c.ran, [
-            "CHOICE R", PROBE_R, "HDPMI32I -r -x",
-            "ESSSB16", "SB16TEST /A /Q", "ESSSB16 /H5",
-            "SB16TEST /A /Q /H:5", "ESSSB16 /H5",
+            "CHOICE R", PROBE_R, "HDPMI32I -r -x"] + SB16TEST + [
             "SETSND", "ESSSB16", "CHOICE Y", "PWORLD", "ESSSB16", "CHOICE Y",
             "PD", "ESSSB16", "CHOICE Y",
-            "SETUP", "ESSSB16", "CHOICE N", "ABS", "ESSSB16", "CHOICE Y"])
-        self.assertEqual(c.log[-6:], [
+            "SETUP", "ESSSB16", "CHOICE N", "ABS", "ESSSB16",
+            "CHOICE Y"] + WINDOWS)
+        self.assertEqual(c.log[-7:], [
             "SETSND tune with DMA 5: yes", "Pinball World with DMA 5: yes",
             "Pinball Dreams with DMA 5: yes",
             "Absolute Pinball's test sound with DMA 5: no",
-            "Absolute Pinball with DMA 5: yes", "done"])
+            "Absolute Pinball with DMA 5: yes", "done",
+            "windows part: started"])
+        self.assertIn("a recorded run", c.log)
         self.assertIn("essprobe: PROBE.TXT", c.log)
         self.assertIn("sb16test on DMA 5: SB16H5.TXT", c.log)
+        self.assertEqual(startup(c), [
+            "@ECHO OFF",
+            "SET W=/once=" + STARTUP + "\\ESSWCHK.BAT",
+            "C:\\ESS\\ESSWCHK.EXE /auto /R /out=C:\\ESS\\RESULTS\\WCHECK.TXT "
+            "%W%"])
+        self.assertIn("Once its window says Done, stop the recorder, and "
+                      "send the folder", c.out)
         self.assertEqual(c.env["PW"], "C:\\21STCENT\\PWORLD")
         self.assertEqual(c.env["PD"], "C:\\DREAMS")
         self.assertEqual(c.env["AP"], "C:\\21STCENT\\ABSOLUTE")
         self.assertEqual(c.cwd, "C:\\ESS")
+
+    def test_silent(self):
+        """silent: the probe and esswchk without /R"""
+        c = Command([], ESS, {"ESSSB16": [0] + [5] * 2}, "S").run()
+        self.assertEqual(c.ran, ["CHOICE S", PROBE_Q, "HDPMI32I -r -x"] +
+                         SB16TEST + WINDOWS)
+        self.assertIn("a silent run", c.log)
+        self.assertEqual(startup(c)[2], "C:\\ESS\\ESSWCHK.EXE /auto "
+                         "/out=C:\\ESS\\RESULTS\\WCHECK.TXT %W%")
 
     def test_run_bat(self):
         """a game folder with RUN.BAT, which starts the game from there"""
@@ -363,7 +428,7 @@ class FlowTest(unittest.TestCase):
         self.assertIn("RUN", c.ran)
         self.assertNotIn("PWORLD", c.ran)
         self.assertEqual(c.ran.count("RUN"), 1)
-        self.assertEqual(c.log[-1], "done")
+        self.assertEqual(c.log[-2:], ["done", "windows part: started"])
 
     def test_no_sound_cfg(self):
         """Pinball Dreams without SOUND.CFG: left out, as its SETSOUND
@@ -372,28 +437,29 @@ class FlowTest(unittest.TestCase):
                     {"ESSSB16": [0] + [5] * 2}, "S").run()
         self.assertNotIn("PD", c.ran)
         self.assertIn("Pinball Dreams: no SOUND.CFG", c.log)
-        self.assertEqual(c.log[-1], "done")
+        self.assertEqual(c.log[-2:], ["done", "windows part: started"])
 
     def test_esssb16_in_already(self):
-        """no probe, then the copy in memory checked and on to the rest"""
+        """no probe, then the copy in memory checked and on to the rest;
+        no HDPMI32i of the batch's to take out"""
         c = Command([], ESS, {"ESSPROBE": 4, "ESSSB16": 5}, "S").run()
-        self.assertEqual(c.ran, ["CHOICE S", PROBE_Q,
-                                 "ESSSB16", "SB16TEST /A /Q", "ESSSB16 /H5",
-                                 "SB16TEST /A /Q /H:5", "ESSSB16 /H5"])
+        self.assertEqual(c.ran, ["CHOICE S", PROBE_Q] + SB16TEST + ["WIN"])
         self.assertIn("essprobe: skipped, esssb16 in already", c.log)
-        self.assertEqual(c.log[-1], "done")
+        self.assertEqual(c.log[-2:], ["done", "windows part: started"])
 
     def test_no_card(self):
+        """essprobe finds no card: stopped, and Windows' part all the
+        same"""
         c = Command([], ESS, {"ESSPROBE": 2}, "S").run()
-        self.assertEqual(c.ran, ["CHOICE S", PROBE_Q])
+        self.assertEqual(c.ran, ["CHOICE S", PROBE_Q, "WIN"])
         self.assertIn("stopped: see the lines above", c.log)
 
     def test_no_traps(self):
         """esssb16 refuses: what it said is on the screen and in the log,
-        then nothing after it"""
+        then Windows' part"""
         c = Command([], ESS, {"ESSSB16": 3}, "S").run()
         self.assertEqual(c.ran, ["CHOICE S", PROBE_Q,
-                                 "HDPMI32I -r -x", "ESSSB16"])
+                                 "HDPMI32I -r -x", "ESSSB16"] + WINDOWS)
         self.assertIn("stopped: see the lines above", c.log)
         self.assertEqual(c.env["E"], "1")
 
@@ -403,7 +469,7 @@ class FlowTest(unittest.TestCase):
         self.assertEqual(c.ran[:3], ["CHOICE R", PROBE_R,
                                      "HDPMI32I -r -x"])
         self.assertIn("essprobe: PROBE.TXT", c.log)
-        self.assertEqual(c.log[-1], "done")
+        self.assertEqual(c.log[-2:], ["done", "windows part: started"])
 
     def test_no_memory(self):
         """essprobe without the memory for its buffers: on to esssb16"""
@@ -415,13 +481,31 @@ class FlowTest(unittest.TestCase):
         """run again with the probe's reports there: on to esssb16, or the
         probe again"""
         there = ESS + ("C:\\ESS\\RESULTS\\PROBE.TXT",)
-        c = Command([], there, {"ESSSB16": 0}, "S").run()
-        self.assertEqual(c.ran, ["CHOICE S", "HDPMI32I -r -x", "ESSSB16",
-                                 "SB16TEST /A /Q", "ESSSB16 /H5",
-                                 "SB16TEST /A /Q /H:5", "ESSSB16 /H5"])
-        c = Command([], there, {}, "RS").run()
-        self.assertEqual(c.ran[:3], ["CHOICE R", "CHOICE S",
-                                     PROBE_Q])
+        c = Command([], there, {"ESSSB16": 0}, "SS").run()
+        self.assertEqual(c.ran, ["CHOICE S", "CHOICE S", "HDPMI32I -r -x"] +
+                         SB16TEST + WINDOWS)
+        c = Command([], there, {}, "RR").run()
+        self.assertEqual(c.ran[:3], ["CHOICE R", "CHOICE R", PROBE_R])
+
+    def test_no_startup_folder(self):
+        """no StartUp folder: the batch says how to run esswchk, and
+        doesn't start Windows"""
+        c = Command([], ESS[:-1], {"ESSSB16": [0] + [5] * 2}, "S").run()
+        self.assertEqual(c.ran[-1], "ESSSB16 /H5")
+        self.assertEqual(c.files, {})
+        self.assertIn("windows part: no " + STARTUP, c.log)
+        self.assertTrue(any("Start Windows, and run C:\\ESS\\ESSWCHK /auto"
+                            in t for t in c.out))
+
+    def test_no_esswchk(self):
+        """no ESSWCHK.EXE: said at the start, and the run ends in DOS"""
+        c = Command([], tuple(p for p in ESS if "ESSWCHK" not in p),
+                    {"ESSSB16": [0] + [5] * 2}, "S").run()
+        self.assertIn("ESSWCHK.EXE isn't in C:\\ESS: the Windows part needs "
+                      "it.", c.out)
+        self.assertIn("esswchk: not in C:\\ESS", c.log)
+        self.assertEqual(c.log[-1], "windows part: no ESSWCHK.EXE")
+        self.assertNotIn("WIN", c.ran)
 
     def test_not_there(self):
         """the programs elsewhere: it says so and stops"""

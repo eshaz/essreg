@@ -1,17 +1,21 @@
 @ECHO OFF
-REM ESSCHECK.BAT: the checks of esssb16 and of the chip in one run, with
-REM the games after them. essprobe notes the machine, plays a game's DMA 5
-REM on the chip as esssb16 does, and a full-scale tone at the chip's top
-REM levels, where it may clip, and sends MIDI through the MPU-401 to a
-REM loopback cable, before esssb16 is in, HDPMI32i and esssb16 load,
+REM ESSCHECK.BAT: the checks of esssb16, of the chip and of the drivers'
+REM fixes in one run, with the games after them. It asks once whether the
+REM run is recorded. essprobe notes the machine, plays a game's DMA 5 on
+REM the chip as esssb16 does, and a full-scale tone at the chip's top
+REM levels, where it may clip, sends MIDI through the MPU-401 to a loopback
+REM cable, and measures what the drivers' fixes rest on and the Windows
+REM player's dual start, before esssb16 is in, HDPMI32i and esssb16 load,
 REM sb16test checks esssb16 with the game's 16-bit DMA as BLASTER has it
 REM and on 5, and the games play with it on 5, which esssb16 switches
 REM without a restart: Pinball World, Pinball Dreams, whose driver unmasks
 REM its DMA after the command, and Absolute Pinball, a protected-mode game,
-REM through HDPMI32i. Everything goes to RESULTS, to send back with the
-REM recording of the probe's sounds, if one was made. After each game,
-REM esssb16 run again logs the buffer that it last carried over from the
-REM game's 16-bit DMA, if any.
+REM through HDPMI32i. After each game, esssb16 run again logs the buffer
+REM that it last carried over from the game's 16-bit DMA, if any. Then
+REM Windows starts, with a batch in its StartUp folder that runs esswchk,
+REM which checks the drivers' fixes there by itself and deletes the batch.
+REM Everything goes to RESULTS, to send back with the recording, if one
+REM was made.
 REM
 REM Run it at the DOS prompt, without Windows, from the folder of the
 REM programs, C:\ESS unless ESSDIR names another, all on drive C:
@@ -46,8 +50,8 @@ IF "%AP%"=="" IF EXIST C:\21STCENT\ABSOLUTE\ABS.EXE SET AP=C:\21STCENT\ABSOLUTE
 IF "%AP%"=="" IF EXIST C:\ABSOLUTE\ABS.EXE SET AP=C:\ABSOLUTE
 IF "%AP%"=="" IF EXIST C:\GAMES\ABSOLUTE\ABS.EXE SET AP=C:\GAMES\ABSOLUTE
 
-ECHO esscheck 8: Pinball World in %PW%, Pinball Dreams in %PD% >> %L%
-ECHO esscheck 8: Absolute Pinball in %AP% >> %L%
+ECHO esscheck 9: Pinball World in %PW%, Pinball Dreams in %PD% >> %L%
+ECHO esscheck 9: Absolute Pinball in %AP% >> %L%
 ECHO esscheck: the checks of esssb16 and the chip, saved in %R%
 VER >> %L%
 SET > %R%\SET.TXT
@@ -56,10 +60,23 @@ IF EXIST C:\AUTOEXEC.BAT TYPE C:\AUTOEXEC.BAT > %R%\AUTOEXEC.TXT
 IF EXIST C:\WINDOWS\DOSSTART.BAT TYPE C:\WINDOWS\DOSSTART.BAT > %R%\DOSSTART.TXT
 MEM /C > %R%\MEM1.TXT
 MEM /D > %R%\MEMD1.TXT
+IF NOT EXIST %ESSDIR%\ESSWCHK.EXE ECHO esswchk: not in %ESSDIR% >> %L%
+IF NOT EXIST %ESSDIR%\ESSWCHK.EXE ECHO ESSWCHK.EXE isn't in %ESSDIR%: the Windows part needs it.
+
+ECHO.
+ECHO Start the recorder on the card's line out to record the sounds, about
+ECHO 40 seconds in DOS and 3 minutes in Windows, and plug a MIDI cable from
+ECHO MIDI out to MIDI in, if you have one. Only the games ask after this.
+CHOICE /C:RS /N Press R to record the sounds or S to run silent
+SET RC=
+IF NOT ERRORLEVEL 2 SET RC=/R
+IF "%RC%"=="/R" ECHO a recorded run >> %L%
+IF "%RC%"=="" ECHO a silent run >> %L%
 
 ECHO.
 ECHO 1. essprobe: a game's DMA 5 on the chip as esssb16 plays it, a
-ECHO    full-scale tone at the chip's top levels, and the MPU-401, before
+ECHO    full-scale tone at the chip's top levels, the MPU-401, what the
+ECHO    drivers' fixes rest on and the Windows player's dual start, before
 ECHO    esssb16 is in
 IF NOT EXIST %R%\PROBE.TXT GOTO PROBE
 ECHO    Its report is there from a run before.
@@ -67,17 +84,8 @@ CHOICE /C:SR /N Press S to go on to esssb16 or R to run it again
 IF ERRORLEVEL 2 GOTO PROBE
 GOTO TSRLOAD
 :PROBE
-ECHO    For the MPU-401, plug a MIDI cable from MIDI out to MIDI in first,
-ECHO    if you have one.
-ECHO    Its sounds, about 40 seconds, can be recorded: start the recorder,
-ECHO    then press Enter at the level tone, which is loud.
-CHOICE /C:RS /N Press R to record them or S to play them unrecorded
-IF ERRORLEVEL 2 GOTO PRBQUIET
-%ESSDIR%\ESSPROBE /R /N /C:env.machine,stream,lvl,mpu /O:%R%\PROBE.TXT
-GOTO PRBEND
-:PRBQUIET
-%ESSDIR%\ESSPROBE /N /C:env.machine,stream,lvl,mpu /O:%R%\PROBE.TXT
-:PRBEND
+IF "%RC%"=="/R" ECHO    At the level tone, which is loud, set the recorder's level and press Enter.
+%ESSDIR%\ESSPROBE %RC% /N /C:env.machine,stream,lvl,mpu,meas,both.go /O:%R%\PROBE.TXT
 IF ERRORLEVEL 5 GOTO PRBDONE
 IF ERRORLEVEL 4 GOTO TSRIN
 IF ERRORLEVEL 2 GOTO STOPPED
@@ -88,6 +96,7 @@ ECHO essprobe: PROBE.TXT >> %L%
 ECHO.
 ECHO 2. HDPMI32i and esssb16
 IF EXIST %ESSDIR%\HDPMI32I.EXE LH %ESSDIR%\HDPMI32I.EXE -r -x > %R%\HDPMI.TXT
+IF EXIST %ESSDIR%\HDPMI32I.EXE SET HD=1
 %ESSDIR%\ESSSB16 > %R%\ESSSB16.TXT
 GOTO TSRCHK
 :TSRIN
@@ -205,10 +214,34 @@ GOTO %RET%
 :STOPPED
 ECHO stopped: see the lines above >> %L%
 ECHO.
-ECHO Stopped: the lines above say why.
-GOTO QUIT
+ECHO Stopped: the lines above say why. Windows' part comes all the same.
+GOTO WINPART
 :END
 ECHO done >> %L%
+:WINPART
 ECHO.
+ECHO 5. Windows: esswchk checks the drivers' fixes there by itself
+SET SU=C:\WINDOWS\STARTM~1\PROGRAMS\STARTUP
+IF NOT EXIST %ESSDIR%\ESSWCHK.EXE GOTO NOWCHK
+IF NOT EXIST %SU%\NUL GOTO NOSTARTUP
+REM the StartUp batch: its own name in W, which keeps the lines short
+ECHO @ECHO OFF > %SU%\ESSWCHK.BAT
+ECHO SET W=/once=%SU%\ESSWCHK.BAT >> %SU%\ESSWCHK.BAT
+ECHO %ESSDIR%\ESSWCHK.EXE /auto %RC% /out=%R%\WCHECK.TXT %%W%% >> %SU%\ESSWCHK.BAT
+IF "%HD%"=="1" %ESSDIR%\HDPMI32I -u
+ECHO windows part: started >> %L%
+ECHO    Windows starts now, and esswchk runs its checks, about 10 minutes.
+ECHO    Once its window says Done, stop the recorder, and send the folder
+ECHO    %R% back, with the recording if you made one.
+WIN
+GOTO QUIT
+:NOSTARTUP
+ECHO windows part: no %SU% >> %L%
+ECHO    Start Windows, and run %ESSDIR%\ESSWCHK /auto %RC% /out=%R%\WCHECK.TXT
+ECHO    there. Once its window says Done, send the folder %R% back, with
+ECHO    the recording if you made one.
+GOTO QUIT
+:NOWCHK
+ECHO windows part: no ESSWCHK.EXE >> %L%
 ECHO Done. Send the folder %R% back, and the recording if you made one.
 :QUIT

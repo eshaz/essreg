@@ -721,7 +721,21 @@ back. `/R` plays each case's sound after a DTMF marker, for a recorder, and
 [`tools/essprec.py`](tools/essprec.py) analyzes the recording;
 [docs/ESSPROBE.md](docs/ESSPROBE.md) has the steps. `/C:typef` records under
 the PIIX4's Type F DMA timing, which can stop the machine, so it runs only
-when asked for, and `/K` goes on after a case that stopped it.
+when asked for, and `/K` goes on after a case that stopped it. Version 2.0
+measures what the drivers' fixes rest on: torn readings of a DMA count, the
+clocks, the FM's sides and rate, and the ADC's top rate.
+
+## [`esswchk.exe`](build)
+
+Checks in Windows 98 that the fixes of the rebuilt drivers work on the card:
+the VxD's reads of a moving DMA count, the Audio 1 device's positions and
+the way it gives its last buffer back, the FM's sides and rate through the
+FM recording device, and `sb16test` in a DOS box, on the Sound Blaster 16
+that the VxD gives DOS programs. It writes `WCHECK.TXT`, to send back.
+`ESSCHECK.BAT` starts it by itself after its DOS part, and `esswchk /auto`
+runs it by hand. `/R` plays sounds after DTMF markers, for a recorder, and
+[`tools/wchkrec.py`](tools/wchkrec.py) analyzes the recording;
+[docs/ESSWCHK.md](docs/ESSWCHK.md) has the details.
 
 ## [`esfmpat.exe`](build)
 * Utility to write custom patch banks to the Windows ESFM VxD driver.
@@ -897,6 +911,15 @@ Keep essctl open on the *ESFM patch bank* page.
 [docs/TESTING.md](docs/TESTING.md) has more checks, in sections G, G2 and
 G3.
 
+### Checking the fixes
+
+Copy `build\esswchk.exe` to `C:\ESSREG`, close the programs that play sound,
+and run `C:\ESSREG\esswchk.exe /auto`. In about 10 minutes its window says
+*Done*, and `C:\ESSREG\WCHECK.TXT` says how each fix did on the card
+([docs/ESSWCHK.md](docs/ESSWCHK.md)). `ESSCHECK.BAT` runs it too, after the
+checks in DOS
+([docs/ESSSB16.md](docs/ESSSB16.md#checking-it-on-the-machine)).
+
 ### Going back
 
 Run `C:\ESSREG\essinst.exe /restore` and press OK. Windows restarts with
@@ -941,6 +964,8 @@ copy C:\WINDOWS\SYSTEM\ESFM.ORG C:\WINDOWS\SYSTEM\ESFM.DRV
   how to install it.
 * [docs/ESSPROBE.md](docs/ESSPROBE.md): `essprobe`, what it measures and how
   to record a run.
+* [docs/ESSWCHK.md](docs/ESSWCHK.md): `esswchk`, what it checks in Windows
+  and how to record a run.
 * [docs/ESS_EXTENDED.md](docs/ESS_EXTENDED.md): the chip's Extended mode,
   each fact with its source, and what the probe measures of it.
 * [docs/MPU401.md](docs/MPU401.md): the chip's MPU-401, what Linux needs of
