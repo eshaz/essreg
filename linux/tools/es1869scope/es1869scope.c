@@ -6,7 +6,7 @@
  *   es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]
  *               [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]
  *               [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL] [-T SECONDS]
- *               [-m MONITOR] [-L DBFS] [-G PCM,ADC]
+ *               [-m MONITOR] [-L DBFS] [-G PCM,ADC] [-C]
  *
  * Notes:
  *
@@ -37,6 +37,10 @@
  * device (hw:CARD=ES1869,DEV=3), it takes what Audio 2 plays anyway in place
  * of its noise, and leaves the output and Audio 2's settings alone. With -x
  * and -i it takes what was played and what came back from two WAV files.
+ * -C calibrates Audio 1's correction filter: the loop at 2x with Audio 2's
+ * treble correction on, taps fitted to the inverse of its response and
+ * loaded with the filter on, and the loop again to verify; the filter and
+ * its taps stay when the rest goes back.
  *
  * Keys: q quits, 1, 2 and 3 choose the view, space holds the picture, r
  * redraws. -s draws once into a PPM file instead, at -W by -H (800 by 600),
@@ -635,7 +639,8 @@ static void usage(void)
 		"usage: es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]\n"
 		"                   [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]\n"
 		"                   [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL]\n"
-		"                   [-T SECONDS] [-m MONITOR] [-L DBFS] [-G PCM,ADC]\n");
+		"                   [-T SECONDS] [-m MONITOR] [-L DBFS] [-G PCM,ADC]\n"
+		"                   [-C]\n");
 }
 
 int main(int argc, char **argv)
@@ -660,8 +665,8 @@ int main(int argc, char **argv)
 	struct fb fb;
 	int o, held = 0;
 
-	while ((o = getopt(argc, argv, "l:d:s:W:H:v:c:r:i:x:p:a:k:T:m:L:G:")) !=
-	       -1) {
+	while ((o = getopt(argc, argv,
+			   "l:d:s:W:H:v:c:r:i:x:p:a:k:T:m:L:G:C")) != -1) {
 		switch (o) {
 		case 'l':
 			log = optarg;
@@ -714,6 +719,10 @@ int main(int argc, char **argv)
 			lc.monitor = optarg;
 			view = 3;
 			break;
+		case 'C':
+			lc.calibrate = 1;
+			view = 3;
+			break;
 		case 'L':
 			lc.level = atof(optarg);
 			break;
@@ -753,14 +762,17 @@ int main(int argc, char **argv)
 			signal(SIGINT, on_signal);
 			signal(SIGTERM, on_signal);
 			signal(SIGHUP, on_signal);
+			lc.secs = secs;
 			lv = loopview_open(&lc);
 			if (!lv)
 				return 2;
-			// a live loop for -T seconds of segments, and no more
-			// than that again while it finds its lag
-			until = time(NULL) + (long long)(2 * secs) + 10;
+			// a live loop for -T seconds of segments, twice over
+			// for a calibration, and no more than that again while
+			// it finds its lag
+			until = time(NULL) +
+				(long long)((lc.calibrate ? 4 : 2) * secs) + 10;
 			while (!lc.ref && !stop && time(NULL) < until &&
-			       loopview_seconds(lv) < secs) {
+			       !loopview_done(lv)) {
 				if (loopview_step(lv, &c) < 0)
 					break;
 				usleep(10000);

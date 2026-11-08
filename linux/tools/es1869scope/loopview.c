@@ -64,6 +64,14 @@
 #define LV_SAVED 16
 #define LV_RESTARTS 20
 #define LV_REDRAW_NS 500000000LL
+#define LV_CF_HALF 16 // the correction filter's taps each side (capfilt.h)
+#define LV_CF_ONE 16384
+#define LV_CAL_MAX 4.0 // the most it may lift, 12 dB
+#define LV_CAL_TOP 20000.0 // the top of the band it flattens, Hz
+#define LV_CAL_AT 6
+
+static const double lv_cal_at[LV_CAL_AT] = { 1000,  5000,  10000,
+					     15000, 18000, 20000 };
 
 // L from L, R from R, L from R, R from L, and the inputs' cross-spectrum
 enum { LL, RR, LR, RL, XX, PATHS };
@@ -111,6 +119,11 @@ struct loopview {
 	double *f, *mag[2], *ph[2], *inc[2], *xt[2], *ir[2], *t, *zir;
 	double gain[2], delay[2], coh1k[2];
 	int invert[2];
+	// the calibration: 0 measures, 1 verifies with the taps in, 2 is done
+	int phase;
+	double before[2][LV_CAL_AT]; // the record path before, dB against 1 kHz
+	long taps[2][LV_CF_HALF + 1];
+	double peak[2]; // the correction's most gain, dB
 };
 
 static long long lv_now(void)
@@ -192,6 +205,27 @@ static int ctl_write(snd_ctl_t *h, const char *name, const long *v,
 		else
 			snd_ctl_elem_value_set_integer(val, i, x);
 	}
+	return snd_ctl_elem_write(h, val) < 0 ? -1 : 0;
+}
+
+// an integer control of count values, all written
+static int ctl_write_all(snd_ctl_t *h, const char *name, const long *v,
+			 unsigned int count)
+{
+	snd_ctl_elem_id_t *id;
+	snd_ctl_elem_info_t *info;
+	snd_ctl_elem_value_t *val;
+	unsigned int i;
+
+	snd_ctl_elem_id_alloca(&id);
+	snd_ctl_elem_info_alloca(&info);
+	snd_ctl_elem_value_alloca(&val);
+	if (ctl_info(h, name, id, info) < 0 ||
+	    snd_ctl_elem_info_get_count(info) != count)
+		return -1;
+	snd_ctl_elem_value_set_id(val, id);
+	for (i = 0; i < count; i++)
+		snd_ctl_elem_value_set_integer(val, i, v[i]);
 	return snd_ctl_elem_write(h, val) < 0 ? -1 : 0;
 }
 
@@ -360,6 +394,22 @@ static int lv_route(struct loopview *v)
 		if (!ctl_read(v->ctl, "Audio 2 Output Rate", val, &n) &&
 		    val[0] > 1)
 			lv_set(v, "Audio 2 Output Rate", 1, 1);
+	}
+	// the calibration measures the record path alone: Audio 2 at 2x with
+	// its treble correction is flat to 20 kHz, and the folding of 1x's
+	// images is far above the band; the recording without the filter
+	if (v->cfg.calibrate) {
+		long off[2] = { 0, 0 };
+
+		if (lv_set(v, "Audio 2 Treble Correction Playback Switch", 1,
+			   1) ||
+		    lv_set(v, "Audio 2 Output Rate", 1, 1) ||
+		    ctl_write(v->ctl, "Audio 1 Correction Capture Switch", off,
+			      2)) {
+			fprintf(stderr, "es1869scope: the driver has no "
+					"correction filter to calibrate\n");
+			return -2;
+		}
 	}
 	lv_settings(v);
 	return 0;
@@ -741,6 +791,10 @@ bad:
 	return NULL;
 }
 
+static int lv_design(struct loopview *v, int c);
+static void lv_figures(struct loopview *v);
+static unsigned int lv_bin(const struct loopview *v, double hz);
+
 static int lv_files(struct loopview *v)
 {
 	unsigned int rx = 0, ry = 0, lg = LV_LAG_LOG2N, n = v->n, k;
@@ -789,6 +843,20 @@ static int lv_files(struct loopview *v)
 			v->seg[3][k] = v->fy[2 * (s + k) + 1];
 		}
 		lv_add(v);
+	}
+	// from files, the taps are fitted and shown, and nothing is loaded
+	if (v->cfg.calibrate && v->path[LL].segments) {
+		int c, i;
+
+		lv_figures(v);
+		for (c = 0; c < 2; c++) {
+			for (i = 0; i < LV_CAL_AT; i++)
+				v->before[c][i] =
+					v->mag[c][lv_bin(v, lv_cal_at[i])];
+			if (lv_design(v, c))
+				return 0;
+		}
+		v->phase = 1;
 	}
 	return 0;
 }
@@ -1091,6 +1159,126 @@ static void lv_figures(struct loopview *v)
 	lv_ir(v);
 }
 
+// the correction filter's response, from its taps, at f
+static double lv_cf_gain(const long *t, double f, unsigned int rate)
+{
+	double a = t[0];
+	int m;
+
+	for (m = 1; m <= LV_CF_HALF; m++)
+		a += 2.0 * t[m] * cos(2 * M_PI * f * m / rate);
+	return a / LV_CF_ONE;
+}
+
+// taps that take back channel c's measured response, against its gain at
+// 1 kHz, up to LV_CAL_TOP: the symmetric FIR of capfilt.c, fitted by least
+// squares to the inverse, held at the top's value above it with little
+// weight, and lifting by LV_CAL_MAX at most
+static int lv_design(struct loopview *v, int c)
+{
+	enum { N = LV_CF_HALF + 1 };
+	double a[N][N + 1], x[N], ref = cabs(v->h[c][lv_bin(v, 1000)]);
+	double top = cabs(v->h[c][lv_bin(v, LV_CAL_TOP)]) / ref, hz;
+	unsigned int k, i, j, r;
+
+	if (!(ref > 0) || !(top > 0))
+		return -1;
+	memset(a, 0, sizeof(a));
+	hz = (double)v->rate / v->n;
+	for (k = 1; k < v->bins; k++) {
+		double f = k * hz, m = cabs(v->h[c][k]) / ref, t, w, b[N];
+
+		if (f < 20)
+			continue;
+		if (f <= LV_CAL_TOP) {
+			t = m > 0 ? 1 / m : LV_CAL_MAX;
+			w = 1;
+		} else {
+			t = 1 / top;
+			w = 0.02;
+		}
+		t = fmin(t, LV_CAL_MAX);
+		for (i = 0; i < N; i++)
+			b[i] = i ? 2 * cos(2 * M_PI * f * i / v->rate) : 1;
+		for (i = 0; i < N; i++) {
+			for (j = 0; j < N; j++)
+				a[i][j] += w * b[i] * b[j];
+			a[i][N] += w * b[i] * t;
+		}
+	}
+	// Gauss with the largest pivot of each column
+	for (i = 0; i < N; i++) {
+		double p;
+
+		r = i;
+		for (j = i + 1; j < N; j++)
+			if (fabs(a[j][i]) > fabs(a[r][i]))
+				r = j;
+		if (fabs(a[r][i]) < 1e-12)
+			return -1;
+		for (j = 0; j <= N; j++) {
+			p = a[i][j];
+			a[i][j] = a[r][j];
+			a[r][j] = p;
+		}
+		for (j = i + 1; j < N; j++) {
+			double q = a[j][i] / a[i][i];
+
+			for (r = i; r <= N; r++)
+				a[j][r] -= q * a[i][r];
+		}
+	}
+	for (i = N; i-- > 0;) {
+		double s = a[i][N];
+
+		for (j = i + 1; j < N; j++)
+			s -= a[i][j] * x[j];
+		x[i] = s / a[i][i];
+	}
+	v->peak[c] = -1e9;
+	for (i = 0; i < N; i++) {
+		long q = lrint(x[i] * LV_CF_ONE);
+
+		v->taps[c][i] = q > 32767 ? 32767 : q < -32768 ? -32768 : q;
+	}
+	for (k = 0; k < v->bins; k++)
+		v->peak[c] = fmax(v->peak[c],
+				  20 * log10(fabs(lv_cf_gain(v->taps[c], k * hz,
+							     v->rate)) +
+					     1e-12));
+	return 0;
+}
+
+// the measurement's response kept, the taps fitted and loaded, the filter on,
+// and the loop started again to verify
+static int lv_calibrate(struct loopview *v)
+{
+	long all[2 * (LV_CF_HALF + 1)], on[2] = { 1, 1 };
+	int c, i;
+
+	lv_figures(v);
+	for (c = 0; c < 2; c++) {
+		for (i = 0; i < LV_CAL_AT; i++)
+			v->before[c][i] = v->mag[c][lv_bin(v, lv_cal_at[i])];
+		if (lv_design(v, c))
+			return -1;
+		for (i = 0; i <= LV_CF_HALF; i++)
+			all[c * (LV_CF_HALF + 1) + i] = v->taps[c][i];
+	}
+	if (ctl_write_all(v->ctl, "Audio 1 Correction Capture Taps", all,
+			  2 * (LV_CF_HALF + 1)) ||
+	    ctl_write(v->ctl, "Audio 1 Correction Capture Switch", on, 2))
+		return -1;
+	return lv_start(v);
+}
+
+int loopview_done(const struct loopview *v)
+{
+	if (v->cfg.calibrate)
+		return v->phase == 2;
+	return loopview_seconds(v) >= v->cfg.secs;
+}
+
 double loopview_seconds(const struct loopview *v)
 {
 	return v->path[LL].segments * (v->n / 2) / (double)v->rate;
@@ -1245,9 +1433,13 @@ static void lv_status(struct loopview *v, struct canvas *c)
 	int fh = c->font->h;
 	char set[64] = "";
 
-	const char *what = v->mon  ? "the music into Audio 1" :
-			   v->play ? "Audio 2 into Audio 1" :
-				     "files";
+	static const char *const phases[3] = { "calibrating, measuring",
+					       "calibrating, verifying",
+					       "calibrated" };
+	const char *what = v->cfg.calibrate ? phases[v->phase] :
+			   v->mon	    ? "the music into Audio 1" :
+			   v->play	    ? "Audio 2 into Audio 1" :
+					      "files";
 
 	fill(c, 0, 0, c->w, 2 * fh + 6, C_BACK);
 	if (v->play || v->mon)
@@ -1334,6 +1526,18 @@ int loopview_step(struct loopview *v, struct canvas *c)
 			return 1;
 		}
 	}
+	if (v->cfg.calibrate && v->phase < 2 && v->lagged &&
+	    loopview_seconds(v) >= v->cfg.secs) {
+		if (v->phase == 0 && lv_calibrate(v)) {
+			snprintf(v->why, sizeof(v->why),
+				 "the taps didn't fit or load");
+			v->phase = 2;
+		} else {
+			v->phase++;
+		}
+		lv_draw(v, c);
+		return 1;
+	}
 	if (v->lagged != lagged || (v->path[LL].segments != before &&
 				    lv_now() - v->drawn > LV_REDRAW_NS)) {
 		lv_draw(v, c);
@@ -1370,6 +1574,7 @@ void loopview_report(struct loopview *v, FILE *f)
 	static const double at[] = { 20,    50,	   100,	  1000,	 5000, 10000,
 				     15000, 18000, 20000, 21000, 22000 };
 	unsigned int i;
+	int c;
 
 	if (!v->lagged || !v->path[LL].segments) {
 		fprintf(f, "none %s\n", v->why);
@@ -1396,4 +1601,20 @@ void loopview_report(struct loopview *v, FILE *f)
 	for (i = LV_IR - 4; i <= LV_IR + 4; i++)
 		fprintf(f, " %.5f", v->ir[0][i]);
 	fprintf(f, "\n");
+	if (!v->cfg.calibrate || v->phase < 1)
+		return;
+	for (c = 0; c < 2; c++) {
+		fprintf(f, "taps %c", "LR"[c]);
+		for (i = 0; i <= LV_CF_HALF; i++)
+			fprintf(f, " %ld", v->taps[c][i]);
+		fprintf(f, "\npeak %c %.2f\n", "LR"[c], v->peak[c]);
+		fprintf(f, "before %c", "LR"[c]);
+		for (i = 0; i < LV_CAL_AT; i++)
+			fprintf(f, " %g:%.2f", lv_cal_at[i], v->before[c][i]);
+		fprintf(f, "\nafter %c", "LR"[c]);
+		for (i = 0; i < LV_CAL_AT; i++)
+			fprintf(f, " %g:%.2f", lv_cal_at[i],
+				v->mag[c][lv_bin(v, lv_cal_at[i])]);
+		fprintf(f, "\n");
+	}
 }

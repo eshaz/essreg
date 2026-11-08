@@ -32,6 +32,14 @@ struct loopview_cfg {
 	unsigned int rate;
 	double level; /* the noise's rms, dBFS */
 	int gain[2]; /* "PCM Capture Volume" (69h) and "Capture Volume" */
+	/*
+	 * the calibration of Audio 1's correction filter: the loop at 2x with
+	 * Audio 2's treble correction on, whose DAC is then flat to 20 kHz,
+	 * measured for secs; taps fitted to take back the record path's
+	 * response, loaded and switched on; and the loop measured again
+	 */
+	int calibrate;
+	double secs;
 };
 
 struct loopview;
@@ -52,6 +60,8 @@ int loopview_step(struct loopview *v, struct canvas *c);
 void loopview_key(struct loopview *v, int key);
 /* the seconds measured since the last start */
 double loopview_seconds(const struct loopview *v);
+/* the measurement over: secs of it, or the calibration through */
+int loopview_done(const struct loopview *v);
 /* the figures as lines of text, for tests and logs */
 void loopview_report(struct loopview *v, FILE *f);
 

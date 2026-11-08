@@ -660,6 +660,49 @@ class ShotTest(unittest.TestCase):
         for rgb in self.PAIR:
             self.assertIn(rgb, seen, "%06x missing" % rgb)
 
+    def test_the_calibration_fits_taps_that_flatten_a_path(self):
+        """-C on two files: a path that rolls off like the record path, -4
+        dB at 20 kHz on the left and -2 on the right; the taps' response
+        times the path's is flat to 20 kHz"""
+        rng = np.random.default_rng(14)
+        n = 44100 * 4
+        x = rng.uniform(-0.17, 0.17, (n, 2))
+        paths = ([0.1, 0.8, 0.1], [0.05, 0.9, 0.05])
+        y = np.zeros((n + 300, 2))
+        for c, h in enumerate(paths):
+            y[300:, c] = -np.convolve(x[:, c], h)[:n]
+        y += rng.normal(0, 1e-4, y.shape)
+        ref = os.path.join(self.tmp, "cal-played.wav")
+        rec = os.path.join(self.tmp, "cal-back.wav")
+        self.wav(ref, x)
+        self.wav(rec, y)
+        r = subprocess.run([self.prog, "-l", os.devnull, "-C", "-x", ref,
+                            "-i", rec, "-s", os.path.join(self.tmp, "c.ppm")],
+                           capture_output=True, text=True)
+        if r.returncode == 2 and "no console font" in r.stderr:
+            self.skipTest("no console font on this machine")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        taps = {}
+        for line in r.stdout.splitlines():
+            f = line.split()
+            if f[0] == "taps":
+                taps[f[1]] = np.array([int(v) for v in f[2:]]) / 16384
+        self.assertEqual(sorted(taps), ["L", "R"])
+        for c, side in enumerate("LR"):
+            t = taps[side]
+            self.assertEqual(len(t), 17)
+            for hz in range(500, 20001, 500):
+                w = 2 * np.pi * hz / 44100
+                path = abs(sum(v * np.exp(-1j * w * k)
+                               for k, v in enumerate(paths[c])))
+                path1k = abs(sum(v * np.exp(-1j * 2 * np.pi * 1000 / 44100
+                                            * k)
+                                 for k, v in enumerate(paths[c])))
+                corr = t[0] + 2 * sum(t[m] * np.cos(w * m)
+                                      for m in range(1, 17))
+                self.assertLess(abs(20 * np.log10(corr * path / path1k)),
+                                0.2, (side, hz))
+
     def test_the_loop_view_says_when_there_is_no_loop(self):
         rng = np.random.default_rng(13)
         x = rng.uniform(-0.17, 0.17, (44100 * 3, 2))
