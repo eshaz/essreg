@@ -962,7 +962,9 @@ copy C:\WINDOWS\SYSTEM\ESFM.ORG C:\WINDOWS\SYSTEM\ESFM.DRV
 * MSDOS like build environment (MS-DOS, Windows 9x, DOS-BOX, etc.)
 * [Watcom C 11.0](https://winworldpc.com/product/watcom-c-c/110b)
   * Install the DOS and 16-bit Windows targets.
-* Python 3 and NASM for the drivers, on any operating system
+* Python 3 and NASM for the drivers, on any operating system. NASM 2.16.01
+  rebuilds `driver/` byte for byte, and with 2.16.03 the byte-identical
+  checks of `ES1869.DRV`, `ESFM.DRV` and `esssb16.com` fail.
 
 ### Building
 * Clone this repo and copy it your build environment.

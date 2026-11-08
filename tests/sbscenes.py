@@ -1120,6 +1120,15 @@ def rec8_mono(card):
 
 
 @scene
+def rec8_top_rate(card):
+    """CAh at the highest rate a game can ask, 42h FFFFh: no front records
+    above the 52920 Hz that the ADC recorded clean at (esschip's
+    ADC_MAX_HZ)"""
+    return _record(card, 0xCA, (0x00, 0xCF, 0x07), 1, 2000,
+                   (8, False, False), rate=0xFFFF)
+
+
+@scene
 def rec8_legacy(card):
     """an SB 2.0 driver's recording: the time constant, then 24h"""
     return _record(card, 0x24, (0xDB, 0x05), 1, 1500, (8, False, False),

@@ -190,6 +190,14 @@ interrupt and channel in their low nibbles (DS p.69):
 | 1010       | 7            | 1                |
 | 1111       | 10           | 3                |
 
+The Linux report measured the bus's ceiling at about 770 kB/s with the
+chip's longest demand bursts, 757 kB/s with bursts of 4 bytes and 740 kB/s
+with bursts of 2, playing silence. Past it the chip plays slowly rather than
+skipping. With single transfers, Audio 2 fell about 12 percent short while
+both channels ran. The Windows and DOS drivers stay far below the ceiling:
+48 kHz 16-bit stereo is 192 kB/s, and both channels at that rate are 384
+kB/s.
+
 ## Modes and resets
 
 After any reset the chip is in Compatibility mode, a Sound Blaster Pro in
@@ -360,6 +368,13 @@ bit 0 first.
   clock), `a1.new48000` (71h bit 5). Measured: every rate came out as the
   clocks of 396.9 and 793.8 kHz give it, 7938 Hz for 8000 on the low clock
   and 46694 Hz for 48000 on the old clocks, and 48012 Hz in the new mode.
+  The Linux report puts the new mode's clock at 768,193.5 Hz, the 23.814 MHz
+  master over 31, as 793.8 kHz is the master over 30, so 48000 Hz plays
+  252.9 ppm sharp, and finds that the ADC records clean up to 52,920 Hz, A1h
+  F1h on the high clock, and not above. The drivers here record through the
+  ADC at 49,000 Hz at most, ESS's wave input's limit, and the fronts at a
+  Sound Blaster 16's 44,100 Hz at most, and `tests/esschip.py` counts a
+  recording above 52,920 Hz as a violation.
 * **A2h, the filter** (DS p.68, p.72). The filter's clock is 7.16 MHz over
   256 minus the value, and its roll-off is the clock over 82, best at 80 to
   90 percent of half the rate. For the high clock's divisors 18 to 35,

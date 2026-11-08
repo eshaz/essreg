@@ -104,6 +104,17 @@ class FMRecordTest(A1Case):
         self.assertEqual(e.dev8(FM_STATE), 0)
         self.assertEqual(e.chip.log, [])
 
+    def test_no_recording_above_the_adc_limit(self):
+        """ESS's wave input takes at most 49000 Hz, so no rate it programs
+        comes near 52920 Hz, the highest the ADC recorded clean at; the FM
+        device records the music DAC digitally, not through the ADC"""
+        e = self.emu()
+        for rate, result in ((48000, 0), (49000, 0),
+                             (49001, WAVERR_BADFORMAT)):
+            with self.subTest(rate=rate):
+                self.assertEqual(e.open_in(dev_id=0, rate=rate,
+                                           flags=WAVE_FORMAT_QUERY)[0], result)
+
     def test_opens_at_the_measured_rate(self):
         e = self.emu()
         r, user = e.open_in(rate=49820)

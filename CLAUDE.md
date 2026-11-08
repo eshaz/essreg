@@ -105,7 +105,8 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
 
 On Claude Code on the web,
 [`.claude/hooks/session-start.sh`](.claude/hooks/session-start.sh) installs
-everything: nasm, unicorn, numpy, flake8, clang-format, Open Watcom v2 in
+everything: nasm (2.16.01, which rebuilds `driver/` byte for byte, where
+2.16.03 doesn't), unicorn, numpy, flake8, clang-format, Open Watcom v2 in
 `/opt/open-watcom`, 32-bit Wine, Xvfb, xdotool and ImageMagick. It exports
 `OW2=/opt/open-watcom` and `ESSREG_WINE=1`, so every test runs, and it logs
 to `/tmp/essreg-setup.log`. Elsewhere, install the same by hand, following

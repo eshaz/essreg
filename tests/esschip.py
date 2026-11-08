@@ -50,6 +50,13 @@ DMA_PER_US = 2              # bytes a DMA engine moves in a microsecond
 # byte off (fix.late0 to fix.late20, fix.b2late1). A resume after a pause
 # has no such race (fix.pb2late)
 RACE_US = 10
+# the highest rate the ADC recorded clean at (the Linux report): A1h F1h on
+# the high clock, 52920 Hz; a recording above it is outside what was seen
+ADC_MAX_HZ = 52920
+# the "768 kHz" clock as measured: the 23.814 MHz master over 31, as 793.8
+# kHz is the master over 30, so 48 kHz plays 252.9 ppm sharp (the Linux
+# report)
+CLOCK_768 = 768193.5
 
 # Audio_Base+Ch's interrupt bits
 I_OVF, I_HE, I_PROC = 0x01, 0x02, 0x04
@@ -96,7 +103,7 @@ def a1_hz(a1, new=False):
 
 def a2_hz(r70):
     """Audio 2's rate for mixer 70h"""
-    clock = 768000 if r70 & 0x80 else 793800
+    clock = CLOCK_768 if r70 & 0x80 else 793800
     return clock / (128 - (r70 & 0x7F))
 
 
@@ -398,6 +405,8 @@ class ES1869Audio:
                 self.violate("Extended DMA while the firmware transfers")
             if bool(new & 0x08) != bool(new & 0x02):
                 self.violate("B8h: the converter and the DMA disagree")
+            if new & 0x08 and self.a1_rate() > ADC_MAX_HZ:
+                self.violate("the ADC above %d Hz" % ADC_MAX_HZ)
             bits, signed, stereo = self._a1_format()
             a8 = self.ctrl[0xA8] & 3
             if a8 != (1 if stereo else 2):

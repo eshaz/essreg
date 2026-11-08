@@ -134,8 +134,39 @@ class ExtendedTest(unittest.TestCase):
         self.assertAlmostEqual(a1_hz(0xF0), 793800 / 16)
         self.assertAlmostEqual(a1_hz(0x40), 396900 / 64)
         self.assertAlmostEqual(a1_hz(0xEE), 44100)
-        self.assertAlmostEqual(a2_hz(0xF0), 768000 / 16)
+        self.assertAlmostEqual(a2_hz(0xF0), 768193.5 / 16)
+        self.assertAlmostEqual(a2_hz(0xF0), 48012.09375)    # 252.9 ppm sharp
         self.assertAlmostEqual(a2_hz(0x6E), 793800 / 18)
+
+    def test_adc_limit(self):
+        """a recording at 52920 Hz, the highest that recorded clean, is
+        fine, and one above it, 54871 Hz from F2h with 71h bit 5 (A1h as
+        70h), is a violation"""
+        for a1, new, bad in ((0xF1, False, False), (0xF2, True, True),
+                             (0xF0, True, False)):
+            with self.subTest(a1=a1, new=new):
+                chip = Chip()
+                program_dma(Card(chip), 1, BUF, 1024, auto=False,
+                            record=True)
+                reset(chip)
+                dsp(chip, 0xC6)
+                chip.mixer[0x71] = 0x20 if new else 0x00
+                reg(chip, 0xB8, 0x0A)               # the ADC, to memory
+                a8 = reg_read(chip, 0xA8)
+                reg(chip, 0xA8, (a8 & 0xFC) | 0x02)         # mono
+                reg(chip, 0xB9, 0x02)
+                reg(chip, 0xA1, a1)
+                reg(chip, 0xA2, 0xF0)
+                reg(chip, 0xA4, 0x00)               # 1024 bytes
+                reg(chip, 0xA5, 0xFC)
+                reg(chip, 0xB7, 0x51)
+                reg(chip, 0xB7, 0xD0)               # 8-bit unsigned mono
+                reg(chip, 0xB1, reg_read(chip, 0xB1) | 0x50)
+                reg(chip, 0xB2, reg_read(chip, 0xB2) | 0x50)
+                reg(chip, 0xB8, reg_read(chip, 0xB8) | 0x01)
+                run(chip, 1000)
+                self.assertEqual([w for _t, w in chip.violations],
+                                 ["the ADC above 52920 Hz"] if bad else [])
 
     def test_sixteen_bit_stereo_auto(self):
         chip = Chip()
