@@ -34,8 +34,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   played on Audio 2 and recorded from record source 7. `esfmrec.c` records
   the FM digitally to a WAV file, and `essinst.c` installs the rebuilt
   drivers and restarts Windows. `esswchk.c` checks the drivers' fixes on the
-  card in Windows 98, which ESSCHECK starts through the StartUp folder.
-  `wheel.c` gives the sliders of essctl and ess3d the mouse wheel.
+  card in Windows 98, which ESSCHECK starts through the StartUp folder;
+  without options it runs the whole check from Windows, essinst and then
+  ExitWindowsExec into `ESSCHECK.BAT /W`. `wheel.c` gives the sliders of
+  essctl and ess3d the mouse wheel.
 * `src/vxd/` holds `ES1869.VXD` as NASM source, made by `tools/vxd2asm.py`.
   `essext.asm` adds the register API, the DOS box improvements (the virtual
   FM chip, Windows' mixer around a DOS program, the DACs' modes for it, and
@@ -57,11 +59,12 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   byte-identical rebuilds, with ESS's ES1869F driver sets for Windows 3.1,
   NT 4.0, Windows 95 and OS/2 in `driver/es1869f/`, and `build/` the
   committed binaries, with `ESSCHECK.BAT`, which runs the checks of a
-  machine in one go (essprobe, esssb16, sb16test and the games, then Windows
-  with esswchk). `third_party/hdpmi32i/` holds `HDPMI32i.EXE` as HX released
-  it but for the fix of `tools/hdpmifix.py` (its emulation of STI before
-  IRETD), for esssb16's protected-mode games, with its origin, the fix and
-  the hashes in its README.
+  machine in one go and asks nothing (essprobe, esssb16 and sb16test, the
+  games only with `G`, then Windows with esswchk). `third_party/hdpmi32i/`
+  holds `HDPMI32i.EXE` as HX released it but for the fix of
+  `tools/hdpmifix.py` (its emulation of STI before IRETD), for esssb16's
+  protected-mode games, with its origin, the fix and the hashes in its
+  README.
 * `src/esssb16.asm` is `esssb16.com`, the DOS TSR that answers games as a
   Sound Blaster 16 and plays their sound on Audio 1, through the port traps
   of EMM386, QPI (QEMM, JEMM with QPIEMU) and HDPMI32i. It is the VxD's
@@ -265,9 +268,10 @@ tools/wineshot.sh run ess3d.exe /sim tray
   Windows NT's, labels that differ in their first eight characters, and the
   programs' own options and case names, each line within 127 characters once
   its variables are in. `tests/test_esscheck.py` checks that, and its way
-  through each case on a model of COMMAND.COM to the StartUp batch it writes
-  for esswchk and to WIN, so a change to an option or a case it uses goes
-  into it too.
+  through each case on a model of COMMAND.COM (from esswchk with `/W`, at
+  the prompt, with `G`) to the StartUp batch it writes for esswchk and to
+  WIN, so a change to an option or a case it uses goes into it too. Only the
+  games ask anything.
 * **sb16test.** Its checks (`src/sb16t.c`) reach the card only through
   `struct sbt_hal`: `src/sb16test.c` on the machine, and
   `tests/test_sb16test.py` on the model and on both fronts. The handler's

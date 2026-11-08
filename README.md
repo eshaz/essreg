@@ -732,9 +732,11 @@ the VxD's reads of a moving DMA count, the Audio 1 device's positions and
 the way it gives its last buffer back, the FM's sides and rate through the
 FM recording device, and `sb16test` in a DOS box, on the Sound Blaster 16
 that the VxD gives DOS programs. It writes `WCHECK.TXT`, to send back.
-`ESSCHECK.BAT` starts it by itself after its DOS part, and `esswchk /auto`
-runs it by hand. `/R` plays sounds after DTMF markers, for a recorder, and
-[`tools/wchkrec.py`](tools/wchkrec.py) analyzes the recording;
+Started without options, it runs all the checks of the machine after an OK:
+it installs the drivers of its folder, Windows ends for `ESSCHECK.BAT` in
+DOS and comes back by itself, and it runs its own checks then.
+`esswchk /auto` runs only those. `/R` plays sounds after DTMF markers, for a
+recorder, and [`tools/wchkrec.py`](tools/wchkrec.py) analyzes the recording;
 [docs/ESSWCHK.md](docs/ESSWCHK.md) has the details.
 
 ## [`esfmpat.exe`](build)
@@ -913,12 +915,18 @@ G3.
 
 ### Checking the fixes
 
-Copy `build\esswchk.exe` and `build\sb16test.exe` to `C:\ESSREG`, close the
-programs that play sound, and run `C:\ESSREG\esswchk.exe /auto`. In about 10
-minutes its window says *Done*, and `C:\ESSREG\WCHECK.TXT` says how each fix
-did on the card ([docs/ESSWCHK.md](docs/ESSWCHK.md)). `ESSCHECK.BAT` runs it
-too, after the checks in DOS
-([docs/ESSSB16.md](docs/ESSSB16.md#checking-it-on-the-machine)).
+1. Copy `build` to `C:\ESS`.
+2. Start a recorder on the card's line out.
+3. Run `C:\ESS\esswchk.exe` and press OK.
+4. When its window says *Done*, about 25 minutes later, stop the recorder
+   and send `C:\ESS\RESULTS` back with the recording.
+
+esswchk installs the drivers in `C:\ESS`, Windows ends for the checks in DOS
+(`ESSCHECK.BAT`) and comes back by itself, and esswchk runs the checks in
+Windows ([docs/ESSWCHK.md](docs/ESSWCHK.md),
+[docs/ESSSB16.md](docs/ESSSB16.md#checking-it-on-the-machine)). Nothing asks
+in between. `esswchk /auto` runs only the checks in Windows, with
+`sb16test.exe` next to it.
 
 ### Going back
 

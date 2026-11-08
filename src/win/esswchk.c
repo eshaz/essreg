@@ -9,6 +9,10 @@
  * Usage:
  *   `esswchk [options]`
  *
+ *   (none)     the whole run, after an OK: as /go
+ *   /go        essinst puts the drivers of esswchk's folder in, then
+ *              Windows ends for ESSCHECK.BAT in DOS and comes back by
+ *              itself, where ESSCHECK's StartUp batch runs esswchk /auto /R
  *   /auto      every check at once, with no question; the summary stays
  *              in the window
  *   /R         a recorded run: a level tone, a start marker, the sounds
@@ -34,7 +38,11 @@
  * leaves what it measured.
  *
  * Nothing shows a message box, since nobody may be watching: problems go to
- * the log and to the window. esswchk changes no setting: it opens the
+ * the log and to the window. Only the whole run started without options,
+ * by a person, asks its OK and says when Windows didn't end.
+ * ExitWindowsExec runs ESSCHECK.BAT through COMSPEC with /W and esswchk's
+ * folder, so that the batch finds the programs there and leaves Windows'
+ * start to WIN.COM. esswchk changes no setting: it opens the
  * devices as any program does, sends the ESFM device program 0 and its
  * controllers' reset (CC121) before it closes it, and leaves the mixer to
  * the drivers. Before the DOS box it closes every device it opened.
@@ -99,13 +107,16 @@
 static const char usage[] =
     "esswchk [options]\n\n"
     "Checks the drivers' fixes on the ES1869 in Windows and writes a "
-    "report.\n\n"
-    "Options: /auto, /R, /once=file, /out=file, /log=file, /nobox, /q, "
-    "/sim, /sim=old, /base=220, /cfg=800, /novxd";
+    "report. Without options, or with /go, it runs all the checks: the "
+    "drivers go in, and Windows ends for ESSCHECK in DOS and comes back "
+    "for its own.\n\n"
+    "Options: /go, /auto, /R, /once=file, /out=file, /log=file, /nobox, "
+    "/q, /sim, /sim=old, /base=220, /cfg=800, /novxd";
 
 static struct {
   char out[144], log[144], once[144];
   int autorun, record, nobox, quiet, sim, old;
+  int go, ask; // the whole run, from Windows; after an OK
   struct winio_opts io;
 } opt;
 
@@ -1379,16 +1390,20 @@ BOOL CALLBACK __export wchk_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
   return FALSE;
 }
 
+// the options; none at all is the whole run, after an OK
 static int parse(LPSTR p) {
   char word[160], *arg;
-  unsigned n;
+  unsigned n, words = 0;
 
   memset(&opt, 0, sizeof(opt));
-  for (;;) {
+  for (;; words++) {
     while (*p == ' ' || *p == '\t')
       p++;
-    if (!*p)
+    if (!*p) {
+      if (!words)
+        opt.go = opt.ask = 1;
       return 0;
+    }
     for (n = 0; *p && *p != ' ' && *p != '\t'; p++)
       if (n + 1 < sizeof(word))
         word[n++] = *p;
@@ -1409,6 +1424,8 @@ static int parse(LPSTR p) {
       opt.nobox = 1;
     else if (!strcmp(word + 1, "q"))
       opt.quiet = 1;
+    else if (!strcmp(word + 1, "go"))
+      opt.go = 1;
     else if (!strcmp(word + 1, "once") && arg && *arg)
       strncpy(opt.once, arg, sizeof(opt.once) - 1);
     else if (!strcmp(word + 1, "out") && arg && *arg)
@@ -1442,6 +1459,83 @@ static void once_done(void) {
   }
 }
 
+// --- the whole run, from Windows
+// ------------------------------------------------
+
+// the program WinExec started at h ended; 0, or -1 after ms
+static int wait_end(UINT h, DWORD ms) {
+  DWORD t0 = timeGetTime();
+
+  while (GetModuleUsage((HINSTANCE)h)) {
+    if (timeGetTime() - t0 > ms)
+      return -1;
+    pump();
+    Yield();
+  }
+  return 0;
+}
+
+// essinst stages the rebuilt drivers of esswchk's folder, then Windows
+// ends for ESSCHECK.BAT /W in DOS, which leaves the StartUp batch that
+// runs esswchk /auto /R; Windows comes back by itself after it, with the
+// drivers in place. /sim logs the two steps only. 1 if not started, 2 if
+// Windows didn't end
+static int whole_run(void) {
+  char dir[144], bat[160], cmd[200], tail[200];
+  const char *shell = getenv("COMSPEC");
+  unsigned n;
+  UINT h;
+
+  full_path("", dir, sizeof(dir));
+  n = strlen(dir);
+  if (n && dir[n - 1] == '\\')
+    dir[n - 1] = 0;
+  if (opt.ask &&
+      MessageBox(0,
+                 "All the checks, about 25 minutes: the drivers in this "
+                 "folder are installed, and Windows ends for the checks in "
+                 "DOS and comes back for its own. Start the recorder on the "
+                 "line out first.",
+                 TITLE, MB_OKCANCEL | MB_ICONINFORMATION) != IDOK) {
+    log_line("The whole run: not started");
+    return 1;
+  }
+  _bprintf(bat, sizeof(bat), "%.140s\\ESSCHECK.BAT", dir);
+  if (access(bat, 0)) {
+    _bprintf(line, sizeof(line), "The whole run needs %.140s", bat);
+    log_line(line);
+    if (opt.ask)
+      MessageBox(0, line, TITLE, MB_OK | MB_ICONSTOP);
+    return 2;
+  }
+  _bprintf(cmd, sizeof(cmd), "%.140s\\ESSINST.EXE /y /norestart", dir);
+  _bprintf(line, sizeof(line), "The whole run: %s", cmd);
+  log_line(line);
+  if (!opt.sim) {
+    h = WinExec(cmd, SW_SHOWMINNOACTIVE);
+    if (h < 32)
+      log_line("essinst didn't start: the drivers stay as they are");
+    else if (wait_end(h, 120000UL))
+      log_line("essinst didn't end in 2 minutes");
+  }
+  if (!shell || !*shell)
+    shell = "C:\\COMMAND.COM";
+  _bprintf(tail, sizeof(tail), "/C %.60s /W %.60s", bat, dir);
+  _bprintf(line, sizeof(line), "The whole run: Windows ends for %.80s %s",
+           shell, tail);
+  log_line(line);
+  if (opt.sim)
+    return 0;
+  ExitWindowsExec(shell, tail);
+  // still here: a program refused to end
+  _bprintf(line, sizeof(line),
+           "Windows didn't end: restart in MS-DOS mode and run %.140s", bat);
+  log_line(line);
+  if (opt.ask)
+    MessageBox(0, line, TITLE, MB_OK | MB_ICONSTOP);
+  return 2;
+}
+
 int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev, LPSTR cmdline, int show_) {
   char text[200];
   DLGPROC proc;
@@ -1456,7 +1550,7 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev, LPSTR cmdline, int show_) {
   for (q = 64; !SetMessageQueue(q) && q > 8; q /= 2)
     ;
   if (parse(cmdline) < 0) {
-    log_line("A bad command line; the options are /auto, /R, /once=, "
+    log_line("A bad command line; the options are /go, /auto, /R, /once=, "
              "/out=, /log=, /nobox, /q, /sim, /sim=old, /base=, /cfg=, "
              "/novxd");
     if (!opt.quiet && !opt.autorun)
@@ -1464,6 +1558,8 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev, LPSTR cmdline, int show_) {
     once_done();
     return 3;
   }
+  if (opt.go)
+    return whole_run();
   err = winio_init(&opt.io);
   proc = (DLGPROC)MakeProcInstance((FARPROC)wchk_proc, inst);
   dlg = CreateDialog(inst, "ESSWCHK", 0, proc);

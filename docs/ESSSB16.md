@@ -262,49 +262,52 @@ The steps for a Windows 98 machine; on MS-DOS 6.22 they are the same with
 
 ## Checking it on the machine
 
-`build\ESSCHECK.BAT` runs the checks of a machine in one go, first in DOS,
-then in Windows 98, and keeps what they find in a folder, `RESULTS`, to send
-back:
-1. Copy `ESSCHECK.BAT`, `esssb16.com`, `essprobe.exe`, `sb16test.exe` and
-   `esswchk.exe` from `build`, and `HDPMI32i.EXE` from
-   `third_party\hdpmi32i`, to `C:\ESS`. Install the rebuilt drivers in
-   Windows first, for its part.
-2. Start DOS without `esssb16`, as step 5 above says but without its line,
-   with the recorder on the card's line out if you record, and a MIDI cable
-   from MIDI out to MIDI in if you have one.
-3. Run `C:\ESS\ESSCHECK`. It finds Pinball World, Pinball Dreams and
-   Absolute Pinball in `C:\21STCENT`, in `C:\` or in `C:\GAMES`; else give
-   their folders, as in `ESSCHECK C:\PW C:\PD C:\AP`.
+The checks of a machine run in one go, first in DOS, then in Windows 98, and
+keep what they find in a folder, `RESULTS`, to send back with the recording
+of the card's line out:
+1. Copy `build` to `C:\ESS`.
+2. Start the recorder on the card's line out, with a MIDI cable from MIDI
+   out to MIDI in if you have one.
+3. In Windows, run `C:\ESS\esswchk.exe` and press OK.
+4. When its window says *Done*, about 25 minutes later, stop the recorder
+   and send `C:\ESS\RESULTS` back with the recording.
 
-It asks once whether the run is recorded: R records the sounds, S runs
-silent, and only the games ask after that. It keeps the memory as `MEM`
-shows it, `CONFIG.SYS`, `AUTOEXEC.BAT`, `DOSSTART.BAT` and the environment,
-then runs `essprobe` on the chip: the machine's lines, a game's refills
-behind the DMA count, on DMA 5 as `esssb16` plays it under EMM386, the
-full-scale tones, the MPU-401, with MIDI out to MIDI in through the cable,
-what the drivers' fixes rest on and the Windows player's dual start
-([ESSPROBE.md](ESSPROBE.md)), with Enter at the level tone in a recorded
-run. Where `essprobe`'s report is there from a run before, S goes on without
-it, and R runs it again. It loads HDPMI32i and `esssb16`, shows what
-`esssb16` said, keeps the memory again and runs `sb16test`'s automatic
-checks, then again with the game's 16-bit DMA on 5 (`ESSSB16 /H5`,
-`SB16TEST /H:5`). Then the games, all with the game's 16-bit DMA on 5:
+Nothing asks in between. esswchk installs the rebuilt drivers of `C:\ESS`
+(`essinst /y /norestart`), then Windows ends for `build\ESSCHECK.BAT` in
+DOS, through ExitWindowsExec, as `ESSCHECK /W C:\ESS`, and comes back by
+itself after it, with the drivers in place. ESSCHECK keeps the run before's
+results as `RESULTS.OLD`, keeps essinst's log, the memory as `MEM` shows it,
+`CONFIG.SYS`, `AUTOEXEC.BAT`, `DOSSTART.BAT` and the environment, then runs
+`essprobe` on the chip, after a level tone of 10 seconds for the recorder
+(`/L`): the machine's lines, a game's refills behind the DMA count, on DMA 5
+as `esssb16` plays it under EMM386, the full-scale tones, the MPU-401, with
+MIDI out to MIDI in through the cable, what the drivers' fixes rest on and
+the Windows player's dual start ([ESSPROBE.md](ESSPROBE.md)). It loads
+`esssb16`, shows what it said, keeps the memory again and runs `sb16test`'s
+automatic checks, then again with the game's 16-bit DMA on 5 (`ESSSB16 /H5`,
+`SB16TEST /H:5`). With `esssb16` in memory already, as with it in
+`AUTOEXEC.BAT`, it skips the probe and checks that copy instead. Last, it
+writes `ESSWCHK.BAT` into Windows' StartUp folder
+(`C:\WINDOWS\STARTM~1\PROGRAMS\STARTUP`). `esssb16` may stay, since it is
+idle while Windows runs. Once Windows is back, the batch runs
+`esswchk /auto /R`, which checks the drivers' fixes in Windows by itself,
+about 10 minutes, writes `RESULTS\WCHECK.TXT` and deletes the batch
+([ESSWCHK.md](ESSWCHK.md)). It does so also when the DOS part stopped early.
+
+`C:\ESS\ESSCHECK` runs the same at the DOS prompt, without Windows, as step
+5 above says but without `esssb16`'s line, with the drivers as they are, and
+starts Windows at its end. `ESSCHECK G` adds the games, which need a person,
+with HDPMI32i loaded before `esssb16` (`HDPMI32i.EXE` from
+`third_party\hdpmi32i` in `C:\ESS`), all with the game's 16-bit DMA on 5:
 Pinball World's `SETSND`, where you choose the Sound Blaster 16 with DMA 5
 and play its test tune, and the game itself, Pinball Dreams with the driver
 of its `SOUND.CFG`, and Absolute Pinball's `SETUP`, where you choose the
 Sound Blaster 16 at 220, IRQ 5 and DMA 5 and play its test sound, and the
 game itself, each followed by Y or N for how it sounded and by `esssb16` run
-again, which logs the buffer that the game last had carried over. With
-`esssb16` in memory already, as after *Restart in MS-DOS mode* with it in
-`AUTOEXEC.BAT`, it skips the probe and checks that copy instead.
+again, which logs the buffer that the game last had carried over. It finds
+the games in `C:\21STCENT`, in `C:\` or in `C:\GAMES`; else give their
+folders after `G`, as in `ESSCHECK G C:\PW C:\PD C:\AP`.
 
-Last, it writes `ESSWCHK.BAT` into Windows' StartUp folder
-(`C:\WINDOWS\STARTM~1\PROGRAMS\STARTUP`), unloads HDPMI32i and starts
-Windows. `esssb16` may stay, since it is idle while Windows runs. The batch
-runs `esswchk /auto`, with `/R` in a recorded run, which checks the drivers'
-fixes in Windows by itself, about 10 minutes, writes `RESULTS\WCHECK.TXT`
-and deletes the batch ([ESSWCHK.md](ESSWCHK.md)). It does so also when the
-DOS part stopped early. Once its window says *Done*, stop the recorder and
-send `C:\ESS\RESULTS` back, with the recording. Where the StartUp folder
-isn't there, ESSCHECK says to start Windows and run `esswchk /auto` there by
-hand.
+Where Windows doesn't end for esswchk, a box says to restart in MS-DOS mode
+and run `C:\ESS\ESSCHECK`. Where the StartUp folder isn't there, ESSCHECK
+says to run `esswchk /auto /R` in Windows by hand.

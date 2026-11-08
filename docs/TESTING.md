@@ -431,7 +431,8 @@ so set the speakers to a normal level first.
 
 `essprobe.exe` measures the chip itself, without `esssb16`. Run and record
 it as [ESSPROBE.md](ESSPROBE.md#running-it) says, and send the reports and
-recordings back. `build\ESSCHECK.BAT` runs D2 to D5 with the games in one go
+recordings back. `build\ESSCHECK.BAT` runs D2 to D5 in one go, and the games
+with `G`; `esswchk.exe` started in Windows without options runs all of it
 ([ESSSB16.md](ESSSB16.md#checking-it-on-the-machine)).
 
 ### D5. esswchk

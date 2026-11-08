@@ -734,6 +734,30 @@ class WineTest(unittest.TestCase):
         self.assertNotIn("No timer", log)
         self.assertIn("exit 0", log)
 
+    def test_esswchk_go(self):
+        """/go, the whole run: essinst's line, then Windows' end for
+        ESSCHECK.BAT /W and esswchk's folder, each logged, where /sim
+        stops; without ESSCHECK.BAT next to it, nothing"""
+        bat = self.path("ESSCHECK.BAT")
+        with open(bat, "w", newline="\r\n") as f:
+            f.write("@ECHO OFF\n")
+        try:
+            self.wine("esswchk.exe", "/go", "/sim", "/log=W12.LOG")
+        finally:
+            os.remove(bat)
+        log = read(self.path("W12.LOG")).decode("latin-1")
+        self.assertRegex(log, r"The whole run: .*\\ESSINST\.EXE /y "
+                         r"/norestart\r?\n")
+        m = re.search(r"The whole run: Windows ends for \S+ /C "
+                      r"(.*)\\ESSCHECK\.BAT /W (.*?)\r?\n", log)
+        self.assertTrue(m, log)
+        self.assertEqual(m.group(1), m.group(2))
+        self.assertNotIn("esswchk 1.0 started", log)
+        self.wine("esswchk.exe", "/go", "/sim", "/log=W13.LOG")
+        log = read(self.path("W13.LOG")).decode("latin-1")
+        self.assertIn("The whole run needs ", log)
+        self.assertNotIn("ESSINST", log)
+
     def test_esswchk_sounds(self):
         """/R: the level tone and the start marker BADC, each sound after
         its marker # its number *, with its parts, what it should hold and

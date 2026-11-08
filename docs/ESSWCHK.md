@@ -2,11 +2,13 @@
 
 `build/esswchk.exe` checks in Windows 98 that the fixes of the rebuilt
 drivers work on the card, and writes what it found to `WCHECK.TXT`, to send
-back. [`ESSCHECK.BAT`](ESSSB16.md#checking-it-on-the-machine) starts it by
-itself once its DOS part is done, through a batch in Windows' StartUp
-folder, which esswchk deletes when it ends. It asks nothing and shows no
-message box: problems go to `ESSWCHK.LOG`, next to it, and its window shows
-each check and, at the end, *Done* with the report's name.
+back. Started without options, after an OK, it runs all the checks of the
+machine ([ESSSB16.md](ESSSB16.md#checking-it-on-the-machine)): essinst puts
+the drivers of its folder in, Windows ends for `ESSCHECK.BAT` in DOS and
+comes back by itself, and ESSCHECK's batch in Windows' StartUp folder starts
+esswchk's checks, which delete the batch when they end. Those ask nothing
+and show no message box: problems go to `ESSWCHK.LOG`, next to it, and its
+window shows each check and, at the end, *Done* with the report's name.
 
 ## What it checks
 
@@ -58,11 +60,18 @@ verdicts are [`src/wchk.c`](../src/wchk.c)'s.
 
 ## Running it
 
-ESSCHECK starts it with `/auto`, and `/R` where the run is recorded. To run
-it by hand, put `sb16test.exe` next to it, close the programs that play
-sound and run `esswchk /auto`. The checks take about 10 minutes.
+Without options, esswchk asks for an OK and then runs
+`essinst /y /norestart` from its folder, which stages the drivers there for
+Windows' next start, and ends Windows with ExitWindowsExec for
+`COMSPEC /C ESSCHECK.BAT /W` and its folder. When ESSCHECK ends, Windows
+comes back by itself, with the drivers in place, and ESSCHECK's StartUp
+batch runs `esswchk /auto /R`. Where Windows doesn't end, a box says to
+restart in MS-DOS mode and run ESSCHECK. To run only the checks in Windows,
+put `sb16test.exe` next to it, close the programs that play sound and run
+`esswchk /auto`. The checks take about 10 minutes.
 
 The options:
+* `/go`: the whole run, without the OK.
 * `/auto`: every check with no question; the window stays open with the
   summary.
 * `/R`: a recorded run (below).
@@ -106,7 +115,8 @@ its side by its level.
 `tests/host/t_wchk.c` checks the measures and verdicts, on /sim's card for
 the fixed drivers and the old ones. `tests/test_wine.py` runs esswchk under
 Wine with `/sim` and `/sim=old`, with `DmaCountTwice=0`, with canned
-`sb16test` reports and with none coming, without a card, and ended by force,
-which leaves the report as `WCHECK.$$$`. `tests/test_wchkrec.py` makes
-recordings to a report and breaks them, and under Wine a recording made to
-esswchk's own `/R` report passes.
+`sb16test` reports and with none coming, without a card, ended by force,
+which leaves the report as `WCHECK.$$$`, and with `/go /sim`, which logs the
+whole run's steps. `tests/test_wchkrec.py` makes recordings to a report and
+breaks them, and under Wine a recording made to esswchk's own `/R` report
+passes.
