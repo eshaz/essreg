@@ -42,6 +42,12 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   samples, and the next start repairs it and removes the marker
 - esfmrec on a full disk (a file size limit): it stops, and the WAV file
   holds what was written; /split= goes on in NAME_2.WAV without a gap
+- esswchk: /sim passes every check of the fixed drivers, /sim=old gives
+  the old drivers' FAIL and KNOWN, and DmaCountTwice=0 in SYSTEM.INI the
+  counts' INFO; sb.box writes SB16BOX.BAT for the VxD's Sound Blaster 16
+  and judges sb16test's report by its summary; /R gives each sound's line
+  with its marker; a bad option, no card, /once= and a run ended by force,
+  which leaves the report's .$$$
 - essinst: with ESS's drivers in the Windows SYSTEM folder, /y
   /norestart keeps them as .ORG files, stages the rebuilt ones as .NEW
   files and lists them in WININIT.INI; a restart carried out by hand puts
@@ -53,6 +59,7 @@ short symbolic link in /tmp.
 """
 
 import os
+import re
 import resource
 import shutil
 import signal
@@ -94,6 +101,7 @@ class WineTest(unittest.TestCase):
         shutil.copy(os.path.join(ROOT, "out", "ow2", "essctl.exe"), work)
         shutil.copy(os.path.join(ROOT, "out", "ow2", "ess3d.exe"), work)
         shutil.copy(os.path.join(ROOT, "out", "ow2", "esfmrec.exe"), work)
+        shutil.copy(os.path.join(ROOT, "out", "ow2", "esswchk.exe"), work)
         os.makedirs(os.path.join(work, "INST"))
         shutil.copy(os.path.join(ROOT, "out", "ow2", "essinst.exe"),
                     os.path.join(work, "INST"))
@@ -611,6 +619,164 @@ class WineTest(unittest.TestCase):
         left = struct.unpack("<%dh" % (len(pcm) // 2), pcm)[0::2]
         rising = sum(a < 0 <= b for a, b in zip(left, left[1:]))
         self.assertLessEqual(abs(rising - 3000), 1)
+
+    # --- esswchk ---------------------------------------------------------
+
+    WCHK = ("vxd.count2", "vxd.count1", "a1.position", "a1.drain",
+            "fm.pan0", "fm.pan127", "fm.rate")
+
+    def wchk(self, name, *args):
+        """esswchk with args, its report NAME.TXT and log NAME.LOG: the
+        report's {check: [(result, details)]}, its text and the log"""
+        self.wine("esswchk.exe", "/out=%s.TXT" % name, "/log=%s.LOG" % name,
+                  *args)
+        text = read(self.path(name + ".TXT")).decode("latin-1")
+        res = {}
+        for line in text.splitlines():
+            parts = line.split(None, 2)
+            if len(parts) == 3 and parts[1] in ("PASS", "FAIL", "KNOWN",
+                                                "INFO", "SKIP"):
+                res.setdefault(parts[0], []).append((parts[1], parts[2]))
+        return res, text, read(self.path(name + ".LOG")).decode("latin-1")
+
+    def test_esswchk_sim(self):
+        """the fixed drivers: every check passes, the report gets its
+        name, /once= deletes its file, and the log has the exit code"""
+        with open(self.path("ONCE.BAT"), "w", newline="\r\n") as f:
+            f.write("@ECHO OFF\n")
+        res, text, log = self.wchk("W1", "/sim", "/auto", "/q", "/nobox",
+                                   "/once=ONCE.BAT")
+        for c in self.WCHK:
+            self.assertEqual([r for r, _d in res[c]], ["PASS"], c)
+        self.assertIn("100000 readings, 0 torn", res["vxd.count2"][0][1])
+        self.assertIn("a ring of 8192", res["vxd.count2"][0][1])
+        self.assertIn("the last header back 531, 532, 533 ms",
+                      res["a1.drain"][0][1])
+        self.assertRegex(res["fm.pan0"][0][1], r"^left -12\.\d, right -120")
+        self.assertIn("49819.", res["fm.rate"][0][1])
+        self.assertEqual(res["sb.box"][0][0], "SKIP")
+        self.assertIn("pass=7 fail=0 known=0", text)
+        self.assertIn("ES1869.VXD with the extension 1.26",
+                      res["env.vxd"][0][1])
+        self.assertFalse(os.path.exists(self.path("ONCE.BAT")))
+        self.assertFalse(os.path.exists(self.path("W1.$$$")))
+        self.assertIn("esswchk done: pass=7 fail=0", log)
+        self.assertIn("exit 0", log)
+
+    def test_esswchk_old(self):
+        """the drivers before the fixes: ESS's VxD's counts are INFO with
+        their tears, a torn position and the early drain fail, and the FM
+        panned left sounds on the right, as ESS's ESFM.DRV plays it"""
+        res, text, log = self.wchk("W2", "/sim=old", "/auto", "/q", "/nobox")
+        for c in ("vxd.count2", "vxd.count1"):
+            self.assertEqual(res[c][0][0], "INFO", c)
+            self.assertRegex(res[c][0][1], r"\d+ torn \(0 near 128, \d+ "
+                             r"near 256.*one in 3\d\d, as ESS's VxD")
+        self.assertEqual(res["a1.position"][0][0], "FAIL")
+        self.assertRegex(res["a1.position"][0][1], r"[1-9]\d* steps back")
+        self.assertEqual(res["a1.drain"][0][0], "FAIL")
+        self.assertIn("at the DMA's end", res["a1.drain"][0][1])
+        for c in ("fm.pan0", "fm.pan127"):
+            self.assertEqual(res[c][0][0], "KNOWN", c)
+            self.assertIn("TrueSides off; on the other side", res[c][0][1])
+        self.assertIn("failed: a1.position a1.drain", text)
+        self.assertIn("exit 4", log)
+
+    def test_esswchk_dmacounttwice_off(self):
+        """DmaCountTwice=0: the extended VxD reads the count once, as
+        ESS's: INFO with the tears"""
+        ini = self.system_ini()
+        saved = read(ini)
+        try:
+            with open(ini, "ab") as f:
+                f.write(b"\r\n[ES1869.VXD]\r\nDmaCountTwice=0\r\n")
+            res, _text, _log = self.wchk("W3", "/sim", "/q", "/nobox")
+        finally:
+            with open(ini, "wb") as f:
+                f.write(saved)
+        self.assertEqual(res["vxd.count2"][0][0], "INFO")
+        self.assertIn("DmaCountTwice=0", res["env.ini"][0][1])
+
+    def test_esswchk_box(self):
+        """sb.box: SB16BOX.BAT sets BLASTER for the VxD's front and runs
+        sb16test /A into SB16BOX.TXT, whose summary decides; its
+        ctl.poll16 line is copied"""
+        canned = ("sb16test 1.6: checks the Sound Blaster 16 that games "
+                  "find\r\nctl.poll16           PASS  100000 readings, 0 "
+                  "torn\r\n\r\n[summary] done\r\npass=61 fail=0 known=3 "
+                  "info=40 skip=2\r\n")
+        with open(self.path("SB16BOX.TXT"), "w", newline="") as f:
+            f.write(canned)
+        res, _text, _log = self.wchk("W4", "/sim", "/q")
+        self.assertEqual(res["sb.box"][0][0], "PASS")
+        self.assertIn("pass=61 fail=0 known=3 info=40; ctl.poll16 ",
+                      res["sb.box"][0][1])
+        bat = read(self.path("SB16BOX.BAT")).decode().upper()
+        self.assertIn("SET BLASTER=A220 I5 D1 H5 P330 T6", bat)
+        self.assertRegex(bat, r"SB16TEST\.EXE /A /O:\S+\\SB16BOX\.TXT")
+        with open(self.path("SB16BOX.TXT"), "w", newline="") as f:
+            f.write(canned.replace("fail=0", "fail=2"))
+        res, _text, _log = self.wchk("W5", "/sim", "/q")
+        self.assertEqual(res["sb.box"][0][0], "FAIL")
+        os.remove(self.path("SB16BOX.TXT"))
+
+    def test_esswchk_sounds(self):
+        """/R: the level tone and the start marker BADC, each sound after
+        its marker # its number *, with its parts, what it should hold and
+        its spec, then the end marker CDAB"""
+        res, text, _log = self.wchk("W6", "/sim", "/R", "/q", "/nobox")
+        self.assertIn("marker BADC at 0 us", res["rec.start"][0][1])
+        want = [("p.start44a", "left"), ("p.start44b", "left"),
+                ("p.start44c", "left"), ("p.start22", "left"),
+                ("p.restart", "lpause"), ("p.dual44a", "step"),
+                ("p.dual44b", "step"), ("p.dual44c", "step"),
+                ("p.fm0", "fml"), ("p.fm127", "fmr")]
+        for i, (c, expect) in enumerate(want):
+            self.assertRegex(res[c][0][1], r"^recorded: marker #%03d\* at "
+                             r"\d+ us, sound( \d+-\d+)+ us, %s expected$" %
+                             (i + 1, expect), c)
+            self.assertRegex(text, r"\n%s +spec  dev=" % re.escape(c))
+        self.assertEqual(len(re.findall(r" \d+-\d+",
+                                        res["p.restart"][0][1])), 2)
+        self.assertRegex(res["rec.end"][0][1], r"^marker CDAB at \d+ us$")
+
+    def test_esswchk_bad_option(self):
+        with open(self.path("ONCE2.BAT"), "w") as f:
+            f.write("@ECHO OFF\n")
+        self.wine("esswchk.exe", "/q", "/log=W7.LOG", "/once=ONCE2.BAT",
+                  "/zz")
+        self.assertIn("A bad command line", read(self.path("W7.LOG")).decode())
+        self.assertFalse(os.path.exists(self.path("ONCE2.BAT")))
+
+    def test_esswchk_no_card(self):
+        """without the card or its drivers every check is skipped, and the
+        report says why"""
+        res, text, log = self.wchk("W8", "/auto", "/q")
+        self.assertIn("no ES1869.VXD answers", res["env.vxd"][0][1])
+        for c in self.WCHK + ("sb.box",):
+            self.assertEqual(res[c][0][0], "SKIP", c)
+        self.assertIn("pass=0 fail=0 known=0", text)
+        self.assertIn("No ES1869 answers", log)
+
+    def test_esswchk_ended_by_force(self):
+        """a run ended by force leaves its report as NAME.$$$, with the
+        lines of the checks that finished"""
+        run = subprocess.Popen(["wine", "esswchk.exe", "/sim", "/q",
+                                "/out=W9.TXT", "/log=W9.LOG"], env=self.env,
+                               cwd=self.link, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        deadline = time.time() + 60
+        while b"a1.position" not in (read(self.path("W9.$$$")) if
+                                     os.path.exists(self.path("W9.$$$"))
+                                     else b""):
+            self.assertLess(time.time(), deadline)
+            time.sleep(0.2)
+        self.wine("taskkill", "/f", "/im", "winevdm.exe")
+        run.wait(timeout=60)
+        self.assertFalse(os.path.exists(self.path("W9.TXT")))
+        text = read(self.path("W9.$$$")).decode("latin-1")
+        self.assertIn("vxd.count2           PASS", text)
+        self.assertNotIn("[summary]", text)
 
     # --- essinst ---------------------------------------------------------
 

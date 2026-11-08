@@ -7,6 +7,7 @@ project : esfmrec.exe .SYMBOLIC
 project : essinst.exe .SYMBOLIC
 project : sb16test.exe .SYMBOLIC
 project : essprobe.exe .SYMBOLIC
+project : esswchk.exe .SYMBOLIC
 
 !include essreg.mk1
 !include 1869opl3.mk1
@@ -18,3 +19,4 @@ project : essprobe.exe .SYMBOLIC
 !include essinst.mk1
 !include sb16test.mk1
 !include essprobe.mk1
+!include esswchk.mk1

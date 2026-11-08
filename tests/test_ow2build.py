@@ -3,8 +3,8 @@
 # Licensed under GPL Version 3.0
 """Build every program with Open Watcom v2 (tools/ow2build.sh).
 
-Then check the 16-bit Windows programs essctl.exe, ess3d.exe and
-esfmrec.exe: expected
+Then check the 16-bit Windows programs essctl.exe, ess3d.exe, esfmrec.exe
+and esswchk.exe: expected
 Windows version 4.0 (3-D look on Windows 95), a single data segment, one
 for each instance (so "essctl /load" can run while the window is open, and
 a second ess3d while the first one's display is up), discardable code, the
@@ -40,6 +40,7 @@ class OW2BuildTest(unittest.TestCase):
         cls.ne = cls.load("essctl.exe")
         cls.ne3d = cls.load("ess3d.exe")
         cls.nerec = cls.load("esfmrec.exe")
+        cls.newchk = cls.load("esswchk.exe")
 
     @classmethod
     def load(cls, name):
@@ -73,7 +74,7 @@ class OW2BuildTest(unittest.TestCase):
     def test_all_programs(self):
         for name in ("essreg.exe", "esfmpat.exe", "1869opl3.com",
                      "essctl.exe", "ess3d.exe", "esfmrec.exe", "nestamp.exe",
-                     "sb16test.exe"):
+                     "sb16test.exe", "essprobe.exe", "esswchk.exe"):
             self.assertTrue(os.path.exists(os.path.join(self.out, name)), name)
 
     def test_windows_program(self):
@@ -114,6 +115,18 @@ class OW2BuildTest(unittest.TestCase):
         self.assertEqual(set(kinds), {3, 5, 14, 16})   # icon, dialog, version
         self.assertEqual(kinds[5], {"ESFMREC"})
         self.assertEqual(kinds[14], {"ESFMREC"})
+
+    def test_esswchk(self):
+        # its window, the wave and MIDI devices through MMSYSTEM, and the
+        # drivers' data through TOOLHELP
+        self.check_windows_program(self.newchk, "ESSWCHK",
+                                   ("KERNEL", "USER", "MMSYSTEM",
+                                    "TOOLHELP"),
+                                   {"WCHK_PROC"})
+        kinds = self.resource_kinds(self.newchk)
+        self.assertEqual(set(kinds), {3, 5, 14, 16})   # icon, dialog, version
+        self.assertEqual(kinds[5], {"ESSWCHK"})
+        self.assertEqual(kinds[14], {"ESSWCHK"})
 
 
 if __name__ == "__main__":
