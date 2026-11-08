@@ -88,9 +88,13 @@ class Report:
 
     def __init__(self, prefix=None):
         self.prefix, self.lines, self.files = prefix, [], []
+        self.values = {}      # the results as numbers, for the tests
 
     def say(self, text=""):
         self.lines.append(text)
+
+    def put(self, key, value):
+        self.values[key] = value
 
     def table(self, head, rows):
         """rows of already formatted cells, under a header, aligned"""
@@ -490,6 +494,9 @@ def describe(ctx):
         len(rec.x) / rec.rate))
     rep.say("align    signal frame 0 at %.3f s (%.2f frames); %s" % (
         al.lag / rec.rate, al.lag, al.how))
+    rep.put("lag", al.lag)
+    rep.put("ppm", al.ppm)
+    rep.put("gains", al.gains)
     if "nominal" not in al.how:
         rep.say("clock    the player against the recorder %+.3f ppm" %
                 al.ppm)
@@ -508,6 +515,7 @@ def describe(ctx):
         if kind:
             rep.say("         " + kind)
             al.notes.append(kind)
+            rep.put("mix", kind)
         if hasattr(al, "skew"):
             rep.say("         the right marker %+.2f frames after the "
                     "left's place" % al.skew)
@@ -759,6 +767,12 @@ def response_report(ctx, tag, f, hs, coh=None, band=None, names=None):
         if own:
             rep.say("  %s: %.1f dB under %s at 1 kHz" % (
                 k, level_near(f, hs[own[0]]) - level_near(f, hs[k]), own[0]))
+    for k in names:
+        rep.put("%s:%s" % (tag, k),
+                (f, hs[k] * np.exp(2j * np.pi * f / rate * taus[k])))
+        rep.put("delay:%s:%s" % (tag, k), taus[k])
+    for k in coh or {}:
+        rep.put("coh:%s:%s" % (tag, k), (f, coh[k]))
     cols, keep = [], (f >= lo) & (f <= hi)
     for k in names:
         hk = hs[k] * np.exp(2j * np.pi * f / rate * taus[k])
@@ -886,6 +900,7 @@ def an_ess(ctx):
                                    for c in cells[1:]])
         rep.say("  %s" % key)
         rep.table(["Hz", "H2", "H3", "H4", "H5", "THD"], rows)
+        rep.put("harm:" + key, {r[0]: r[1:] for r in csv_rows})
         rep.csv("harmonics-" + key.replace(">", "to").replace("+", ""),
                 ["hz", "h2_db", "h3_db", "h4_db", "h5_db", "thd_db"],
                 csv_rows)
@@ -978,6 +993,7 @@ def an_linsweep(ctx):
                        hi=fc[ok][min(40, ok.sum() - 1)]) if ok.sum() > 4 \
             else 0.0
         hb2 = hb * np.exp(2j * np.pi * fc / rr * tau)
+        rep.put("sweep:" + key, (fc, hb2))
         rows = []
         for p in [p for p in range(int(f1) + 500, int(f2), 500)]:
             i = int((p - f1) / width)
@@ -1092,6 +1108,21 @@ def an_periodic(ctx):
             g = np.full(len(f), np.nan)
             g[k] = num / np.maximum(den, 1e-30)
             coh[key] = g
+    # the other side's own dither lies on a side's bins too, about 80 dB
+    # under a tone: what it brings through its direct path, interpolated
+    # from that side's bins, comes off the cross terms
+    if len(act) == 2 and len(ctx.outs) == 2:
+        for c in ctx.outs:
+            for s in act:
+                o = 1 - s
+                ko, kk = bins[o], bins[s]
+                direct_o = hs["%s>%s" % (SIDE[o], SIDE[c])][1][ko]
+                if SIDE[o] == SIDE[c]:
+                    lead = np.interp(f[kk], f[ko], np.abs(direct_o)) * \
+                        np.exp(1j * np.interp(f[kk], f[ko],
+                                              np.unwrap(np.angle(direct_o))))
+                    key = "%s>%s" % (SIDE[s], SIDE[c])
+                    hs[key][1][kk] -= lead * xf[kk, o] / xf[kk, s]
     rep.say()
     rep.say("transfers at the tones, %d periods of %d frames averaged" % (
         len(ys), n))
@@ -1099,6 +1130,8 @@ def an_periodic(ctx):
     for key, (k, h) in hs.items():
         tau = delay_of(f[k], h[k], rate)
         keyed[key] = (k, h, tau)
+        rep.put("bins:" + key, (f[k], h[k] * np.exp(2j * np.pi * f[k] / rate * tau)))
+        rep.put("agree:" + key, coh[key][k])
     pts = [p for p in POINTS if 20 <= p <= min(20000, 0.45 * rate)]
     head, rows = ["Hz"], []
     for key in keyed:
@@ -1256,6 +1289,7 @@ def boot_method(ctx, hs):
         hb = yf[kk, c] / xf[kk, s]
         d = np.abs(20 * np.log10(np.abs(hb) / np.abs(h[kk])))
         worst = max(worst, float(np.percentile(d, 99)))
+    rep.put("boot_db", worst)
     rep.say("boot     onset at frame %d by a level of %.1f dBFS; %d periods "
             "from one period later" % (c0, db(thr), j))
     rep.say("         against the aligned analysis, 99 %% of the bins "
@@ -1498,6 +1532,7 @@ def timeline(ctx, s, t, what):
     a, b0 = np.polyfit(s[ok], t[ok], 1)
     ppm = (ctx.al.r0 / a - 1) * 1e6
     err = (t[ok] - (a * s[ok] + b0)) / rr * 1e6
+    rep.put(what, {"ppm": ppm, "rms_us": float(np.sqrt(np.mean(err ** 2)))})
     rep.say()
     rep.say("%s    %d in a line: the player against the recorder %+.3f ppm" %
             (what, ok.sum(), ppm))
@@ -1563,6 +1598,7 @@ def an_tones(ctx):
     rep.say()
     rep.say("tones (gain in dB, phase in degrees against the signal, THD+N "
             "and harmonics in dB under the tone)")
+    rep.put("tones", csv_rows)
     rep.table(["Hz", "", "dBFS", "gain", "deg", "THD+N", "A-wtd", "H2",
                "H3", "H4", "H5", ""], rows)
     rep.csv("tones", ["hz", "out", "level", "gain_db", "deg", "thdn_db",
@@ -1646,6 +1682,8 @@ def linearity(ctx, rows):
             rep.say("  a stage starts to clip at %g dBFS in, %.1f dBFS at "
                     "the recorder: %s" % (clip, clip + g0, why))
         peak = min(clip - MARGIN, -MARGIN - g0)
+        rep.put("level:%d" % c, {"g0": g0, "peak": peak,
+                                 "clip": clip if found else None})
         rep.say("  the rule: a test signal's true peak may reach %.1f dBFS "
                 "at the player, %g dB under the clip point and under the "
                 "recorder's full scale" % (peak, MARGIN))
@@ -1681,6 +1719,7 @@ def separation(ctx):
     rep.say()
     rep.say("separation: each side's tone in each recorded channel, dB "
             "against the signal, and the difference")
+    rep.put("separation", [(float(r[1]), float(r[2])) for r in rows])
     rep.table(["", "left", "right", "apart"], rows)
     rep.say("  " + "; ".join(hears))
 
@@ -1704,6 +1743,7 @@ def an_silence(ctx):
         dc = float(np.mean(x))
         lvl = db(math.sqrt(2) * band_rms(x - dc, rr, 20, hi))
         lva = db(math.sqrt(2) * band_rms(x - dc, rr, 20, hi, "A"))
+        rep.put("noise:%d" % c, (lvl, lva, dc))
         rows.append([ctx.oname(c), "%.1f" % lvl, "%.1f" % lva,
                      "%+.1f" % (dc * ts.FULL)])
         nf = 16384 if rr > 30000 else 8192
@@ -1728,6 +1768,7 @@ def an_silence(ctx):
                 continue
             lines.append([ctx.oname(c), "%.1f" % f[i], "%.1f" % pdb(2 * p[i]),
                           "%.1f" % pdb(p[i] / np.median(loc))])
+    rep.put("lines", lines)
     rep.say("noise floor (dBFS from 20 Hz to %.0f kHz, DC in LSB)" % (
         hi / 1000))
     rep.table(["", "level", "A-wtd", "DC"], rows)
@@ -1766,6 +1807,7 @@ def an_lsb(ctx):
     rep.say()
     rep.say("squares (gain of the fundamental against 4/pi of the square, "
             "against the largest, and the fit's standard error, dB)")
+    rep.put("lsb", rows)
     rep.table(["", "LSB", "gain", "vs top", "+-", "H3", "H2"], rows)
     rep.say("  a square's third harmonic is -9.5 dB of its fundamental")
 
@@ -1817,6 +1859,7 @@ def an_dc(ctx):
     rep.say("DC steps: the step's start against the input, the time "
             "constant of its decay, the corner that gives, the share left "
             "at the plateau's end and the level before the step in LSB")
+    rep.put("dc", rows)
     rep.table(["", "step", "gain", "ms", "Hz", "left", "before"], rows)
     rep.say("  a path that passes DC leaves near 1; one with a high-pass "
             "of one pole decays to 1/e in the time constant")
@@ -1861,6 +1904,7 @@ def an_imd(ctx):
                 "(%.4f %%)" % (ctx.oname(c), db(a1), db(a2),
                                db(math.sqrt(tot) / max(refa, 1e-15)),
                                100 * math.sqrt(tot) / max(refa, 1e-15)))
+        rep.put("imd:%d" % c, {r[1]: float(r[4]) for r in rows})
         rep.table(["", "product", "Hz", "dBFS", "dB re tone", ""], rows)
 
 
@@ -1902,6 +1946,7 @@ def an_jtest(ctx):
                 "multiples of %.4f Hz, in the file and recorded (dBc), and "
                 "the peak jitter that what the path added would be as pure "
                 "phase modulation" % (ctx.oname(c), fc, db(car), fm))
+        rep.put("jtest:%d" % c, {int(r[0]): float(r[6]) for r in rows})
         rep.table(["k", "offset Hz", "file -", "rec -", "file +", "rec +",
                    "ps"], rows)
         skip = [fc + sg * k * fm for k in range(0, 17) for sg in (-1, 1)]
@@ -1960,6 +2005,8 @@ def an_pilot(ctx, f0=None, s0=None, s1=None, near=(10.0, 1000.0)):
         ppm = (fobs / f0 * ctx.made.rate / ctx.made.rate - 1) * 1e6
         ppm = (fobs / f0 - 1) * 1e6
         xe = (ph - (a1 * t + a0)) / fobs
+        rep.put("pilot:%d" % c, {"ppm": ppm, "tie_ns": float(
+            np.sqrt(np.mean(xe ** 2)) * 1e9)})
         rep.say()
         rep.say("pilot %s: %.4f Hz at %.1f dBFS; the player against the "
                 "recorder %+.3f ppm" % (ctx.oname(c), fobs,
@@ -2000,6 +2047,7 @@ def jitter(ctx, x, rr, fp, lo=10.0, hi=1000.0):
     fo = np.fft.rfftfreq(nf, 1.0 / rr)
     sel = (fo >= lo) & (fo <= hi)
     rad = math.sqrt(psd[sel].sum() * (fo[1] - fo[0]))
+    ctx.rep.put("jitter_ns", rad / (2 * math.pi * fp) * 1e9)
     ctx.rep.say("  phase noise from %g to %g Hz off the tone: %.3e rad rms, "
                 "%.2f ns of jitter, an upper bound since the path's noise "
                 "counts too" % (lo, hi, rad,
@@ -2074,6 +2122,7 @@ def an_dual(ctx):
     rep.say("Audio 1 against Audio 2, frames (positive: Audio 1 later)")
     rep.table(["s", "A1 corr", "A2 corr", "skew"], rows)
     if skew:
+        rep.put("skew", float(np.mean(skew)))
         rep.say("  mean %+.3f frames, spread %.3f" % (np.mean(skew),
                                                       np.std(skew)))
     rep.csv("skew", ["s", "skew_frames"],
@@ -2106,6 +2155,7 @@ def an_bursts(ctx):
     rep.say()
     rep.say("bursts (group delay from the envelope's top, us; level dB; "
             "phase at the top, degrees)")
+    rep.put("bursts", rows)
     rep.table(["", "Hz", "us", "dB", "deg"], rows)
 
 
@@ -2161,6 +2211,7 @@ def an_polarity(ctx):
     rep.say("pulses (gain of each side's pulses into each output, dB, and "
             "their sign)")
     rep.table(["", "", "dB", "sign"], rows)
+    rep.put("polarity", says)
     rep.say("  " + "; ".join(says))
 
 
@@ -2279,6 +2330,7 @@ def running(ctx, x, y, href, f, nfft, segs, tau=2.0):
     rep.say("running estimate, forgetting with a time constant of %.0f s: "
             "seconds from each change until within 0.5 dB, and the worst "
             "dB in the segment" % tau)
+    rep.put("running", out)
     rep.table(["kind", "dBFS", "settle s", "worst dB"], out)
     rep.csv("running", ["s", "worst_db"],
             np.column_stack([times, devs]).tolist())

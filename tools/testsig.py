@@ -703,7 +703,7 @@ class Sig:
     """a test signal: its family's parameters, its rates and level (AES17
     dBFS: a sine's peak, or the rms of anything else plus 3 dB), and what it
     is for, in the doc's words. paths: L the internal loop, O the line out
-    to a second card, I the second card into the line in, D Audio 2 read
+    to a second card, I the second card into the Aux input, D Audio 2 read
     back through the FM (the dig path), Q the four-channel device. sides
     (from SIDES): the one-side variants made with it, at 44.1 kHz, or at
     48 kHz, or at its own rates when it has neither"""
@@ -730,401 +730,409 @@ GROUPS = (("response", "Frequency and phase response"),
           ("timebase", "Timebase"),
           ("amplitude", "Amplitude and noise"),
           ("distortion", "Distortion, images and jitter"),
-          ("loop", "The loop's calibration and correction"))
+          ("loop", "For the loop's correction"))
 
 SIGNALS = [
     Sig("sweep", "ess", R4, -20, "response", "LOID",
-        "An exponential sweep (Farina's) from 10 Hz to 0.95 of half the "
+        "An exponential sweep (Farina's) runs from 10 Hz to 0.95 of half the "
         "rate in 10 s, the same on both channels.",
         "Its deconvolution gives the impulse response, the magnitude, phase "
         "and group delay to 0.92 of half the rate, and the 2nd to 5th "
         "harmonics against frequency, each from its own impulse response.",
-        "On the internal loop, a response that the dig path reads flat and "
-        "the out path reads with the DAC's droop of 1.2 dB at 10 kHz and "
-        "4.2 dB at 20 kHz at 44.1 kHz with the DAC's stages off.",
+        "Expect a flat response on the dig path, and at the line out, with "
+        "the DAC's stages off at 44.1 kHz, the DAC's droop: 1.2 dB at 10 kHz "
+        "and 4.2 dB at 20 kHz.",
         f1=10.0, f2="nyq:0.95", sweep=10.0),
     Sig("sweep-quick", "ess", R1, -20, "response", "LOID",
-        "The same sweep in 2 s.",
-        "The same results with less averaging of the noise, about 7 dB "
-        "more of it than the 10 s sweep, and less room between the "
-        "harmonics' impulse responses.",
-        "The 10 s sweep's response within its noise.",
+        "The same sweep lasts 2 s.",
+        "Its analysis gives the same results with about 7 dB more noise than "
+        "the 10 s sweep's, and less room between the harmonics' impulse "
+        "responses.",
+        "Expect the 10 s sweep's response within its noise.",
         f1=10.0, f2="nyq:0.95", sweep=2.0),
     Sig("sweep-low", "ess", R1, -40, "response", "LOI",
-        "The 10 s sweep 20 dB lower.",
-        "The response at a low level, which against the sweep at -20 dBFS "
-        "shows what depends on the level.",
-        "The same response as at -20 dBFS within 0.1 dB where the noise "
+        "The 10 s sweep plays 20 dB lower.",
+        "Against the sweep at -20 dBFS, its response shows what depends on "
+        "the level.",
+        "Expect the response at -20 dBFS within 0.1 dB where the noise "
         "allows, and harmonics that fall with the level.",
         f1=10.0, f2="nyq:0.95", sweep=10.0),
     Sig("sweep-hot", "ess", R1, -3, "response", "LOI",
-        "The 10 s sweep at -3 dBFS, near full scale.",
-        "The response and the harmonics at a level near clipping, against "
-        "the sweeps at -20 and -40 dBFS.",
-        "A response within 0.2 dB of the one at -20 dBFS. Harmonics that "
-        "rise by much more than the 17 dB of the level show where a stage "
-        "runs out of room.",
+        "The 10 s sweep plays at -3 dBFS, near full scale.",
+        "Its response and harmonics show the path near clipping, against the "
+        "sweeps at -20 and -40 dBFS.",
+        "Expect a response within 0.2 dB of the one at -20 dBFS. Harmonics "
+        "that rise by much more than the 17 dB of the level show where a "
+        "stage runs out of room.",
         f1=10.0, f2="nyq:0.95", sweep=10.0),
     Sig("sweep-lr", "ess", R2, -20, "channels", "LOI",
-        "The sweep of 5 s on the left channel alone, then on the right "
+        "The 5 s sweep plays on the left channel alone, then on the right "
         "alone.",
-        "All four transfers of the stereo pair, left to left, left to "
-        "right, right to left and right to right, and the crosstalk "
-        "against frequency.",
-        "Crosstalk well under -60 dB through the line paths. A cross term "
-        "as large as the direct one means a mono capture or a swapped or "
-        "summed path.",
+        "Its analysis gives all four transfers of the stereo pair, left to "
+        "left, left to right, right to left and right to right, and so the "
+        "crosstalk against frequency.",
+        "Expect crosstalk well under -60 dB through the line paths and near "
+        "-66 dB on the internal loop. A cross term as large as the direct one "
+        "means a mono capture or a path that sums the sides.",
         f1=10.0, f2="nyq:0.95", sweep=5.0, mode="lr"),
     Sig("sweep-hf", "linsweep", R2, -20, "response", "LOID",
-        "A linear sweep from 15 kHz to half the rate in 8 s.",
-        "The top of the band at a resolution of a few hertz: the filter "
-        "edge, the dip near 18 to 19 kHz, and any image or alias, which "
-        "the analysis tracks as other components against the sweep.",
-        "A smooth roll-off to the edge, with the DAC's hold (4.2 dB down "
-        "at 20 kHz at 44.1 kHz) and no notch. An image of a tone at f lies "
-        "at the rate less f.",
+        "A linear sweep runs from 15 kHz to half the rate in 8 s.",
+        "Its analysis follows the top of the band at a resolution of a few "
+        "hertz: the filter edge, the dip near 18 to 19 kHz, and any image or "
+        "alias, which it tracks as other components beside the sweep.",
+        "Expect a smooth roll-off to the edge with the DAC's hold, 4.2 dB "
+        "down at 20 kHz at 44.1 kHz, and no notch. An image of a tone at f "
+        "lies at the rate less f.",
         f1=15000.0, f2="nyq:0.999", sweep=8.0),
     Sig("sweep-sub", "ess", R1, -20, "response", "LOI",
-        "An exponential sweep from 2 Hz to 2 kHz in 12 s.",
-        "The response under 20 Hz: the high-pass corners of the DAC's, the "
-        "line stages' and the ADC's coupling.",
-        "A high-pass of one or two poles. The corner, where the level is 3 "
-        "dB under the level at 1 kHz, is the figure to note.",
+        "An exponential sweep runs from 2 Hz to 2 kHz in 12 s.",
+        "Its analysis gives the response under 20 Hz, where the coupling of "
+        "the DAC, the line stages and the ADC sets the high-pass corners.",
+        "Expect a high-pass of one or two poles. Its corner, where the level "
+        "is 3 dB under the level at 1 kHz, is the figure to note.",
         f1=2.0, f2=2000.0, sweep=12.0),
     Sig("multitone", "multitone", R2, -20, "response", "LOID",
-        "A periodic multitone with every odd bin of a 16384-point "
-        "transform from 20 Hz to 20 kHz, the bins of 1 mod 4 on the left "
-        "channel and of 3 mod 4 on the right, all of one amplitude, with "
-        "a crest factor of about 3 dB, as low as a sine, 16 periods.",
-        "The four transfers of the stereo pair at once, averaged over 14 "
-        "periods with no window, and the distortion and noise in the bins "
-        "that no tone excites.",
-        "The sweep's response at the tones. The empty bins read the noise "
-        "floor, and their rise above the silence's floor is the "
+        "A periodic multitone holds every odd bin of a 16384-point transform "
+        "from 20 Hz to 20 kHz, the bins of 1 mod 4 on the left channel and of "
+        "3 mod 4 on the right, all of one amplitude, for 16 periods. Its "
+        "crest factor is about 3 dB, as low as a sine's.",
+        "Its analysis gives the four transfers of the stereo pair at once, "
+        "averaged over 14 periods with no window, and the distortion and "
+        "noise in the bins that no tone excites.",
+        "Expect the sweep's response at the tones. The empty bins read the "
+        "noise floor, and their rise over the silence's floor is the "
         "distortion.",
         period=16384, periods=16, color="white"),
     Sig("multitone-pink", "multitone", R1, -20, "response", "LOID",
-        "The multitone with an amplitude that falls 3 dB an octave, the "
-        "same power in every octave.",
-        "As the multitone, with more of the signal at low frequencies, "
-        "like music.",
-        "The multitone's response, with less noise under 1 kHz and more "
-        "above.",
+        "The multitone's amplitude falls 3 dB an octave, for the same power "
+        "in every octave.",
+        "Its analysis gives the multitone's results with more of the signal "
+        "at low frequencies, as in music.",
+        "Expect the multitone's response, with less noise under 1 kHz and "
+        "more above.",
         period=16384, periods=16, color="pink"),
     Sig("noise-white", "noise", R2, -20, "response", "LOID",
-        "Gaussian white noise for 10 s, independent on the two channels.",
-        "Welch's estimate of the four transfers of the stereo pair, with "
-        "the coherence of each. The cross terms, from one channel to the "
-        "other, show the coherence's bias for this many averages.",
-        "Coherence near 1 wherever the path passes the signal. A coherence "
-        "that falls with frequency, while the level holds, means a clock "
-        "that drifts during the analysis, which the analysis takes out.",
+        "Gaussian white noise plays for 10 s, independent on the two "
+        "channels.",
+        "Welch's method gives the four transfers of the stereo pair with the "
+        "coherence of each. The cross terms, from one channel to the other, "
+        "show the coherence's bias for this many averages.",
+        "Expect a coherence near 1 wherever the path passes the signal. A "
+        "coherence that falls with frequency while the level holds means a "
+        "clock that drifts during the analysis.",
         seconds=10.0, color="white", mode="ind"),
     Sig("noise-pink", "noise", R1, -20, "response", "LOID",
-        "Pink noise for 10 s, the same power in every octave from 20 Hz, "
-        "independent on the two channels.",
-        "As the white noise, with more of the signal at low frequencies.",
-        "The white noise's response, with coherence that holds lower down "
-        "and less of it at the top.",
+        "Pink noise, the same power in every octave from 20 Hz, plays for 10 "
+        "s, independent on the two channels.",
+        "Its analysis gives the white noise's results with more of the signal "
+        "at low frequencies.",
+        "Expect the white noise's response, with a coherence that holds lower "
+        "down and less of it at the top.",
         seconds=10.0, color="pink", mode="ind"),
     Sig("noise-white-same", "noise", R1, -20, "channels", "LOID",
-        "The white noise, the same on both channels.",
-        "The two outputs against each other: the difference in level, the "
-        "phase and the delay between the channels against frequency.",
-        "Under 0.1 dB, a few degrees and a few microseconds between the "
-        "channels, unless one channel's path differs.",
+        "The white noise plays the same on both channels.",
+        "Its analysis sets the two outputs against each other, for the "
+        "difference in level, the phase and the delay between the channels "
+        "against frequency.",
+        "Expect the channels to differ by under 0.1 dB, a few degrees and a "
+        "few microseconds, unless one channel's path differs.",
         seconds=10.0, color="white", mode="same"),
     Sig("noise-pink-same", "noise", R1, -20, "channels", "LOID",
-        "The pink noise, the same on both channels.",
-        "As the white noise on both channels, with more of the signal at "
-        "low frequencies.",
-        "As the white noise on both channels.",
+        "The pink noise plays the same on both channels.",
+        "Its analysis gives what the white noise on both channels gives, with "
+        "more of the signal at low frequencies.",
+        "Expect the results of the white noise on both channels.",
         seconds=10.0, color="pink", mode="same"),
     Sig("mls", "mls", R1, -20, "response", "LOI",
-        "A maximum-length sequence of order 16 (65535 samples), 6 periods "
-        "on both channels.",
-        "The impulse response by circular correlation, averaged over 4 "
+        "A maximum-length sequence of order 16, 65535 samples, plays 6 "
+        "periods on both channels.",
+        "Circular correlation gives the impulse response, averaged over 4 "
         "periods, and the response from it.",
-        "The sweep's response. An MLS takes distortion as noise spread "
-        "over the response, so the two differ only where the path is not "
-        "linear.",
+        "Expect the sweep's response. An MLS spreads distortion as noise over "
+        "the response, so the two differ only where the path is not linear.",
         dither=False, order=16, periods=6),
     Sig("impulses", "impulses", R1, -12, "response", "LOI",
-        "A single sample at -12 dBFS every 8192 frames for 10 s, a click "
-        "train of an exact period.",
-        "The impulse response by synchronous averaging, its shape (the "
-        "DAC's hold and filters), the response from it, and each click's "
-        "time, against the recorder's clock.",
-        "An impulse response that settles within a few milliseconds, and "
-        "clicks evenly spaced, in a line whose slope is the clocks' ratio.",
+        "A single sample at -12 dBFS comes every 8192 frames for 10 s, a "
+        "click train of an exact period.",
+        "Synchronous averaging gives the impulse response, its shape (the "
+        "DAC's hold and filters) and the response from it, and each click's "
+        "time against the recorder's clock.",
+        "Expect an impulse response that settles within a few milliseconds, "
+        "and clicks evenly spaced on a line whose slope is the clocks' ratio.",
         dither=False, period=8192, periods=54),
     Sig("steps", "tones", R4, -20, "response", "LOI",
-        "Sines at the third-octave frequencies from 20 Hz to 20 kHz (to "
-        "0.45 of the rate), 0.25 s each, on both channels.",
-        "The level and phase at each frequency from a sine fit, and THD+N "
+        "Sines at the third-octave frequencies from 20 Hz to 20 kHz, or to "
+        "0.45 of the rate, play for 0.25 s each on both channels.",
+        "A sine fit gives the level and phase at each frequency, and THD+N "
         "and the 2nd to 5th harmonics against frequency.",
-        "The sweep's response at the same frequencies within 0.1 dB, and "
-        "THD+N that the noise sets except at the top.",
+        "Expect the sweep's response at the same frequencies within 0.1 dB, "
+        "and THD+N that the noise sets except at the top.",
         steps="thirds", hold=0.25),
     Sig("steps-hot", "tones", R1, -3, "response", "LOI",
-        "The stepped sines at -3 dBFS, near full scale.",
-        "THD+N and the harmonics against frequency at a high level.",
-        "Harmonics within 10 dB of those at -20 dBFS, plus the 17 dB of "
-        "the level for a second harmonic and 34 dB for a third.",
+        "The stepped sines play at -3 dBFS, near full scale.",
+        "Its analysis gives THD+N and the harmonics against frequency at a "
+        "high level.",
+        "Expect each harmonic within 10 dB of its level at -20 dBFS, plus the "
+        "17 dB of the level for a second harmonic and 34 dB for a third.",
         steps="thirds", hold=0.25),
     Sig("bursts", "bursts", R1, -20, "response", "LOI",
-        "Tone bursts with a Gaussian envelope of 3 cycles at the octaves "
-        "from 31.5 Hz to 16 kHz.",
-        "The group delay at each octave from the delay of the burst's "
-        "envelope, and the level, independent of the transfer function's "
-        "phase.",
-        "Group delays within a few hundred microseconds of each other "
-        "above 100 Hz; a high-pass shows as a longer delay at the bottom.",
+        "Tone bursts with a Gaussian envelope of 3 cycles sound at the "
+        "octaves from 31.5 Hz to 16 kHz.",
+        "The delay of each burst's envelope gives the group delay at its "
+        "octave, and its level, apart from the transfer function's phase.",
+        "Expect group delays within a few hundred microseconds of each other "
+        "over 100 Hz. A high-pass shows as a longer delay at the bottom.",
         freqs=(31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000),
         cycles=3),
     Sig("polarity", "polarity", R1, -20, "channels", "LOI",
-        "Positive half-sine pulses of 1 ms, 8 on the left channel and then "
-        "8 on the right.",
-        "Which output carries which input, and the sign of each, from the "
-        "correlation with the pulse.",
-        "The left pulses on the left output and the right on the right, "
-        "both positive.",
+        "Positive half-sine pulses of 1 ms play, 8 on the left channel and "
+        "then 8 on the right.",
+        "The correlation with the pulse tells which output carries which "
+        "input, and the sign of each.",
+        "Expect the left pulses on the left output and the right ones on the "
+        "right, both positive.",
         width=0.001, every=0.25, count=8),
     Sig("pilot-19600", "pilot", R1, -30, "timebase", "LOI",
-        "A sine of 19600 Hz at -30 dBFS for 15 s, 4 cycles in 9 frames, "
+        "A sine of 19600 Hz at -30 dBFS plays for 15 s, 4 cycles in 9 frames, "
         "the samples repeating exactly.",
-        "The player's clock against the recorder's in ppm, the time error "
-        "over the file, its Allan deviation, and the jitter around the "
-        "tone, as es1869clock reads its pilot.",
-        "0 ppm on the internal loop with a2_resample at 0; about +29 ppm "
-        "on the loop in the Clock mode; a few ppm against a second card, "
+        "Its phase gives the player's clock against the recorder's in ppm, "
+        "the time error over the file, its Allan deviation and the jitter "
+        "around the tone, as es1869clock reads its pilot.",
+        "Expect 0 ppm on the internal loop with `a2_resample` at 0 and about "
+        "+29 ppm in the Clock mode, and a few ppm against a second card, "
         "steady over the file.",
         dither=False, f=19600, seconds=15.0),
     Sig("pilot-11025", "pilot", R1, -30, "timebase", "LOI",
-        "A sine of 11025 Hz, a quarter of the rate, at -30 dBFS for 15 s, "
-        "1 cycle in 4 frames.",
-        "As the 19600 Hz pilot, at a frequency where jitter weighs less "
-        "and the path's response is flatter.",
-        "As the 19600 Hz pilot.",
+        "A sine of 11025 Hz, a quarter of the rate, plays at -30 dBFS for 15 "
+        "s, 1 cycle in 4 frames.",
+        "Its analysis gives the 19600 Hz pilot's results at a frequency where "
+        "jitter weighs less and the path's response is flatter.",
+        "Expect the 19600 Hz pilot's results.",
         dither=False, f=11025, seconds=15.0),
     Sig("pilot-12000", "pilot", (48000,), -30, "timebase", "LOI",
-        "A sine of 12000 Hz at -30 dBFS for 15 s, 1 cycle in 4 frames. "
-        "The chip's 48 kHz is 48012.09 Hz, so the cycles are whole in "
-        "frames and the tone sounds at 12003.02 Hz.",
-        "As the 19600 Hz pilot, at 48 kHz.",
-        "+252 ppm against a recorder whose 48 kHz is true, plus the two "
-        "crystals' difference.",
+        "A sine of 12000 Hz plays at -30 dBFS for 15 s, 1 cycle in 4 frames. "
+        "The chip's 48 kHz is 48012.09 Hz, so the cycles are whole in frames "
+        "and the tone sounds at 12003.02 Hz.",
+        "Its analysis gives the 19600 Hz pilot's results at 48 kHz.",
+        "Expect +252 ppm against a recorder whose 48 kHz is true, plus the "
+        "two crystals' difference.",
         dither=False, f=12000, seconds=15.0),
     Sig("chirps", "chirps", R1, None, "timebase", "LOI",
-        "The marker chirp every second, 15 times.",
-        "Each chirp's time to a hundredth of a frame, the clocks' ratio "
-        "from their line, and the time error at each.",
-        "Residuals of a few microseconds or less; a wandering crystal "
+        "The marker chirp plays every second, 15 times.",
+        "Each chirp's time, to a hundredth of a frame, gives the clocks' "
+        "ratio from their line and the time error at each.",
+        "Expect residuals of a few microseconds or less. A wandering crystal "
         "shows as a curve.",
         every=1.0, count=15),
     Sig("dual-skew", "dual", (44100, 22050), None, "timebase", "Q",
-        "Four channels for the dual device: the marker chirp on Audio 1's "
-        "left channel (channel 1) and the same chirp downward on Audio 2's "
-        "(channel 3), together every 0.5 s for 6 s, the right channels "
-        "silent.",
-        "When each DAC plays the same frame, from the two chirps in one "
-        "recording of the mixed output, to a hundredth of a frame.",
-        "A skew that stays the same within a run, of 1 to 4.5 frames at "
+        "Four channels for the dual device carry the marker chirp on Audio "
+        "1's left channel (channel 1) and the same chirp downward on Audio "
+        "2's (channel 3), together every 0.5 s for 6 s, with the right "
+        "channels silent.",
+        "The two chirps, found apart in one recording of the mixed output, "
+        "show when each DAC plays the same frame, to a hundredth of a frame.",
+        "Expect a skew that stays the same within a run: 1 to 4.5 frames at "
         "44.1 kHz and up to 15 at 22050 Hz on the Armada so far.",
         every=0.5, count=13),
     Sig("levels", "tones", R2, None, "amplitude", "LOI",
-        "A 997 Hz sine at -100 to -20 dBFS in steps of 10 dB, 0.5 s each.",
-        "The gain at each level against the gain at -20 dBFS, which is the "
-        "linearity, and THD+N against level.",
-        "Gain within 0.1 dB down to -60 dBFS and within 1 dB at -80; "
-        "THD+N that rises 10 dB a step once the noise dominates.",
+        "A 997 Hz sine steps from -100 to -20 dBFS in steps of 10 dB, 0.5 s "
+        "each.",
+        "Its analysis gives the gain at each level against the gain at -20 "
+        "dBFS, which is the linearity, and THD+N against level.",
+        "Expect the gain within 0.1 dB down to -60 dBFS and within 1 dB at "
+        "-80, and THD+N that rises 10 dB a step once the noise dominates.",
         steps="levels", f=997.0, hold=0.5,
         levels=(-100, -90, -80, -70, -60, -50, -40, -30, -20)),
     Sig("levelcal-hot", "tones", R2, None, "amplitude", "LOID",
-        "The level calibration: a 997 Hz sine from -60 dBFS up to -0.1 "
+        "The level calibration is a 997 Hz sine from -60 dBFS up to -0.1 "
         "dBFS, 0.5 s a step, in steps of 0.5 dB over the top 6 dB.",
-        "The path's gain, and the level at which some stage starts to "
-        "clip: the lowest step whose gain leaves the small-signal gain by "
-        "0.1 dB or whose harmonics rise 10 dB over their trend, with the "
-        "highest peak a test signal may have, by the rule in the levels' "
-        "section.",
-        "A gain that holds within 0.1 dB to a few dB under full scale and "
-        "a clip point that the record gain moves when the ADC clips first "
-        "and leaves where it is when the DAC or the mixer does.",
+        "Its analysis gives the path's gain and the level at which a stage "
+        "starts to clip: the lowest step whose gain leaves the small-signal "
+        "gain by 0.1 dB, or whose harmonics rise 10 dB over their trend. It "
+        "then gives the highest peak that a test signal may have, by the rule "
+        "of TEST_LEVELS.md.",
+        "Expect a gain of -1.8 dB on the internal loop at its calibrated "
+        "setting, linear to 0.01 dB, with THD+N of -62 dB up to -0.5 dBFS. A "
+        "clip point that the record gain moves belongs to the ADC.",
         steps="levels", f=997.0, hold=0.5,
         levels=(-60, -40, -30, -24, -20, -17, -14, -12, -10, -9, -8, -7,
                 -6, -5.5, -5, -4.5, -4, -3.5, -3, -2.5, -2, -1.5, -1, -0.5,
                 -0.1)),
     Sig("separation", "tones", R2, -20, "channels", "LOI",
-        "997 Hz on the left side and 1499 Hz on the right, at -20 dBFS, "
-        "for 3 s.",
-        "Which side each recorded channel hears and how far apart the "
-        "sides stay, from each tone's level in each channel. Run it before "
-        "anything else on a path whose cabling is new.",
-        "On a stereo path each channel hears its own tone, the other some "
-        "60 dB lower (the internal loop's crosstalk is about -66 dB). A "
-        "path of one channel hears one tone, and a difference or sum "
-        "hears both, the markers saying which.",
+        "A tone of 997 Hz plays on the left side and one of 1499 Hz on the "
+        "right, at -20 dBFS, for 3 s.",
+        "Each tone's level in each recorded channel shows which side each "
+        "channel hears and how far apart the sides stay. Run it first on a "
+        "path whose cabling is new.",
+        "Expect each channel to hear its own tone and the other far lower: "
+        "-66 dB on the internal loop, 66 to 73 dB apart into the VX, and 60 "
+        "dB back into the Aux input, whose sides are swapped. A path of one "
+        "channel hears one tone, and a sum or difference hears both.",
         steps="pair", pair=(997.0, 1499.0), hold=3.0),
     Sig("dr60", "tones", R1, -60, "amplitude", "LOI",
-        "A 997 Hz sine at -60 dBFS for 6 s.",
-        "AES17's dynamic range: THD+N of the tone, unweighted and "
-        "A-weighted, plus 60 dB.",
-        "About the noise floor's distance from full scale, around 65 dB "
-        "through the record paths at 0 dB of gain.",
+        "A 997 Hz sine plays at -60 dBFS for 6 s.",
+        "Its THD+N, unweighted and A-weighted, plus 60 dB is AES17's dynamic "
+        "range.",
+        "Expect the noise floor's distance from full scale, some 65 to 70 dB "
+        "through the chip's record paths.",
         steps="list", freqs=(997.0,), hold=6.0),
     Sig("silence", "silence", R2, None, "amplitude", "LOID",
-        "Digital silence for 8 s between the markers.",
-        "The noise floor: its level unweighted and A-weighted from 20 Hz "
-        "to 20 kHz, its spectrum, the DC, and the idle tones above it.",
-        "The record mixer read -68 dBFS at Capture Volume 15, with a line "
-        "at 15625 Hz near -84 dBFS. A DC offset is the ADC's.",
+        "Digital silence lasts 8 s between the markers.",
+        "Its analysis gives the noise floor: its level unweighted and "
+        "A-weighted from 20 Hz to 20 kHz, its spectrum, the DC and the idle "
+        "tones above it.",
+        "Expect the record mixer's floor, which read -68 dBFS at Capture "
+        "Volume 15, with a line at 15625 Hz near -84 dBFS. A DC offset is the "
+        "ADC's.",
         dither=False, seconds=8.0, mode="zero"),
     Sig("dither", "silence", R2, None, "amplitude", "LOID",
-        "Triangular dither of 1 LSB alone for 8 s, about -96 dBFS.",
-        "The noise floor with the DAC's input moving, against the digital "
-        "silence: idle tones that only digital zero shows.",
-        "The same floor as the silence's within 1 dB, since 16-bit dither "
-        "lies some 30 dB under the analog noise.",
+        "Triangular dither of 1 LSB plays alone for 8 s, about -96 dBFS.",
+        "Against the digital silence, its floor shows the idle tones that "
+        "only digital zero brings out, with the DAC's input moving.",
+        "Expect the silence's floor within 1 dB, since 16-bit dither lies "
+        "some 30 dB under the analog noise.",
         dither=False, seconds=8.0, mode="tpdf"),
     Sig("lsb", "lsb", R1, None, "amplitude", "LOID",
-        "Square waves of 1, 2, 4 and 8 LSB about zero, 3 s each, at 1002 "
-        "Hz (44 frames a period), with no dither.",
-        "The DAC's linearity at its last bits: each square's fundamental "
-        "against 4/pi of its height, and its even harmonics.",
-        "Each step 6 dB over the one before within the fit's noise, which "
-        "the report gives.",
+        "Square waves of 1, 2, 4 and 8 LSB about zero play for 3 s each at "
+        "1002 Hz, 44 frames a period, with no dither.",
+        "Each square's fundamental against 4/pi of its height, and its even "
+        "harmonics, show the DAC's linearity at its last bits.",
+        "Expect each step 6 dB over the one before, within the fit's noise, "
+        "which the report gives.",
         dither=False, period={44100: 44, 48000: 48}, hold=3.0,
         lsb=(1, 2, 4, 8)),
     Sig("dc-step", "dc", R1, None, "amplitude", "LOID",
-        "DC of +0.1 of full scale for 2 s, zero for 2 s, -0.1 for 2 s and "
-        "zero again.",
-        "Whether the path passes DC, and the time constant and corner of "
-        "its high-pass from each step's decay.",
-        "A decay of one pole whose corner matches sweep-sub's, and a "
-        "recording's own DC between the steps.",
+        "DC of +0.1 of full scale plays for 2 s, then zero for 2 s, -0.1 for "
+        "2 s and zero again.",
+        "Each step's decay tells whether the path passes DC, and gives the "
+        "time constant and corner of its high-pass.",
+        "Expect a decay of one pole whose corner matches `sweep-sub`'s, and "
+        "the recording's own DC between the steps.",
         dither=False, plateaus=((0.1, 2.0), (0.0, 2.0), (-0.1, 2.0),
                                 (0.0, 2.0))),
     Sig("imd-smpte", "imd", R1, None, "distortion", "LOI",
-        "60 Hz and 7 kHz at 4 to 1, with a combined peak of -12 dBFS, on "
-        "exact bins, for 5 s.",
-        "SMPTE intermodulation: the sidebands of 7 kHz at multiples of 60 "
-        "Hz against 7 kHz.",
-        "Sidebands near the noise. A rise with the level points at a "
+        "Tones of 60 Hz and 7 kHz play at 4 to 1, with a combined peak of -12 "
+        "dBFS, on exact bins, for 5 s.",
+        "The sidebands of 7 kHz at multiples of 60 Hz, against 7 kHz, give "
+        "the SMPTE intermodulation.",
+        "Expect sidebands near the noise. A rise with the level points at a "
         "stage that the low tone modulates.",
         kind="smpte", f1=60.0, f2=7000.0, ratio=4.0, peak=-12.0,
         seconds=5.0),
     Sig("imd-smpte-hot", "imd", R1, None, "distortion", "LOI",
-        "The SMPTE pair with a combined peak of -3 dBFS.",
-        "SMPTE intermodulation near full scale.",
-        "Sidebands that rise with the level, against the pair at -12 "
+        "The SMPTE pair plays with a combined peak of -3 dBFS.",
+        "Its analysis gives the SMPTE intermodulation near full scale.",
+        "Expect sidebands that rise with the level, against the pair at -12 "
         "dBFS.",
         kind="smpte", f1=60.0, f2=7000.0, ratio=4.0, peak=-3.0,
         seconds=5.0),
     Sig("imd-ccif", "imd", R2, None, "distortion", "LOI",
-        "19 kHz and 20 kHz at one amplitude, with a combined peak of -12 "
-        "dBFS, on exact bins, for 5 s.",
-        "Twin-tone intermodulation: the difference tone at 1 kHz and the "
-        "products at 18 and 21 kHz, and the folded products of a path "
-        "without an anti-alias filter.",
-        "Products near the noise. The ADC with its filter off folds what "
-        "lies above half the rate back into the band.",
+        "Tones of 19 kHz and 20 kHz play at one amplitude, with a combined "
+        "peak of -12 dBFS, on exact bins, for 5 s.",
+        "Its analysis gives the twin-tone intermodulation: the difference "
+        "tone at 1 kHz, the products at 18 and 21 kHz, and the folded "
+        "products of a path without an anti-alias filter.",
+        "Expect products near the noise. The ADC with its filter off folds "
+        "what lies above half the rate back into the band.",
         kind="ccif", f1=19000.0, f2=20000.0, ratio=1.0, peak=-12.0,
         seconds=5.0),
     Sig("imd-ccif-hot", "imd", R1, None, "distortion", "LOI",
-        "The twin tone with a combined peak of -3 dBFS.",
-        "Twin-tone intermodulation near full scale.",
-        "Products that rise with the level, against the pair at -12 dBFS.",
+        "The twin tone plays with a combined peak of -3 dBFS.",
+        "Its analysis gives the twin-tone intermodulation near full scale.",
+        "Expect products that rise with the level, against the pair at -12 "
+        "dBFS.",
         kind="ccif", f1=19000.0, f2=20000.0, ratio=1.0, peak=-3.0,
         seconds=5.0),
     Sig("jtest", "jtest", R1, -21.1, "distortion", "LOID",
-        "Dunn's J-test at a low level: a quarter of the rate as samples of "
-        "+-2048, with an LSB square wave at a 192nd of the rate, exact.",
-        "Data-dependent jitter and interference: the sidebands of the tone "
-        "at multiples of a 192nd of the rate, as jitter.",
-        "No sidebands over the noise. A sideband at -100 dBc of an 11 kHz "
-        "tone is about 0.3 ns of jitter.",
+        "Dunn's J-test plays at a low level: a quarter of the rate as samples "
+        "of +-2048, with an LSB square wave at a 192nd of the rate, exact.",
+        "The tone's sidebands at multiples of a 192nd of the rate, beyond the "
+        "file's own, give data-dependent jitter and interference as jitter.",
+        "Expect no sideband over the file's own. A pair of sidebands at -100 "
+        "dBc of an 11 kHz tone is about 0.3 ns of jitter.",
         dither=False, code=2048, seconds=5.0),
     Sig("jtest-hot", "jtest", R2, -3, "distortion", "LOID",
-        "The J-test as Dunn defined it: +-16384, a sine of -3 dBFS, with "
-        "the LSB square that flips every bit under the top two.",
-        "As the J-test, with the most bits changing.",
-        "Sidebands no higher than at the low level.",
+        "The J-test plays as Dunn defined it: +-16384, a sine of -3 dBFS, "
+        "with the LSB square that flips every bit under the top two.",
+        "Its analysis gives the J-test's results with the most bits changing.",
+        "Expect sidebands no higher than at the low level.",
         dither=False, code=16384, seconds=5.0),
     Sig("nyquist", "tones", R1, -20, "distortion", "O",
-        "Sines from 15 kHz to 21.9 kHz, 1 s each.",
-        "The level near the top of the band and the DAC's images at the "
-        "rate less f, which a second card at 48 kHz hears up to 24 kHz.",
-        "Images some 10 dB or more under the tone with the DAC's stages "
-        "off, and much lower with a2_oversample or the filters.",
+        "Sines from 15 kHz to 21.9 kHz play for 1 s each.",
+        "Its analysis gives the level near the top of the band and the DAC's "
+        "images at the rate less f, which a second card at 48 kHz hears up to "
+        "24 kHz.",
+        "Expect images some 10 dB or more under the tone with the DAC's "
+        "stages off, and far lower with `a2_oversample` or the filters.",
         steps="list", hold=1.0,
         freqs=(15000.0, 18000.0, 19000.0, 20000.0, 20500.0, 21000.0,
                21500.0, 21900.0)),
     Sig("alias", "tones", (48000,), -20, "distortion", "I",
-        "Sines at 48 kHz from 20 kHz to 23.9 kHz, 1 s each, for a second "
-        "card to play into the line in.",
-        "The ADC's anti-aliasing at 44.1 kHz: each tone over 22.05 kHz "
-        "comes back at 44.1 kHz less f.",
-        "With the Audio 1 filter off, aliases close to the tone's level; "
-        "with it on, much lower.",
+        "Sines at 48 kHz from 20 kHz to 23.9 kHz play for 1 s each, for a "
+        "second card to play into the Aux input.",
+        "The ADC's anti-aliasing at 44.1 kHz shows in each tone over 22.05 "
+        "kHz, which comes back at 44.1 kHz less f.",
+        "Expect aliases close to the tone's level with the Audio 1 filter "
+        "off, and far lower with it on.",
         steps="list", hold=1.0,
         freqs=(20000.0, 21000.0, 22000.0, 22500.0, 23000.0, 23500.0,
                23900.0)),
     Sig("images", "tones", (22050, 11025), -20, "distortion", "LO",
-        "Sines at fractions of the rate from 0.05 to 0.45, 1 s each, at "
-        "the low rates.",
-        "The images of the DAC at the rate less f, in the audible band at "
-        "these rates, recorded at 44.1 or 48 kHz.",
-        "At 22050 Hz an image of 5 kHz at 17050 Hz, about 11 dB under the "
-        "tone with the stages off and much lower with the filter.",
+        "Sines at fractions of the rate from 0.05 to 0.45 play for 1 s each, "
+        "at the low rates.",
+        "Recorded at 44.1 or 48 kHz, they show the DAC's images at the rate "
+        "less f, in the audible band at these rates.",
+        "Expect, at 22050 Hz, an image of 5 kHz at 17050 Hz, about 11 dB "
+        "under the tone with the stages off, and far lower with the filter.",
         steps="fraction", hold=1.0,
         freqs=(0.05, 0.1, 0.2, 0.25, 0.35, 0.45)),
     Sig("cal", "multitone", R2, -20, "loop", "LOI",
-        "The boot calibration: 10 periods of 8192 frames, every odd bin "
-        "from 20 Hz to 20 kHz, the bins of 1 mod 4 on the left channel "
-        "and of 3 mod 4 on the right, the same power in each octave above 63 Hz, a "
-        "crest factor of about 3.2 dB, a ramp over the first and the "
-        "last period and no markers.",
-        "The loop's four transfers from 8 periods averaged with no window, "
-        "the noise and distortion in the empty bins, and the SNR of each "
-        "bin from the spread of the periods, as the boot's C code would "
-        "find them.",
-        "0 ppm between the periods, coherence near 1, and a response that "
-        "matches the sweep's at the bins.",
+        "The boot calibration plays 10 periods of 8192 frames with every odd "
+        "bin from 20 Hz to 20 kHz, the bins of 1 mod 4 on the left channel "
+        "and of 3 mod 4 on the right, each octave over 63 Hz within 1 dB of "
+        "the same power. Its crest factor is about 3.2 dB, a ramp covers the "
+        "first and the last period, and it has no markers.",
+        "Its analysis gives the loop's four transfers from 8 periods averaged "
+        "with no window, the noise and distortion in the empty bins and how "
+        "far the periods agree, and runs the boot method of the section on "
+        "the loop's calibration on the same recording.",
+        "Expect 0 ppm between the periods, agreement near 1, the sweep's "
+        "response at the bins, and the boot method within 0.01 dB of the full "
+        "analysis.",
         markers=False, period=8192, periods=10, color="pink", phases=True),
     Sig("verify", "ess", R2, -20, "loop", "LOI",
-        "The exponential sweep of 4 s, for checking a correction.",
-        "The response after a correction, which should come back flat, "
-        "with its deviation in bands.",
-        "Within a few tenths of a dB from 20 Hz to 20 kHz once a "
-        "correction applies.",
+        "The exponential sweep lasts 4 s, for checking a correction.",
+        "Its analysis gives the response after a correction, which should "
+        "come back flat, and its widest swing from 20 Hz to 20 kHz.",
+        "Expect a response within a few tenths of a dB from 20 Hz to 20 kHz "
+        "once a correction applies.",
         f1=10.0, f2="nyq:0.95", sweep=4.0),
     Sig("program", "program", R2, -24, "loop", "LOI",
-        "Noise with music's long-term spectrum and a crest factor near "
-        "16 dB from a slow envelope, the channels correlated by 0.6, for "
-        "15 s.",
-        "What the live analysis meets in music: the four transfers by "
-        "Welch's method with correlated inputs, with the coherence that a "
+        "Noise with music's long-term spectrum plays for 15 s, the channels "
+        "correlated by 0.6, with a crest factor near 16 dB from a slow "
+        "envelope.",
+        "Welch's method gives the four transfers with correlated inputs, as a "
+        "live analysis meets them in music, and the coherence that a "
         "music-like spectrum leaves at the top.",
-        "The response of the white noise wherever the coherence is near "
-        "1, and low coherence at the top, where music is quiet.",
+        "Expect the white noise's response wherever the coherence is near 1, "
+        "and a coherence that falls at the top, where music is quiet.",
         seconds=15.0, corr=0.6, swing=1.5),
     Sig("program-pilot", "program", R2, -24, "loop", "LOI",
-        "The program for 30 s with a pilot at -40 dBFS, 19600 Hz at 44.1 "
-        "kHz and 19200 Hz at 48 kHz, and nothing else within 100 Hz of "
+        "The program plays for 30 s with a pilot at -40 dBFS, 19600 Hz at "
+        "44.1 kHz and 19200 Hz at 48 kHz, and nothing else within 100 Hz of "
         "it.",
-        "The loop's response and the clocks at once, as a live analysis "
-        "would watch both under music.",
-        "The program's response, and the pilot's ppm as on its own.",
+        "Its analysis gives the loop's response and the clocks at once, as a "
+        "live analysis would watch both under music.",
+        "Expect the program's response, and the pilot's ppm as on its own.",
         seconds=30.0, corr=0.6, swing=1.5,
         pilot={44100: 19600, 48000: 19200}, pilot_level=-40.0),
     Sig("track", "track", R1, None, "loop", "LOI",
-        "Segments of 4 s whose spectrum changes: pink, white, bass, "
-        "treble, mid band, pink 20 dB lower, 2 s of silence and program.",
-        "How fast a running estimate of the loop settles after each "
-        "change, how far it strays in the bands a segment leaves empty, "
-        "and what the coherence reads in silence.",
-        "Each segment's response within 0.5 dB of the white noise's in "
+        "Segments of 4 s change the spectrum: pink, white, bass, treble, mid "
+        "band, pink 20 dB lower, 2 s of silence and program.",
+        "Its analysis gives how fast a running estimate of the loop settles "
+        "after each change, how far it strays in the bands a segment leaves "
+        "empty, and what silence does to it.",
+        "Expect each segment's response within 0.5 dB of the white noise's in "
         "the bands it excites, and an estimate that silence leaves alone.",
         segments=(("pink", 4.0, -20), ("white", 4.0, -20),
                   ("bass", 4.0, -20), ("treble", 4.0, -20),
@@ -1132,9 +1140,10 @@ SIGNALS = [
                   ("silence", 2.0, None), ("program", 4.0, -24))),
 ]
 
-# the one-side variants made by default, for the VX's input, which hears
-# the difference of the sides: the signals whose sides carry the same body.
-# --side makes the other side, and any signal's
+# the one-side variants made by default, for a recorder that hears one
+# side, or the sides' sum or difference, and for checks of one side: the
+# signals whose sides carry the same body. --side makes the other side,
+# and any signal's
 SIDES = {"sweep": "lr", "sweep-hf": "lr", "verify": "lr", "steps": "lr",
          "levelcal-hot": "lr",
          "levels": "lr", "dr60": "lr",
@@ -1151,35 +1160,42 @@ BY_NAME = {s.name: s for s in SIGNALS}
 
 # the driver's settings that change a path, with the signals that show it
 SETTINGS = [
-    ("a2_resample", "0 and 2", "pilot-19600, chirps, cal",
+    ("`a2_resample`", "0 and 2", "pilot-19600, chirps, cal",
      "The loop reads 0 ppm with 0 (Off). The Clock mode resamples Audio 2 "
      "to true time, so the loop then reads its correction, about +29 ppm, "
      "and a periodic signal no longer comes back periodic."),
-    ("a2_treble", "0 and 1", "sweep, sweep-hf, verify",
-     "The treble correction's lift, up to 4 dB near 20 kHz on the dig "
-     "path; at the line out with the DAC's stages off, the droop taken "
-     "back to within 0.2 dB."),
-    ("audio2_oversampling", "0 and 1", "sweep, sweep-hf, nyquist",
-     "ESS's 4x mode: 1.74 dB less level, 6 dB down by 20.4 kHz, and "
-     "images 25 dB lower."),
-    ("audio2_filter", "0 and 1", "sweep, images",
-     "The switched-capacitor filter after Audio 2's DAC, with its corner "
-     "at filter_corner below 44.1 kHz."),
-    ("audio1_filter", "0 and 1", "alias, sweep, imd-ccif",
-     "The ADC's anti-alias filter: what lies above half the rate folds "
-     "back with 0 and is filtered with 1, at the filter's response."),
-    ("a2_oversample", "0, 1 and 2", "nyquist, sweep-hf, silence",
-     "Audio 2's DAC at 2x or 3x of the stream: images moved up and less "
-     "droop."),
-    ("filter_corner", "875 and others", "sweep, images",
-     "The filters' corner at the rates under 44.1 kHz, with a filter on."),
-    ("Capture Volume, PCM Capture Volume", "the steps",
-     "levels, silence, sweep-hot",
-     "The record path's gain, noise floor and clipping point on the "
-     "internal loop."),
-    ("adc_offset", "0 and the saved value", "dc-step, silence",
-     "The recording's DC."),
-    ("dual_playback", "1", "dual-skew",
+    ("`a2_treble`", "0 and 1", "sweep, sweep-hf, verify",
+     "It shows the treble correction's lift, up to 4 dB near 20 kHz on the "
+     "dig path. At the line out, with the DAC's stages off, the droop "
+     "comes back to within 0.2 dB."),
+    ("`audio2_oversampling`", "0 and 1", "sweep, sweep-hf, nyquist",
+     "It is ESS's 4x mode, which takes 1.74 dB off everything, falls 6 dB "
+     "by 20.4 kHz and puts the images 25 dB lower."),
+    ("`audio2_filter`", "0 and 1", "sweep, images",
+     "It puts the switched-capacitor filter after Audio 2's DAC, with its "
+     "corner at `filter_corner` below 44.1 kHz."),
+    ("`audio1_filter`", "0 and 1", "alias, sweep, imd-ccif",
+     "It is the ADC's anti-alias filter. With 0, what lies over half the "
+     "rate folds back; with 1, the filter's response takes it."),
+    ("`a2_oversample`", "0, 1 and 2", "nyquist, sweep-hf, silence",
+     "It runs Audio 2's DAC at 2x or 3x of the stream, which moves the "
+     "images up and takes less of the treble."),
+    ("`filter_corner`", "875 and others", "sweep, images",
+     "It moves the filters' corner at the rates under 44.1 kHz, with a "
+     "filter on."),
+    ('"PCM Capture Volume" and "Capture Volume"', "the steps",
+     "levelcal-hot, silence, sweep-hot",
+     "They set the internal loop's gain, noise floor and clip point. 14 and "
+     "3 are its calibrated setting."),
+    ('"Aux Capture Volume"', "the steps", "levelcal-hot, silence",
+     "It is the second card's way into the ES1869. 15, with \"Capture "
+     "Volume\" at 4, is its calibrated setting."),
+    ('"Master Playback Volume"', "55 and others", "levelcal-hot, sweep-hot",
+     "It sets the line out's level into the second card, and 55 (-6 dB) "
+     "keeps the VX at \"Mic Capture Volume\" 1 from clipping."),
+    ("`adc_offset`", "0 and the saved value", "dc-step, silence",
+     "It sets the recording's DC."),
+    ("`dual_playback`", "1", "dual-skew",
      "The four-channel device opens only with it."),
 ]
 
@@ -1355,11 +1371,32 @@ def write_all(outdir, pairs, quiet=False):
         print("%d files, %.1f MB in %s" % (len(rows), total / 1e6, outdir))
 
 
-# --- the doc -----------------------------------------------------------------
+# --- the docs ----------------------------------------------------------------
 
+LEVELS_DOC = os.path.join(ROOT, "docs", "TEST_LEVELS.md")
 CAT_BEGIN, CAT_END = "<!-- signals -->", "<!-- /signals -->"
 MAT_BEGIN, MAT_END = "<!-- paths -->", "<!-- /paths -->"
 SET_BEGIN, SET_END = "<!-- settings -->", "<!-- /settings -->"
+LEV_BEGIN, LEV_END = "<!-- levels -->", "<!-- /levels -->"
+MARGIN = 3.0                # the levels rule's margin under each clip point
+
+# the paths, with the gain from the file's dBFS to the recording's at 997
+# Hz in the calibrated settings of TEST_LEVELS.md (measured 2026-11-08),
+# the higher where the sides differ
+PATHS = (("L", "Loop", -1.8), ("O", "Out", -2.65), ("I", "In", -1.2),
+         ("D", "Dig", 0.0), ("Q", "Quad", None))
+
+_STATS = {}
+
+
+def stats(s):
+    """a signal's length in seconds, the level of its body (AES17 dBFS) and
+    its true peak, at its first rate"""
+    if s.name not in _STATS:
+        m = render(s, s.rates[0])
+        level, peak = measures(m)
+        _STATS[s.name] = (len(m.data) / m.rate, level, peak)
+    return _STATS[s.name]
 
 
 def khz(rate):
@@ -1367,63 +1404,57 @@ def khz(rate):
         rate, "%g" % (rate / 1000))
 
 
-def length_of(s):
-    """a signal's length in seconds at its first rate"""
-    m = render(s, s.rates[0])
-    return len(m.data) / m.rate
-
-
-def level_text(s):
+def level_text(s, long=False):
+    """a signal's level in dBFS, short for the table or as a phrase"""
     if s.level is not None:
-        return "%g" % s.level
+        return "%g%s" % (s.level, " dBFS" if long else "")
     if s.family == "tones":
         lv = [v for _f, _g, v, _h in step_list(s, s.rates[0])]
-        return "%g to %g" % (min(lv), max(lv))
+        return "%g to %g%s" % (min(lv), max(lv), " dBFS" if long else "")
     if s.family == "imd":
-        return "%g pk" % s.params["peak"]
+        return "%g%s" % (s.params["peak"], " dBFS peak" if long else " pk")
     if s.family == "lsb":
-        return "1-8 LSB"
+        return "1 to 8 LSB" if long else "1-8 LSB"
     if s.family == "dc":
-        return "-20 DC"
+        return "DC of -20 dBFS" if long else "-20 DC"
     if s.family == "silence":
-        return "zero" if s.params["mode"] == "zero" else "-96"
+        if s.params["mode"] == "zero":
+            return "digital zero" if long else "zero"
+        return "-96 dBFS" if long else "-96"
     if s.family == "track":
-        return "-40 to -20"
-    return "-20 pk"
+        return "-40 to -20 dBFS" if long else "-40 to -20"
+    return "-20 dBFS peak" if long else "-20 pk"
 
 
-def catalog(lengths):
-    out = [CAT_BEGIN, "", "| Signal | Rates (kHz) | Length | Level |",
-           "|---|---|---|---|"]
+def rates_text(s):
+    r = [khz(v) for v in s.rates]
+    return (", ".join(r[:-1]) + " and " + r[-1] if len(r) > 1 else r[0]) + \
+        " kHz"
+
+
+def catalog():
+    out = [CAT_BEGIN, "", "| Signal | Rates | Length | Level | "
+           "Sides |", "|---|---|---|---|---|"]
     for s in SIGNALS:
-        out.append("| `%s` | %s | %.1f s | %s |" % (
-            s.name, ", ".join(khz(r) for r in s.rates), lengths[s.name],
-            level_text(s)))
+        out.append("| `%s` | %s | %.1f s | %s | %s |" % (
+            s.name, " ".join(rate_tag(r) for r in s.rates), stats(s)[0],
+            level_text(s), ", ".join(s.sides)))
     for key, title in GROUPS:
         out += ["", "### %s" % title, ""]
         for s in [s for s in SIGNALS if s.group == key]:
-            rates = " and ".join(khz(r) for r in s.rates) + " kHz"
-            if len(s.rates) > 2:
-                rates = ", ".join(khz(r) for r in s.rates[:-1]) + \
-                    " and %s kHz" % khz(s.rates[-1])
-            out.append("* **%s** (%s, %.1f s, %s dBFS). %s %s A good "
-                       "result: %s" % (s.name, rates, lengths[s.name],
-                                       level_text(s), s.what, s.gives,
-                                       s.good[0].lower() + s.good[1:]))
+            out.append("* **%s** (%s, %.1f s, %s). %s %s %s" % (
+                s.name, rates_text(s), stats(s)[0], level_text(s, True),
+                s.what, s.gives, s.good))
     out += ["", CAT_END]
     return "\n".join(out)
 
 
-PATHS = (("L", "Loop"), ("O", "Out"), ("I", "In"), ("D", "Dig"),
-         ("Q", "Quad"))
-
-
 def matrix():
-    out = [MAT_BEGIN, "", "| Signal | " + " | ".join(t for _c, t in PATHS) +
-           " |", "|---|" + "---|" * len(PATHS)]
+    out = [MAT_BEGIN, "", "| Signal | " + " | ".join(t for _c, t, _g in PATHS)
+           + " |", "|---|" + "---|" * len(PATHS)]
     for s in SIGNALS:
         out.append("| `%s` | " % s.name + " | ".join(
-            "x" if c in s.paths else "" for c, _t in PATHS) + " |")
+            "x" if c in s.paths else "" for c, _t, _g in PATHS) + " |")
     out += ["", MAT_END]
     return "\n".join(out)
 
@@ -1432,39 +1463,66 @@ def settings_list():
     out = [SET_BEGIN, ""]
     for key, values, sigs, text in SETTINGS:
         names = ", ".join("`%s`" % v.strip() for v in sigs.split(","))
-        out.append("* **%s** (%s; %s). %s" % (key, values, names, text))
+        out.append("* %s (%s; %s). %s" % (key, values, names, text))
     out += ["", SET_END]
     return "\n".join(out)
 
 
-def doc_text(old, lengths):
+def levels_tables():
+    """for each path, every signal it plays: the body's level and the true
+    peak in the file, the peak at the recorder at the path's calibrated
+    gain, and the room left under the recorder's full scale"""
+    out = [LEV_BEGIN]
+    for code, title, gain in PATHS:
+        if gain is None:
+            continue
+        out += ["", "### %s, %+.2f dB" % (title, gain), "",
+                "| Signal | Level | Peak | At rec | Room |",
+                "|---|---|---|---|---|"]
+        for s in [s for s in SIGNALS if code in s.paths]:
+            _n, level, peak = stats(s)
+            room = -(peak + gain)
+            out.append("| `%s` | %.1f | %.1f | %.1f | %.1f%s |" % (
+                s.name, level, peak, peak + gain, room,
+                " short" if room < MARGIN else ""))
+    out += ["", LEV_END]
+    return "\n".join(out)
+
+
+DOCS = {DOC: ((CAT_BEGIN, CAT_END, catalog), (MAT_BEGIN, MAT_END, matrix),
+              (SET_BEGIN, SET_END, settings_list)),
+        LEVELS_DOC: ((LEV_BEGIN, LEV_END, levels_tables),)}
+
+
+def doc_text(path, old):
+    """a doc with the text between each pair of its markers made again"""
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import mdfmt
     nl = "\r\n" if "\r\n" in old else "\n"
-    for begin, end, text in ((CAT_BEGIN, CAT_END, catalog(lengths)),
-                             (MAT_BEGIN, MAT_END, matrix()),
-                             (SET_BEGIN, SET_END, settings_list())):
+    for begin, end, make in DOCS[path]:
         a, b = old.find(begin), old.find(end)
         if a < 0 or b <= a:
-            raise SystemExit("%s: no %s markers" % (DOC, begin))
-        new = mdfmt.format_text(text).rstrip("\n").replace("\n", nl)
+            raise SystemExit("%s: no %s markers" % (path, begin))
+        new = mdfmt.format_text(make()).rstrip("\n").replace("\n", nl)
         old = old[:a] + new + old[b + len(end):]
     return old
 
 
 def doc(check):
-    with open(DOC, encoding="ascii", newline="") as f:
-        old = f.read()
-    lengths = {s.name: length_of(s) for s in SIGNALS}
-    new = doc_text(old, lengths)
-    if new == old:
-        return 0
-    if check:
-        print("%s is stale: run python3 tools/testsig.py --doc" % DOC)
-        return 1
-    with open(DOC, "w", encoding="ascii", newline="") as f:
-        f.write(new)
-    return 0
+    stale = 0
+    for path in DOCS:
+        with open(path, encoding="ascii", newline="") as f:
+            old = f.read()
+        new = doc_text(path, old)
+        if new == old:
+            continue
+        if check:
+            print("%s is stale: run python3 tools/testsig.py --doc" % path)
+            stale = 1
+            continue
+        with open(path, "w", encoding="ascii", newline="") as f:
+            f.write(new)
+    return stale
 
 
 def main(argv=None):
