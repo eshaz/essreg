@@ -364,8 +364,10 @@ static int lv_route(struct loopview *v)
 		"Aux Capture Volume", "Mono Capture Volume",
 		"Mic Boost (+26dB)",
 	};
-	int pcm = v->cfg.gain[0] >= 0 ? v->cfg.gain[0] : 8;
-	int adc = v->cfg.gain[1] >= 0 ? v->cfg.gain[1] : 4;
+	// the calibrated levels (TEST_LEVELS.md): -1.8 dB from Audio 2 to the
+	// recording, clean to full scale
+	int pcm = v->cfg.gain[0] >= 0 ? v->cfg.gain[0] : 14;
+	int adc = v->cfg.gain[1] >= 0 ? v->cfg.gain[1] : 3;
 	long val[2];
 	unsigned int i, n;
 	int item;

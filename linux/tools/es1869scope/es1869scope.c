@@ -32,8 +32,8 @@
  * channel's magnitude and phase, what isn't the path, and the impulse
  * response. The keys c, t and o start it again, turn Audio 2's treble
  * correction over, and switch its output rate between 1x and 2x. -L sets the
- * noise's rms level (-20 dBFS) and -G the record mixer's two gains, "PCM
- * Capture Volume" and "Capture Volume" (8 and 4). With -m, the monitor's
+ * noise's rms level (-12 dBFS) and -G the record mixer's two gains, "PCM
+ * Capture Volume" and "Capture Volume" (14 and 3, the calibrated levels). With -m, the monitor's
  * device (hw:CARD=ES1869,DEV=3), it takes what Audio 2 plays anyway in place
  * of its noise, and leaves the output and Audio 2's settings alone. With -x
  * and -i it takes what was played and what came back from two WAV files.
@@ -653,7 +653,7 @@ int main(int argc, char **argv)
 				   .capture = "hw:CARD=ES1869,DEV=0",
 				   .ctl = "hw:CARD=ES1869",
 				   .rate = 44100,
-				   .level = -20,
+				   .level = -12,
 				   .gain = { -1, -1 } };
 	struct loopview *lv = NULL;
 	struct spectro *sp = NULL;

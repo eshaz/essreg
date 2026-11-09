@@ -121,12 +121,13 @@ its time on the machine it runs on.
 
 `es1869scope -v 3`, or the key 3, measures the ES1869's internal loop:
 * **What it plays:** noise on Audio 2 (`-p`, `hw:CARD=ES1869,DEV=0,SUBDEV=0`
-  by default), independent between the channels, at -20 dBFS rms.
+  by default), independent between the channels, at -12 dBFS rms.
 * **What it records:** Audio 1 (`-a`, `hw:CARD=ES1869,DEV=0`), through the
   record mixer of the card `-k`.
 
 While the view shows, the record mixer takes Audio 2 alone:
-* record source Mix, 69h at 8, the ADC's level at 4;
+* record source Mix, 69h at 14 and the ADC's level at 3, the calibrated
+  levels of [TEST_LEVELS.md](TEST_LEVELS.md), -1.8 dB in all;
 * every other record input at 0, the mic boost off;
 * the master switched off, so that nothing reaches the speakers;
 * Audio 2's rate correction off, so that what plays is what was written;
@@ -139,10 +140,9 @@ signal, and the next start puts back what a run that ended without doing so
 left in that file. The device that is busy, as Audio 2 is while MPD plays,
 stops the view before anything changes.
 
-`-L` sets the noise's rms level, -20 dBFS by default. `-G PCM,ADC` sets the
-record mixer's two gains, "PCM Capture Volume" (69h) and "Capture Volume", 8
-and 4 by default, so that a level calibration can bring the loop's level up
-to the headroom it leaves.
+`-L` sets the noise's rms level, -12 dBFS by default. `-G PCM,ADC` sets the
+record mixer's two gains, "PCM Capture Volume" (69h) and "Capture Volume",
+14 and 3 by default, the calibrated levels.
 
 `-m MONITOR` takes what Audio 2 plays anyway as what went in, from the
 monitor, PCM device 3 (`hw:CARD=ES1869,DEV=3`,
