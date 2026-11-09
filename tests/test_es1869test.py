@@ -61,6 +61,7 @@ FAULTS = {
     0x100000000: "dac.over.quality",  # the ring gets noise above 1x
     0x200000000: "mon.exact",      # the monitor reads the ring a lap late
     0x400000000: "mon.trim",       # the monitor reads the application's
+    0x800000000: "a1rec.correct",  # the correction filter does nothing
 }
 
 # the cases that run only when named, or with someone at the machine
@@ -77,7 +78,8 @@ def suite():
         sources = sorted(glob.glob(os.path.join(SUITE, "*.c"))) + [
             os.path.join(ROOT, "src", "s3dmeas.c"),
             os.path.join(ROOT, "src", "s3dsim.c"),
-            os.path.join(ROOT, "linux", "es1869", "resample.c")]
+            os.path.join(ROOT, "linux", "es1869", "resample.c"),
+            os.path.join(ROOT, "linux", "es1869", "capfilt.c")]
         subprocess.run(["gcc", "-std=gnu99", "-Wall", "-Wextra", "-Werror",
                         "-O2", "-fno-math-errno", "-DESS_HOST",
                         "-I" + os.path.join(ROOT, "src"), "-o", exe] +

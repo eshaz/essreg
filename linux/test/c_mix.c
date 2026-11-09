@@ -31,6 +31,7 @@
 #include "cases.h"
 #include "hal.h"
 #include "settab.h"
+#include "sim_rs.h"
 
 struct path {
 	const char *ctl;
@@ -599,5 +600,93 @@ enum et_result c_mix_adc(struct et_ctx *c, const struct et_case *k)
 		}
 	}
 	et_measure(c, "mismatches over the eight sources", bad, "", 0, 0);
+	return ET_PASS;
+}
+
+// a1rec.correct: Audio 1's correction filter on a recording of the loop.
+// Audio 2 plays four tones at 2x with its treble correction on, which keeps
+// each tone's level from one start to the next (at 1x the ADC folds the DAC's
+// image back, dac.fold); Audio 1 records them through the record mixer with
+// the filter off, then with it on and known taps: a lift of the top on the
+// left and a plain -1 dB on the right. Each tone changes by the taps' own
+// response at its frequency
+enum et_result c_a1rec_correct(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	static const double hz[4] = { 1000, 5000, 10000, 15000 };
+	static const long lift[3] = { 20480, -2458, 410 }; // 1.25, -0.15, 0.025
+	long taps[2 * (SIM_CF_HALF + 1)];
+	unsigned long pn = 3 * 44100, rn = 2 * 44100, i;
+	double lv[2][2][4];
+	int run, ch, j;
+
+	(void)k;
+	memset(taps, 0, sizeof(taps));
+	for (j = 0; j < 3; j++)
+		taps[j] = lift[j];
+	taps[SIM_CF_HALF + 1] = 14602; // -1 dB
+	et_mix_quiet(c);
+	et_mix_dig(c, 0);
+	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
+	if (et_mix_rec_a2(c, 13) < 0 || et_param_set(c, "a2_oversample", 1) ||
+	    et_param_set(c, "a2_treble", 1))
+		return ET_ERROR;
+	for (run = 0; run < 2; run++) {
+		struct et_stream s[2];
+		void *d = et_alloc_frames(&f, pn);
+
+		for (i = 0; i < pn; i++)
+			for (ch = 0; ch < 2; ch++) {
+				double v = 0;
+
+				for (j = 0; j < 4; j++)
+					v += 4000 *
+					     sin(2 * M_PI * hz[j] * i / f.rate);
+				et_pack1(&f, d, i, ch, v);
+			}
+		if (run == 1 &&
+		    (et_ctl_set_n(c, "Audio 1 Correction Capture Taps", 0, taps,
+				  2 * (SIM_CF_HALF + 1)) < 0 ||
+		     et_ctl_set(c, "Audio 1 Correction Capture Switch", 0, 1,
+				1) < 0)) {
+			free(d);
+			return ET_ERROR;
+		}
+		s[0] = et_play(ET_A2, &f, d, pn, 0);
+		s[1] = et_rec(ET_A1C, &f, rn, 0.5);
+		if (et_run(c, s, 2)) {
+			free(s[0].data);
+			free(s[1].data);
+			return ET_ERROR;
+		}
+		for (ch = 0; ch < 2; ch++) {
+			double *x = et_chan(&f, s[1].data, s[1].done, ch);
+
+			for (j = 0; j < 4; j++)
+				lv[run][ch][j] = an_dbfs(an_tone(
+					x, s[1].done, 44100, hz[j], NULL));
+			free(x);
+		}
+		free(s[0].data);
+		free(s[1].data);
+	}
+	for (ch = 0; ch < 2; ch++)
+		for (j = 0; j < 4; j++) {
+			const long *t = taps + ch * (SIM_CF_HALF + 1);
+			double g = t[0], want;
+			char name[64];
+			int m;
+
+			for (m = 1; m <= SIM_CF_HALF; m++)
+				g += 2.0 * t[m] *
+				     cos(2 * M_PI * hz[j] * m / f.rate);
+			want = 20 * log10(fabs(g) / SIM_CF_ONE);
+			snprintf(
+				name, sizeof(name),
+				"%s at %.0f Hz, the filter's change less its taps'",
+				ch ? "right" : "left", hz[j]);
+			et_measure(c, name, lv[1][ch][j] - lv[0][ch][j] - want,
+				   "dB", -0.15, 0.15);
+		}
 	return ET_PASS;
 }

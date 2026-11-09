@@ -20,8 +20,9 @@ OBJS = main.o run.o cases.o c_util.o c_probe.o c_dig.o c_fm.o c_a1.o c_midi.o \
 SHARED = s3dmeas.o s3dsim.o
 DRV = ../es1869
 
-es1869test: $(OBJS) $(SHARED) sim_rs.o resample.o
-	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(SHARED) sim_rs.o resample.o $(LDLIBS)
+es1869test: $(OBJS) $(SHARED) sim_rs.o resample.o capfilt.o
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(SHARED) sim_rs.o resample.o capfilt.o \
+		$(LDLIBS)
 
 $(OBJS): et.h hal.h an.h cases.h run.h settab.h \
 	../es1869/settings.def ../es1869/settings_kinds.h
@@ -32,10 +33,16 @@ resample.o: $(DRV)/resample.c $(DRV)/resample.h $(DRV)/hw_compat.h \
 	$(CC) $(CFLAGS) -I$(DRV) -c -o $@ $<
 
 sim_rs.o: sim_rs.c sim_rs.h $(DRV)/resample.h $(DRV)/hw_compat.h \
-	$(DRV)/treble.h
+	$(DRV)/treble.h $(DRV)/capfilt.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 hal_sim.o c_rs.o c_mon.o: sim_rs.h
+
+# the driver's filter on Audio 1's recordings, which the simulated chip runs
+capfilt.o: $(DRV)/capfilt.c $(DRV)/capfilt.h $(DRV)/hw_compat.h
+	$(CC) $(CFLAGS) -I$(DRV) -c -o $@ $<
+
+c_mix.o: sim_rs.h
 
 $(SHARED): %.o: $(SRC)/%.c $(SRC)/%.h $(SRC)/esstypes.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<

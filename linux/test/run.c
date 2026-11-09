@@ -363,12 +363,14 @@ void et_dump(struct et_ctx *c, const char *tag, const struct et_fmt *f,
 // --- the journal -------------------------------------------------------------
 
 #define JMAX 512
+#define JVALS 34 // a control's values, at most: the correction's taps
 
 static struct jent {
 	char kind; // 'c' a control, 'p' a parameter
 	char name[48];
 	int index;
-	long v[2];
+	int n; // a control's values
+	long v[JVALS];
 	char sval[64];
 } jtab[JMAX];
 static int jcount;
@@ -403,13 +405,19 @@ static void jsave(void)
 	f = fopen(tmp, "w");
 	if (!f)
 		return;
-	for (i = 0; i < jcount; i++)
-		if (jtab[i].kind == 'c')
-			fprintf(f, "ctl\t%s\t%d\t%ld\t%ld\n", jtab[i].name,
-				jtab[i].index, jtab[i].v[0], jtab[i].v[1]);
-		else
+	for (i = 0; i < jcount; i++) {
+		int j;
+
+		if (jtab[i].kind != 'c') {
 			fprintf(f, "param\t%s\t%s\n", jtab[i].name,
 				jtab[i].sval);
+			continue;
+		}
+		fprintf(f, "ctl\t%s\t%d", jtab[i].name, jtab[i].index);
+		for (j = 0; j < jtab[i].n; j++)
+			fprintf(f, "\t%ld", jtab[i].v[j]);
+		fprintf(f, "\n");
+	}
 	fflush(f);
 	fsync(fileno(f));
 	fclose(f);
@@ -418,21 +426,25 @@ static void jsave(void)
 
 static void jadd_ctl(struct et_ctx *c, const char *name, int index)
 {
-	long v[2] = { 0, 0 };
+	struct jent *e;
 	int n;
 
 	if (jfind('c', name, index) >= 0 || jcount == JMAX)
 		return;
-	n = c->hal->ctl_get(c->hal->ctx, name, index, v, 2);
+	e = &jtab[jcount];
+	memset(e->v, 0, sizeof(e->v));
+	n = c->hal->ctl_get(c->hal->ctx, name, index, e->v, JVALS);
 	if (n <= 0)
 		return;
-	if (n == 1)
-		v[1] = v[0];
-	jtab[jcount].kind = 'c';
-	snprintf(jtab[jcount].name, sizeof(jtab[jcount].name), "%s", name);
-	jtab[jcount].index = index;
-	jtab[jcount].v[0] = v[0];
-	jtab[jcount].v[1] = v[1];
+	// a mono control as two, as it was written
+	if (n == 1) {
+		e->v[1] = e->v[0];
+		n = 2;
+	}
+	e->kind = 'c';
+	snprintf(e->name, sizeof(e->name), "%s", name);
+	e->index = index;
+	e->n = n;
 	jcount++;
 	jsave();
 }
@@ -463,7 +475,7 @@ int et_journal_restore(struct et_hal *h)
 
 		if (jtab[i].kind == 'c')
 			err = h->ctl_set(h->ctx, jtab[i].name, jtab[i].index,
-					 jtab[i].v, 2);
+					 jtab[i].v, jtab[i].n);
 		else
 			err = h->param_set(h->ctx, jtab[i].name, jtab[i].sval);
 		if (err < 0) {
@@ -483,7 +495,7 @@ int et_journal_restore(struct et_hal *h)
 // -1 for none to apply
 int et_journal_replay(struct et_hal *h, const char *path)
 {
-	char line[256];
+	char line[1024];
 	FILE *f = fopen(path, "r");
 
 	if (!f)
@@ -499,16 +511,17 @@ int et_journal_replay(struct et_hal *h, const char *path)
 		if (!strcmp(t, "ctl")) {
 			char *name = strtok(NULL, "\t\n");
 			char *idx = strtok(NULL, "\t\n");
-			char *l = strtok(NULL, "\t\n");
-			char *r = strtok(NULL, "\t\n");
+			char *val;
 
-			if (!name || !idx || !l || !r)
+			if (!name || !idx)
+				continue;
+			while (e->n < JVALS && (val = strtok(NULL, "\t\n")))
+				e->v[e->n++] = atol(val);
+			if (e->n < 2)
 				continue;
 			e->kind = 'c';
 			snprintf(e->name, sizeof(e->name), "%s", name);
 			e->index = atoi(idx);
-			e->v[0] = atol(l);
-			e->v[1] = atol(r);
 			jcount++;
 		} else if (!strcmp(t, "param")) {
 			char *id = strtok(NULL, "\t\n");
@@ -540,6 +553,19 @@ int et_ctl_set(struct et_ctx *c, const char *name, int index, long l, long r)
 
 	jadd_ctl(c, name, index);
 	err = c->hal->ctl_set(c->hal->ctx, name, index, v, 2);
+	if (err < 0)
+		et_note(c, "control '%s' %d: %s", name, index, strerror(-err));
+	return err;
+}
+
+// a control of n values, journaled as et_ctl_set's are
+int et_ctl_set_n(struct et_ctx *c, const char *name, int index, const long *v,
+		 int n)
+{
+	int err;
+
+	jadd_ctl(c, name, index);
+	err = c->hal->ctl_set(c->hal->ctx, name, index, v, n);
 	if (err < 0)
 		et_note(c, "control '%s' %d: %s", name, index, strerror(-err));
 	return err;

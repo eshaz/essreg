@@ -28,6 +28,13 @@ short *sim_rs_parts(const short *src, unsigned long frames,
 		    int n, unsigned long *made);
 short *sim_rs_over(const short *src, unsigned long frames, unsigned int channels,
 		   long ppb, int over, int treble, unsigned long *made);
+
+// the driver's correction filter on Audio 1's recordings (capfilt.c), from
+// silence, in place: taps as its control holds them, the left's 17 first
+#define SIM_CF_HALF 16
+#define SIM_CF_ONE 16384
+void sim_cf_run(const long *taps, short *buf, unsigned long frames,
+		unsigned int channels);
 // the DAC's share of the last sample, which its correction takes back
 double sim_rs_dac_last(void);
 // what the filter costs on this CPU, in cycles a frame, by MMX or C, or 0

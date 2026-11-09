@@ -147,6 +147,7 @@ int et_klog_fault(const char *msg);
 #define SIM_RS_NOISE 0x100000000ULL // the ring gets noise above 1x
 #define SIM_MON_LAP 0x200000000ULL // the monitor reads the ring a lap late
 #define SIM_MON_APPL 0x400000000ULL // the monitor reads what was written
+#define SIM_CF_OFF 0x800000000ULL // Audio 1's correction filter does nothing
 #define SIM_MIXER 0x80000000u // the record level's scale moves with the source,
 			      // the ADC's list holds its own value, and the
 			      // PC speaker doesn't hear the master

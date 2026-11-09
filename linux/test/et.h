@@ -186,6 +186,8 @@ void et_dump(struct et_ctx *c, const char *tag, const struct et_fmt *f,
 // controls, by name and index, with the journal of the old value
 int et_ctl_get(struct et_ctx *c, const char *name, int index, long *v, int n);
 int et_ctl_set(struct et_ctx *c, const char *name, int index, long l, long r);
+int et_ctl_set_n(struct et_ctx *c, const char *name, int index, const long *v,
+		 int n);
 int et_ctl_set_enum(struct et_ctx *c, const char *name, const char *item);
 int et_param_get(struct et_ctx *c, const char *id, long *v);
 int et_param_set(struct et_ctx *c, const char *id, long v);

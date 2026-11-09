@@ -47,6 +47,7 @@ struct sim {
 	double mute_at; // SIM_A1_MUTES: Audio 2 silent 100 ms from here
 	long adc_own; // SIM_MIXER: what the ADC's list holds by itself
 	int r70; // the last rate Audio 2 played at
+	long cf_taps[2 * (SIM_CF_HALF + 1)]; // Audio 1's correction's taps
 };
 
 static struct sim sim;
@@ -695,6 +696,13 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 
 		memmove(r->data, (char *)r->data + 1, nb - 1);
 	}
+	// the driver's correction filter over what the DMA wrote, as a1filter.c
+	// runs it: Audio 1's own recordings at 16 bits
+	if (r->role == ET_A1C && r->fmt.format == ET_S16 &&
+	    r->fmt.channels <= 2 &&
+	    ctl("Audio 1 Correction Capture Switch", 0, 0) &&
+	    !(sim.faults & SIM_CF_OFF))
+		sim_cf_run(sim.cf_taps, r->data, r->frames, r->fmt.channels);
 }
 
 // Audio 2's playback in a run, or NULL
@@ -908,6 +916,14 @@ static int hwcount_ctl(const char *name, int index)
 	return !index && !strcmp(name, "Hardware Master Playback Volume");
 }
 
+#define CF_TAPS_CTL "Audio 1 Correction Capture Taps"
+#define CF_COUNT (2 * (SIM_CF_HALF + 1))
+
+static int cf_ctl(const char *name, int index)
+{
+	return !index && !strcmp(name, CF_TAPS_CTL);
+}
+
 static int sim_ctl_info(void *ctx, const char *name, int index,
 			struct et_ctl_info *info)
 {
@@ -916,6 +932,14 @@ static int sim_ctl_info(void *ctx, const char *name, int index,
 	const char *p;
 
 	(void)ctx;
+	if (cf_ctl(name, index)) {
+		memset(info, 0, sizeof(*info));
+		info->type = ET_CTL_INT;
+		info->count = CF_COUNT;
+		info->min = -32768;
+		info->max = 32767;
+		return 0;
+	}
 	if (hwcount_ctl(name, index)) {
 		memset(info, 0, sizeof(*info));
 		info->type = ET_CTL_INT;
@@ -949,6 +973,11 @@ static int sim_ctl_get(void *ctx, const char *name, int index, long *v,
 	int i = find_ctl(name, index), j, count;
 
 	(void)ctx;
+	if (cf_ctl(name, index)) {
+		for (j = 0; j < CF_COUNT && j < n; j++)
+			v[j] = sim.cf_taps[j];
+		return j;
+	}
 	if (hwcount_ctl(name, index)) {
 		for (j = 0; j < 2 && j < n; j++)
 			v[j] = sim.hwcount[j];
@@ -972,6 +1001,16 @@ static int sim_ctl_set(void *ctx, const char *name, int index, const long *v,
 	int i = find_ctl(name, index), j, count;
 
 	(void)ctx;
+	if (cf_ctl(name, index)) {
+		for (j = 0; j < CF_COUNT; j++) {
+			long x = v[j < n ? j : n - 1];
+
+			if (x < -32768 || x > 32767)
+				return -EINVAL;
+			sim.cf_taps[j] = x;
+		}
+		return CF_COUNT;
+	}
 	if (i < 0)
 		return -ENOENT;
 	if ((sim.faults & SIM_MIXER) && !strcmp(name, ADC_LIST)) {
@@ -1373,6 +1412,8 @@ struct et_hal *et_hal_sim(unsigned long long faults)
 
 	memset(&sim, 0, sizeof(sim));
 	sim.faults = faults;
+	sim.cf_taps[0] = SIM_CF_ONE;
+	sim.cf_taps[SIM_CF_HALF + 1] = SIM_CF_ONE;
 	for (i = 0; i < et_nsettings && i < 256; i++)
 		sim.val[i][0] = sim.val[i][1] = et_settings[i].def;
 	return &h;

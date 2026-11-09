@@ -11,6 +11,7 @@
 
 #include "../es1869/resample.h"
 #include "../es1869/treble.h"
+#include "../es1869/capfilt.h"
 #include "sim_rs.h"
 
 // a2_trim's item in ppb
@@ -185,4 +186,20 @@ double sim_rs_cycles(unsigned int channels, int mmx)
 	(void)mmx;
 	return 0;
 #endif
+}
+
+_Static_assert(SIM_CF_HALF == ES_CF_HALF && SIM_CF_ONE == ES_CF_ONE,
+	       "sim_rs.h's view of capfilt.h");
+
+void sim_cf_run(const long *taps, short *buf, unsigned long frames,
+		unsigned int channels)
+{
+	struct es1869_cf cf;
+	int c, k;
+
+	for (c = 0; c < 2; c++)
+		for (k = 0; k <= ES_CF_HALF; k++)
+			cf.taps[c][k] = (s16)taps[c * (ES_CF_HALF + 1) + k];
+	es1869_cf_reset(&cf);
+	es1869_cf_run(&cf, buf, frames, channels);
 }

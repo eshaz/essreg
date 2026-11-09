@@ -228,6 +228,11 @@ against the stream, the filter's C code and the dig path.
   frames at their start. `a1rec.dc` measures the ADC's offset from a source
   that nothing drives, which should stay under half a step of the offset
   registers, and what a step of `Capture DC Offset` moves it by.
+  `a1rec.correct` (root) records four tones through the record mixer with
+  the correction filter (`a1c_filter`) off, then on with known taps, a lift
+  of the top on the left and -1 dB on the right. Audio 2 runs at 2x with its
+  treble correction, so that no image folds back and moves a tone. Each tone
+  has to change by the taps' own response within 0.15 dB.
 * `a1play`: Audio 1's playback through the cable: formats, rates and twenty
   starts, measured late in each tone, with THD+N over 600 Hz: the second
   card's clock wanders while it records, which leaves sidebands within 20 Hz

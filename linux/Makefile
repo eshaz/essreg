@@ -70,6 +70,7 @@ DIST_FILES := LICENSE docs/ES1869TEST.md docs/LINUX.md docs/FLYER.md \
 	linux/es1869/settings.def linux/es1869/settings_kinds.h \
 	linux/es1869/resample.c linux/es1869/resample.h \
 	linux/es1869/treble.h linux/es1869/hw_compat.h \
+	linux/es1869/capfilt.c linux/es1869/capfilt.h \
 	docs/ES1869SCOPE.md linux/config/es1869cal.initd \
 	$(wildcard tools/es1869scope/*.c tools/es1869scope/*.h) \
 	linux/tools/es1869scope/Makefile \
