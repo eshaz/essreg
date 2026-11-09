@@ -300,26 +300,30 @@ void es1869_irq_sources_locked(struct es1869 *chip)
 // line buffer (MBDMA, ISA bridge 76h and 77h: bit 7 on, bits 2:0 the
 // channel). The Armada 1500c's BIOS sets it for both of the ES1869's: its
 // playback works, but the first byte a recording moves hangs the machine.
-// Unless piix4_type_f keeps it, Audio 1's channel takes ISA timing, until
-// the next boot
+// Unless piix4_type_f keeps it, Audio 1's channel takes ISA timing, also
+// after each resume, when the BIOS has set it again. A load after an earlier
+// one finds bit 7 already off, so the register is taken by its channel
+// alone once none has both; the BIOS's Type F is then unknown and stays off
 static void es1869_type_f_find(struct es1869 *chip)
 {
 	struct pci_dev *isa;
 	u8 reg, v;
+	int pass;
 
 	isa = pci_get_device(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371AB_0,
 			     NULL);
 	if (!isa)
 		return;
-	for (reg = 0x76; reg <= 0x77; reg++) {
-		pci_read_config_byte(isa, reg, &v);
-		if ((v & 0x80) && (v & 0x07) == chip->dma1) {
+	for (pass = 0; pass < 2; pass++)
+		for (reg = 0x76; reg <= 0x77; reg++) {
+			pci_read_config_byte(isa, reg, &v);
+			if ((v & 0x07) != chip->dma1 || (!pass && !(v & 0x80)))
+				continue;
 			chip->isa_bridge = isa;
 			chip->type_f_reg = reg;
 			chip->type_f_bios = v;
 			return;
 		}
-	}
 	pci_dev_put(isa);
 }
 
@@ -692,8 +696,12 @@ static int es1869_probe(struct snd_card *card, int dev)
 		if (err)
 			return err;
 		dev_info(d, "the PIIX4's Type F DMA timing on DMA %d %s\n",
-			 chip->dma1, es1869_val(ES_S_piix4_type_f) ?
-			 "kept (piix4_type_f=1)" : "off: recording hangs with it");
+			 chip->dma1,
+			 !(chip->type_f_bios & 0x80) ?
+				 "off since an earlier load" :
+			 es1869_val(ES_S_piix4_type_f) ?
+				 "kept (piix4_type_f=1)" :
+				 "off: recording hangs with it");
 	}
 
 	err = es1869_chip_init(chip, false);

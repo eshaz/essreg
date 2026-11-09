@@ -50,8 +50,8 @@
  * way to the ring. The chip then takes a ring frame for a little more or
  * less than a stream frame, by a2_trim_ppb and, in the Clock mode, by what
  * clock.c measures, so that the stream plays at its rate in the system's
- * time. The samples are no longer the application's; the mode's default is
- * off. The ring keeps a straight line between its frames and the stream's:
+ * time. The samples are no longer the application's; the Clock mode is the
+ * default. The ring keeps a straight line between its frames and the stream's:
  * a position is the frame the ring writes next, w, plus rot and a fraction,
  * less what lies between the DMA and w. The filter is slow, for this CPU,
  * so it runs only in the work item and at the timer, never in .ack, in
