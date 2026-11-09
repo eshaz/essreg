@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
- * zstep.h: the gap of Audio 2's DAC at its sign, for es1869scope -E. The
+ * zstep.h: the step at the sign of Audio 2's codes, for es1869scope -E. The
  * DAC puts its codes from 0 up a little higher than those below. Each side
  * of the loop's output is fitted per bin to both sides of what the DAC took
  * and to the sign of its own side's codes, a third input; that input's
- * transfer over the side's own path is the gap, as the driver's a2_zstep_l
- * and a2_zstep_r take it, measured from the music alone.
+ * transfer over the side's own path is the step the path shows. Through
+ * Audio 1 that is the DAC's gap less what the record path's own soft dead
+ * zone takes back, so -E logs it and never tells the driver.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */

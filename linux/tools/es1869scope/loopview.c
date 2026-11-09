@@ -127,7 +127,6 @@ static const double lv_cal_at[LV_CAL_AT] = { 1000,  5000,  10000,
 #define LV_IDLE_S 10 // seconds with no frame from the monitor before resting
 #define LV_ZS_LO 1000.0 // the band the DAC's gap at its sign comes from, Hz
 #define LV_ZS_HI 8000.0
-#define LV_ZS_MOVE 0.1 // the least change of the gap the driver is told, LSB
 #define LV_SEG_RHO 0.5 // the least |r| of a segment that counts
 #define LV_SEG_BAD 8 // segments in a row under it that lose the lag
 #define LV_SEG_QUIET 3.0 // an input this quiet, rms in steps, says nothing
@@ -180,8 +179,7 @@ struct loopview {
 	uint8_t *qring;
 	double *segq[2], *zq[2];
 	struct zstep zst;
-	double zs_w[2], zs_n, zs_set[2];
-	int zs_blocks;
+	double zs_w[2], zs_n;
 	uint64_t seen; // the monitor's frames at seen_at, when they last moved
 	long long seen_at;
 	long long slowest; // the longest step since the last status line, ns
@@ -1445,7 +1443,6 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 		if (!v->coh[i] || !v->mag[i] || !v->ph[i] || !v->inc[i] ||
 		    !v->xt[i] || !v->ir[i] || !v->segq[i] || !v->zq[i])
 			goto bad;
-		v->zs_set[i] = -1;
 	}
 	if (zstep_init(&v->zst, v->bins))
 		goto bad;
@@ -2072,37 +2069,27 @@ static int lv_eq_refit(struct loopview *v, const double *drift, int have,
 	return fitted;
 }
 
-// a block's end: the loop's deviation in bands and the clock's residual
-// into their trends, each predicted a block ahead; the DAC's correction
-// refitted to the drift and loaded, and the trim moved; lines to the log
-// the DAC's gap at its sign over the block, each side's in LSB, which the
-// driver's a2_zstep_l and a2_zstep_r take back while a2_zstep is on: told
-// from the second block on, once it moves by LV_ZS_MOVE, and kept after,
-// since it is the DAC's, as alsactl keeps its controls
+// the step at the sign over the block, each side's in LSB, logged only.
+// It is the loop's: the DAC's gap less what Audio 1's record path takes back
+// with its own soft dead zone about its zero, which on the Armada leaves
+// near nothing once the music swings past the dead zone's knee. The DAC's
+// gap, which a2_zstep_l and a2_zstep_r take, is the one that small signals
+// or another recorder on the line out show, so this one is never told
 static void lv_eq_zstep(struct loopview *v, double now, FILE *out)
 {
-	static const char *const name[2] = { "a2_zstep_l", "a2_zstep_r" };
-	int c, told = 0;
+	int c;
 
 	if (!v->zs_n)
 		return;
 	fprintf(out, "%.0f zstep", now - v->t0);
 	for (c = 0; c < 2; c++)
 		fprintf(out, " %.2f", v->zs_w[c] / v->zs_n);
-	if (++v->zs_blocks >= 2)
-		for (c = 0; c < 2; c++) {
-			double g = fmin(fmax(v->zs_w[c] / v->zs_n, 0), 32);
-			long want = lrint(g * 256);
-
-			if (fabs(g - v->zs_set[c]) < LV_ZS_MOVE ||
-			    lv_param(name[c], NULL, &want))
-				continue;
-			v->zs_set[c] = want / 256.0;
-			told = 1;
-		}
-	fprintf(out, " LSB, %.0f segments%s\n", v->zs_n, told ? " (told)" : "");
+	fprintf(out, " LSB, %.0f segments\n", v->zs_n);
 }
 
+// a block's end: the loop's deviation in bands and the clock's residual
+// into their trends, each predicted a block ahead; the DAC's correction
+// refitted to the drift and loaded, and the trim moved; lines to the log
 static void lv_eq_block(struct loopview *v, double now)
 {
 	double m[LV_EQ_BANDS], drift[LV_EQ_BANDS], chip, tie, applied, ahead;

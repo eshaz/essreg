@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /*
- * zstep.c: the gap of Audio 2's DAC at its sign, from the music. Notes:
+ * zstep.c: the step at the sign of Audio 2's codes, from the music. Notes:
  *
  * The DAC's level of a code c is c below 0 and c plus the gap from 0 up, so
  * what comes back is the path's response to the codes plus the gap times
@@ -12,6 +12,10 @@
  * sign is mostly the music itself, which leaves the system near singular, so
  * the gap comes from a band higher up, where a sign's edges reach and the
  * music no longer does, as its median over the bins.
+ *
+ * A nonlinearity of the recorder's own that is soft about the same zero, as
+ * Audio 1's record path has, follows the sign as well once the music swings
+ * past its knee, and the fit takes it as part of the step.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */

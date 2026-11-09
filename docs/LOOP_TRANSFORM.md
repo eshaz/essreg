@@ -200,7 +200,7 @@ hears, a loop that corrects its own level, rather than from a table.
 
 ## The DAC's gap at its sign
 
-Audio 2's DAC puts its codes from 0 up about 7 LSB higher than those below,
+Audio 2's DAC puts its codes from 0 up about 8 LSB higher than those below,
 a gap between -1 and 0 where its sign changes, the error an R-2R ladder
 makes at its largest carry. Fitted as a function of the code, what the loop
 and the VX heard of the program (`residual`, both 1x takes of 2026-11-09)
@@ -220,17 +220,59 @@ half an LSB, and one within that goes to the gap's nearer edge, since no
 code reaches inside it. The monitor reads the codes moved, which are what
 the DAC takes.
 
--E learns the gap from the music alone. Each kept frame of the monitor
-carries the share of the DAC's codes from 0 up that it stands for, less a
-half, each side's sign, which goes into the segments as a third input beside
-both sides' codes. The sign follows the music, so the three are solved
-together in each bin; the sign's transfer over the side's own path is the
-gap. Low down the sign is mostly the music, so the gap comes from 1 to 8
-kHz, as the median over the bins, measured in each run and weighed into the
-block by its segments. The fit sees the DAC's own codes, moved or not, so it
-measures the DAC either way, and nothing feeds back. On a simulated DAC with
-a gap of 7.4 LSB, through a delayed lowpass and noise, it read 7.33 and 7.46
-from 20 s of music.
+On the Armada (2026-11-09, test build be8c00c), `lsb` and `levels` played
+through the correction, heard at once by the VX on the line out and by the
+loop, in the plain copy at 1x and in the Clock mode at 2x alike. With the
+correction off, the loop heard the squares of 1, 2 and 4 LSB about 0 come
+out 10.3, 5.9 and 2.4 dB over that of 8 LSB, a gap of 7.5 to 7.7 LSB, and
+the VX's gains at -90 to -60 dBFS against -30 dBFS's, 13.3, 8.1, 3.4 and 1.2
+dB, matched those of a gap of 8.0 in a simulation of the signal. With the
+correction at 7.6 LSB, the squares of 8 and 4 LSB came back to the path's
+gain, -1.56 and -1.27 dB on the loop where the simulation has -1.58 and
+-1.37, and those of 1 and 2 LSB, which lie within the gap, went to its
+edges. The tone's harmonics on the line out, H2 to H5 under the tone on the
+VX's left side in the Clock mode at 2x, two takes each:
+
+| Tone     | Off      | 7.6 LSB  | 8.0 LSB  |
+|----------|----------|----------|----------|
+| -60 dBFS | -25.9 dB | -36.1 dB | -40.3 dB |
+| -50 dBFS | -34.4 dB | -45.8 dB | -49.0 dB |
+| -40 dBFS | -43.9 dB | -54.8 dB | -56.2 dB |
+
+The right side came within 1.5 dB of these, and the plain copy at 1x within
+3 dB. The gain at -60 dBFS came within 0.1 dB of -30 dBFS's, from 1.2 dB
+over. A tone under about -75 dBFS lies within the gap, where no code
+reaches, and stays as loud as before: at -80 dBFS it came out 4 to 6 dB over
+the path, from 8 dB.
+
+The loop can't learn the gap from the music. Audio 1's record path has a
+soft dead zone of its own about its zero, which falls within the DAC's gap.
+What the loop heard of the program, less its linear part, steps by about 5.5
+LSB at the codes' sign as the gap does, but comes back within some 100 LSB
+either side, where the VX's stays. Once the music swings past that knee, the
+dead zone takes back what the gap puts in. -E's fit of the step through
+Audio 1 (below) read -0.5 and +0.9 LSB over 160 s of program noise, and a
+copy of it in Python read the same in every band from 30 Hz to 19 kHz, where
+it reads 7.0 on a simulated loop with a gap of 7. Tones agree: through the
+loop, -60 and -50 dBFS read 0.8 and 0.3 dB under the VX's against -30 dBFS,
+with the correction off and on alike, and the squares of 1 to 8 LSB, which
+stay within the knee, show the gap about 5 % small. The gap comes from a
+recorder on the line out, or from small signals through the loop with those
+5 % allowed for. Smooth functions of the code beside the sign in the fit
+(tanh of the code over 16 to 256 LSB) brought the loop's reading to 6.2 to
+6.7 LSB, with a wide spread over the bins.
+
+-E fits the step all the same, and logs it as the loop's. Each kept frame of
+the monitor carries the share of the DAC's codes from 0 up that it stands
+for, less a half, each side's sign, which goes into the segments as a third
+input beside both sides' codes. The sign follows the music, so the three are
+solved together in each bin; the sign's transfer over the side's own path is
+the step. Low down the sign is mostly the music, so the step comes from 1 to
+8 kHz, as the median over the bins, measured in each run and weighed into
+the block by its segments. The fit sees the DAC's own codes, moved or not,
+so the gap that it would find is the DAC's either way. On a simulated DAC
+with a gap of 7.4 LSB, through a delayed lowpass and noise, it read 7.33 and
+7.46 from 20 s of music.
 
 ## What the loop measures
 
@@ -319,6 +361,9 @@ overrun, and the recording started again on its own.
   need it beside the loop all the time, and the VX's capture loads the
   Celeron.
 * Music at 48 kHz isn't followed, because Audio 1 records at 44.1 kHz.
+* The DAC's gap at its sign isn't learned: Audio 1's own soft dead zone
+  takes it back once the music swings past its knee ([The DAC's gap at its
+  sign](#the-dacs-gap-at-its-sign)).
 * Random noise can't be predicted, so nothing added before the DAC removes
   it. What could be cancelled is deterministic, and the loop shows little of
   it: the DAC's own noise lies far under the record path's, and what the
