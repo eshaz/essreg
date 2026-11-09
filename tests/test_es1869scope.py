@@ -572,7 +572,7 @@ class ShotTest(unittest.TestCase):
                 "fft.c", "spectro.c", "loop.c", "loopview.c", "eq.c")]
         subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall",
                                "-Wextra", "-Werror", "-o", cls.prog] + src +
-                              ["-lasound", "-lz", "-lm"])
+                              ["-lasound", "-lz", "-lm", "-lpthread"])
 
     @classmethod
     def tearDownClass(cls):

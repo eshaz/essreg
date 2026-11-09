@@ -49,6 +49,12 @@ struct loopview_cfg {
 	 */
 	int equalize;
 	const char *log;
+	/*
+	 * no screen: the picture only at the end, or every few blocks with
+	 * equalize, since a drawing takes longer on the Armada's Celeron than
+	 * Audio 1's buffer lasts
+	 */
+	int headless;
 };
 
 struct loopview;

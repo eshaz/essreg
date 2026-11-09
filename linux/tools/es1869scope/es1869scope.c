@@ -779,6 +779,7 @@ int main(int argc, char **argv)
 			signal(SIGTERM, on_signal);
 			signal(SIGHUP, on_signal);
 			lc.secs = secs;
+			lc.headless = 1;
 			lv = loopview_open(&lc);
 			if (!lv)
 				return 2;

@@ -18,7 +18,7 @@ es1869clock: es1869clock.o phase.o
 
 es1869scope: es1869scope.o tie.o draw.o fb.o plot.o fft.o spectro.o loop.o \
 	     loopview.o eq.o
-	$(CC) $(LDFLAGS) -o $@ $^ -lasound -lz -lm
+	$(CC) $(LDFLAGS) -o $@ $^ -lasound -lz -lm -lpthread
 
 es1869clock.o: es1869clock.c phase.h
 phase.o: phase.c phase.h

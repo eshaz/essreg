@@ -41,6 +41,7 @@
 
 #include <alsa/asoundlib.h>
 #include <complex.h>
+#include <pthread.h>
 #include <errno.h>
 #include <math.h>
 #include <stdint.h>
@@ -56,7 +57,11 @@
 #include "tie.h"
 
 #define LV_LOG2N 13 // Welch segments of 8192 frames, half over the last
-#define LV_LAG_LOG2N 16 // the lag, from the first 65536 frames of each
+// the lag of a live loop, from 16384 frames of each, whose FFTs take the
+// Armada a fifth of a second, within Audio 1's buffer; from files, from 65536
+// frames, which reach the half second a recording may start late
+#define LV_LAG_LOG2N 14
+#define LV_FILE_LAG_LOG2N 16
 #define LV_RING (1u << 17) // frames kept of each, a power of two
 #define LV_CHUNK 1024 // frames a write or a read
 #define LV_FIT_LO 200.0 // the band the delay is fitted over, Hz
@@ -111,6 +116,8 @@ struct loopview {
 	char journal[64];
 	int16_t *xring, *yring; // stereo frames
 	uint64_t played, captured, next;
+	pthread_t wthread; // the noise's writer
+	int writing, wstop, werr;
 	uint32_t seed[2];
 	double amp;
 	unsigned int restarts;
@@ -519,7 +526,7 @@ bad:
 // --- the streams ---------------------------------------------------------------
 
 static int lv_pcm(snd_pcm_t **p, const char *dev, snd_pcm_stream_t dir,
-		  unsigned int rate)
+		  unsigned int rate, unsigned int latency)
 {
 	int err;
 
@@ -528,7 +535,7 @@ static int lv_pcm(snd_pcm_t **p, const char *dev, snd_pcm_stream_t dir,
 	if (!err)
 		err = snd_pcm_set_params(*p, SND_PCM_FORMAT_S16_LE,
 					 SND_PCM_ACCESS_RW_INTERLEAVED, 2, rate,
-					 0, 200000);
+					 0, latency);
 	// positions stamped on the monotonic clock, which NTP steers as it
 	// does the boot clock the Clock mode follows
 	if (!err) {
@@ -617,28 +624,92 @@ static int lv_lag(struct loopview *v, const double *x, const double *y,
 
 // the lag from the latest frames of each, so that it doesn't matter when
 // either began: y's frame is x's plus the lag
+// what the writer has played, read whole on a 32-bit CPU too
+static uint64_t lv_played(const struct loopview *v)
+{
+	return __atomic_load_n(&v->played, __ATOMIC_ACQUIRE);
+}
+
+#define LV_DECIMATE 8 // the coarse search's step, frames
+#define LV_FINE 16 // and the fine one's reach each way about it
+
+// the lag from the latest frames of each, so that it doesn't matter when
+// either began: y's frame is x's plus the lag. A search over the full rate
+// takes the Celeron longer than Audio 2's buffer lasts, so it goes coarse
+// first, both channels' sums averaged over LV_DECIMATE frames, which the
+// loop's flat low band carries, and then over LV_FINE frames each way at the
+// full rate, sums of products straight; a few milliseconds in all
 static int lv_live_lag(struct loopview *v)
 {
-	unsigned int n = 1u << LV_LAG_LOG2N, k;
-	uint64_t x0 = v->played - n, y0 = v->captured - n;
-	double *x = malloc(2 * (size_t)n * sizeof(double)), *y;
-	int r;
+	unsigned int n = 1u << LV_LAG_LOG2N, m = n / LV_DECIMATE, k, j;
+	uint64_t x0 = lv_played(v) - n, y0 = v->captured - n;
+	double *x = malloc(2 * (size_t)n * sizeof(double)), *y, *xd, *yd;
+	double best = 0, frac;
+	long coarse, lag, l;
 
 	if (!x)
 		return -1;
 	y = x + n;
 	for (k = 0; k < n; k++) {
-		x[k] = v->xring[2 * ((x0 + k) % LV_RING)];
-		y[k] = v->yring[2 * ((y0 + k) % LV_RING)];
+		const int16_t *xp = &v->xring[2 * ((x0 + k) % LV_RING)];
+		const int16_t *yp = &v->yring[2 * ((y0 + k) % LV_RING)];
+
+		x[k] = xp[0] + xp[1];
+		y[k] = yp[0] + yp[1];
 	}
 	v->lag_at = v->captured;
-	r = lv_lag(v, x, y, LV_LAG_LOG2N);
-	free(x);
-	if (!r) {
-		v->lag += (long)(int64_t)(y0 - x0);
-		v->next = y0;
+	xd = malloc(2 * (size_t)m * sizeof(double));
+	if (!xd) {
+		free(x);
+		return -1;
 	}
-	return r;
+	yd = xd + m;
+	for (k = 0; k < m; k++) {
+		xd[k] = yd[k] = 0;
+		for (j = 0; j < LV_DECIMATE; j++) {
+			xd[k] += x[k * LV_DECIMATE + j];
+			yd[k] += y[k * LV_DECIMATE + j];
+		}
+	}
+	coarse = loop_lag(xd, yd, LV_LAG_LOG2N - 3, &frac) * LV_DECIMATE;
+	free(xd);
+	// the fine search, either way up
+	lag = coarse;
+	for (l = coarse - LV_FINE; l <= coarse + LV_FINE; l++) {
+		double sum = 0;
+
+		for (k = 0; k < n; k++)
+			if ((long)k + l >= 0 && (long)k + l < (long)n)
+				sum += x[k] * y[k + l];
+		if (fabs(sum) > best) {
+			best = fabs(sum);
+			lag = l;
+		}
+	}
+	// lv_lag()'s test of a loop, at that lag
+	{
+		double num = 0, ex = 0, ey = 0;
+
+		for (k = 0; k < n; k++) {
+			if ((long)k + lag < 0 || (long)k + lag >= (long)n)
+				continue;
+			num += x[k] * y[k + lag];
+			ex += x[k] * x[k];
+			ey += y[k + lag] * y[k + lag];
+		}
+		free(x);
+		if (ex <= 0 || ey <= 0 || fabs(num) < 0.3 * sqrt(ex * ey)) {
+			snprintf(v->why, sizeof(v->why),
+				 "no loop: what came back doesn't follow what "
+				 "was played");
+			return -1;
+		}
+	}
+	v->lag = lag + (long)(int64_t)(y0 - x0);
+	v->lagged = 1;
+	v->why[0] = 0;
+	v->next = y0;
+	return 0;
 }
 
 // every whole segment that has come back, against what was played
@@ -650,18 +721,23 @@ static void lv_live_segments(struct loopview *v)
 		// both a window's worth in, and half a window since a search
 		// that found nothing, as music may be quiet for a while
 		if (v->captured < (1u << LV_LAG_LOG2N) ||
-		    v->played < (1u << LV_LAG_LOG2N) ||
+		    lv_played(v) < (1u << LV_LAG_LOG2N) ||
 		    (v->lag_at &&
 		     v->captured - v->lag_at < (1u << (LV_LAG_LOG2N - 1))))
 			return;
 		if (lv_live_lag(v))
 			return;
 	}
-	while (v->next + n <= v->captured) {
+	// at most one segment a step, so that the streams are served between
+	// them; behind by more than a few, on to the newest, since a segment
+	// takes the Celeron about as long as it lasts
+	if (v->captured >= v->next + 4 * n)
+		v->next = (v->captured - n) / (n / 2) * (n / 2);
+	if (v->next + n <= v->captured) {
 		int64_t xs = (int64_t)v->next - v->lag;
 
-		if (xs >= 0 && (uint64_t)xs + n <= v->played &&
-		    v->played - (uint64_t)xs <= LV_RING &&
+		if (xs >= 0 && (uint64_t)xs + n <= lv_played(v) &&
+		    lv_played(v) - (uint64_t)xs <= LV_RING &&
 		    v->captured - v->next <= LV_RING) {
 			for (k = 0; k < n; k++) {
 				const int16_t *xp =
@@ -680,36 +756,50 @@ static void lv_live_segments(struct loopview *v)
 	}
 }
 
-static int lv_feed(struct loopview *v)
+// the noise's writer, a thread of its own with blocking writes, as aplay and
+// MPD write Audio 2: each chunk goes to the ring of what was played before it
+// goes to the device, and played moves after both
+static void *lv_writer(void *arg)
 {
+	struct loopview *v = arg;
 	int16_t buf[2 * LV_CHUNK];
 
-	for (;;) {
-		snd_pcm_sframes_t room = snd_pcm_avail_update(v->play), w;
-		snd_pcm_sframes_t i;
+	while (!__atomic_load_n(&v->wstop, __ATOMIC_ACQUIRE)) {
+		uint64_t at = v->played;
+		snd_pcm_sframes_t i, w;
 
-		if (room < 0)
-			return (int)room;
-		if (room < LV_CHUNK / 4)
-			return 0;
-		if (room > LV_CHUNK)
-			room = LV_CHUNK;
-		for (i = 0; i < room; i++) {
-			int16_t *at =
-				&v->xring[2 * ((v->played + i) % LV_RING)];
+		for (i = 0; i < LV_CHUNK; i++) {
+			int16_t *x = &v->xring[2 * ((at + i) % LV_RING)];
 
 			buf[2 * i] = lv_noise(&v->seed[0], v->amp);
 			buf[2 * i + 1] = lv_noise(&v->seed[1], v->amp);
-			at[0] = buf[2 * i];
-			at[1] = buf[2 * i + 1];
+			x[0] = buf[2 * i];
+			x[1] = buf[2 * i + 1];
 		}
-		w = snd_pcm_writei(v->play, buf, room);
-		if (w == -EAGAIN)
-			return 0;
-		if (w < 0)
-			return (int)w;
-		v->played += w;
+		w = snd_pcm_writei(v->play, buf, LV_CHUNK);
+		if (w < 0) {
+			__atomic_store_n(&v->werr, (int)w, __ATOMIC_RELEASE);
+			break;
+		}
+		__atomic_store_n(&v->played, at + w, __ATOMIC_RELEASE);
 	}
+	return NULL;
+}
+
+static void lv_writer_stop(struct loopview *v)
+{
+	if (!v->writing)
+		return;
+	__atomic_store_n(&v->wstop, 1, __ATOMIC_RELEASE);
+	snd_pcm_drop(v->play);
+	pthread_join(v->wthread, NULL);
+	v->writing = 0;
+}
+
+// the writer's trouble, if any, for the step to start again on
+static int lv_feed(struct loopview *v)
+{
+	return __atomic_load_n(&v->werr, __ATOMIC_ACQUIRE);
 }
 
 // what the monitor has, every factor-th frame of it
@@ -772,7 +862,6 @@ static int lv_pull(struct loopview *v)
 		v->captured += r;
 		if (v->cfg.equalize)
 			lv_stamp(v);
-		lv_live_segments(v);
 	}
 }
 
@@ -797,13 +886,18 @@ static int lv_start(struct loopview *v)
 		}
 		return 0;
 	}
-	snd_pcm_drop(v->play);
+	lv_writer_stop(v);
 	snd_pcm_drop(v->cap);
 	if (snd_pcm_prepare(v->play) < 0 || snd_pcm_prepare(v->cap) < 0 ||
 	    snd_pcm_start(v->cap) < 0)
 		return -1;
-	// the playback starts once its buffer is full
-	return lv_feed(v) < 0 ? -1 : 0;
+	// the playback starts once the writer has filled its buffer
+	v->wstop = 0;
+	v->werr = 0;
+	if (pthread_create(&v->wthread, NULL, lv_writer, v))
+		return -1;
+	v->writing = 1;
+	return 0;
 }
 
 // --- files ---------------------------------------------------------------------
@@ -884,7 +978,7 @@ static unsigned int lv_bin(const struct loopview *v, double hz);
 
 static int lv_files(struct loopview *v)
 {
-	unsigned int rx = 0, ry = 0, lg = LV_LAG_LOG2N, n = v->n, k;
+	unsigned int rx = 0, ry = 0, lg = LV_FILE_LAG_LOG2N, n = v->n, k;
 	double *x, *y;
 	size_t s;
 
@@ -1024,11 +1118,13 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 				strerror(errno));
 	}
 	// the devices first, so that a busy one leaves the mixer as it was
-	if (lv_pcm(&v->cap, cfg->capture, SND_PCM_STREAM_CAPTURE, v->rate))
+	if (lv_pcm(&v->cap, cfg->capture, SND_PCM_STREAM_CAPTURE, v->rate,
+		   500000))
 		goto bad;
 	if (cfg->monitor ? lv_mon_open(v) :
-			   lv_pcm(&v->play, cfg->play, SND_PCM_STREAM_PLAYBACK,
-				  v->rate)) {
+			   (lv_pcm(&v->play, cfg->play, SND_PCM_STREAM_PLAYBACK,
+				   v->rate, 500000) ||
+			    snd_pcm_nonblock(v->play, 0) < 0)) {
 		if (v->why[0])
 			fprintf(stderr, "es1869scope: %s\n", v->why);
 		goto bad;
@@ -1057,8 +1153,10 @@ void loopview_close(struct loopview *v)
 
 	if (!v)
 		return;
-	if (v->play)
+	if (v->play) {
+		lv_writer_stop(v);
 		snd_pcm_close(v->play);
+	}
 	if (v->mon)
 		snd_pcm_close(v->mon);
 	if (v->cap)
@@ -1778,6 +1876,23 @@ void loopview_frame(struct loopview *v, struct canvas *c)
 	lv_draw(v, c);
 }
 
+// the streams read and written as far as they go, before a long piece of work
+static void lv_drain(struct loopview *v)
+{
+	if (v->mon)
+		lv_take(v);
+	else if (v->play)
+		lv_feed(v);
+	if (v->cap)
+		lv_pull(v);
+}
+
+static void lv_redraw(struct loopview *v, struct canvas *c)
+{
+	if (!v->cfg.headless)
+		lv_draw(v, c);
+}
+
 int loopview_step(struct loopview *v, struct canvas *c)
 {
 	unsigned long before = v->path[LL].segments;
@@ -1788,17 +1903,26 @@ int loopview_step(struct loopview *v, struct canvas *c)
 		if (lv_now() < v->retry)
 			return 0;
 		v->retry = lv_start(v) ? lv_now() + 1000000000LL : 0;
-		lv_draw(v, c);
+		lv_redraw(v, c);
 		return 1;
 	}
 	if (v->play || v->mon) {
 		int err = v->mon ? lv_take(v) : lv_feed(v);
+		const char *which = v->mon ? "the monitor" : "the playback";
 		char what[48];
 
-		if (err >= 0)
+		if (err >= 0) {
 			err = lv_pull(v);
+			which = "Audio 1's recording";
+		}
+		if (err >= 0)
+			lv_live_segments(v);
 		if (err < 0) {
 			snprintf(what, sizeof(what), "%s", snd_strerror(err));
+			fprintf(stderr,
+				"es1869scope: %s on %s after %llu frames, "
+				"started again\n",
+				what, which, (unsigned long long)v->captured);
 			v->restarts++;
 			if (v->cfg.monitor) {
 				// a pause or a stop of the music, as often as
@@ -1811,7 +1935,7 @@ int loopview_step(struct loopview *v, struct canvas *c)
 			if (!v->retry)
 				snprintf(v->why, sizeof(v->why),
 					 "%s, started again", what);
-			lv_draw(v, c);
+			lv_redraw(v, c);
 			return 1;
 		}
 	}
@@ -1820,12 +1944,18 @@ int loopview_step(struct loopview *v, struct canvas *c)
 		struct timespec ts;
 
 		clock_gettime(CLOCK_MONOTONIC, &ts);
+		lv_drain(v);
 		lv_eq_block(v, ts.tv_sec + ts.tv_nsec * 1e-9);
+		// without a screen, the picture every fifth block
+		if (v->cfg.headless && v->blocks % 5)
+			return 0;
+		lv_drain(v);
 		lv_draw(v, c);
 		return 1;
 	}
 	if (v->cfg.calibrate && v->phase < 2 && v->lagged &&
 	    loopview_seconds(v) >= v->cfg.secs) {
+		lv_drain(v);
 		if (v->phase == 0 && lv_calibrate(v)) {
 			snprintf(v->why, sizeof(v->why),
 				 "the taps didn't fit or load");
@@ -1833,9 +1963,11 @@ int loopview_step(struct loopview *v, struct canvas *c)
 		} else {
 			v->phase++;
 		}
-		lv_draw(v, c);
+		lv_redraw(v, c);
 		return 1;
 	}
+	if (v->cfg.headless)
+		return 0;
 	if (v->lagged != lagged || (v->path[LL].segments != before &&
 				    lv_now() - v->drawn > LV_REDRAW_NS)) {
 		lv_draw(v, c);
@@ -1875,7 +2007,10 @@ void loopview_report(struct loopview *v, FILE *f)
 	int c;
 
 	if (!v->lagged || !v->path[LL].segments) {
-		fprintf(f, "none %s\n", v->why);
+		fprintf(f,
+			"none %s (restarts %u, played %llu, recorded %llu)\n",
+			v->why, v->restarts, (unsigned long long)v->played,
+			(unsigned long long)v->captured);
 		return;
 	}
 	lv_figures(v);
