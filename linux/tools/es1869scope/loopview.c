@@ -57,10 +57,11 @@
 #include "tie.h"
 
 #define LV_LOG2N 13 // Welch segments of 8192 frames, half over the last
-// the lag of a live loop, from 16384 frames of each, whose FFTs take the
-// Armada a fifth of a second, within Audio 1's buffer; from files, from 65536
-// frames, which reach the half second a recording may start late
-#define LV_LAG_LOG2N 14
+// the lag of a live loop, from 32768 frames of each, a few milliseconds by
+// the coarse search, which reach a monitor that starts a lap behind; from
+// files, from 65536 frames, which reach the half second a recording may
+// start late
+#define LV_LAG_LOG2N 15
 #define LV_FILE_LAG_LOG2N 16
 #define LV_RING (1u << 17) // frames kept of each, a power of two
 #define LV_CHUNK 1024 // frames a write or a read
@@ -492,7 +493,8 @@ static int lv_mon_open(struct loopview *v)
 		v->mon = NULL;
 		goto bad;
 	}
-	frames = v->rate / 5;
+	// half a second at the rate it runs, which at 2x is twice Audio 1's
+	frames = v->rate;
 	if ((err = snd_pcm_hw_params_any(v->mon, hw)) < 0 ||
 	    (err = snd_pcm_hw_params_set_access(
 		     v->mon, hw, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0 ||
@@ -1966,8 +1968,21 @@ int loopview_step(struct loopview *v, struct canvas *c)
 		lv_redraw(v, c);
 		return 1;
 	}
-	if (v->cfg.headless)
+	if (v->cfg.headless) {
+		// without a screen, a line on stderr every five seconds
+		if (lv_now() - v->drawn > 5000000000LL) {
+			fprintf(stderr,
+				"es1869scope: in %llu, back %llu, lag %s %ld, "
+				"%lu segments%s%s\n",
+				(unsigned long long)lv_played(v),
+				(unsigned long long)v->captured,
+				v->lagged ? "found" : "not found", v->lag,
+				v->path[LL].segments, v->why[0] ? ", " : "",
+				v->why);
+			v->drawn = lv_now();
+		}
 		return 0;
+	}
 	if (v->lagged != lagged || (v->path[LL].segments != before &&
 				    lv_now() - v->drawn > LV_REDRAW_NS)) {
 		lv_draw(v, c);

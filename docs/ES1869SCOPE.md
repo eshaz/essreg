@@ -275,9 +275,17 @@ after alsasound and before MPD, so that MPD finds Audio 2 free. It writes
 `/var/lib/es1869/cal.txt` and `cal.ppm`. A run that finds no loop leaves the
 filter as it was and says so.
 
-Measured on the Armada, 2026-11-08, before the filter:
-* Record path at 20 kHz: -4.2 dB on the left, -5.4 dB on the right.
-* At 10 kHz: -0.9 dB and -1.3 dB.
+`es1869scope -C -T 6` on the Armada, 2026-11-08, with test build 4 (dB
+against 1 kHz):
+
+| record path  | 5 kHz | 10 kHz | 15 kHz | 18 kHz | 20 kHz |
+|--------------|-------|--------|--------|--------|--------|
+| left before  | -0.19 | -0.90  | -2.18  | -3.25  | -4.09  |
+| left after   | -0.01 | -0.01  | -0.00  | -0.02  | -0.05  |
+| right before | -0.29 | -1.28  | -2.93  | -4.26  | -5.27  |
+| right after  | -0.01 | -0.01  | -0.00  | -0.01  | -0.05  |
+
+The taps lift the left by 4.2 dB at most and the right by 5.4 dB.
 
 ## Corrections over time
 
