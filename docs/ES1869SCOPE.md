@@ -469,6 +469,18 @@ IRQ 5. The Clock mode doesn't feel them, since its line goes through the
 earliest interrupt of each second, but a client with buffers of a few
 milliseconds would.
 
+On the wired NIC, booted with `processor.max_cstate=2` (2026-11-08, an hour
+of es1869clock against the VX, with a minute of load at half time):
+* **Lateness:** outside the load, the interrupts came a median of 38 us
+  late, 54 us at the 99th percentile, and only 4 over 1 ms, minutes apart.
+  An idle CPU sleeps in C2 and pays its wake. Under the load (a CPU hog and
+  a synced 200 MB write) the median was 15 us, with none over 1 ms.
+* **Against the VX:** the ES1869's crystal ran 22 ppm from the VX's, with an
+  Allan deviation of 1.0e-8 at 1 s, 2.5e-8 at 10 s, 1.9e-7 at 100 s and
+  6.6e-7 at 1000 s, where the VX's own crystal wanders as the laptop warms.
+* **The smallest period:** es1869test's `latency.min` ran both DACs without
+  an xrun at 32-frame periods in a 128-frame buffer, 2.9 ms.
+
 The Focusrite, a Scarlett 2i4 on a CardBus USB 2.0 card, streamed nothing in
 the first run and then stopped answering on USB until it was unplugged.
 
