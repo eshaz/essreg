@@ -95,15 +95,30 @@ against the raw clock.
 es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]
             [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]
             [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL] [-T SECONDS]
-            [-m MONITOR] [-L DBFS] [-G PCM,ADC]
+            [-m MONITOR] [-L DBFS] [-G PCM,ADC] [-C] [-E] [-O LOG]
 ```
 
 It takes a virtual terminal's framebuffer, `/dev/fb0` by default, gives the
 terminal back at a switch away and redraws at a switch back, and puts text
-mode back at the end, also after a signal. Its font is the first console
-font it finds in `/usr/share/consolefonts`. `q` quits, space holds the
-picture and `r` redraws. `-s` draws the log once into a PPM picture, at `-W`
-by `-H`, 800 by 600 by default.
+mode back at the end, also after a signal, a crash or a quit (Ctrl-\);
+Ctrl-Z does nothing while the picture shows, since a stopped program would
+leave the terminal in graphics. Its font is the first console font it finds
+in `/usr/share/consolefonts`, `/usr/share/kbd/consolefonts` or
+`/lib/kbd/consolefonts`. `q` quits, space holds the picture and `r` redraws.
+`-s` draws the log once into a PPM picture, at `-W` by `-H`, 800 by 600 by
+default. `-T` counts on the screen as in a picture: `-C` fits its taps after
+`-T` seconds of the loop, and the blocks of `-E` last `-T` seconds.
+
+What goes wrong, such as a device another program holds or a stream that
+stopped, is said across the bottom of the screen for 15 seconds, since text
+written to the terminal under the picture isn't seen. Each message also goes
+to stderr, the service's log among them, and those that came while the
+picture showed are printed again once the terminal is text. A message the
+same as the one before is counted rather than printed again, so that a
+stream refused once a second doesn't fill a log.
+
+With no clock log yet, the clock view draws empty and says why in its status
+line, and it shows the log once es1869clock writes one.
 
 The clock view has four panels:
 * Each pair's time error over the run, with its line taken out.
@@ -404,6 +419,8 @@ The fields, by line:
   what the record path's own soft dead zone takes back, near 0 on the Armada
   ([LOOP_TRANSFORM.md](LOOP_TRANSFORM.md#the-dacs-gap-at-its-sign)), so the
   driver's `a2_zstep_l` and `a2_zstep_r` are never told it.
+* **note:** a message, as the screen or stderr would show it, such as `1834
+  note nothing played for 10 s, Audio 1 rests until the music comes`.
 
 On the Armada (2026-11-08, test build 4, 20-s blocks), the record path was
 tilted halfway through a run: Audio 1's correction taps, refitted 0.5 dB

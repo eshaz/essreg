@@ -37,6 +37,15 @@ static void on_acquire(int sig)
 	want_acquire = 1;
 }
 
+// a crash or a quit gives the terminal back as text before the signal's own
+// action ends the program
+static void on_fatal(int sig)
+{
+	fb_restore();
+	signal(sig, SIG_DFL);
+	raise(sig);
+}
+
 int fb_open(struct fb *f, const char *dev)
 {
 	struct fb_var_screeninfo var;
@@ -97,6 +106,14 @@ int fb_open(struct fb *f, const char *dev)
 	f->shown = 1;
 	f->redraw = 1;
 	live = f;
+	signal(SIGQUIT, on_fatal);
+	signal(SIGILL, on_fatal);
+	signal(SIGABRT, on_fatal);
+	signal(SIGFPE, on_fatal);
+	signal(SIGSEGV, on_fatal);
+	signal(SIGBUS, on_fatal);
+	// stopped from the keyboard, it would leave the terminal in graphics
+	signal(SIGTSTP, SIG_IGN);
 	return 0;
 }
 

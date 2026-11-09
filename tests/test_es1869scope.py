@@ -672,6 +672,7 @@ class ShotTest(unittest.TestCase):
     PAIR = (0x5aa9ff, 0xffa64d)
     HAT = (0x41c7b9, 0xff7eb6, 0xe8d04a)
     LATE = 0xff6f6f
+    SAY = 0xffcf5a
 
     @classmethod
     def setUpClass(cls):
@@ -680,7 +681,7 @@ class ShotTest(unittest.TestCase):
         src = [os.path.join(SCOPE, f) for f in
                ("es1869scope.c", "tie.c", "draw.c", "fb.c", "plot.c",
                 "fft.c", "spectro.c", "loop.c", "loopview.c", "eq.c",
-                "zstep.c")]
+                "zstep.c", "say.c")]
         subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall",
                                "-Wextra", "-Werror", "-o", cls.prog] + src +
                               ["-lasound", "-lz", "-lm", "-lpthread"])
@@ -911,6 +912,18 @@ class ShotTest(unittest.TestCase):
             self.skipTest("no console font on this machine")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn(self.LATE, self.colours(ppm))
+
+    def test_a_missing_log_draws_and_says_why(self):
+        """with no clock log yet the clock view draws, its status line
+        saying why in amber, where es1869scope used to quit"""
+        ppm = os.path.join(self.tmp, "missing.ppm")
+        r = subprocess.run([self.prog, "-l",
+                            os.path.join(self.tmp, "no-such.log"), "-s",
+                            ppm], capture_output=True, text=True)
+        if r.returncode == 2 and "no console font" in r.stderr:
+            self.skipTest("no console font on this machine")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(self.SAY, self.colours(ppm))
 
 
 if __name__ == "__main__":

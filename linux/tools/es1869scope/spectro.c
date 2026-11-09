@@ -15,6 +15,7 @@
 
 #include "fft.h"
 #include "plot.h"
+#include "say.h"
 
 #define DB_FLOOR -1000 // tenths of a dB at the colour map's black
 
@@ -111,7 +112,7 @@ static int load_wav(struct spectro *s, const char *path)
 bad:
 	if (f)
 		fclose(f);
-	fprintf(stderr, "es1869scope: %s: not a 16-bit WAV\n", path);
+	say("%s: not a 16-bit WAV", path);
 	return -1;
 }
 
@@ -126,8 +127,7 @@ static int open_capture(struct spectro *s, const char *dev, unsigned int rate)
 					 SND_PCM_ACCESS_RW_INTERLEAVED, 2, rate,
 					 1, 200000);
 	if (err < 0) {
-		fprintf(stderr, "es1869scope: %s: %s\n", dev,
-			snd_strerror(err));
+		say("%s: %s", dev, snd_strerror(err));
 		if (s->pcm)
 			snd_pcm_close(s->pcm);
 		s->pcm = NULL;

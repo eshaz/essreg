@@ -85,6 +85,7 @@
 #include "eq.h"
 #include "zstep.h"
 #include "plot.h"
+#include "say.h"
 #include "tie.h"
 
 #define LV_LOG2N 13 // Welch segments of 8192 frames, half over the last
@@ -164,6 +165,7 @@ struct loopview {
 	struct lv_saved saved[LV_SAVED];
 	int nsaved, treble, over;
 	char journal[64];
+	int journaled; // this run wrote the journal, and removes it
 	int16_t *xring, *yring; // stereo frames
 	uint64_t played, captured, next;
 	pthread_t wthread; // the noise's writer
@@ -407,8 +409,8 @@ static void journal_write(struct loopview *v)
 		unlink(tmp);
 		return;
 	}
-	if (!fclose(f))
-		rename(tmp, v->journal);
+	if (!fclose(f) && !rename(tmp, v->journal))
+		v->journaled = 1;
 }
 
 // what an earlier run left changed, put back
@@ -432,8 +434,19 @@ static void journal_apply(snd_ctl_t *h, const char *path)
 	}
 	fclose(f);
 	unlink(path);
-	fprintf(stderr,
-		"es1869scope: put back the mixer an earlier run left\n");
+	say("put back the mixer an earlier run left");
+}
+
+// a message into -E's log, a line of its own among the blocks
+static void lv_note(const char *msg, void *arg)
+{
+	struct loopview *v = arg;
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	fprintf(v->eqlog, "%.0f note %s\n",
+		ts.tv_sec + ts.tv_nsec * 1e-9 - v->t0, msg);
+	fflush(v->eqlog);
 }
 
 // a control set for the run, its old value saved first
@@ -471,7 +484,10 @@ static void lv_restore(struct loopview *v)
 		ctl_write(v->ctl, v->saved[i].name, v->saved[i].v,
 			  v->saved[i].count);
 	v->nsaved = 0;
-	unlink(v->journal);
+	// only the journal this run wrote: another run's is its own
+	if (v->journaled)
+		unlink(v->journal);
+	v->journaled = 0;
 }
 
 static void lv_settings(struct loopview *v)
@@ -518,9 +534,8 @@ static int lv_route(struct loopview *v)
 	}
 	if (v->mon && !ctl_read(v->ctl, "Audio 2 Output Rate", val, &n) &&
 	    val[0] > 1) {
-		fprintf(stderr,
-			"es1869scope: Audio 2 runs at 3x, which Audio 1's recording "
-			"would stall: set \"Audio 2 Output Rate\" to 2x\n");
+		say("Audio 2 runs at 3x, which Audio 1's recording "
+		    "would stall: set \"Audio 2 Output Rate\" to 2x");
 		return -2;
 	}
 	if (!v->mon)
@@ -552,8 +567,7 @@ static int lv_route(struct loopview *v)
 		    lv_set(v, "Audio 2 Output Rate", 1, 1) ||
 		    ctl_write(v->ctl, "Audio 1 Correction Capture Switch", off,
 			      2)) {
-			fprintf(stderr, "es1869scope: the driver has no "
-					"correction filter to calibrate\n");
+			say("the driver has no correction filter to calibrate");
 			return -2;
 		}
 	}
@@ -645,8 +659,7 @@ static int lv_pcm(snd_pcm_t **p, const char *dev, snd_pcm_stream_t dir,
 	if (!err)
 		lv_tstamp(*p);
 	if (err < 0) {
-		fprintf(stderr, "es1869scope: %s: %s\n", dev,
-			snd_strerror(err));
+		say("%s: %s", dev, snd_strerror(err));
 		if (*p)
 			snd_pcm_close(*p);
 		*p = NULL;
@@ -1323,7 +1336,7 @@ bad:
 	if (f)
 		fclose(f);
 	free(out);
-	fprintf(stderr, "es1869scope: %s: not a 16 or 24-bit WAV\n", path);
+	say("%s: not a 16 or 24-bit WAV", path);
 	return NULL;
 }
 
@@ -1344,8 +1357,7 @@ static int lv_files(struct loopview *v)
 	if (!v->fx || !v->fy)
 		return -1;
 	if (rx != ry) {
-		fprintf(stderr, "es1869scope: %s at %u Hz, %s at %u Hz\n",
-			v->cfg.ref, rx, v->cfg.rec, ry);
+		say("%s at %u Hz, %s at %u Hz", v->cfg.ref, rx, v->cfg.rec, ry);
 		return -1;
 	}
 	v->rate = ry;
@@ -1354,7 +1366,7 @@ static int lv_files(struct loopview *v)
 	while (lg > LV_LOG2N && ((size_t)1 << lg) > v->ny)
 		lg--;
 	if (((size_t)1 << lg) > v->nx || ((size_t)1 << lg) > v->ny) {
-		fprintf(stderr, "es1869scope: the files are too short\n");
+		say("the files are too short");
 		return -1;
 	}
 	x = malloc(2 * ((size_t)1 << lg) * sizeof(double));
@@ -1464,11 +1476,10 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 	snprintf(v->journal, sizeof(v->journal),
 		 "/var/tmp/es1869scope.%u.mixer", (unsigned int)getuid());
 	if (snd_ctl_open(&v->ctl, cfg->ctl, 0) < 0) {
-		fprintf(stderr, "es1869scope: %s: no mixer\n", cfg->ctl);
+		say("%s: no mixer", cfg->ctl);
 		v->ctl = NULL;
 		goto bad;
 	}
-	journal_apply(v->ctl, v->journal);
 	if (cfg->equalize) {
 		struct timespec ts;
 
@@ -1479,8 +1490,9 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 					 "Audio 2 Treble Correction Taps",
 					 v->taps0, 3 * EQ_SIDES);
 		if (cfg->log && !(v->eqlog = fopen(cfg->log, "a")))
-			fprintf(stderr, "es1869scope: %s: %s\n", cfg->log,
-				strerror(errno));
+			say("%s: %s", cfg->log, strerror(errno));
+		if (v->eqlog)
+			say_hook(lv_note, v);
 	}
 	// the devices first, so that a busy one leaves the mixer as it was
 	if (lv_pcm(&v->cap, cfg->capture, SND_PCM_STREAM_CAPTURE, v->rate,
@@ -1491,19 +1503,20 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 				   v->rate, 500000) ||
 			    snd_pcm_nonblock(v->play, 0) < 0)) {
 		if (v->why[0])
-			fprintf(stderr, "es1869scope: %s\n", v->why);
+			say("%s", v->why);
 		goto bad;
 	}
+	// what an earlier run left in the mixer, only once this one holds the
+	// devices: no other run is then using them, the service among them
+	journal_apply(v->ctl, v->journal);
 	i = (unsigned int)-lv_route(v);
 	if (i) {
 		if (i == 1)
-			fprintf(stderr, "es1869scope: the record mixer can't "
-					"take the loop\n");
+			say("the record mixer can't take the loop");
 		goto bad;
 	}
 	if (lv_start(v, LV_BOTH, 1)) {
-		fprintf(stderr, "es1869scope: %s\n",
-			v->why[0] ? v->why : "the streams didn't start");
+		say("%s", v->why[0] ? v->why : "the streams didn't start");
 		goto bad;
 	}
 	return v;
@@ -1531,8 +1544,10 @@ void loopview_close(struct loopview *v)
 		lv_restore(v);
 		snd_ctl_close(v->ctl);
 	}
-	if (v->eqlog)
+	if (v->eqlog) {
+		say_hook(NULL, NULL);
 		fclose(v->eqlog);
+	}
 	for (i = 0; i < PATHS; i++)
 		loop_free(&v->path[i]);
 	for (i = 0; i < 4; i++) {
@@ -2426,7 +2441,8 @@ static void lv_status(struct loopview *v, struct canvas *c)
 
 static void lv_draw(struct loopview *v, struct canvas *c)
 {
-	int top = c->font->h * 2 + 8, w = c->w / 2, h = (c->h - top) / 2;
+	int top = c->font->h * 2 + 8, w = c->w / 2;
+	int h = (c->h - top - say_bar(c)) / 2;
 
 	fill(c, 0, 0, c->w, c->h, C_BACK);
 	if (v->lagged && v->path[LL].segments)
@@ -2473,10 +2489,9 @@ static void lv_idle(struct loopview *v)
 	v->bad = 0;
 	v->idle = 1;
 	snprintf(v->why, sizeof(v->why), "nothing plays: Audio 1 rests");
-	fprintf(stderr,
-		"es1869scope: nothing played for %d s, Audio 1 rests "
-		"until the music comes\n",
-		LV_IDLE_S);
+	say("nothing played for %d s, Audio 1 rests "
+	    "until the music comes",
+	    LV_IDLE_S);
 }
 
 // whether the view rests, as it starts to or goes on: the monitor's first
@@ -2498,7 +2513,7 @@ static int lv_rest(struct loopview *v, long long now)
 			return 1;
 		v->idle = 0;
 		v->seen_at = 0;
-		fprintf(stderr, "es1869scope: the music came, Audio 1 again\n");
+		say("the music came, Audio 1 again");
 		if (lv_start(v, LV_BOTH, 0)) {
 			v->again = LV_BOTH;
 			v->retry = lv_now() + 1000000000LL;
@@ -2533,14 +2548,12 @@ int loopview_step(struct loopview *v, struct canvas *c)
 	}
 	err = lv_fault(v, &which);
 	if (err < 0) {
-		fprintf(stderr,
-			"es1869scope: %s on %s after %llu frames, started "
-			"again\n",
-			snd_strerror(err),
-			which == LV_CAP ? "Audio 1's recording" :
-			v->mon		? "the monitor" :
-					  "the playback",
-			(unsigned long long)lv_captured(v));
+		say("%s on %s after %llu frames, started again",
+		    snd_strerror(err),
+		    which == LV_CAP ? "Audio 1's recording" :
+		    v->mon	    ? "the monitor" :
+				      "the playback",
+		    (unsigned long long)lv_captured(v));
 		v->restarts++;
 		if (v->cfg.monitor) {
 			// a pause or a stop of the music, as often as it
@@ -2593,11 +2606,13 @@ int loopview_step(struct loopview *v, struct canvas *c)
 		lv_draw(v, c);
 		r = 1;
 	}
-	// without a screen, a line on stderr every five seconds
+	// without a screen, a line on stderr every five seconds, or a minute
+	// over time beside the blocks, and none at rest
 	now = lv_now();
 	if (now - t0 > v->slowest)
 		v->slowest = now - t0;
-	if (v->cfg.headless && now - v->drawn > 5000000000LL) {
+	if (v->cfg.headless && !v->idle &&
+	    now - v->drawn > (v->cfg.equalize ? 60 : 5) * 1000000000LL) {
 		fprintf(stderr,
 			"es1869scope: in %llu, back %llu, lag %s %ld, %lu "
 			"segments, slowest step %lld ms%s%s\n",

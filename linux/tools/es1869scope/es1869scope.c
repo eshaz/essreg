@@ -69,6 +69,7 @@
 #include "fb.h"
 #include "loopview.h"
 #include "plot.h"
+#include "say.h"
 #include "spectro.h"
 #include "tie.h"
 
@@ -121,6 +122,7 @@ struct data {
 	long long master_ppb, steered_ppb;
 	int have_k;
 	char chrony[160];
+	char missing[SAY_LEN]; // why there is no log to follow, if there isn't
 	double t0;
 	int have_t0;
 	long pos; // how far the log was read
@@ -600,6 +602,11 @@ static void status(struct canvas *c, struct data *d, int y)
 		x += textf(c, x, y + 2, pair_rgb[i], "%s %.0f dBFS  ",
 			   d->pair[i].name,
 			   20 * log10(fmax(d->pair[i].amp, 1e-3) / 32768));
+	if (d->missing[0])
+		textf(c, 6, y + 4 + c->font->h, 0xffcf5a,
+		      "no clock log, %s: es1869clock -o FILE writes one, and -l "
+		      "FILE shows it",
+		      d->missing);
 	// chronyc -c tracking: ref id, name, stratum, ref time, system time,
 	// last offset, rms offset, frequency ppm, ...
 	if (d->chrony[0]) {
@@ -619,7 +626,8 @@ static void status(struct canvas *c, struct data *d, int y)
 
 static void draw(struct canvas *c, struct data *d)
 {
-	int top = c->font->h * 2 + 8, w = c->w / 2, h = (c->h - top) / 2;
+	int top = c->font->h * 2 + 8, w = c->w / 2;
+	int h = (c->h - top - say_bar(c)) / 2;
 
 	fill(c, 0, 0, c->w, c->h, C_BACK);
 	status(c, d, 0);
@@ -669,7 +677,7 @@ int main(int argc, char **argv)
 	struct canvas c;
 	struct font font;
 	struct fb fb;
-	int o, held = 0;
+	int o, got, held = 0;
 
 	while ((o = getopt(argc, argv,
 			   "l:d:s:W:H:v:c:r:i:x:p:a:k:T:m:L:G:CEO:")) != -1) {
@@ -752,7 +760,7 @@ int main(int argc, char **argv)
 		}
 	}
 	if (font_find(&font)) {
-		fprintf(stderr, "es1869scope: no console font found\n");
+		say("no console font found");
 		return 2;
 	}
 	if (view == 3 && lc.ref)
@@ -761,13 +769,15 @@ int main(int argc, char **argv)
 	if (lc.equalize && !lc.monitor)
 		lc.monitor = "hw:CARD=ES1869,DEV=3";
 	if (view == 3 && lc.ref && !lc.rec) {
-		fprintf(stderr, "es1869scope: -x needs -i, what came back\n");
+		say("-x needs -i, what came back");
 		return 1;
 	}
-	if (follow(&d, log) < 0 && view == 1) {
-		fprintf(stderr, "es1869scope: %s: %s\n", log, strerror(errno));
-		return 2;
-	}
+	// the run's length, on the screen as in a picture
+	lc.secs = secs;
+	// with no clock log yet, the clock view says so and waits for one
+	if (follow(&d, log) < 0)
+		snprintf(d.missing, sizeof(d.missing), "%s: %s", log,
+			 strerror(errno));
 	if (shot) {
 		if (canvas_init(&c, w, h))
 			return 2;
@@ -778,7 +788,6 @@ int main(int argc, char **argv)
 			signal(SIGINT, on_signal);
 			signal(SIGTERM, on_signal);
 			signal(SIGHUP, on_signal);
-			lc.secs = secs;
 			lc.headless = 1;
 			lv = loopview_open(&lc);
 			if (!lv)
@@ -827,9 +836,11 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	if (fb_open(&fb, dev)) {
-		fprintf(stderr, "es1869scope: %s: %s\n", dev, strerror(errno));
+		say("%s: %s", dev, strerror(errno));
 		return 2;
 	}
+	// what is said while the picture shows comes again after it
+	say_keep(1);
 	signal(SIGINT, on_signal);
 	signal(SIGTERM, on_signal);
 	signal(SIGHUP, on_signal);
@@ -879,7 +890,7 @@ int main(int argc, char **argv)
 		}
 		fb_poll_switch(&fb);
 		if (view == 3) {
-			int r = held ? 0 : loopview_step(lv, &c);
+			int r = held ? 0 : loopview_step(lv, &c), bar;
 
 			if (r < 0) {
 				loopview_close(lv);
@@ -888,30 +899,47 @@ int main(int argc, char **argv)
 				fb.redraw = 1;
 				continue;
 			}
+			// a drawing of the view covers the bar
+			bar = r || fb.redraw || say_due();
 			if (fb.redraw)
 				loopview_frame(lv, &c);
-			if (fb.shown && (r || fb.redraw))
+			if (bar)
+				say_draw(&c);
+			if (fb.shown && bar)
 				fb_present(&fb, &c);
 			usleep(10000);
 			continue;
 		}
 		if (view == 2) {
+			int bar = fb.redraw || say_due();
+
 			if (fb.redraw)
 				spectro_frame(sp, &c);
 			if (!held && spectro_step(sp, &c) < 0) {
 				spectro_close(sp);
 				sp = NULL;
 				view = 1;
+				fb.redraw = 1;
+				continue;
 			}
+			if (bar)
+				say_draw(&c);
 			if (fb.shown)
 				fb_present(&fb, &c);
 			usleep(10000);
 			continue;
 		}
-		if (!held && follow(&d, log) >= 0 && fb.shown) {
+		// the clock view again when the log has grown, and the bar when
+		// a message comes or grows old
+		got = held ? 0 : follow(&d, log);
+		if (got > 0)
+			d.missing[0] = 0;
+		if (fb.shown && (got > 0 || fb.redraw)) {
 			draw(&c, &d);
+			say_draw(&c);
 			fb_present(&fb, &c);
-		} else if (fb.redraw && fb.shown) {
+		} else if (fb.shown && say_due()) {
+			say_draw(&c);
 			fb_present(&fb, &c);
 		}
 		usleep(fb.redraw ? 1000 : 500000);
@@ -919,6 +947,8 @@ int main(int argc, char **argv)
 	loopview_close(lv);
 	spectro_close(sp);
 	fb_close(&fb);
+	say_keep(0);
+	say_replay();
 	canvas_free(&c);
 	return 0;
 }
