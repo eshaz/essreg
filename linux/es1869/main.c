@@ -738,6 +738,8 @@ static int es1869_probe(struct snd_card *card, int dev)
 	err = es1869_mixer_extra(chip);
 	if (!err)
 		err = es1869_a1c_new(chip);
+	if (!err)
+		err = es1869_treble_ctl_new(chip);
 	if (err < 0)
 		return err;
 	err = es1869_fm_new(chip);

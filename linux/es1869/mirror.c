@@ -97,6 +97,7 @@
 #include <linux/mm.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
+#include <sound/control.h>
 #include <sound/pcm_params.h>
 #ifdef CONFIG_X86
 #include <asm/cpufeature.h>
@@ -104,6 +105,7 @@
 #endif
 
 #include "es1869.h"
+#include "treble.h"
 
 #define ES_FORMATS (SNDRV_PCM_FMTBIT_U8 | SNDRV_PCM_FMTBIT_S8 | \
 		    SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_U16_LE)
@@ -681,7 +683,8 @@ static s16 *rs_table_new(struct es1869 *chip, unsigned int flat)
 		dev_err(chip->dev, "no memory for the rate correction: off\n");
 		return NULL;
 	}
-	es1869_rs_table(tab, flat);
+	es1869_rs_table_fit(tab, flat,
+			    flat ? chip->mirror.fit[flat - 1] : NULL);
 	return tab;
 }
 
@@ -697,6 +700,14 @@ static void rs_table(struct es1869 *chip)
 		rs->tab = rs_table_new(chip, 0);
 	if (es1869_val(ES_S_a2_treble))
 		most = es1869_val(ES_S_a2_oversample);
+	// loaded taps go into the tables made, while no stream runs on them
+	if (chip->mirror.fit_stale && !chip->mirror.running) {
+		for (k = 0; k < ES_RS_OVER; k++)
+			if (rs->flat[k])
+				es1869_rs_table_fit(rs->flat[k], k + 1,
+						    chip->mirror.fit[k]);
+		chip->mirror.fit_stale = false;
+	}
 	for (k = 0; k <= most && k < ES_RS_OVER; k++)
 		if (!rs->flat[k])
 			rs->flat[k] = rs_table_new(chip, k + 1);
@@ -1182,6 +1193,7 @@ int es1869_mirror_init(struct es1869 *chip)
 	hrtimer_setup(&m->period, mirror_period, CLOCK_MONOTONIC,
 		      HRTIMER_MODE_REL_HARD);
 	INIT_WORK(&m->copy_work, mirror_copy_work);
+	memcpy(m->fit, es1869_treble, sizeof(m->fit));
 	m->over = 1;
 	m->rs.over = 1;
 	m->lead_low = U32_MAX;
@@ -1209,4 +1221,68 @@ int es1869_mirror_init(struct es1869 *chip)
 	snd_pcm_set_managed_buffer(ss, SNDRV_DMA_TYPE_VMALLOC, NULL, 0,
 				   m->ring.bytes / 2);
 	return 0;
+}
+
+static int fit_info(struct snd_kcontrol *kc, struct snd_ctl_elem_info *ui)
+{
+	ui->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	ui->count = ES_RS_OVER * ES_RS_FIT;
+	ui->value.integer.min = -(1 << 30);
+	ui->value.integer.max = 1 << 30;
+	ui->value.integer.step = 1;
+	return 0;
+}
+
+static int fit_get(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
+{
+	struct es1869 *chip = snd_kcontrol_chip(kc);
+	unsigned int k, i;
+
+	mutex_lock(&chip->state_mutex);
+	for (k = 0; k < ES_RS_OVER; k++)
+		for (i = 0; i < ES_RS_FIT; i++)
+			uv->value.integer.value[k * ES_RS_FIT + i] =
+				chip->mirror.fit[k][i];
+	mutex_unlock(&chip->state_mutex);
+	return 0;
+}
+
+static int fit_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
+{
+	struct es1869 *chip = snd_kcontrol_chip(kc);
+	unsigned int k, i;
+	int changed = 0;
+
+	for (i = 0; i < ES_RS_OVER * ES_RS_FIT; i++)
+		if (uv->value.integer.value[i] < -(1 << 30) ||
+		    uv->value.integer.value[i] > 1 << 30)
+			return -EINVAL;
+	mutex_lock(&chip->state_mutex);
+	for (k = 0; k < ES_RS_OVER; k++)
+		for (i = 0; i < ES_RS_FIT; i++) {
+			s32 v = uv->value.integer.value[k * ES_RS_FIT + i];
+
+			changed |= chip->mirror.fit[k][i] != v;
+			chip->mirror.fit[k][i] = v;
+		}
+	if (changed)
+		chip->mirror.fit_stale = true;
+	mutex_unlock(&chip->state_mutex);
+	return changed;
+}
+
+// "Audio 2 Treble Correction Taps": a2_treble's correction of the DAC at 1x,
+// 2x and 3x, 16 side taps each in Q30 as tools/es1869treble.py makes them,
+// loaded in place of treble.h's, for a model fitted to a measured DAC
+int es1869_treble_ctl_new(struct es1869 *chip)
+{
+	static const struct snd_kcontrol_new knew = {
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name = "Audio 2 Treble Correction Taps",
+		.info = fit_info,
+		.get = fit_get,
+		.put = fit_put,
+	};
+
+	return snd_ctl_add(chip->card, snd_ctl_new1(&knew, chip));
 }

@@ -103,6 +103,11 @@ struct es1869_mirror {
 	bool draining; // a drain's silence goes on past the last frame
 	snd_pcm_uframes_t silent_to; // the absolute frame it has reached
 	struct es1869_rs rs;
+	// the DAC's correction at each rate that a2_treble's tables take:
+	// treble.h's fit until "Audio 2 Treble Correction Taps" loads others,
+	// which a stream takes at its prepare
+	s32 fit[ES_RS_OVER][ES_RS_FIT];
+	bool fit_stale; // the tables still hold the taps before
 	u32 over; // the ring frames to a stream frame
 	u32 lap; // the ring's frames, as the 8237 runs through them
 	u32 rs_quiet; // where in the ring its silence has reached, in bytes
@@ -345,6 +350,8 @@ void es1869_mon_a2_go(struct es1869 *chip, struct snd_pcm_runtime *rt,
 		      bool fresh);
 void es1869_mon_a2_stop(struct es1869 *chip);
 void es1869_mon_proc(struct es1869 *chip, struct snd_info_buffer *buf);
+
+int es1869_treble_ctl_new(struct es1869 *chip);
 
 // a1filter.c
 int es1869_a1c_new(struct es1869 *chip);

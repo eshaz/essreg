@@ -57,6 +57,12 @@ EXTRA = {
                     "Volume` and `Hardware Master Playback Switch`, F3): "
                     "61h and 63h, the counters the buttons move in split "
                     "mode.\n",
+    "a2_treble": "* **Audio 2 Treble Correction Taps** (`Audio 2 Treble "
+                 "Correction Taps`): the DAC's correction that a2_treble "
+                 "folds into the rate filter, 16 side taps at each of 1x, "
+                 "2x and 3x in Q30, as `tools/es1869treble.py` fits them; "
+                 "treble.h's until others are loaded, for a DAC measured "
+                 "apart. A stream takes them at its prepare.\n",
     "a1c_filter": "* **Audio 1 Correction Taps** (`Audio 1 Correction "
                   "Capture Taps`): the correction filter's taps, 17 for "
                   "each channel, the left's first, each the centre then "

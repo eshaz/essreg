@@ -9,6 +9,9 @@ usage:
   python3 tools/es1869treble.py --check    fail if it is stale
   python3 tools/es1869treble.py --last X   the fit for a DAC that keeps X
                                            of the last sample, printed only
+  python3 tools/es1869treble.py --last X --amixer
+                                           and as the amixer command that
+                                           loads it into a running driver
 
 The model is docs/AUDIO_PIPELINE.md's: with its stages off, the Audio 2 DAC
 holds each sample for a period of its rate and keeps LAST of the one
@@ -23,7 +26,10 @@ response is flat, and the hold's still falls, so the error shrinks only as
 about 1 / SIDES. The taps cost nothing a frame, since they fold into the
 filter's own.
 
-To follow a new measurement of the DAC, change LAST and run the tool.
+To follow a new measurement of the DAC, change LAST and run the tool. A
+running driver takes a fit without a rebuild through its control "Audio 2
+Treble Correction Taps", 16 side taps at 1x, 2x and 3x in turn, which the
+next stream takes at its prepare; alsactl store keeps them over a boot.
 """
 
 import argparse
@@ -159,7 +165,14 @@ def main():
     p.add_argument("--last", type=float,
                    help="print the fit for a DAC that keeps this much of "
                         "the last sample")
+    p.add_argument("--amixer", action="store_true",
+                   help="with --last, the amixer command that loads it")
     a = p.parse_args()
+    if a.last is not None and a.amixer:
+        fit = [v for q, _, _, _ in taps(a.last) for v in q]
+        print("amixer -c ES1869 cset name='Audio 2 Treble Correction Taps' "
+              + ",".join(str(v) for v in fit))
+        return 0
     if a.last is not None:
         w = np.linspace(0, np.pi, 9)
         for over, (q, err, gain, at) in zip(OVERS, taps(a.last)):

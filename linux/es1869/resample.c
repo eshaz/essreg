@@ -177,9 +177,10 @@ static s64 rs_sinc(const s64 *series, s64 s, int m, unsigned int i)
 // sinc before its window: treble.h's over the window at their frames, so
 // that at a frame's own place the filter is treble.h's taps, and a centre
 // that makes their sum 1
-static void rs_side(s32 *side, const s64 *series, unsigned int flat)
+_Static_assert(ES_RS_FIT == ES_TREBLE_SIDES, "resample.h's ES_RS_FIT");
+
+static void rs_side(s32 *side, const s64 *series, const s32 *fit)
 {
-	const s32 *fit = es1869_treble[flat - 1];
 	s64 centre = Q30;
 	int k;
 
@@ -260,6 +261,11 @@ static s16 rs_up(s16 v)
 // is the DAC's rate over the stream's, for its correction, or 0
 void es1869_rs_table(s16 *tab, unsigned int flat)
 {
+	es1869_rs_table_fit(tab, flat, NULL);
+}
+
+void es1869_rs_table_fit(s16 *tab, unsigned int flat, const s32 *fit)
+{
 	s16 end[ES_RS_TAPS];
 	s64 series[RS_TERMS];
 	s32 side[ES_TREBLE_SIDES + 1];
@@ -267,7 +273,7 @@ void es1869_rs_table(s16 *tab, unsigned int flat)
 
 	kaiser_series(series);
 	if (flat)
-		rs_side(side, series, flat);
+		rs_side(side, series, fit ? fit : es1869_treble[flat - 1]);
 	for (i = 0; i < RS_PLACES; i++)
 		rs_row(tab + i * ES_RS_STRIDE, i, series, flat ? side : NULL);
 	for (i = RS_PLACES; i < ES_RS_ROWS; i++)
