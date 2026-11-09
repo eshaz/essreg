@@ -168,9 +168,12 @@ Steady lines stood out of the silence:
 
 Those takes ran at 09:48. At 11:16 the line out still carried the 15625 Hz
 line at -81 dBFS, but Audio 1's left heard it 12 dB weaker and its own noise
-on the left lay 8 dB lower, while its right was as before. So how much of
-that source the record path takes changes over time, and with it how much of
-the loop's noise is the source's.
+on the left lay 8 dB lower, while its right was as before. At 12:14, after a
+reboot, four takes found the left as at 09:48 again, the line at -98 dBFS
+and Audio 1's own noise within 0.5 dB of the table, and the DAC's still
+under it. So how much of that source the record path takes changes over
+time, and with it how much of the loop's noise is the source's. The fan was
+off and the battery full each time.
 
 Audio 1 can follow the line, since both recorders heard it alike: what the
 line out carries is what Audio 1 hears times a ratio, and a tone added at
