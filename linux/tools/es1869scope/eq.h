@@ -35,10 +35,11 @@ double eq_predict(const struct eq_series *s, double t, double *slope);
 double eq_sides_gain(const long *sides, double f, double rate);
 /*
  * side taps whose response comes nearest target[k] at f[k], weighted by w[k],
- * by least squares with the gain at 0 Hz held at 1; 0, or -1 if the fit has
- * nothing to stand on
+ * by least squares with the gain at 0 Hz held at 1, and nearest prior (or 0
+ * for NULL) where the targets leave them free; 0, or -1 if the fit has
+ * nothing to stand on or a tap would leave the driver's range of 2^30
  */
 int eq_fit_sides(const double *f, const double *target, const double *w, int n,
-		 double rate, long *sides);
+		 double rate, const long *prior, long *sides);
 
 #endif /* EQ_H */

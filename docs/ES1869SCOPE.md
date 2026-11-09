@@ -298,33 +298,112 @@ trend, a block later.
 After each block:
 * **The DAC:** the loop's deviation against 1 kHz goes into 24 bands from
   250 Hz to 20 kHz, each band weighted by its coherence, since music may
-  leave a band empty. Each band keeps a trend, a line through its last 16
-  blocks, predicted a block ahead. Audio 2's DAC correction (the treble
-  correction's table at the rate in use) is refitted to take the prediction
-  back:
+  leave a band empty. The monitor's frames carry Audio 2's DAC correction,
+  so the loop against them doesn't see it: through the record path that
+  `es1869scope -C` calibrated, the loop is the DAC itself. The first 3
+  blocks give each band's start, when the calibration had just made the
+  chain flat. Each band keeps a trend, a line through its last 16 blocks,
+  predicted a block ahead. Once the trend has 3 blocks more than the start,
+  the correction (the treble correction's table at the rate in use) takes
+  back what it drifts from the start:
   * a step of 0.5 dB at most an update;
   * within 3 dB of where it began;
-  * nothing for deviations under 0.05 dB.
+  * nothing for less than 0.05 dB.
 
-  It is loaded live, and the driver swaps it in between the filter's runs.
-  This only happens through a record path that `es1869scope -C` calibrated.
-  Without that, the deviation is the record path's own loss, and the DAC's
+  The table's 16 taps are fitted to the bands by least squares. Most bands
+  lie low, where every tap's response looks alike, so the fit alone is all
+  but singular; a ridge towards the taps before keeps the table where the
+  bands leave it free, above 20 kHz among them. The table is loaded live,
+  and the driver swaps it in between the filter's runs. Without a calibrated
+  record path, the deviation is the record path's own loss, and the
   correction stays.
-* **The clock:** Audio 1's capture positions, stamped on the monotonic
-  clock, give the chip's rate against the steered clock. The ratio that the
-  Clock mode applies, from the driver's /proc page, goes on top of it. What
-  is left over is the Clock mode's residual: on the Armada, 0.2 ppm over a
-  half hour in es1869test's `rs.clock.long44`. Its trend, predicted a block
-  ahead, moves `a2_trim_ppb` by half of it at a time (as root).
+* **The clock:** the monitor's positions give the chip's rate against the
+  steered clock. The driver reads each from the 8237 right before the core
+  stamps it on the monotonic clock. A line goes through each run of the
+  music between its breaks, after the run's first second, and the runs'
+  slopes are pooled. Audio 1's own position would not do: once its
+  correction filter runs, it moves a period at a time. With the ratio that
+  the Clock mode applies on top, from the driver's /proc page, the chip's
+  rate gives the stream's residual against the steered clock. Less the trim,
+  the residual is the driver's own error. That error keeps a trend,
+  predicted a block ahead, and `a2_trim_ppb` takes it back whole (as root),
+  0.5 ppm a block at most. A trend of the residual itself would follow the
+  trim's own steps: on the Armada it overshot from -0.65 to +0.18 ppm in
+  eight blocks while the error stayed at +1.2 ppm. The log's `tie` is the
+  positions' time error about the runs' lines, in us rms. It is the DMA's
+  steps through its FIFO and the stamps' timing, which hide the crystal's
+  own jitter: that needs a second clock (es1869clock).
 
-Every block writes its lines to `-O LOG` and, with `-s`, the picture:
+* **The noise:** what came back that the music, through the loop's measured
+  response, doesn't explain: each output's power times one less its multiple
+  coherence, in each band, its density in dB a Hz against a full-scale sine.
+  The top band reaches past 20 kHz, where at 2x the monitor's every other
+  frame and the ADC fold the filter's images back differently, so its noise
+  is mostly that. It holds the ADC's noise, the DAC's and the record path's,
+  the music's distortion and any interference, which the loop can't tell
+  apart: the DAC's own needs a second ADC on the same output, whose noise is
+  its own.
+
+* **The overlay:** each segment's input and output, both channels summed,
+  are compared by their Pearson correlation at the lag and a frame either
+  way. Its size at the lag says whether the two still overlay: a segment
+  under 0.5 is left out of the sums, and 8 in a row end the run, after which
+  the lag is found again. A stop of the DAC or a lost block moves one
+  against the other that way: on the Armada one such block, before the
+  check, read the DAC 1.1 dB low at 7.7 kHz, and a refit followed it. The
+  parabola through the three gives the delay between frames, segment by
+  segment; within the loop it holds still, since the DAC and the ADC share
+  one crystal. A block's clock rate 0.5 ppm off its trend is left out until
+  a second agrees with it.
+
+Every block writes its lines to `-O LOG` and, with `-s`, the picture every
+fifth block. The first `base` line gives each band's start:
 ```
-180 clock chip -28.6010 applied +28.5970 resid -0.0040 pred -0.0030 trim -20
-180 eq 250:+0.01 452:+0.00 ... 20000:-0.04 (refitted)
+63 base 250:-0.01 443:-0.01 ... 13663:-0.62 20000:-1.58
+210 clock chip -28.9778 tie 5.7 applied +29.0550 resid +0.0772 ...
+210 overlay r 0.99550 delay +0.101 sd 0.011 missed 0
+210 eq 250:-0.01 ... 20000:-2.08 drift 20000:-0.28 corr +0.28 (refitted)
+210 noise 250:-115.0 443:-115.4 ... 13663:-118.7 20000:-107.5
 ```
 
-It holds Audio 2 at 2x at most, since 3x stalls while Audio 1 records, with
-the treble correction on, and puts both back when it stops.
+The fields, by line:
+* **clock:** the chip's rate on the steered clock (ppm), the time error
+  (us), the driver's ratio and the residual (ppm), then the driver's own
+  error, its trend a block ahead and the trim in ppb. This one goes on `bias
+  -0.1838 pred -0.2818 trim 282 (moved)`.
+* **overlay:** |r| at the lag, the delay between frames, its spread, and the
+  segments left out.
+* **eq:** the deviation against 1 kHz, the largest predicted drift, and the
+  correction's change at 20 kHz since it began.
+* **noise:** the density in dB a Hz.
+
+On the Armada (2026-11-08, test build 4, 20-s blocks), the record path was
+tilted halfway through a run: Audio 1's correction taps, refitted 0.5 dB
+lower at 20 kHz. -E read the step as the DAC's: -0.50 dB at 20 kHz and -0.24
+dB at 13.7 kHz. The DAC's correction took it back in 5 blocks (+0.11, +0.28,
++0.40, +0.48 and +0.54 dB at 20 kHz). It overshot to +0.67 dB at 9 blocks,
+the trend's line through a step, and was back to +0.55 dB at 18. A slow
+drift, which the line follows, gives no such overshoot. Through it all the
+overlay held |r| at 0.995 and the delay at +0.10 frames, spread 0.01.
+
+It holds Audio 2 at 2x with the treble correction on, and puts both back
+when it stops. 3x stalls while Audio 1 records, and at 1x the top of the
+loop's response moves with where the ADC and the DAC sample in a frame.
+
+A break of the music (a pause, a stop, the next file of a player that closes
+the device between files) stops the monitor. The view starts the monitor
+again on its own, at the rate it ran, while Audio 1 records on, and finds
+the lag again. Each start puts the DAC and the ADC another fraction of a
+frame apart, and the monitor's every other frame at 2x half a frame either
+way. So the cross-spectra of two runs don't add at the top, where their
+phases differ by up to 80 degrees: mixed, they took 2.4 dB off 20 kHz on the
+Armada. Each run is measured alone, and its deviation in each band goes into
+the block, weighted by its segments: a block is `-T` seconds of music,
+however broken. A change of the DAC's rate starts the block afresh. Music at
+48 kHz isn't followed, since Audio 1 records at 44.1 kHz. A thread of its
+own reads both streams, so that the work of a block, which can take the
+Celeron longer than Audio 1's buffer lasts, holds up neither.
+
 `linux/config/es1869eq.initd` runs it as a service after es1869cal and MPD.
 
 ## The DAC and the ADC apart

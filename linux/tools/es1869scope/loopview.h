@@ -44,8 +44,9 @@ struct loopview_cfg {
 	 * corrections over time, beside the music (with monitor): in blocks of
 	 * secs, the loop's deviation in bands and the Clock mode's residual
 	 * against the steered clock, each a trend predicted a block ahead; the
-	 * DAC's correction refitted and loaded live, and a2_trim_ppb trimmed
-	 * (as root); a line a block to log, or stdout
+	 * DAC's correction refitted to the drift since the first blocks and
+	 * loaded live, and a2_trim_ppb trimmed (as root); lines a block to
+	 * log, or stdout
 	 */
 	int equalize;
 	const char *log;
@@ -68,7 +69,8 @@ void loopview_close(struct loopview *v);
 void loopview_frame(struct loopview *v, struct canvas *c);
 /*
  * what has come since, redrawn at most twice a second; 1 when the picture
- * changed, 0 if not, -1 when the streams failed for good
+ * changed, 2 when it shows a block of the corrections over time that just
+ * ended, 0 if not, -1 when the streams failed for good
  */
 int loopview_step(struct loopview *v, struct canvas *c);
 /* c starts again, t turns Audio 2's treble correction over, o its rate */

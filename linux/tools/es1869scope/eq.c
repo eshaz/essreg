@@ -10,7 +10,12 @@
  * The DAC correction's response is c0 + 2 sum s_k cos(k w), and with its
  * centre c0 = 1 - 2 sum s_k, so that its gain at 0 Hz stays 1, that is
  * 1 + 2 sum s_k (cos(k w) - 1): linear in the side taps, whose least squares
- * fit is a 16 x 16 system.
+ * fit is a 16 x 16 system. From bands that mostly lie low, where every tap's
+ * response looks alike, that system is all but singular (a condition of
+ * 1e16), and its taps would go anywhere along the directions the bands leave
+ * free. A ridge of EQ_RIDGE towards the taps before keeps them there: the
+ * bands are met as closely, and above the top band the response stays as it
+ * was.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
@@ -19,6 +24,8 @@
 
 #include <math.h>
 #include <string.h>
+
+#define EQ_RIDGE 1e-6 // the pull towards the taps before, against a band's 1
 
 void eq_reset(struct eq_series *s)
 {
@@ -73,7 +80,7 @@ double eq_sides_gain(const long *sides, double f, double rate)
 }
 
 int eq_fit_sides(const double *f, const double *target, const double *w, int n,
-		 double rate, long *sides)
+		 double rate, const long *prior, long *sides)
 {
 	enum { N = EQ_SIDES };
 	double a[N][N + 1], x[N];
@@ -90,6 +97,10 @@ int eq_fit_sides(const double *f, const double *target, const double *w, int n,
 				a[i][j] += w[k] * b[i] * b[j];
 			a[i][N] += w[k] * b[i] * (target[k] - 1);
 		}
+	}
+	for (i = 0; i < N; i++) {
+		a[i][i] += EQ_RIDGE;
+		a[i][N] += EQ_RIDGE * (prior ? prior[i] / EQ_Q30 : 0);
 	}
 	// Gauss with the largest pivot of each column
 	for (i = 0; i < N; i++) {
@@ -119,6 +130,9 @@ int eq_fit_sides(const double *f, const double *target, const double *w, int n,
 			s -= a[i][j] * x[j];
 		x[i] = s / a[i][i];
 	}
+	for (i = 0; i < N; i++)
+		if (!(fabs(x[i]) < 1))
+			return -1;
 	for (i = 0; i < N; i++)
 		sides[i] = lrint(x[i] * EQ_Q30);
 	return 0;

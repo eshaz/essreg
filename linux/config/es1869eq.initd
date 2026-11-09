@@ -5,12 +5,13 @@
 # es1869scope -E reads what Audio 2's DAC took (the monitor, PCM device 3) and
 # what came back on Audio 1 through the record mixer, in blocks of a minute.
 # The loop's deviation in bands, through the record path that es1869cal
-# calibrated at boot, becomes a trend predicted a block ahead. So does the
-# Clock mode's residual against the steered clock. From those it refits Audio
-# 2's DAC correction and loads it live, and trims a2_trim_ppb. It holds
-# Audio 2 at 2x at most and its treble correction on, and puts both back when
-# it stops. The log is /var/log/es1869eq.log and the picture
-# /var/lib/es1869/eq.ppm.
+# calibrated at boot, becomes a trend predicted a block ahead, and Audio 2's
+# DAC correction, loaded live, takes back its drift from the first blocks.
+# The chip's rate on the steered clock, from the monitor's positions, gives
+# the driver's own clock error, whose trend a2_trim_ppb takes back. It holds
+# Audio 2 at 2x and its treble correction on, and puts both back when it
+# stops; a break of the music only restarts the monitor. The log is
+# /var/log/es1869eq.log and the picture /var/lib/es1869/eq.ppm.
 #
 # Install as /etc/init.d/es1869eq and add it to the default runlevel:
 #   rc-update add es1869eq default

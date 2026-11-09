@@ -11,6 +11,7 @@ usage: python3 -m unittest tests.test_es1869scope   (needs gcc and numpy)
 
 import ctypes
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -510,6 +511,7 @@ class EqTest(unittest.TestCase):
         cls.lib.eq_sides_gain.restype = D
         cls.lib.eq_sides_gain.argtypes = [ctypes.POINTER(ctypes.c_long), D, D]
         cls.lib.eq_fit_sides.argtypes = [DP, DP, DP, ctypes.c_int, D,
+                                         ctypes.POINTER(ctypes.c_long),
                                          ctypes.POINTER(ctypes.c_long)]
 
     @classmethod
@@ -547,12 +549,45 @@ class EqTest(unittest.TestCase):
         w = np.ones(len(f))
         sides = (ctypes.c_long * 16)()
         self.assertEqual(self.lib.eq_fit_sides(dp(f), dp(want), dp(w),
-                                               len(f), rate, sides), 0)
+                                               len(f), rate, None, sides), 0)
         for fk, wk in zip(f, want):
             got = self.lib.eq_sides_gain(sides, fk, rate)
             self.assertLess(abs(20 * np.log10(got / wk)), 0.1, fk)
         self.assertAlmostEqual(self.lib.eq_sides_gain(sides, 0.0, rate), 1.0,
                                places=9)
+
+    def test_a_drift_taken_back_stays_near_the_taps_before(self):
+        # the driver's correction at 2x, and a drift of the DAC of -0.3 dB
+        # at 20 kHz, as f squared, taken back over es1869scope's bands:
+        # sixteen taps over bands that mostly lie low, a system all but
+        # singular, which only the ridge keeps in the driver's range
+        rate = 44100.0
+        src = open(os.path.join(ROOT, "linux", "es1869", "treble.h")).read()
+        rows = re.findall(r"\{([^{}]*)\}", src[src.index("treble[3]"):])
+        prior = (ctypes.c_long * 16)(
+            *[int(x) for x in rows[1].split(",") if x.strip()])
+        f = np.geomspace(250, 20000, 24)
+        before = np.array([self.lib.eq_sides_gain(prior, fk, rate)
+                           for fk in f])
+        want = before * 10 ** (0.3 * (f / 20000) ** 2 / 20)
+        f = np.concatenate([f, [50, 100, 150]])
+        low = [self.lib.eq_sides_gain(prior, fk, rate) for fk in f[-3:]]
+        want = np.concatenate([want, low])
+        w = np.concatenate([np.ones(24), 0.2 * np.ones(3)])
+        sides = (ctypes.c_long * 16)()
+        self.assertEqual(self.lib.eq_fit_sides(dp(f), dp(want), dp(w),
+                                               len(f), rate, prior, sides),
+                         0)
+        for fk, wk in zip(f, want):
+            got = self.lib.eq_sides_gain(sides, fk, rate)
+            self.assertLess(abs(20 * np.log10(got / wk)), 0.01, fk)
+        for k in range(16):
+            self.assertLess(abs(sides[k] - prior[k]), 1 << 23, k)
+        # above the top band it follows, and stays near what it was
+        for fk in (21000.0, 22050.0):
+            change = 20 * np.log10(self.lib.eq_sides_gain(sides, fk, rate) /
+                                   self.lib.eq_sides_gain(prior, fk, rate))
+            self.assertLess(abs(change), 0.35, fk)
 
 
 class ShotTest(unittest.TestCase):

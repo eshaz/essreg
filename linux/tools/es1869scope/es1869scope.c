@@ -795,9 +795,8 @@ int main(int argc, char **argv)
 
 				if (r < 0)
 					break;
-				// over time, the picture of each block
-				if (r > 0 && lc.equalize &&
-				    canvas_ppm(&c, shot))
+				// over time, the picture of a block
+				if (r == 2 && canvas_ppm(&c, shot))
 					perror(shot);
 				usleep(10000);
 			}

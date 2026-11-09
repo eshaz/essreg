@@ -218,21 +218,34 @@ int font_find(struct font *f)
 	return -ENOENT;
 }
 
+// a row at a time: a pixel at a time is 480000 calls into stdio for the
+// Armada's 800 x 600
 int canvas_ppm(const struct canvas *c, const char *path)
 {
-	FILE *f = fopen(path, "wb");
-	size_t i, n = (size_t)c->w * c->h;
+	unsigned char *row = malloc(3 * (size_t)c->w);
+	FILE *f = row ? fopen(path, "wb") : NULL;
+	unsigned int x, y;
+	int err = 0;
 
-	if (!f)
-		return -errno;
-	fprintf(f, "P6\n%u %u\n255\n", c->w, c->h);
-	for (i = 0; i < n; i++) {
-		unsigned char rgb[3] = { c->px[i] >> 16, c->px[i] >> 8,
-					 c->px[i] };
-
-		fwrite(rgb, 1, 3, f);
+	if (!f) {
+		err = row ? -errno : -ENOMEM;
+		free(row);
+		return err;
 	}
-	if (fclose(f))
-		return -errno;
-	return 0;
+	fprintf(f, "P6\n%u %u\n255\n", c->w, c->h);
+	for (y = 0; y < c->h && !err; y++) {
+		const uint32_t *px = &c->px[(size_t)y * c->w];
+
+		for (x = 0; x < c->w; x++) {
+			row[3 * x] = px[x] >> 16;
+			row[3 * x + 1] = px[x] >> 8;
+			row[3 * x + 2] = px[x];
+		}
+		if (fwrite(row, 3, c->w, f) != c->w)
+			err = -EIO;
+	}
+	free(row);
+	if (fclose(f) && !err)
+		err = -errno;
+	return err;
 }
