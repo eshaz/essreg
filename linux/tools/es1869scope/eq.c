@@ -23,6 +23,7 @@
 #include "eq.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #define EQ_RIDGE 1e-6 // the pull towards the taps before, against a band's 1
@@ -136,4 +137,58 @@ int eq_fit_sides(const double *f, const double *target, const double *w, int n,
 	for (i = 0; i < N; i++)
 		sides[i] = lrint(x[i] * EQ_Q30);
 	return 0;
+}
+
+// The rules of what music may do, apart from the code that measures it:
+// - at 3x Audio 1 can't record, since the ISA bus can't carry both and the
+//   DAC stalls, and a rate past Audio 1's it can't record at all;
+// - the trends, and the refits from them, count only what was measured like
+//   their start: through the record path at the rate es1869cal calibrated it
+//   at, at 2x, where the top of the loop holds still from run to run (at 1x
+//   it moves with where the DAC and the ADC sample in a frame), and with
+//   Audio 1's correction as it was at the start. Music measured otherwise
+//   shows, and counts again once the setup comes back;
+// - the trim moves only in the Clock mode, whose residual it answers, and
+//   only for the 44.1 kHz family, since the 48 kHz family's clock runs
+//   about 252 ppm apart and its trend would be another
+int eq_policy(const struct eq_setup *now, const struct eq_setup *base,
+	      char *why, unsigned int len)
+{
+	int f = EQ_COUNT | EQ_TRIM;
+
+	why[0] = 0;
+	if (now->factor > 2) {
+		snprintf(why, len,
+			 "Audio 2 at %ux, which Audio 1's recording would "
+			 "stall: Audio 1 rests",
+			 now->factor);
+		return EQ_REST;
+	}
+	if (!now->rate || now->rate > EQ_A1_MAX) {
+		snprintf(
+			why, len,
+			"a stream at %u Hz, past what Audio 1 records: Audio 1 "
+			"rests",
+			now->rate);
+		return EQ_REST;
+	}
+	if (now->mode != 2 || now->rate % 11025)
+		f &= ~EQ_TRIM;
+	if (now->rate != EQ_CAL_RATE)
+		snprintf(why, len,
+			 "%u Hz, where the record path wasn't calibrated: "
+			 "shown, not counted",
+			 now->rate);
+	else if (now->factor < 2)
+		snprintf(why, len,
+			 "at 1x the top of the loop moves from run to run: "
+			 "shown, not counted");
+	else if (base && (now->factor != base->factor || now->a1c != base->a1c))
+		snprintf(why, len,
+			 "not as the trends started (%ux, Audio 1's correction "
+			 "%s): shown, not counted",
+			 base->factor, base->a1c ? "on" : "off");
+	else
+		return f;
+	return f & ~EQ_COUNT;
 }

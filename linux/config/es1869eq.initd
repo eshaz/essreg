@@ -8,11 +8,13 @@
 # calibrated at boot, becomes a trend predicted a block ahead, and Audio 2's
 # DAC correction, loaded live, takes back its drift from the first blocks.
 # The chip's rate on the steered clock, from the monitor's positions, gives
-# the driver's own clock error, whose trend a2_trim_ppb takes back. It holds
-# Audio 2 at 2x and its treble correction on, and puts both back when it
-# stops; a break of the music only restarts the monitor, and after 10 s with
+# the driver's own clock error, whose trend a2_trim_ppb takes back. It sets
+# Audio 2 to 2x and its treble correction on, and puts back at its stop what
+# nobody changed meanwhile; at 3x, or at a rate Audio 1 can't record, Audio 1
+# rests. A break of the music only restarts the monitor, and after 10 s with
 # nothing playing Audio 1 rests until the music comes. The log is
-# /var/log/es1869eq.log and the picture /var/lib/es1869/eq.ppm.
+# /var/log/es1869eq.log and the picture /var/lib/es1869/eq.ppm; what it says
+# on stderr, such as a stream it can't follow, goes to /var/log/es1869eq.err.
 #
 # Install as /etc/init.d/es1869eq and add it to the default runlevel:
 #   rc-update add es1869eq default
@@ -28,6 +30,7 @@ command="${ES1869SCOPE}"
 command_args="-E -T ${ES1869EQ_BLOCK} -l /dev/null -O /var/log/es1869eq.log -s /var/lib/es1869/eq.ppm"
 command_background=yes
 pidfile="/run/es1869eq.pid"
+error_log="/var/log/es1869eq.err"
 
 depend() {
 	need alsasound
@@ -36,4 +39,6 @@ depend() {
 
 start_pre() {
 	checkpath -d -m 0755 /var/lib/es1869
+	# its live state and commands, for es1869scope on a console
+	checkpath -d -m 0750 -o root:audio /run/es1869
 }

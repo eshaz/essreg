@@ -333,6 +333,27 @@ through the record mixer, in blocks of `-T` seconds (a minute from the
 service). Fast changes are not its business: each correction answers a
 trend, a block later.
 
+The music it measures can change under it, and it follows:
+* **The rate:** it reads the stream's own rate from Audio 2's `hw_params` in
+  /proc and records Audio 1 at that rate, 44.1 or 48 kHz.
+* **3x:** at 3x, which stalls the DAC while Audio 1 records, or at a rate
+  Audio 1 can't record, Audio 1 rests while the monitor runs on. Its reader
+  watches the controls' events and stops Audio 1 the moment Audio 2 goes to
+  3x, since a step of the measurement can take 0.4 s.
+* **What counts:** music goes into the trends and the refits only as it was
+  measured at their start: at 44.1 kHz, where es1869cal calibrated the
+  record path, at 2x, since at 1x the top of the loop moves from run to run,
+  and with Audio 1's correction as it was. Other music is measured and
+  shown, a note in the log says why it isn't counted, and it counts again
+  once the setup comes back.
+* **The trim** moves only in the Clock mode, for the 44.1 kHz family, whose
+  clock its trend follows; otherwise the clock line says it is held.
+* **Audio 1's correction** switched starts Audio 1 again, since Audio 1
+  takes the switch at its next start.
+* **Another program's changes:** a control that es1869eq set and another
+  program changed stays as that program set it, also after es1869eq stops,
+  and a DAC correction that another program loads becomes the refits' start.
+
 After each block:
 * **The DAC:** the loop's deviation against 1 kHz goes into 24 bands from
   250 Hz to 20 kHz, each band weighted by its coherence, since music may
@@ -408,7 +429,8 @@ The fields, by line:
 * **clock:** the chip's rate on the steered clock (ppm), the time error
   (us), the driver's ratio and the residual (ppm), then the driver's own
   error, its trend a block ahead and the trim in ppb. This one goes on `bias
-  -0.1838 pred -0.2818 trim 282 (moved)`.
+  -0.1838 pred -0.2818 trim 282 (moved)`. Outside the Clock mode, or on the
+  48 kHz family, the line ends at the trim with why it is held.
 * **overlay:** |r| at the lag, the delay between frames, its spread, and the
   segments left out.
 * **eq:** the deviation against 1 kHz, the largest predicted drift, and the

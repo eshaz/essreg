@@ -146,8 +146,16 @@ static const char *const lv_name[4] = { "L", "R", "L from R", "R from L" };
 struct lv_saved {
 	char name[48];
 	unsigned int count;
-	long v[2];
+	long v[2]; // what it was before the run
+	long set[2]; // and what the run set it to
 };
+
+// the controls changed under the view, as its reader saw them go by
+#define LV_CH_OVER 1 // Audio 2's output rate
+#define LV_CH_A1C 2 // Audio 1's correction switched
+#define LV_CH_TAPS 4 // the DAC's correction loaded
+#define LV_CH_OTHER 8 // any other, a control the run set among them
+#define LV_E_3X (-100000) // the reader stopped Audio 1 for 3x
 
 struct loopview {
 	struct loopview_cfg cfg;
@@ -162,6 +170,18 @@ struct loopview {
 	uint64_t lag_at; // the frame of the last search for the lag
 	long long retry; // when to try the streams again
 	snd_ctl_t *ctl;
+	snd_ctl_t *evctl; // the reader's, for the controls' events
+	unsigned int changed; // LV_CH_ bits the reader saw, for the step
+	char card[40]; // the card's directory in /proc/asound
+	unsigned int stream_rate; // Audio 2's stream's rate, 0 if closed
+	int a1_rest; // Audio 1 rests for the stream: 3x, or a rate it can't take
+	int a1c_applied; // Audio 1's correction as its last start took it
+	struct eq_setup run_setup; // what this run is measured under
+	struct eq_setup base_setup; // and what the trends started under
+	int have_setup;
+	char not_counted[160]; // why the block's last run wasn't counted
+	unsigned long blk_segs; // the block's segments, counted or not
+	long taps_set[3 * EQ_SIDES]; // the DAC's correction as last loaded
 	struct lv_saved saved[LV_SAVED];
 	int nsaved, treble, over;
 	char journal[64];
@@ -194,7 +214,7 @@ struct loopview {
 	// both
 	long lag;
 	int lagged;
-	char why[96];
+	char why[160]; // why the view stands still, in plain words
 	long long drawn;
 	// the figures, made for each drawing
 	double complex *h[4]; // the paths, solved together
@@ -473,6 +493,8 @@ static int lv_set(struct loopview *v, const char *name, long a, long b)
 		s->v[1] = count > 1 ? old[1] : old[0];
 		journal_write(v);
 	}
+	v->saved[i].set[0] = a;
+	v->saved[i].set[1] = b;
 	return ctl_write(v->ctl, name, val, 2);
 }
 
@@ -532,12 +554,6 @@ static int lv_route(struct loopview *v)
 		lv_set(v, "Audio 2 Output Rate", 1, 1);
 		lv_set(v, "Audio 2 Treble Correction Playback Switch", 1, 1);
 	}
-	if (v->mon && !ctl_read(v->ctl, "Audio 2 Output Rate", val, &n) &&
-	    val[0] > 1) {
-		say("Audio 2 runs at 3x, which Audio 1's recording "
-		    "would stall: set \"Audio 2 Output Rate\" to 2x");
-		return -2;
-	}
 	if (!v->mon)
 		lv_set(v, "Master Playback Switch", 0, 0);
 	for (i = 0; i < sizeof(quiet) / sizeof(quiet[0]); i++)
@@ -589,15 +605,54 @@ static void lv_tstamp(snd_pcm_t *p)
 		snd_pcm_sw_params(p, sw);
 }
 
+// the card's directory in /proc/asound, from the control's name as
+// hw:CARD=ES1869 or hw:0 gives it
+static void lv_card(struct loopview *v)
+{
+	const char *c = strstr(v->cfg.ctl, "CARD=");
+
+	v->card[0] = 0;
+	if (c)
+		snprintf(v->card, sizeof(v->card), "%.*s",
+			 (int)strcspn(c + 5, ",:"), c + 5);
+	else if (!strncmp(v->cfg.ctl, "hw:", 3))
+		snprintf(v->card, sizeof(v->card), "card%d",
+			 atoi(v->cfg.ctl + 3));
+}
+
+// Audio 2's stream's own rate, from its hw_params in /proc, which the core
+// keeps without the chip: 0 while it is closed
+static unsigned int lv_stream_rate(const struct loopview *v)
+{
+	char path[96], line[80];
+	unsigned int rate = 0;
+	FILE *f;
+
+	if (!v->card[0])
+		return 0;
+	snprintf(path, sizeof(path), "/proc/asound/%s/pcm0p/sub0/hw_params",
+		 v->card);
+	f = fopen(path, "r");
+	if (!f)
+		return 0;
+	while (fgets(line, sizeof(line), f))
+		if (sscanf(line, "rate: %u", &rate) == 1)
+			break;
+	fclose(f);
+	return rate;
+}
+
 // the monitor at the rate it offers, which is Audio 2's ring's while Audio 2
-// is prepared: Audio 1's rate, or twice that. Between two runs of the music
-// it asks for the rate the last one ran at, which the next start then carries
-// on, where any other would break it off at once
+// is prepared: the stream's rate, or two or three times that. Between two
+// runs of the music it asks for the rate the last one ran at, which the next
+// start then carries on, where any other would break it off at once. The
+// stream's own rate tells the factor; whether Audio 1 can follow it is
+// lv_follow's to say
 static int lv_mon_open(struct loopview *v)
 {
 	snd_pcm_hw_params_t *hw;
 	snd_pcm_uframes_t frames;
-	unsigned int rate = v->rate * (v->want ? v->want : 1);
+	unsigned int rate = v->rate * (v->want ? v->want : 1), s;
 	int err;
 
 	if (v->mon)
@@ -624,14 +679,11 @@ static int lv_mon_open(struct loopview *v)
 							  &frames)) < 0 ||
 	    (err = snd_pcm_hw_params(v->mon, hw)) < 0)
 		goto bad;
-	if (rate % v->rate || rate / v->rate > 2) {
-		snprintf(
-			v->why, sizeof(v->why),
-			"the monitor runs at %u Hz: Audio 2 at 1x or 2x, please",
-			rate);
-		return -1;
-	}
-	v->factor = v->want = rate / v->rate;
+	s = lv_stream_rate(v);
+	if (!s || rate % s || rate / s > 3)
+		s = rate % v->rate || rate / v->rate > 3 ? rate : v->rate;
+	v->stream_rate = s;
+	v->factor = v->want = rate / s;
 	lv_tstamp(v->mon);
 	return 0;
 bad:
@@ -1074,7 +1126,7 @@ static void lv_clear(struct loopview *v)
 		loop_reset(&v->path[i]);
 	for (i = 0; i < LV_EQ_BANDS; i++)
 		v->eq_w[i] = v->eq_v[i] = v->eq_n[i] = 0;
-	v->eq_segs = 0;
+	v->eq_segs = v->blk_segs = 0;
 	pthread_mutex_lock(&v->clk_lock);
 	v->cn = v->cu = v->cy = v->cuu = v->cuy = v->cyy = 0;
 	v->csn = v->csxx = v->csxy = v->csyy = v->cruns = 0;
@@ -1154,6 +1206,40 @@ static int lv_pull(struct loopview *v)
 	}
 }
 
+// the controls changed since the last look, as LV_CH_ bits for the step.
+// In the reader, Audio 2 gone to 3x stops Audio 1 there and then, since the
+// DAC stalls while Audio 1 records and a step may take 0.4 s: 1 then
+static int lv_events(struct loopview *v, int reader)
+{
+	snd_ctl_event_t *ev;
+	unsigned int bits = 0, n;
+	long val[2];
+
+	if (!v->evctl)
+		return 0;
+	snd_ctl_event_alloca(&ev);
+	while (snd_ctl_read(v->evctl, ev) > 0) {
+		const char *name;
+
+		if (snd_ctl_event_get_type(ev) != SND_CTL_EVENT_ELEM)
+			continue;
+		name = snd_ctl_event_elem_get_name(ev);
+		bits |= !strcmp(name, "Audio 2 Output Rate") ? LV_CH_OVER :
+			!strcmp(name, "Audio 1 Correction Capture Switch") ?
+							       LV_CH_A1C :
+			!strcmp(name, "Audio 2 Treble Correction Taps") ?
+							       LV_CH_TAPS :
+							       LV_CH_OTHER;
+	}
+	if (bits)
+		__atomic_fetch_or(&v->changed, bits, __ATOMIC_RELEASE);
+	if (!reader || !(bits & LV_CH_OVER) || v->a1_rest ||
+	    ctl_read(v->evctl, "Audio 2 Output Rate", val, &n) || val[0] < 2)
+		return 0;
+	snd_pcm_drop(v->cap);
+	return 1;
+}
+
 // the streams' reader, a thread of its own: what each stream has, as it
 // comes, until the first error, which the step takes up
 static void *lv_reader(void *arg)
@@ -1163,8 +1249,12 @@ static void *lv_reader(void *arg)
 	while (!__atomic_load_n(&v->rstop, __ATOMIC_ACQUIRE)) {
 		int err = v->mon ? lv_take(v) : 0, which = LV_IN;
 
-		if (err >= 0) {
+		if (err >= 0 && !v->a1_rest) {
 			err = lv_pull(v);
+			which = LV_CAP;
+		}
+		if (err >= 0 && lv_events(v, 1)) {
+			err = LV_E_3X;
 			which = LV_CAP;
 		}
 		if (err < 0) {
@@ -1213,9 +1303,44 @@ static int lv_fault(struct loopview *v, int *which)
 // found again, and the sums cleared with clear. With the music, either may
 // start alone, and the sums hold, since the loop is the same, unless the
 // DAC's rate changed; the noise and Audio 1 always start together
+// Audio 1 for the stream as it now plays, as eq_policy has it: at rest at
+// 3x or at a rate it can't record, else at the stream's rate, opened again
+// if that moved; 0, or -1 if Audio 1 couldn't be opened at its new rate
+static int lv_follow(struct loopview *v)
+{
+	struct eq_setup s = { .rate = v->stream_rate ? v->stream_rate : v->rate,
+			      .factor = v->factor };
+	char why[160];
+	int was = v->a1_rest;
+
+	v->a1_rest = !!(eq_policy(&s, NULL, why, sizeof(why)) & EQ_REST);
+	if (v->a1_rest) {
+		if (!was && v->cap)
+			snd_pcm_drop(v->cap);
+		if (!was)
+			say("%s", why);
+		snprintf(v->why, sizeof(v->why), "%s", why);
+		return 0;
+	}
+	if (s.rate != v->rate || !v->cap) {
+		if (v->cap)
+			snd_pcm_close(v->cap);
+		v->cap = NULL;
+		if (lv_pcm(&v->cap, v->cfg.capture, SND_PCM_STREAM_CAPTURE,
+			   s.rate, 500000))
+			return -1;
+		say("Audio 1 records at %u Hz, as the stream plays", s.rate);
+		v->rate = s.rate;
+	}
+	if (was)
+		say("Audio 1 records again: the stream plays at %ux",
+		    v->factor);
+	return 0;
+}
+
 static int lv_start(struct loopview *v, int which, int clear)
 {
-	unsigned int factor = v->factor;
+	unsigned int factor = v->factor, rate = v->rate;
 
 	// neither thread left to move a count after it is cleared
 	lv_reader_stop(v);
@@ -1238,19 +1363,40 @@ static int lv_start(struct loopview *v, int which, int clear)
 	if (which & LV_CAP)
 		v->captured = v->next = 0;
 	if (v->cfg.monitor) {
-		if ((which & LV_IN) && lv_mon_open(v))
+		int rest = v->a1_rest;
+
+		if ((which & LV_IN) && (lv_mon_open(v) || lv_follow(v)))
 			return -1;
-		if (clear || v->factor != factor)
+		// Audio 1 with the stream once it may again, and not at rest
+		if (rest && !v->a1_rest) {
+			which |= LV_CAP;
+			v->captured = v->next = 0;
+		}
+		if (v->a1_rest)
+			which &= ~LV_CAP;
+		if (clear || v->factor != factor || v->rate != rate)
 			lv_clear(v);
 		if ((which & LV_IN) &&
 		    (snd_pcm_prepare(v->mon) < 0 || snd_pcm_start(v->mon) < 0))
 			goto bad;
 		if (which & LV_CAP) {
+			long val[2];
+			unsigned int n;
+
 			snd_pcm_drop(v->cap);
+			// the correction that this start of Audio 1 takes
+			v->a1c_applied =
+				!ctl_read(v->ctl,
+					  "Audio 1 Correction Capture Switch",
+					  val, &n) &&
+				val[0];
 			if (snd_pcm_prepare(v->cap) < 0 ||
 			    snd_pcm_start(v->cap) < 0)
 				goto bad;
 		}
+		v->run_setup.rate = v->rate;
+		v->run_setup.factor = v->factor;
+		v->run_setup.a1c = v->a1c_applied;
 		return lv_reader_start(v);
 	}
 	lv_clear(v);
@@ -1480,6 +1626,14 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 		v->ctl = NULL;
 		goto bad;
 	}
+	lv_card(v);
+	// beside the music, the controls' events, which the reader watches
+	if (cfg->monitor) {
+		if (snd_ctl_open(&v->evctl, cfg->ctl, SND_CTL_NONBLOCK) < 0)
+			v->evctl = NULL;
+		else
+			snd_ctl_subscribe_events(v->evctl, 1);
+	}
 	if (cfg->equalize) {
 		struct timespec ts;
 
@@ -1489,6 +1643,7 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 		v->have0 = !ctl_read_all(v->ctl,
 					 "Audio 2 Treble Correction Taps",
 					 v->taps0, 3 * EQ_SIDES);
+		memcpy(v->taps_set, v->taps0, sizeof(v->taps_set));
 		if (cfg->log && !(v->eqlog = fopen(cfg->log, "a")))
 			say("%s: %s", cfg->log, strerror(errno));
 		if (v->eqlog)
@@ -1548,6 +1703,8 @@ void loopview_close(struct loopview *v)
 		say_hook(NULL, NULL);
 		fclose(v->eqlog);
 	}
+	if (v->evctl)
+		snd_ctl_close(v->evctl);
 	for (i = 0; i < PATHS; i++)
 		loop_free(&v->path[i]);
 	for (i = 0; i < 4; i++) {
@@ -1963,9 +2120,25 @@ static double lv_eq_fc(int b, double *lo, double *hi)
 static void lv_eq_run(struct loopview *v)
 {
 	unsigned long segs = v->path[LL].segments;
-	int b, k;
+	char why[160];
+	int b, k, count;
 
+	// what the run was measured under, against the trends' start
+	count = !!(eq_policy(&v->run_setup,
+			     v->have_setup ? &v->base_setup : NULL, why,
+			     sizeof(why)) &
+		   EQ_COUNT);
 	if (segs >= LV_EQ_RUN) {
+		v->blk_segs += segs;
+		if (!count)
+			snprintf(v->not_counted, sizeof(v->not_counted), "%s",
+				 why);
+		else if (!v->have_setup) {
+			v->base_setup = v->run_setup;
+			v->have_setup = 1;
+		}
+	}
+	if (count && segs >= LV_EQ_RUN) {
 		lv_figures(v);
 		for (b = 0; b < LV_EQ_BANDS; b++) {
 			double lo, hi;
@@ -1993,7 +2166,7 @@ static void lv_eq_run(struct loopview *v)
 		v->eq_segs += segs;
 	}
 	// the DAC's gap from this run, in LSB, into the block by its segments
-	if (v->zst.segments >= LV_EQ_RUN) {
+	if (count && v->zst.segments >= LV_EQ_RUN) {
 		unsigned int lo = lv_bin(v, LV_ZS_LO), hi = lv_bin(v, LV_ZS_HI);
 
 		for (k = 0; k < 2; k++)
@@ -2079,6 +2252,8 @@ static int lv_eq_refit(struct loopview *v, const double *drift, int have,
 			ctl_read_all(v->ctl, "Audio 2 Treble Correction Taps",
 				     all, 3 * EQ_SIDES);
 	}
+	// what it loaded, so that its own load isn't taken for another's
+	memcpy(v->taps_set, all, sizeof(all));
 	*corr = 20 * log10(eq_sides_gain(row, 20000, v->rate) /
 			   eq_sides_gain(row0, 20000, v->rate));
 	return fitted;
@@ -2112,12 +2287,23 @@ static void lv_eq_block(struct loopview *v, double now)
 	unsigned int n;
 	long cal[2];
 	int b, at = LV_EQ_BANDS - 1, have = 0, fitted = 0, trimmed = 0;
-	int based = 1;
-	long trim;
+	int based = 1, tmode;
+	long trim, mode[2];
+	char why[160];
+	struct eq_setup at_now;
 	FILE *out = v->eqlog ? v->eqlog : stdout;
 
 	lv_eq_run(v);
 	ahead = now + v->cfg.secs;
+	// music measured otherwise than the trends started says so, once
+	if (!v->eq_segs && v->not_counted[0])
+		say("%s", v->not_counted);
+	// the trim answers the Clock mode's residual on the 44.1 kHz family
+	at_now = v->run_setup;
+	at_now.mode = ctl_read(v->ctl, "Audio 2 Rate Correction", mode, &n) ?
+			      0 :
+			      (int)mode[0];
+	tmode = !!(eq_policy(&at_now, NULL, why, sizeof(why)) & EQ_TRIM);
 	for (b = 0; b < LV_EQ_BANDS; b++) {
 		m[b] = drift[b] = NAN;
 		if (v->eq_w[b] > 0) {
@@ -2167,6 +2353,14 @@ static void lv_eq_block(struct loopview *v, double now)
 	if (lv_clock_rate(v, &chip, &tie) || lv_applied_ppb(&applied) ||
 	    lv_param("a2_trim_ppb", &trim, NULL)) {
 		// no clock this block
+	} else if (!tmode) {
+		// the trend and the trim are the Clock mode's: held
+		fprintf(out,
+			"%.0f clock chip %+.4f tie %.1f applied %+.4f trim %ld "
+			"(held: %s)\n",
+			now - v->t0, chip, tie, applied / 1e3, trim,
+			at_now.mode != 2 ? "the rate correction isn't Clock" :
+					   "the 48 kHz family's clock");
 	} else if (!lv_eq_chip(v, now, chip)) {
 		fprintf(out,
 			"%.0f clock chip %+.4f tie %.1f off its trend, left out\n",
@@ -2232,7 +2426,8 @@ static void lv_eq_block(struct loopview *v, double now)
 	// the next block from here, with the lag kept
 	for (b = 0; b < LV_EQ_BANDS; b++)
 		v->eq_w[b] = v->eq_v[b] = v->eq_n[b] = 0;
-	v->eq_segs = 0;
+	v->eq_segs = v->blk_segs = 0;
+	v->not_counted[0] = 0;
 	v->zs_w[0] = v->zs_w[1] = v->zs_n = 0;
 }
 
@@ -2252,7 +2447,7 @@ int loopview_done(const struct loopview *v)
 
 double loopview_seconds(const struct loopview *v)
 {
-	return (v->eq_segs + v->path[LL].segments) * (v->n / 2) /
+	return (v->blk_segs + v->path[LL].segments) * (v->n / 2) /
 	       (double)v->rate;
 }
 
@@ -2479,7 +2674,8 @@ static void lv_idle(struct loopview *v)
 	lv_clock_fold(v);
 	v->cfirst = 0;
 	pthread_mutex_unlock(&v->clk_lock);
-	snd_pcm_drop(v->cap);
+	if (v->cap)
+		snd_pcm_drop(v->cap);
 	snd_pcm_drop(v->mon);
 	if (snd_pcm_prepare(v->mon) >= 0)
 		snd_pcm_start(v->mon);
@@ -2531,6 +2727,55 @@ static int lv_rest(struct loopview *v, long long now)
 	return 0;
 }
 
+// what the reader saw change: Audio 1 started again to take its correction
+// as switched, the DAC's correction that another program loaded taken as the
+// refits' start, and a control the run set that another program changed left
+// as they set it, out of the journal that the end of the run puts back
+static void lv_changes(struct loopview *v)
+{
+	unsigned int bits =
+		__atomic_exchange_n(&v->changed, 0, __ATOMIC_ACQ_REL);
+	long cur[2], all[3 * EQ_SIDES];
+	unsigned int n;
+	int i, k;
+
+	if (!bits)
+		return;
+	if ((bits & LV_CH_A1C) && v->reading && !v->a1_rest && !v->retry) {
+		say("Audio 1's correction was switched: Audio 1 starts again "
+		    "to take it");
+		if (lv_start(v, LV_CAP, 0)) {
+			v->again = LV_BOTH;
+			v->retry = lv_now() + 1000000000LL;
+		}
+	}
+	if ((bits & LV_CH_TAPS) && v->have0 &&
+	    !ctl_read_all(v->ctl, "Audio 2 Treble Correction Taps", all,
+			  3 * EQ_SIDES) &&
+	    memcmp(all, v->taps_set, sizeof(all))) {
+		memcpy(v->taps0, all, sizeof(all));
+		memcpy(v->taps_set, all, sizeof(all));
+		say("the DAC's correction was loaded by another program: the "
+		    "refits start from it");
+	}
+	for (i = 0; i < v->nsaved; i++) {
+		struct lv_saved *sv = &v->saved[i];
+
+		if (ctl_read(v->ctl, sv->name, cur, &n) ||
+		    (cur[0] == sv->set[0] &&
+		     (sv->count < 2 || cur[1] == sv->set[1])))
+			continue;
+		say("\"%s\" was changed by another program: it stays as they "
+		    "set it",
+		    sv->name);
+		for (k = i; k + 1 < v->nsaved; k++)
+			v->saved[k] = v->saved[k + 1];
+		v->nsaved--;
+		i--;
+		journal_write(v);
+	}
+}
+
 int loopview_step(struct loopview *v, struct canvas *c)
 {
 	unsigned long before = v->path[LL].segments;
@@ -2547,6 +2792,16 @@ int loopview_step(struct loopview *v, struct canvas *c)
 		return 1;
 	}
 	err = lv_fault(v, &which);
+	if (err == LV_E_3X) {
+		// the reader stopped Audio 1: the monitor again at 3x, and
+		// Audio 1 at rest until the rate comes down
+		if (lv_start(v, LV_BOTH, 0)) {
+			v->again = LV_BOTH;
+			v->retry = lv_now() + 1000000000LL;
+		}
+		lv_redraw(v, c);
+		return 1;
+	}
 	if (err < 0) {
 		say("%s on %s after %llu frames, started again",
 		    snd_strerror(err),
@@ -2572,6 +2827,10 @@ int loopview_step(struct loopview *v, struct canvas *c)
 		lv_redraw(v, c);
 		return 1;
 	}
+	// the controls' events, the reader's while it reads
+	if (!v->reading)
+		lv_events(v, 0);
+	lv_changes(v);
 	if (v->mon && lv_rest(v, t0)) {
 		lv_redraw(v, c);
 		return 1;

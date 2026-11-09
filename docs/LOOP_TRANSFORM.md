@@ -360,7 +360,8 @@ overrun, and the recording started again on its own.
   ([The DAC apart from the ADC](#the-dac-apart-from-the-adc)), but -E would
   need it beside the loop all the time, and the VX's capture loads the
   Celeron.
-* Music at 48 kHz isn't followed, because Audio 1 records at 44.1 kHz.
+* Music at 48 kHz is measured at 48 kHz but not counted, because the record
+  path was calibrated at 44.1 kHz.
 * The DAC's gap at its sign isn't learned: Audio 1's own soft dead zone
   takes it back once the music swings past its knee ([The DAC's gap at its
   sign](#the-dacs-gap-at-its-sign)).

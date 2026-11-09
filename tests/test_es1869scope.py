@@ -515,9 +515,53 @@ class EqTest(unittest.TestCase):
                                          ctypes.POINTER(ctypes.c_long),
                                          ctypes.POINTER(ctypes.c_long)]
 
+        class Setup(ctypes.Structure):
+            _fields_ = [("rate", ctypes.c_uint), ("factor", ctypes.c_uint),
+                        ("a1c", ctypes.c_int), ("mode", ctypes.c_int)]
+        cls.Setup = Setup
+        cls.lib.eq_policy.argtypes = [ctypes.POINTER(Setup),
+                                      ctypes.POINTER(Setup), ctypes.c_char_p,
+                                      ctypes.c_uint]
+
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.tmp)
+
+    def policy(self, now, base=None):
+        why = ctypes.create_string_buffer(160)
+        f = self.lib.eq_policy(ctypes.byref(self.Setup(*now)),
+                               ctypes.byref(self.Setup(*base)) if base
+                               else None, why, 160)
+        return f, why.value.decode()
+
+    def test_the_policy_rests_audio_1_where_it_must(self):
+        """3x stalls the DAC while Audio 1 records, and a stream past
+        Audio 1's highest rate can't be recorded"""
+        for now in ((44100, 3, 1, 2), (96000, 1, 1, 2), (0, 2, 1, 2)):
+            f, why = self.policy(now)
+            self.assertEqual(f, 1, now)
+            self.assertIn("Audio 1 rests", why)
+
+    def test_the_policy_counts_what_was_measured_like_the_start(self):
+        base = (44100, 2, 1, 2)
+        f, why = self.policy(base)
+        self.assertEqual((f, why), (2 | 4, ""))
+        self.assertEqual(self.policy(base, base), (2 | 4, ""))
+        # shown, not counted: another rate, 1x, Audio 1's correction
+        # switched or another factor than the start's; the trim still moves
+        # where the clock is the one the trend follows
+        for now, trim in (((48000, 2, 1, 2), 0), ((44100, 1, 1, 2), 4),
+                          ((44100, 2, 0, 2), 4)):
+            f, why = self.policy(now, base)
+            self.assertEqual(f, trim, now)
+            self.assertIn("not counted", why)
+
+    def test_the_trim_moves_only_in_the_clock_mode(self):
+        for mode in (0, 1):
+            f, why = self.policy((44100, 2, 1, mode))
+            self.assertEqual(f, 2, mode)
+        f, why = self.policy((22050, 2, 1, 2))
+        self.assertEqual(f, 4)
 
     def test_a_drift_is_predicted_a_block_ahead(self):
         s = self.Series()

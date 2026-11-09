@@ -42,4 +42,28 @@ double eq_sides_gain(const long *sides, double f, double rate);
 int eq_fit_sides(const double *f, const double *target, const double *w, int n,
 		 double rate, const long *prior, long *sides);
 
+/*
+ * what the music was measured under: the stream's rate, which Audio 1
+ * records at, the DAC's at 1, 2 or 3 times it, Audio 1's correction as its
+ * last start took it, and the rate correction (0 off, 1 trim, 2 clock)
+ */
+struct eq_setup {
+	unsigned int rate, factor;
+	int a1c, mode;
+};
+
+#define EQ_REST 1 /* Audio 1 rests: the DAC would stall, or it can't record */
+#define EQ_COUNT 2 /* the run goes into the trends and the refit */
+#define EQ_TRIM 4 /* the clock's trim may move */
+#define EQ_CAL_RATE 44100 /* the rate es1869cal measures the record path at */
+#define EQ_A1_MAX 52920 /* the highest rate Audio 1 records (a1c_max_rate) */
+
+/*
+ * what music under now may do, against base, the setup the trends started
+ * under (NULL before they have one): EQ_ flags, and in why (len bytes, at
+ * least 1) the reason for what it may not do, else ""
+ */
+int eq_policy(const struct eq_setup *now, const struct eq_setup *base,
+	      char *why, unsigned int len);
+
 #endif /* EQ_H */
