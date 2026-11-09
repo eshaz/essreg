@@ -394,8 +394,9 @@ Parameters only:
 * **Audio 2 Treble Correction Taps** (`Audio 2 Treble Correction Taps`): the
   DAC's correction that a2_treble folds into the rate filter, 16 side taps
   at each of 1x, 2x and 3x in Q30, as `tools/es1869treble.py` fits them;
-  treble.h's until others are loaded, for a DAC measured apart. A stream
-  takes them at its prepare.
+  treble.h's until others are loaded, for a DAC measured apart. A playing
+  stream takes them within milliseconds, between the filter's runs, with no
+  break.
 * **Audio 1 Correction** (`Audio 1 Correction Capture Switch`, F4): 0 to 1,
   default 0. Audio 1's 16-bit recordings through a filter of 33 taps a
   channel that takes back the record path's own response, with the taps of
@@ -405,7 +406,8 @@ Parameters only:
 * **Audio 1 Correction Taps** (`Audio 1 Correction Capture Taps`): the
   correction filter's taps, 17 for each channel, the left's first, each the
   centre then outward, in units of 1/16384; the identity until a calibration
-  (`es1869scope -C`) loads its own. A recording takes them at its start.
+  (`es1869scope -C`) loads its own. A recording under way takes them at its
+  next pass.
 
 Parameters only:
 

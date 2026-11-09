@@ -700,14 +700,6 @@ static void rs_table(struct es1869 *chip)
 		rs->tab = rs_table_new(chip, 0);
 	if (es1869_val(ES_S_a2_treble))
 		most = es1869_val(ES_S_a2_oversample);
-	// loaded taps go into the tables made, while no stream runs on them
-	if (chip->mirror.fit_stale && !chip->mirror.running) {
-		for (k = 0; k < ES_RS_OVER; k++)
-			if (rs->flat[k])
-				es1869_rs_table_fit(rs->flat[k], k + 1,
-						    chip->mirror.fit[k]);
-		chip->mirror.fit_stale = false;
-	}
 	for (k = 0; k <= most && k < ES_RS_OVER; k++)
 		if (!rs->flat[k])
 			rs->flat[k] = rs_table_new(chip, k + 1);
@@ -1176,6 +1168,8 @@ void es1869_a2_irq(struct es1869 *chip, struct snd_pcm_substream **sub)
 // subdevice 0's buffer: the application's, and on a 16-bit channel the
 // ring, 128 KiB of words in one 128 KiB page under 16 MB (the 8237 can't
 // cross one), or half of that where the allocation gives no such page
+static void mirror_fit_work(struct work_struct *work);
+
 int es1869_mirror_init(struct es1869 *chip)
 {
 	struct snd_pcm_substream *ss =
@@ -1193,6 +1187,7 @@ int es1869_mirror_init(struct es1869 *chip)
 	hrtimer_setup(&m->period, mirror_period, CLOCK_MONOTONIC,
 		      HRTIMER_MODE_REL_HARD);
 	INIT_WORK(&m->copy_work, mirror_copy_work);
+	INIT_WORK(&m->fit_work, mirror_fit_work);
 	memcpy(m->fit, es1869_treble, sizeof(m->fit));
 	m->over = 1;
 	m->rs.over = 1;
@@ -1221,6 +1216,45 @@ int es1869_mirror_init(struct es1869 *chip)
 	snd_pcm_set_managed_buffer(ss, SNDRV_DMA_TYPE_VMALLOC, NULL, 0,
 				   m->ring.bytes / 2);
 	return 0;
+}
+
+// loaded taps into each table that exists: made into a spare with the stream
+// playing on, about 3 ms each on the Armada, then swapped under the stream's
+// lock, which every run of the filter holds, so that the next run takes the
+// new one and the old one becomes the next spare
+static void mirror_fit_work(struct work_struct *work)
+{
+	struct es1869 *chip =
+		container_of(work, struct es1869, mirror.fit_work);
+	struct es1869_mirror *m = &chip->mirror;
+	struct es1869_rs *rs = &m->rs;
+	s32 fit[ES_RS_OVER][ES_RS_FIT];
+	unsigned long flags;
+	int k;
+
+	mutex_lock(&chip->state_mutex);
+	memcpy(fit, m->fit, sizeof(fit));
+	for (k = 0; k < ES_RS_OVER; k++) {
+		struct snd_pcm_substream *ss;
+		s16 *old;
+
+		if (!rs->flat[k])
+			continue;
+		if (!m->spare[k])
+			m->spare[k] = rs_table_new(chip, k + 1);
+		if (!m->spare[k])
+			continue;
+		es1869_rs_table_fit(m->spare[k], k + 1, fit[k]);
+		ss = chip->a2_sub;
+		if (ss)
+			snd_pcm_stream_lock_irqsave(ss, flags);
+		old = rs->flat[k];
+		rs->flat[k] = m->spare[k];
+		m->spare[k] = old;
+		if (ss)
+			snd_pcm_stream_unlock_irqrestore(ss, flags);
+	}
+	mutex_unlock(&chip->state_mutex);
 }
 
 static int fit_info(struct snd_kcontrol *kc, struct snd_ctl_elem_info *ui)
@@ -1265,9 +1299,9 @@ static int fit_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 			changed |= chip->mirror.fit[k][i] != v;
 			chip->mirror.fit[k][i] = v;
 		}
-	if (changed)
-		chip->mirror.fit_stale = true;
 	mutex_unlock(&chip->state_mutex);
+	if (changed)
+		queue_work(system_long_wq, &chip->mirror.fit_work);
 	return changed;
 }
 

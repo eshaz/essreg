@@ -107,7 +107,10 @@ struct es1869_mirror {
 	// treble.h's fit until "Audio 2 Treble Correction Taps" loads others,
 	// which a stream takes at its prepare
 	s32 fit[ES_RS_OVER][ES_RS_FIT];
-	bool fit_stale; // the tables still hold the taps before
+	// a load of them made into spare tables and swapped in between runs,
+	// so that a playing stream takes them with no break
+	s16 *spare[ES_RS_OVER];
+	struct work_struct fit_work;
 	u32 over; // the ring frames to a stream frame
 	u32 lap; // the ring's frames, as the 8237 runs through them
 	u32 rs_quiet; // where in the ring its silence has reached, in bytes
@@ -199,6 +202,7 @@ struct es1869 {
 	// the correction filter on Audio 1's recordings (a1filter.c)
 	struct es1869_cf a1c_cf;
 	s16 a1c_taps[2][ES_CF_HALF + 1]; // what the next recording takes
+	bool a1c_new; // and the one recording now takes them at its next pass
 	struct work_struct a1c_work;
 	bool a1c_on; // this recording goes through it
 	snd_pcm_uframes_t a1c_at; // the next frame of the buffer to filter

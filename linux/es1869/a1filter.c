@@ -22,7 +22,9 @@
  * (PCM device 1) stays exact, as es1869test's dig cases need. The taps come
  * from "Audio 1 Correction Capture Taps", 17 for each channel, the centre
  * first, in units of 1/16384, which a recording takes at its prepare with
- * a1c_filter. es1869scope -v 3 -C measures the loop, fits them and loads them.
+ * a1c_filter, and a recording under way at its next pass, its history kept,
+ * so that a correction can follow the path as it drifts. es1869scope -C
+ * measures the loop, fits them and loads them.
  *
  * ESS's drivers have no such filter: ES1869.DRV and ES1869.VXD record the
  * DMA's bytes as they come. The roll-off it takes back is measured, not from
@@ -55,6 +57,12 @@ static void a1c_work_fn(struct work_struct *work)
 	rt = ss->runtime;
 	pos = es1869_dma_pos(&chip->hw, chip->dma1,
 			     snd_pcm_lib_buffer_bytes(ss));
+	// taps loaded while it records: from this pass on, the history kept
+	if (chip->a1c_new) {
+		memcpy(chip->a1c_cf.taps, chip->a1c_taps,
+		       sizeof(chip->a1c_cf.taps));
+		chip->a1c_new = false;
+	}
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	to = es1869_forward(&chip->a1_last, bytes_to_frames(rt, pos),
 			    rt->buffer_size, bytes_to_frames(rt, 32));
@@ -96,6 +104,7 @@ void es1869_a1c_prepare(struct es1869 *chip, struct snd_pcm_substream *ss)
 		       rt->channels <= 2;
 	chip->a1c_at = 0;
 	memcpy(chip->a1c_cf.taps, chip->a1c_taps, sizeof(chip->a1c_cf.taps));
+	chip->a1c_new = false;
 	es1869_cf_reset(&chip->a1c_cf);
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 }
@@ -124,20 +133,22 @@ static int taps_info(struct snd_kcontrol *kc, struct snd_ctl_elem_info *ui)
 static int taps_get(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 {
 	struct es1869 *chip = snd_kcontrol_chip(kc);
+	unsigned long flags;
 	unsigned int c, i;
 
-	mutex_lock(&chip->state_mutex);
+	spin_lock_irqsave(&chip->reg_lock, flags);
 	for (c = 0; c < 2; c++)
 		for (i = 0; i <= ES_CF_HALF; i++)
 			uv->value.integer.value[c * (ES_CF_HALF + 1) + i] =
 				chip->a1c_taps[c][i];
-	mutex_unlock(&chip->state_mutex);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	return 0;
 }
 
 static int taps_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 {
 	struct es1869 *chip = snd_kcontrol_chip(kc);
+	unsigned long flags;
 	unsigned int c, i;
 	int changed = 0;
 
@@ -145,7 +156,8 @@ static int taps_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 		if (uv->value.integer.value[i] < -32768 ||
 		    uv->value.integer.value[i] > 32767)
 			return -EINVAL;
-	mutex_lock(&chip->state_mutex);
+	// under the lock the filter's work takes them by
+	spin_lock_irqsave(&chip->reg_lock, flags);
 	for (c = 0; c < 2; c++)
 		for (i = 0; i <= ES_CF_HALF; i++) {
 			s16 v = uv->value.integer.value[c * (ES_CF_HALF + 1) +
@@ -154,7 +166,9 @@ static int taps_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 			changed |= chip->a1c_taps[c][i] != v;
 			chip->a1c_taps[c][i] = v;
 		}
-	mutex_unlock(&chip->state_mutex);
+	if (changed)
+		chip->a1c_new = true;
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	return changed;
 }
 
