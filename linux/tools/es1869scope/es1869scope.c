@@ -6,7 +6,7 @@
  *   es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]
  *               [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]
  *               [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL] [-T SECONDS]
- *               [-m MONITOR] [-L DBFS] [-G PCM,ADC] [-C]
+ *               [-m MONITOR] [-L DBFS] [-G PCM,ADC] [-C] [-E] [-O LOG]
  *
  * Notes:
  *
@@ -40,7 +40,13 @@
  * -C calibrates Audio 1's correction filter: the loop at 2x with Audio 2's
  * treble correction on, taps fitted to the inverse of its response and
  * loaded with the filter on, and the loop again to verify; the filter and
- * its taps stay when the rest goes back.
+ * its taps stay when the rest goes back. -E corrects over time, beside the
+ * music, through the monitor: in blocks of -T seconds, the loop's deviation
+ * in bands and the Clock mode's residual against the steered clock become
+ * trends predicted a block ahead, from which it refits the DAC's correction
+ * and loads it live, and trims a2_trim_ppb (as root), a line a block to
+ * -O LOG (stdout without), until a signal; with -s it rewrites the picture
+ * at each block.
  *
  * Keys: q quits, 1, 2 and 3 choose the view, space holds the picture, r
  * redraws. -s draws once into a PPM file instead, at -W by -H (800 by 600),
@@ -640,7 +646,7 @@ static void usage(void)
 		"                   [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]\n"
 		"                   [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL]\n"
 		"                   [-T SECONDS] [-m MONITOR] [-L DBFS] [-G PCM,ADC]\n"
-		"                   [-C]\n");
+		"                   [-C] [-E] [-O LOG]\n");
 }
 
 int main(int argc, char **argv)
@@ -666,7 +672,7 @@ int main(int argc, char **argv)
 	int o, held = 0;
 
 	while ((o = getopt(argc, argv,
-			   "l:d:s:W:H:v:c:r:i:x:p:a:k:T:m:L:G:C")) != -1) {
+			   "l:d:s:W:H:v:c:r:i:x:p:a:k:T:m:L:G:CEO:")) != -1) {
 		switch (o) {
 		case 'l':
 			log = optarg;
@@ -723,6 +729,13 @@ int main(int argc, char **argv)
 			lc.calibrate = 1;
 			view = 3;
 			break;
+		case 'E':
+			lc.equalize = 1;
+			view = 3;
+			break;
+		case 'O':
+			lc.log = optarg;
+			break;
 		case 'L':
 			lc.level = atof(optarg);
 			break;
@@ -744,6 +757,9 @@ int main(int argc, char **argv)
 	}
 	if (view == 3 && lc.ref)
 		lc.rec = wav;
+	// over time, beside the music: from the monitor, a block of -T seconds
+	if (lc.equalize && !lc.monitor)
+		lc.monitor = "hw:CARD=ES1869,DEV=3";
 	if (view == 3 && lc.ref && !lc.rec) {
 		fprintf(stderr, "es1869scope: -x needs -i, what came back\n");
 		return 1;
@@ -771,10 +787,17 @@ int main(int argc, char **argv)
 			// it finds its lag
 			until = time(NULL) +
 				(long long)((lc.calibrate ? 4 : 2) * secs) + 10;
-			while (!lc.ref && !stop && time(NULL) < until &&
+			while (!lc.ref && !stop &&
+			       (lc.equalize || time(NULL) < until) &&
 			       !loopview_done(lv)) {
-				if (loopview_step(lv, &c) < 0)
+				int r = loopview_step(lv, &c);
+
+				if (r < 0)
 					break;
+				// over time, the picture of each block
+				if (r > 0 && lc.equalize &&
+				    canvas_ppm(&c, shot))
+					perror(shot);
 				usleep(10000);
 			}
 			loopview_frame(lv, &c);

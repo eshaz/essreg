@@ -279,6 +279,46 @@ Measured on the Armada, 2026-11-08, before the filter:
 * Record path at 20 kHz: -4.2 dB on the left, -5.4 dB on the right.
 * At 10 kHz: -0.9 dB and -1.3 dB.
 
+## Corrections over time
+
+`es1869scope -E` follows the corrections while the music plays. It reads
+what Audio 2's DAC took through the monitor and what came back on Audio 1
+through the record mixer, in blocks of `-T` seconds (a minute from the
+service). Fast changes are not its business: each correction answers a
+trend, a block later.
+
+After each block:
+* **The DAC:** the loop's deviation against 1 kHz goes into 24 bands from
+  250 Hz to 20 kHz, each band weighted by its coherence, since music may
+  leave a band empty. Each band keeps a trend, a line through its last 16
+  blocks, predicted a block ahead. Audio 2's DAC correction (the treble
+  correction's table at the rate in use) is refitted to take the prediction
+  back:
+  * a step of 0.5 dB at most an update;
+  * within 3 dB of where it began;
+  * nothing for deviations under 0.05 dB.
+
+  It is loaded live, and the driver swaps it in between the filter's runs.
+  This only happens through a record path that `es1869scope -C` calibrated.
+  Without that, the deviation is the record path's own loss, and the DAC's
+  correction stays.
+* **The clock:** Audio 1's capture positions, stamped on the monotonic
+  clock, give the chip's rate against the steered clock. The ratio that the
+  Clock mode applies, from the driver's /proc page, goes on top of it. What
+  is left over is the Clock mode's residual: on the Armada, 0.2 ppm over a
+  half hour in es1869test's `rs.clock.long44`. Its trend, predicted a block
+  ahead, moves `a2_trim_ppb` by half of it at a time (as root).
+
+Every block writes its lines to `-O LOG` and, with `-s`, the picture:
+```
+180 clock chip -28.6010 applied +28.5970 resid -0.0040 pred -0.0030 trim -20
+180 eq 250:+0.01 452:+0.00 ... 20000:-0.04 (refitted)
+```
+
+It holds Audio 2 at 2x at most, since 3x stalls while Audio 1 records, with
+the treble correction on, and puts both back when it stops.
+`linux/config/es1869eq.initd` runs it as a service after es1869cal and MPD.
+
 ## The DAC and the ADC apart
 
 The loop gives the DAC and the ADC together. The VX Pocket, cabled both

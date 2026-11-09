@@ -40,6 +40,15 @@ struct loopview_cfg {
 	 */
 	int calibrate;
 	double secs;
+	/*
+	 * corrections over time, beside the music (with monitor): in blocks of
+	 * secs, the loop's deviation in bands and the Clock mode's residual
+	 * against the steered clock, each a trend predicted a block ahead; the
+	 * DAC's correction refitted and loaded live, and a2_trim_ppb trimmed
+	 * (as root); a line a block to log, or stdout
+	 */
+	int equalize;
+	const char *log;
 };
 
 struct loopview;
@@ -60,7 +69,8 @@ int loopview_step(struct loopview *v, struct canvas *c);
 void loopview_key(struct loopview *v, int key);
 /* the seconds measured since the last start */
 double loopview_seconds(const struct loopview *v);
-/* the measurement over: secs of it, or the calibration through */
+/* the measurement over: secs of it, or the calibration through; never while
+ * it equalizes */
 int loopview_done(const struct loopview *v);
 /* the figures as lines of text, for tests and logs */
 void loopview_report(struct loopview *v, FILE *f);

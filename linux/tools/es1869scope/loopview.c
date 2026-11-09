@@ -51,6 +51,7 @@
 #include <unistd.h>
 
 #include "loop.h"
+#include "eq.h"
 #include "plot.h"
 #include "tie.h"
 
@@ -72,6 +73,14 @@
 
 static const double lv_cal_at[LV_CAL_AT] = { 1000,  5000,  10000,
 					     15000, 18000, 20000 };
+
+#define LV_EQ_BANDS 24 // log-spaced from 250 Hz to 20 kHz
+#define LV_EQ_STEP 0.5 // the most an update moves the correction, dB
+#define LV_EQ_MIN 0.05 // a deviation smaller than this leaves it alone, dB
+#define LV_EQ_COH 0.5 // the least coherence a band counts with
+#define LV_EQ_GAIN 0.5 // the share of the clock's residual a trim takes back
+#define LV_EQ_STAMPS 8192 // Audio 1's position readings a block keeps
+#define LV_EQ_SPAN 3.0 // the most the refits move it from the start, dB
 
 // L from L, R from R, L from R, R from L, and the inputs' cross-spectrum
 enum { LL, RR, LR, RL, XX, PATHS };
@@ -121,6 +130,15 @@ struct loopview {
 	int invert[2];
 	// the calibration: 0 measures, 1 verifies with the taps in, 2 is done
 	int phase;
+	// corrections over time: the bands' and the clock's trends, Audio 1's
+	// position readings of this block, its start, and the trim made
+	struct eq_series band[LV_EQ_BANDS], resid;
+	double st[LV_EQ_STAMPS], sn[LV_EQ_STAMPS], block0, t0;
+	int ns, blocks;
+	long trim;
+	long taps0[3 * EQ_SIDES]; // the DAC's correction when it began
+	int have0;
+	FILE *eqlog;
 	double before[2][LV_CAL_AT]; // the record path before, dB against 1 kHz
 	long taps[2][LV_CF_HALF + 1];
 	double peak[2]; // the correction's most gain, dB
@@ -227,6 +245,29 @@ static int ctl_write_all(snd_ctl_t *h, const char *name, const long *v,
 	for (i = 0; i < count; i++)
 		snd_ctl_elem_value_set_integer(val, i, v[i]);
 	return snd_ctl_elem_write(h, val) < 0 ? -1 : 0;
+}
+
+// an integer control's count values, all read
+static int ctl_read_all(snd_ctl_t *h, const char *name, long *v,
+			unsigned int count)
+{
+	snd_ctl_elem_id_t *id;
+	snd_ctl_elem_info_t *info;
+	snd_ctl_elem_value_t *val;
+	unsigned int i;
+
+	snd_ctl_elem_id_alloca(&id);
+	snd_ctl_elem_info_alloca(&info);
+	snd_ctl_elem_value_alloca(&val);
+	if (ctl_info(h, name, id, info) < 0 ||
+	    snd_ctl_elem_info_get_count(info) != count)
+		return -1;
+	snd_ctl_elem_value_set_id(val, id);
+	if (snd_ctl_elem_read(h, val) < 0)
+		return -1;
+	for (i = 0; i < count; i++)
+		v[i] = snd_ctl_elem_value_get_integer(val, i);
+	return 0;
 }
 
 // an enumerated control's item, by its name
@@ -372,6 +413,14 @@ static int lv_route(struct loopview *v)
 	unsigned int i, n;
 	int item;
 
+	// over time, beside the music: 2x at most, which Audio 1's recording
+	// leaves room for, and the DAC's correction on, which it refits
+	if (v->cfg.equalize) {
+		if (!ctl_read(v->ctl, "Audio 2 Output Rate", val, &n) &&
+		    val[0] > 1)
+			lv_set(v, "Audio 2 Output Rate", 1, 1);
+		lv_set(v, "Audio 2 Treble Correction Playback Switch", 1, 1);
+	}
 	if (v->mon && !ctl_read(v->ctl, "Audio 2 Output Rate", val, &n) &&
 	    val[0] > 1) {
 		fprintf(stderr,
@@ -480,6 +529,19 @@ static int lv_pcm(snd_pcm_t **p, const char *dev, snd_pcm_stream_t dir,
 		err = snd_pcm_set_params(*p, SND_PCM_FORMAT_S16_LE,
 					 SND_PCM_ACCESS_RW_INTERLEAVED, 2, rate,
 					 0, 200000);
+	// positions stamped on the monotonic clock, which NTP steers as it
+	// does the boot clock the Clock mode follows
+	if (!err) {
+		snd_pcm_sw_params_t *sw;
+
+		snd_pcm_sw_params_alloca(&sw);
+		if (!snd_pcm_sw_params_current(*p, sw) &&
+		    !snd_pcm_sw_params_set_tstamp_mode(*p, sw,
+						       SND_PCM_TSTAMP_ENABLE) &&
+		    !snd_pcm_sw_params_set_tstamp_type(
+			    *p, sw, SND_PCM_TSTAMP_TYPE_MONOTONIC))
+			snd_pcm_sw_params(*p, sw);
+	}
 	if (err < 0) {
 		fprintf(stderr, "es1869scope: %s: %s\n", dev,
 			snd_strerror(err));
@@ -675,6 +737,24 @@ static int lv_take(struct loopview *v)
 	}
 }
 
+// where Audio 1's capture stands on the steered clock: the frames read and
+// those waiting, at the core's stamp of its last position
+static void lv_stamp(struct loopview *v)
+{
+	snd_pcm_status_t *st;
+	snd_htimestamp_t ts;
+
+	snd_pcm_status_alloca(&st);
+	if (v->ns >= LV_EQ_STAMPS || snd_pcm_status(v->cap, st) < 0)
+		return;
+	snd_pcm_status_get_htstamp(st, &ts);
+	if (!ts.tv_sec)
+		return;
+	v->st[v->ns] = ts.tv_sec + ts.tv_nsec * 1e-9;
+	v->sn[v->ns] = (double)v->captured + snd_pcm_status_get_avail(st);
+	v->ns++;
+}
+
 static int lv_pull(struct loopview *v)
 {
 	int16_t buf[2 * LV_CHUNK];
@@ -690,6 +770,8 @@ static int lv_pull(struct loopview *v)
 			memcpy(&v->yring[2 * ((v->captured + i) % LV_RING)],
 			       &buf[2 * i], 4);
 		v->captured += r;
+		if (v->cfg.equalize)
+			lv_stamp(v);
 		lv_live_segments(v);
 	}
 }
@@ -698,6 +780,7 @@ static int lv_pull(struct loopview *v)
 static int lv_start(struct loopview *v)
 {
 	lv_reset(v);
+	v->ns = 0;
 	v->played = v->captured = v->next = v->mon_frames = v->lag_at = 0;
 	v->why[0] = 0;
 	if (v->cfg.monitor) {
@@ -794,6 +877,8 @@ bad:
 }
 
 static int lv_design(struct loopview *v, int c);
+static int lv_param(const char *name, long *v, const long *set);
+static void lv_eq_block(struct loopview *v, double now);
 static void lv_figures(struct loopview *v);
 static unsigned int lv_bin(const struct loopview *v, double hz);
 
@@ -925,6 +1010,19 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 		goto bad;
 	}
 	journal_apply(v->ctl, v->journal);
+	if (cfg->equalize) {
+		struct timespec ts;
+
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		v->t0 = ts.tv_sec + ts.tv_nsec * 1e-9;
+		lv_param("a2_trim_ppb", &v->trim, NULL);
+		v->have0 = !ctl_read_all(v->ctl,
+					 "Audio 2 Treble Correction Taps",
+					 v->taps0, 3 * EQ_SIDES);
+		if (cfg->log && !(v->eqlog = fopen(cfg->log, "a")))
+			fprintf(stderr, "es1869scope: %s: %s\n", cfg->log,
+				strerror(errno));
+	}
 	// the devices first, so that a busy one leaves the mixer as it was
 	if (lv_pcm(&v->cap, cfg->capture, SND_PCM_STREAM_CAPTURE, v->rate))
 		goto bad;
@@ -969,6 +1067,8 @@ void loopview_close(struct loopview *v)
 		lv_restore(v);
 		snd_ctl_close(v->ctl);
 	}
+	if (v->eqlog)
+		fclose(v->eqlog);
 	for (i = 0; i < PATHS; i++)
 		loop_free(&v->path[i]);
 	for (i = 0; i < 4; i++) {
@@ -1274,8 +1374,195 @@ static int lv_calibrate(struct loopview *v)
 	return lv_start(v);
 }
 
+// the Clock mode's ratio that the driver applies, ppb: "Audio 2's stream
+// takes +X ppb more of itself a frame" in its /proc page
+static int lv_applied_ppb(double *ppb)
+{
+	FILE *f = fopen("/proc/asound/ES1869/es1869", "r");
+	char line[160];
+	long long x;
+	int ok = 0;
+
+	if (!f)
+		return -1;
+	while (!ok && fgets(line, sizeof(line), f))
+		ok = sscanf(line,
+			    "clock: Audio 2's stream takes %lld ppb more of itself a frame",
+			    &x) == 1;
+	fclose(f);
+	if (ok)
+		*ppb = (double)x;
+	return ok ? 0 : -1;
+}
+
+static int lv_param(const char *name, long *v, const long *set)
+{
+	char path[96];
+	FILE *f;
+	int ok;
+
+	snprintf(path, sizeof(path), "/sys/module/snd_es1869/parameters/%s",
+		 name);
+	f = fopen(path, set ? "w" : "r");
+	if (!f)
+		return -1;
+	ok = set ? fprintf(f, "%ld\n", *set) > 0 : fscanf(f, "%ld", v) == 1;
+	return fclose(f) || !ok ? -1 : 0;
+}
+
+// the steered clock's rate of Audio 1's capture over the block, ppm against
+// its nominal: a line through its stamped positions
+static int lv_clock_rate(const struct loopview *v, double *ppm)
+{
+	double st = 0, sn = 0, stt = 0, stn = 0, t0, den;
+	int i;
+
+	if (v->ns < 16)
+		return -1;
+	t0 = v->st[0];
+	for (i = 0; i < v->ns; i++) {
+		double u = v->st[i] - t0;
+
+		st += u;
+		sn += v->sn[i];
+		stt += u * u;
+		stn += u * v->sn[i];
+	}
+	den = v->ns * stt - st * st;
+	if (den <= 0)
+		return -1;
+	*ppm = ((v->ns * stn - st * sn) / den / v->rate - 1) * 1e6;
+	return 0;
+}
+
+// a block's end: the loop's deviation in bands and the clock's residual
+// into their trends, each predicted a block ahead; the DAC's correction
+// refitted to the prediction and loaded, and the trim moved; a line to the log
+static void lv_eq_block(struct loopview *v, double now)
+{
+	double f[LV_EQ_BANDS + 3], target[LV_EQ_BANDS + 3], w[LV_EQ_BANDS + 3];
+	double dev[LV_EQ_BANDS], worst = 0, chip, applied, resid, ahead;
+	long all[3 * EQ_SIDES], sides[EQ_SIDES], over[2], cal[2];
+	unsigned int n;
+	int b, k, nf = 0, have = 0, fitted = 0, trimmed = 0;
+	FILE *out = v->eqlog ? v->eqlog : stdout;
+
+	lv_figures(v);
+	ahead = now + v->cfg.secs;
+	for (b = 0; b < LV_EQ_BANDS; b++) {
+		double fc = 250 * pow(80, b / (LV_EQ_BANDS - 1.0));
+		double lo = fc * pow(80, -0.5 / (LV_EQ_BANDS - 1.0));
+		double hi = fc * pow(80, 0.5 / (LV_EQ_BANDS - 1.0));
+		double sw = 0, sv = 0;
+		unsigned int k0 = lv_bin(v, lo), k1 = lv_bin(v, hi);
+
+		for (k = (int)k0; k <= (int)k1; k++) {
+			double c = fmin(v->coh[0][k], v->coh[1][k]);
+
+			if (c < LV_EQ_COH || !isfinite(v->mag[0][k]) ||
+			    !isfinite(v->mag[1][k]))
+				continue;
+			sw += c;
+			sv += c * (v->mag[0][k] + v->mag[1][k]) / 2;
+		}
+		if (sw > 0)
+			eq_push(&v->band[b], now, sv / sw);
+		dev[b] = eq_predict(&v->band[b], ahead, NULL);
+		if (v->band[b].n) {
+			f[nf] = fc;
+			w[nf] = 1;
+			have++;
+			nf++;
+		}
+		worst = fmax(worst, fabs(dev[b]));
+	}
+	// the DAC's correction, refitted where its table is in use, and only
+	// through a record path that the calibration has made flat: without it
+	// the deviation is the record path's own loss, not the DAC's
+	if (!ctl_read(v->ctl, "Audio 1 Correction Capture Switch", cal, &n) &&
+	    !cal[0] && !v->blocks)
+		fprintf(v->eqlog ? v->eqlog : stdout,
+			"0 the record path isn't calibrated (es1869scope -C): "
+			"the DAC's correction stays as it is\n");
+	if (have >= LV_EQ_BANDS / 2 && worst >= LV_EQ_MIN && v->have0 &&
+	    !ctl_read(v->ctl, "Audio 1 Correction Capture Switch", cal, &n) &&
+	    cal[0] && !ctl_read(v->ctl, "Audio 2 Output Rate", over, &n) &&
+	    over[0] < 3 &&
+	    !ctl_read_all(v->ctl, "Audio 2 Treble Correction Taps", all,
+			  3 * EQ_SIDES)) {
+		long *row = all + over[0] * EQ_SIDES;
+		const long *row0 = v->taps0 + over[0] * EQ_SIDES;
+
+		nf = 0;
+		for (b = 0; b < LV_EQ_BANDS; b++) {
+			double fc = 250 * pow(80, b / (LV_EQ_BANDS - 1.0));
+			double d = fmax(-LV_EQ_STEP, fmin(LV_EQ_STEP, dev[b]));
+			double g0 = eq_sides_gain(row0, fc, v->rate), g;
+
+			if (!v->band[b].n)
+				continue;
+			// a step of the trend's way, and within LV_EQ_SPAN of
+			// where it began
+			g = eq_sides_gain(row, fc, v->rate) * pow(10, -d / 20);
+			g = fmax(g0 * pow(10, -LV_EQ_SPAN / 20),
+				 fmin(g0 * pow(10, LV_EQ_SPAN / 20), g));
+			f[nf] = fc;
+			target[nf] = g;
+			w[nf++] = 1;
+		}
+		// the low end held where it is
+		for (k = 0; k < 3; k++, nf++) {
+			f[nf] = 50 * (k + 1);
+			target[nf] = eq_sides_gain(row, f[nf], v->rate);
+			w[nf] = 0.2;
+		}
+		if (!eq_fit_sides(f, target, w, nf, v->rate, sides)) {
+			memcpy(row, sides, sizeof(sides));
+			fitted = !ctl_write_all(
+				v->ctl, "Audio 2 Treble Correction Taps", all,
+				3 * EQ_SIDES);
+		}
+	}
+	// the clock: what Audio 2's stream does against the steered clock is
+	// the chip's rate there with the ratio the driver applies on top
+	if (!lv_clock_rate(v, &chip) && !lv_applied_ppb(&applied)) {
+		double pred;
+		long trim;
+
+		resid = chip + applied / 1e3;
+		eq_push(&v->resid, now, resid);
+		pred = eq_predict(&v->resid, ahead, NULL);
+		if (v->resid.n >= 3 && fabs(pred) >= 0.01 &&
+		    !lv_param("a2_trim_ppb", &trim, NULL)) {
+			trim -= lrint(LV_EQ_GAIN * pred * 1e3);
+			trimmed = !lv_param("a2_trim_ppb", NULL, &trim);
+			if (trimmed)
+				v->trim = trim;
+		}
+		fprintf(out,
+			"%.0f clock chip %+.4f applied %+.4f resid %+.4f pred %+.4f trim %ld%s\n",
+			now - v->t0, chip, applied / 1e3, resid,
+			eq_predict(&v->resid, ahead, NULL), v->trim,
+			trimmed ? " (moved)" : "");
+	}
+	fprintf(out, "%.0f eq", now - v->t0);
+	for (b = 0; b < LV_EQ_BANDS; b += 3)
+		fprintf(out, " %.0f:%+.2f",
+			250 * pow(80, b / (LV_EQ_BANDS - 1.0)), dev[b]);
+	fprintf(out, " %.0f:%+.2f%s\n", 20000.0, dev[LV_EQ_BANDS - 1],
+		fitted ? " (refitted)" : "");
+	fflush(out);
+	v->blocks++;
+	// the next block from here, with the lag kept
+	for (k = 0; k < PATHS; k++)
+		loop_reset(&v->path[k]);
+	v->ns = 0;
+}
+
 int loopview_done(const struct loopview *v)
 {
+	if (v->cfg.equalize)
+		return 0;
 	if (v->cfg.calibrate)
 		return v->phase == 2;
 	return loopview_seconds(v) >= v->cfg.secs;
@@ -1527,6 +1814,15 @@ int loopview_step(struct loopview *v, struct canvas *c)
 			lv_draw(v, c);
 			return 1;
 		}
+	}
+	if (v->cfg.equalize && v->lagged &&
+	    loopview_seconds(v) >= v->cfg.secs) {
+		struct timespec ts;
+
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		lv_eq_block(v, ts.tv_sec + ts.tv_nsec * 1e-9);
+		lv_draw(v, c);
+		return 1;
 	}
 	if (v->cfg.calibrate && v->phase < 2 && v->lagged &&
 	    loopview_seconds(v) >= v->cfg.secs) {

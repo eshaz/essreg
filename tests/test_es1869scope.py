@@ -486,6 +486,75 @@ class LoopTest(unittest.TestCase):
             self.assertLess(abs(frac.value), 0.5)
 
 
+class EqTest(unittest.TestCase):
+    """eq.c: a value's trend over blocks, predicted ahead, and the DAC
+    correction's side taps fitted to a response"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        so = os.path.join(cls.tmp, "eq.so")
+        subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall", "-Wextra",
+                               "-Werror", "-fPIC", "-shared", "-o", so,
+                               os.path.join(SCOPE, "eq.c"), "-lm"])
+        cls.lib = ctypes.CDLL(so)
+
+        class Series(ctypes.Structure):
+            _fields_ = [("t", D * 16), ("v", D * 16), ("n", ctypes.c_int),
+                        ("next", ctypes.c_int)]
+        cls.Series = Series
+        cls.lib.eq_reset.argtypes = [ctypes.POINTER(Series)]
+        cls.lib.eq_push.argtypes = [ctypes.POINTER(Series), D, D]
+        cls.lib.eq_predict.restype = D
+        cls.lib.eq_predict.argtypes = [ctypes.POINTER(Series), D, DP]
+        cls.lib.eq_sides_gain.restype = D
+        cls.lib.eq_sides_gain.argtypes = [ctypes.POINTER(ctypes.c_long), D, D]
+        cls.lib.eq_fit_sides.argtypes = [DP, DP, DP, ctypes.c_int, D,
+                                         ctypes.POINTER(ctypes.c_long)]
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp)
+
+    def test_a_drift_is_predicted_a_block_ahead(self):
+        s = self.Series()
+        self.lib.eq_reset(ctypes.byref(s))
+        rng = np.random.default_rng(15)
+        # 0.02 dB a minute, with 0.01 dB of noise, over 30 blocks
+        for k in range(30):
+            self.lib.eq_push(ctypes.byref(s), 60.0 * k,
+                             0.02 * k + rng.normal(0, 0.01))
+        slope = D()
+        got = self.lib.eq_predict(ctypes.byref(s), 60.0 * 30,
+                                  ctypes.byref(slope))
+        self.assertAlmostEqual(got, 0.6, delta=0.03)
+        self.assertAlmostEqual(slope.value * 60, 0.02, delta=0.004)
+
+    def test_few_blocks_give_their_mean(self):
+        s = self.Series()
+        self.lib.eq_reset(ctypes.byref(s))
+        self.lib.eq_push(ctypes.byref(s), 0.0, 1.0)
+        self.lib.eq_push(ctypes.byref(s), 60.0, 3.0)
+        self.assertAlmostEqual(self.lib.eq_predict(ctypes.byref(s), 600.0,
+                                                   None), 2.0)
+
+    def test_the_fit_reaches_a_target_and_holds_0_hz(self):
+        rate = 44100.0
+        f = np.geomspace(250, 20000, 24)
+        f = np.concatenate([f, [50, 100, 150]])
+        # a lift of 2 dB at 20 kHz, rising smoothly from 5 kHz
+        want = 10 ** (np.clip(np.log2(f / 5000) / 2, 0, 1) * 2 / 20)
+        w = np.ones(len(f))
+        sides = (ctypes.c_long * 16)()
+        self.assertEqual(self.lib.eq_fit_sides(dp(f), dp(want), dp(w),
+                                               len(f), rate, sides), 0)
+        for fk, wk in zip(f, want):
+            got = self.lib.eq_sides_gain(sides, fk, rate)
+            self.assertLess(abs(20 * np.log10(got / wk)), 0.1, fk)
+        self.assertAlmostEqual(self.lib.eq_sides_gain(sides, 0.0, rate), 1.0,
+                               places=9)
+
+
 class ShotTest(unittest.TestCase):
     """es1869scope draws a log into a picture: two pairs that share the
     Focusrite, interrupts with pulses, and the system's lines"""
@@ -500,7 +569,7 @@ class ShotTest(unittest.TestCase):
         cls.prog = os.path.join(cls.tmp, "es1869scope")
         src = [os.path.join(SCOPE, f) for f in
                ("es1869scope.c", "tie.c", "draw.c", "fb.c", "plot.c",
-                "fft.c", "spectro.c", "loop.c", "loopview.c")]
+                "fft.c", "spectro.c", "loop.c", "loopview.c", "eq.c")]
         subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall",
                                "-Wextra", "-Werror", "-o", cls.prog] + src +
                               ["-lasound", "-lz", "-lm"])
