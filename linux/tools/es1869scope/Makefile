@@ -2,11 +2,19 @@
 #
 # es1869clock, the clock logger, and es1869scope, the framebuffer display:
 # `make` for this machine, `make CFLAGS_ARCH=-march=pentium2` as the
-# Armada's kit builds it.
+# Armada's kit builds it. `make install` puts the programs in PREFIX's bin,
+# and `make install-services` the OpenRC services (es1869cal, es1869eq) and
+# the rotation of es1869eq's log in /etc, pointed at the programs there; a
+# package passes DESTDIR and PREFIX=/usr.
 #
 # (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 
 CC ?= gcc
+INSTALL ?= install
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+SYSCONFDIR ?= /etc
+CONFIG := ../../config
 CFLAGS_ARCH ?=
 CFLAGS ?= -O2
 CFLAGS += -std=gnu99 -Wall -Wextra -Werror $(CFLAGS_ARCH)
@@ -33,7 +41,22 @@ spectro.o: spectro.c spectro.h fft.h draw.h plot.h
 loopview.o: loopview.c loopview.h loop.h draw.h plot.h tie.h eq.h
 eq.o: eq.c eq.h
 
+install: all
+	$(INSTALL) -d $(DESTDIR)$(BINDIR)
+	$(INSTALL) -m 0755 es1869clock es1869scope $(DESTDIR)$(BINDIR)
+
+install-services:
+	$(INSTALL) -d $(DESTDIR)$(SYSCONFDIR)/init.d \
+		$(DESTDIR)$(SYSCONFDIR)/logrotate.d
+	for s in es1869cal es1869eq; do \
+		sed 's,/usr/local/bin/es1869scope,$(BINDIR)/es1869scope,' \
+			$(CONFIG)/$$s.initd > $(DESTDIR)$(SYSCONFDIR)/init.d/$$s && \
+		chmod 0755 $(DESTDIR)$(SYSCONFDIR)/init.d/$$s || exit 1; \
+	done
+	$(INSTALL) -m 0644 $(CONFIG)/es1869eq.logrotate \
+		$(DESTDIR)$(SYSCONFDIR)/logrotate.d/es1869eq
+
 clean:
 	rm -f es1869clock es1869scope *.o
 
-.PHONY: all clean
+.PHONY: all install install-services clean

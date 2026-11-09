@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# es1869eq's log, a few lines a minute while the music plays: a week to a
+# file and four kept. es1869scope keeps the log open, so it is copied and
+# cut in place.
+#
+# Install as /etc/logrotate.d/es1869eq (make install-services does).
+#
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+
+/var/log/es1869eq.log {
+	weekly
+	rotate 4
+	compress
+	delaycompress
+	missingok
+	notifempty
+	copytruncate
+}

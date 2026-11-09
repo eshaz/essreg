@@ -4,7 +4,26 @@ es1869clock logs the ES1869's clock against the machine's clocks, real time
 and other cards' crystals. es1869scope draws that log on the framebuffer of
 a virtual terminal and follows it as it grows. Both are in
 `linux/tools/es1869scope/`, under the GPL version 3 or later, and `make`
-there builds them, with alsa-lib and zlib.
+there builds them, with alsa-lib and zlib. Its text needs a console font of
+kbd's, 8 by 16.
+
+`make install` puts both programs in PREFIX's bin (`/usr/local` unless
+given), and `make install-services` puts two OpenRC services in
+`/etc/init.d`, pointed at the programs there, with the rotation of
+es1869eq's log in `/etc/logrotate.d`. A package passes `DESTDIR` and
+`PREFIX=/usr`. The services run at boot once added to the default runlevel:
+* **es1869cal** calibrates the record path before MPD starts ([The
+  calibration](#the-calibration-of-audio-1s-correction));
+* **es1869eq** follows the corrections over time beside MPD ([Corrections
+  over time](#corrections-over-time)).
+
+```
+make -C linux/tools/es1869scope install install-services PREFIX=/usr
+rc-update add es1869cal default
+rc-update add es1869eq default
+```
+
+`make -C linux dist` packs these with es1869test.
 
 ## What is measured
 
