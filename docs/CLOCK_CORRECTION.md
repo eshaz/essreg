@@ -19,7 +19,11 @@ Three clocks take part:
 * **The raw clock** (`CLOCK_MONOTONIC_RAW`) counts the same crystal, so the
   chip holds a fixed +0.873 ppm against it, the rounding of 800/481. That
   was measured on 2026-11-03 and held through the hour of 2026-11-08 to a
-  few ppb.
+  few ppb, both with the ACPI PM timer as the clock source. Booted with
+  `processor.max_cstate=1`, the Armada takes the CPU's time stamp counter
+  instead, whose rate the kernel calibrates at boot, and on 2026-11-09 the
+  chip read +0.490 ppm against that raw clock over an hour. The driver's
+  fits follow whichever clock the system has.
 * **The steered clock** (`CLOCK_MONOTONIC` and `CLOCK_BOOTTIME`) is the raw
   clock with chronyd's correction, so its rate against the raw clock is
   chrony's frequency, about 29 to 31 ppm on the Armada. That frequency moves
@@ -117,22 +121,23 @@ unbroken stream from 20:14 it fell from +1.19 ppm to zero in about six
 minutes, by two thirds every three minutes, as a line of 256 samples
 recovers from a disturbance. A fresh stream at 20:23 started at -0.04 ppm.
 
-What disturbed it is not yet known. One cause is ruled out, and one is
-likely:
-* **Restarts of the stream are ruled out.** A replay of the driver's fit
-  through restarts every 16.5 s, with the first interrupt of each up to 0.4
-  ms early, stayed within 20 ppb of the truth.
-* **The likely cause is a faulty build of es1869scope.** That evening it
-  read the monitor in a loop that never ended, at 82 % of the CPU in the
-  kernel, from 19:42 to 19:49 and from 20:01 to 20:03. Each read takes the
-  monitor's frames under a lock with interrupts off, so the interrupts'
-  stamps could come late by an amount that changed with the load. A line
-  through the earliest interrupts reads a lateness that changes as a rate.
+What disturbed it is not known. Two causes are ruled out:
+* **Restarts of the stream.** A replay of the driver's fit through restarts
+  every 16.5 s, with the first interrupt of each up to 0.4 ms early, stayed
+  within 20 ppb of the truth.
+* **A faulty build of es1869scope.** That evening it read the monitor in a
+  loop that never ended, at 82 % of the CPU in the kernel, from 19:42 to
+  19:49 and from 20:01 to 20:03, so the interrupts' stamps could have come
+  late by an amount that changed with the load. On 2026-11-09 the same loop
+  ran on purpose for 5 minutes beside one stream in the Clock mode, with the
+  fit read every 10 s. The fit stood at +0.483 ppm before it, on that boot's
+  raw clock, rose 20 ppb during it and fell 30 ppb after it. The interrupts
+  came earlier during the spin, a median of 3 us late against 26 us before,
+  since the CPU never sat idle. That boot had no C2, though, and the
+  evening's had.
 
-Running that loop on purpose while logging the fit and
-`/proc/asound/card0/es1869_irqs` would show it. es1869test's
-`rs.clock.long44` had earlier read 0.197 ppm over half an hour, against its
-limit of 0.1, under its own loads.
+es1869test's `rs.clock.long44` had earlier read 0.197 ppm over half an hour,
+against its limit of 0.1, under its own loads.
 
 The trim follows such an error within a few blocks, since -E measures the
 chip on the steered clock directly in every block. Without -E, the stream
@@ -156,9 +161,11 @@ second.
 
 ## Open questions
 
-* What disturbed the chip's fit on 2026-11-08: the faulty read loop, run
-  again on purpose with the interrupts logged, would confirm it or rule it
-  out.
+* What disturbed the chip's fit on 2026-11-08. The faulty read loop moved it
+  by 30 ppb at most without C2; with C2, an idle CPU wakes each interrupt
+  some 30 us later, which a load that comes and goes turns into a step in
+  the earliest interrupts' lateness, but a step that size moves a line of
+  256 s by about 0.2 ppm, not 1.2.
 * The fit of the steered clock lags chrony's frequency by about 20 minutes
   by design, so that chronyd's offset corrections don't reach the pitch. A
   faster fit would follow temperature sooner but carry more of those

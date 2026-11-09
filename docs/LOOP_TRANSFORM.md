@@ -129,6 +129,60 @@ about -106. It reaches to 21.9 kHz, into the band where at 2x the monitor's
 every other frame and the ADC fold the resampler's images back in different
 ways.
 
+### The DAC apart from the ADC
+
+A second recorder on the line out tells them apart: each recorder's own
+noise is its own, and only what the DAC put out reaches both. On 2026-11-09
+the VX recorded the line out while Audio 1 recorded the loop and Audio 2
+played `residual`, 20 s of program and then 20 s of digital silence
+([TEST_SIGNALS.md](TEST_SIGNALS.md#analyzing)). sigan.py took the two
+recordings together, three takes at 1x and three at 2x, and gave each part
+in dB a Hz at Audio 2's input:
+
+| Octave  | The DAC, in the silence | Audio 1's own | The VX's own |
+|---------|-------------------------|---------------|--------------|
+| 31.5 Hz | under -113              | -104          | -89          |
+| 125 Hz  | under -122              | -108          | -97          |
+| 1 kHz   | under -132              | -116          | -102         |
+| 4 kHz   | under -137              | -118          | -104         |
+| 16 kHz  | under -140              | -116          | -108         |
+
+The DAC's own noise stayed under twice its uncertainty in every octave, at
+1x and at 2x alike. It lies at least 9 dB under Audio 1's own at 31.5 Hz, 16
+dB at 1 kHz, 19 dB at 4 kHz and 24 dB at 16 kHz, so the noise that -E logs
+is the record path's: the mixer's stage, the ADC and its correction filter.
+With the music, Audio 1's own noise rose 1 to 2 dB over 1 kHz and what both
+heard didn't, so that rise is the record path's too, distortion and noise
+that follow the level.
+
+Steady lines stood out of the silence:
+* 15625 Hz, which both heard alike in every take, at -98 dBFS in Audio 1's
+  recording and -80 in the VX's: about 19 dB more on the line out than in
+  the record path, against the music's level in each. It lies within 0.13
+  ppm of 15625 Hz on the system's crystal, so something clocked from that
+  crystal makes it, and it joins mostly at the line out.
+* Audio 1's own: 5512.5 Hz, an eighth of the rate, near -101 dBFS, and lines
+  near -100 at 3458.8, 11025 and 16408 Hz.
+* The VX's own: 64.6 Hz, and a comb of 750 Hz, its rate over 64, near -80
+  dBFS.
+
+Those takes ran at 09:48. At 11:16 the line out still carried the 15625 Hz
+line at -81 dBFS, but Audio 1's left heard it 12 dB weaker and its own noise
+on the left lay 8 dB lower, while its right was as before. So how much of
+that source the record path takes changes over time, and with it how much of
+the loop's noise is the source's.
+
+Audio 1 can follow the line, since both recorders heard it alike: what the
+line out carries is what Audio 1 hears times a ratio, and a tone added at
+the ring through the line out's path could cancel it there. Over the six
+takes in five minutes the ratio held within 0.15 dB and 7 degrees, which
+allows some 15 to 20 dB of cancellation. By 11:16 it had moved 10 dB on the
+left and 1.4 dB on the right, so a recorder on the line out would have to
+set it again from time to time. A jump of the frames that the DAC takes, as
+the takes had while the VX captured
+([TEST_SIGNALS.md](TEST_SIGNALS.md#analyzing)), moves such a tone's phase
+against the line's, which keeps running, until Audio 1 measures it again.
+
 ## What the loop measures
 
 Name the parts of the chain in the frequency domain:
@@ -211,9 +265,16 @@ overrun, and the recording started again on its own.
 ## Limits
 
 * The loop can't tell the DAC from the ADC: a drift of the record path reads
-  as the DAC's. A second ADC on the same output can, since the
-  cross-spectrum of two recordings keeps only what both heard.
+  as the DAC's. A second ADC on the same output can, as it did for the noise
+  ([The DAC apart from the ADC](#the-dac-apart-from-the-adc)), but -E would
+  need it beside the loop all the time, and the VX's capture loads the
+  Celeron.
 * Music at 48 kHz isn't followed, because Audio 1 records at 44.1 kHz.
 * Random noise can't be predicted, so nothing added before the DAC removes
-  it. What could be cancelled is deterministic: the DAC's distortion, and
-  interference that keeps a period. That is the plan's next phase.
+  it. What could be cancelled is deterministic, and the loop shows little of
+  it: the DAC's own noise lies far under the record path's, and what the
+  music adds is the record path's own. The one steady line both recorders
+  heard, 15625 Hz, could be followed from Audio 1 and cancelled at the line
+  out, with the ratio between the two set by a recorder on the line out
+  whenever it moves ([The DAC apart from the
+  ADC](#the-dac-apart-from-the-adc)).
