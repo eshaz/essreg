@@ -602,6 +602,11 @@ class AnalysisTest(unittest.TestCase):
         line of its own: what both heard and what each heard alone"""
         m = made("residual")
         x = m.floats()
+        # the player stops for 30 ms 8 s into the program, as Audio 2's DAC
+        # does while the VX captures: both recorders hear the stop
+        at = m.info["segments"][0]["at"] + 8 * RATE
+        x = np.concatenate([x[:at], np.zeros((int(0.03 * RATE), 2)),
+                            x[at:]])
         t = np.arange(len(x)) / RATE
         dac = noise(x.shape, -95, seed=7)
         dac += 10 ** (-100 / 20) * np.sin(2 * np.pi * 1000 * t)[:, None]
@@ -624,6 +629,9 @@ class AnalysisTest(unittest.TestCase):
         _text, ctx = sigan.analyze(m, sigan.Rec.of(rec, RATE),
                                    sigan.Rec.of(ref, 48000))
         v = ctx.rep.values
+        for stops in v["stops"]:
+            self.assertEqual(len(stops), 1)
+            self.assertAlmostEqual(stops[0][1], 30.0, delta=0.5)
         both = -95 - 10 * math.log10(RATE / 2)
         for side in "LR":
             b = v["both:" + side]

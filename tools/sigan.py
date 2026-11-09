@@ -264,7 +264,9 @@ def find_markers(rec, made):
                 hits.append((t, c, v))
             else:
                 hits.append(None)
-        if best is None or score > best[0] + 1e-9:
+        # the earliest wins unless a later one hears a marker more, so
+        # that an end marker missed doesn't take the start's place
+        if best is None or score > best[0] + 0.3:
             best = (score, t0, hits)
     _score, t0, hits = best
     ev = {"sL": hits[0]}
@@ -2452,6 +2454,130 @@ def lines_of(p, f, lo, hi, count):
     return out
 
 
+STOP_FRAMES = 2.0       # a place this far off the drift is past a stop
+RUN_S = 2.0             # the shortest run between stops that counts
+
+
+def track(rec, lag, rho, x, s0, s1, block):
+    """the recording's place against the signal x from signal frame s0 to
+    s1, in blocks: each block's first frame and its offset from lag + s *
+    rho in the recording's frames, followed from block to block, or nan for
+    a quiet block"""
+    out, off, srch = [], 0.0, block
+    mono = x[:, :2].sum(axis=1)
+    for a in range(s0, s1 - block + 1, block):
+        sig = mono[a:a + block]
+        if np.dot(sig, sig) < 1e-6 * block:
+            out.append((a, float("nan")))
+            continue
+        y = warp(rec.x, lag + (a - srch) * rho + off, rho, block + 2 * srch)
+        y = y[:, :2].sum(axis=1)
+        m = next_pow2(len(y) + block)
+        r = np.abs(np.fft.irfft(np.fft.rfft(y, m) *
+                                np.conj(np.fft.rfft(sig, m)), m))
+        r = r[:2 * srch + 1]
+        off += (refine_peak(r, int(np.argmax(r))) - srch) * rho
+        out.append((a, off))
+    return out
+
+
+def runs_of(rec, al, x, s0, s1, block, rate):
+    """the runs between the player's stops from signal frame s0 to s1, each
+    (first frame, frames, the recording's frame at signal frame 0 along
+    it), the recorder's frames a signal frame over all of them, and the
+    stops, (signal frame, ms). A block next to a stop is left out, and so is
+    a run under RUN_S"""
+    # the markers' rate holds a stop between them that fell within their
+    # tolerance, and a block stretched by it blurs its own place: a first
+    # pass takes the rate from the median step, and a second the places
+    lag, rho = al.lag, al.rho
+    for _pass in range(2):
+        tr = track(rec, lag, rho, x, s0, s1, block)
+        a = np.array([t[0] for t in tr], float)
+        d = np.array([t[1] for t in tr])
+        mid = a + block / 2.0
+        step = np.diff(d)
+        if not np.isfinite(step).any():
+            break
+        drift = np.nanmedian(step) / block
+        if _pass == 0:
+            lag += np.nanmedian(d - drift * mid)
+            rho += drift
+    step = np.diff(d)
+    drift = np.nanmedian(step) if np.isfinite(step).any() else 0.0
+    jump = np.abs(np.nan_to_num(step - drift)) > STOP_FRAMES
+    bad = ~np.isfinite(d)
+    bad[1:] |= jump
+    bad[:-1] |= jump
+    stops = [(int(a[i + 1]), (step[i] - drift) / rec.rate * 1e3)
+             for i in np.flatnonzero(jump)]
+    groups, cur = [], []
+    for i in range(len(d)):
+        if bad[i]:
+            if cur:
+                groups.append(cur)
+            cur = []
+        else:
+            cur.append(i)
+    if cur:
+        groups.append(cur)
+    groups = [g for g in groups if len(g) * block >= RUN_S * rate]
+    # one rate over every run, each with its own place; a block off its
+    # run's line by half a frame, as the one after a long stop can be,
+    # leaves the line and splits its run
+    mid = a + block / 2.0
+    for _again in range(3):
+        num = den = 0.0
+        for g in groups:
+            ag, dg = mid[g], d[g]
+            num += np.sum((ag - ag.mean()) * (dg - dg.mean()))
+            den += np.sum((ag - ag.mean()) ** 2)
+        c1 = num / den if den > 0 else 0.0
+        kept = []
+        for g in groups:
+            c0 = d[g].mean() - c1 * mid[g].mean()
+            off = np.abs(d[g] - c0 - c1 * mid[g]) > 0.5
+            cur = []
+            for i, o in zip(g, off):
+                if o:
+                    if cur:
+                        kept.append(cur)
+                    cur = []
+                else:
+                    cur.append(i)
+            if cur:
+                kept.append(cur)
+        kept = [g for g in kept if len(g) * block >= RUN_S * rate]
+        if kept == groups:
+            break
+        groups = kept
+    runs = []
+    for g in groups:
+        c0 = d[g].mean() - c1 * mid[g].mean()
+        runs.append((int(a[g[0]]), int(a[g[-1]] + block - a[g[0]]),
+                     lag + c0))
+    return runs, rho + c1, stops
+
+
+def common_runs(sets, least):
+    """the stretches that every recorder's runs cover, each at least least
+    frames: (first frame, frames, each recorder's lag along it)"""
+    out = []
+    for f0, n0, l0 in sets[0]:
+        spans = [(f0, f0 + n0, [l0])]
+        for other in sets[1:]:
+            nxt = []
+            for lo, hi, lags in spans:
+                for f1, n1, l1 in other:
+                    a, b = max(lo, f1), min(hi, f1 + n1)
+                    if b > a:
+                        nxt.append((a, b, lags + [l1]))
+            spans = nxt
+        out += [(lo, hi - lo, lags) for lo, hi, lags in spans
+                if hi - lo >= least]
+    return out
+
+
 def an_residual(ctx):
     """what the recording holds beyond the program through the path
     measured from it, with the music and in the silence after it. With a
@@ -2467,37 +2593,131 @@ def an_residual(ctx):
     nfft = nfft_for(rate)
     w = hann(nfft)
     f = np.fft.rfftfreq(nfft, 1.0 / rate)
-    chans = [(0, c) for c in ctx.outs]
-    ys = [ctx.onto()[:, ctx.outs]]
-    rates = [rate, ctx.rec.rate]
+    recs = [(ctx.rec, ctx.al, list(ctx.outs))]
     if ctx.ref is not None:
-        yr, _al = ref_onto(ctx)
-        if yr is not None:
-            rc = list(range(min(2, yr.shape[1])))
-            chans += [(1, c) for c in rc]
-            ys.append(yr[:, rc])
-            rates.append(ctx.ref.rate)
-    yy = np.concatenate(ys, axis=1)
-    top = min(20000.0, 0.48 * min(rates))
+        _yr, ral = ref_onto(ctx)
+        if ral is not None:
+            recs.append((ctx.ref, ral, list(range(min(2,
+                                                      ctx.ref.x.shape[1])))))
+    chans = [(r, c) for r, (_rec, _al, cs) in enumerate(recs) for c in cs]
+    top = min(20000.0, 0.48 * min([rate] + [r.rate for r, _a, _c in recs]))
+    # the player may stop for a moment, as Audio 2's DAC does while the VX
+    # captures: every recorder hears the stop, so the program is taken in
+    # the runs between the stops, each aligned on its own
     a, n = span["program"]
-    seg_y = yy[a:a + n] - yy[a:a + n].mean(axis=0)
-    gxx, gyx, gyy, k = welch(ctx.x[a:a + n, :2], seg_y, nfft)
+    block = int(0.25 * rate)
+    found = [runs_of(r, al, ctx.x, a, a + n, block, rate)
+             for r, al, _c in recs]
+    runs = common_runs([fd[0] for fd in found], int(RUN_S * rate))
+    names = ("rec", "ref")
+    rep.put("stops", [fd[2] for fd in found])
+    if not runs:
+        rep.say("residual: no run of %.0f s between the player's stops" %
+                RUN_S)
+        return
+
+    def place(i, s0, nn, lag):
+        """recorder i's frames for the signal's s0 to s0 + nn along lag, a
+        margin taken either way, since the warp makes its span periodic"""
+        r, _al, cs = recs[i]
+        rho, mg = found[i][1], 4096
+        y = warp(r.x, lag + (s0 - mg) * rho, rho, nn + 2 * mg)
+        return y[mg:mg + nn, cs]
+
+    nlo = 4 * nfft
+    runs = [(s0, nn, list(lags)) for s0, nn, lags in runs]
+
+    def measure():
+        sums, longs, ys, each = None, None, [], []
+        for s0, nn, lags in runs:
+            y = np.concatenate([place(i, s0, nn, lags[i])
+                                for i in range(len(recs))], axis=1)
+            y -= y.mean(axis=0)
+            ys.append(y)
+            g = welch(ctx.x[s0:s0 + nn, :2], y, nfft)
+            each.append(g)
+            sums = g if sums is None else \
+                tuple(u + v for u, v in zip(sums, g))
+            if nn >= 2 * nlo:
+                g = welch(ctx.x[s0:s0 + nn, :2], y, nlo)
+                longs = g if longs is None else \
+                    tuple(u + v for u, v in zip(longs, g))
+        return sums, longs, ys, each
+
+    # each run's place to a small part of a frame, and each recorder's rate
+    # to a few parts in 10^10: the blocks' correlations of the music leave
+    # a place a fraction of a frame out, differently from run to run and
+    # path to path, and a rate a few parts in 10^9, which within a run
+    # leaves the program in the residual, the more the higher, with the
+    # two recorders' errors apart. Pieces of 2 s against the paths of all
+    # runs together give delays, and a line through them with each run's
+    # own place gives both
+    sums, longs, ys, each = measure()
+    for _again in range(2):
+        h, _coh, _mult = transfers(*sums[:3])
+        pts = []
+        for r, (s0, nn, _lags) in enumerate(runs):
+            cuts = np.linspace(0, nn, max(1, int(nn // (2 * rate))) + 1)
+            for u, v in zip(cuts[:-1].astype(int), cuts[1:].astype(int)):
+                hr = transfers(*welch(ctx.x[s0 + u:s0 + v, :2],
+                                      ys[r][u:v], nfft)[:3])[0]
+                pts.append((r, s0 + (u + v) / 2.0, [np.mean([delay_of(
+                    f, hr[:, j, c] / np.where(np.abs(h[:, j, c]) > 0,
+                                              h[:, j, c], 1), rate, 300.0,
+                    min(6000.0, top)) for j, c in [(chans.index((i, c)), c)
+                                                   for c in cs]])
+                    for i, (_rec, _al, cs) in enumerate(recs)]))
+        for i in range(len(recs)):
+            num = den = 0.0
+            for r in range(len(runs)):
+                q = [(t, d[i]) for rr, t, d in pts if rr == r]
+                tm = np.mean([t for t, _d in q])
+                dm = np.mean([d for _t, d in q])
+                num += sum((t - tm) * (d - dm) for t, d in q)
+                den += sum((t - tm) ** 2 for t, _d in q)
+            c1 = num / den if den > 0 else 0.0
+            rho = found[i][1]
+            for r, (s0, nn, lags) in enumerate(runs):
+                q = [(t, d[i]) for rr, t, d in pts if rr == r]
+                c0 = np.mean([d for _t, d in q]) - \
+                    c1 * np.mean([t for t, _d in q])
+                lags[i] += c0 * rho
+            found[i] = (found[i][0], rho * (1 + c1), found[i][2])
+        sums, longs, ys, each = measure()
+    rep.say()
+    for i, (r, _al, _c) in enumerate(recs):
+        _rr, rho, stops = found[i]
+        rep.say("%s      %d stops of the player in the program, %.0f ms in "
+                "all%s; the player against it %+.3f ppm over the runs" % (
+                    names[i], len(stops),
+                    sum(ms for _f, ms in stops),
+                    "".join(", %+.1f ms at %.2f s" % (ms, (fr - a) / rate)
+                            for fr, ms in stops[:6]),
+                    (r.rate / made.rate / rho - 1) * 1e6))
+    gxx, gyx, gyy, k = sums
     h, _coh, _mult = transfers(gxx, gyx, gyy)
     # what the program, through the paths measured, leaves of each channel,
     # taken in time: within a window, a path whose phase turns fast, as a
     # highpass's does, would leak the loud low end of the program into the
-    # residual. Low down, windows eight times as long estimate the paths
+    # residual. Low down, windows four times as long estimate the paths
     # with that much less of the window's error, where the program's level
     # makes up for their fewer averages
-    nlo, hfull, nir = 8 * nfft, h, nfft
-    if n >= 2 * nlo:
-        gl = welch(ctx.x[a:a + n, :2], seg_y, nlo)
-        hl, _c, _m = transfers(*gl[:3])
+    hfull, nir = h, nfft
+    if longs is not None:
+        hl, _c, _m = transfers(*longs[:3])
         hfull, nir = blend(hl, np.fft.rfftfreq(nlo, 1.0 / rate), h, f), nlo
-    e = seg_y - through(ctx.x[:, :2], a, n, hfull, nir)
-    gee, _k = autos(e, nfft)
+    gee, ke = None, 0
+    for (s0, nn, _lags), y in zip(runs, ys):
+        g, kk = autos(y - through(ctx.x[:, :2], s0, nn, hfull, nir), nfft)
+        gee = g if gee is None else gee + g
+        ke += kk
+    # the silence, along the last run's places: a stop in it moves no
+    # sample, and every recorder's place moves alike
     a, n = span["silence"]
-    gss, k1 = autos(yy[a:a + n] - yy[a:a + n].mean(axis=0), nfft)
+    s0, _nn, lags = runs[-1]
+    y = np.concatenate([place(i, a, n, lags[i]) for i in range(len(recs))],
+                       axis=1)
+    gss, k1 = autos(y - y.mean(axis=0), nfft)
     sw2, df = (w * w).sum(), rate / nfft
     band = (f >= 20) & (f <= top)
     wa = 10 ** (a_weight(f) / 10)
@@ -2512,18 +2732,16 @@ def an_residual(ctx):
         return float(v.sum() * df)
 
     rep.say()
-    rep.say("residual: the program's %.1f s through the paths measured from "
-            "it, and %.1f s of the silence after it; Hann windows of %d, half "
-            "overlapping, %d and %d of them" % (
-                span["program"][1] / rate, span["silence"][1] / rate, nfft,
-                k, k1))
-    names = ("rec", "ref")
+    rep.say("residual: the program's %.1f s in %d runs between the player's "
+            "stops, through the paths measured from them, and %.1f s of the "
+            "silence after it; Hann windows of %d, half overlapping, %d and "
+            "%d of them" % (sum(nn for _s, nn, _l in runs) / rate, len(runs),
+                            span["silence"][1] / rate, nfft, ke, k1))
     octs = bands_of(f, OCTAVES, 1, top)
     thirds = bands_of(f, ts.THIRDS, 3, top)
     csv_rows, res = [], {}
-    a, n = span["program"]
     for j, (r, c) in enumerate(chans):
-        dm, ds = dens(gee[:, j, j].real, k), dens(gss[:, j, j].real, k1)
+        dm, ds = dens(gee[:, j, j].real, ke), dens(gss[:, j, j].real, k1)
         sig = dens(gyy[:, j, j].real, k)
         res[j] = (dm, ds)
         key = "%s:%s" % (names[r], SIDE[c])
@@ -2550,10 +2768,12 @@ def an_residual(ctx):
                for b, s in octs])
     rep.csv("residual", ["recorder", "side", "hz", "music_dbfs_hz",
                          "silence_dbfs_hz"], csv_rows)
+    rep.put("sums", {"f": f, "h": h, "gee": gee, "ke": ke, "gss": gss,
+                     "k1": k1, "chans": chans})
     pairs = [(c, chans.index((0, c)), chans.index((1, c)))
              for c in range(2) if (0, c) in chans and (1, c) in chans]
     if pairs:
-        apart(ctx, f, h, gee, gss, k, k1, pairs, octs, thirds, dens, total)
+        apart(ctx, f, h, gee, gss, ke, k1, pairs, octs, thirds, dens, total)
     found = []
     for j, (r, c) in enumerate(chans):
         p = 4.0 * gss[:, j, j].real / (k1 * w.sum() ** 2)

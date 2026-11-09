@@ -236,6 +236,18 @@ correlates between them too, and so does what the paths' estimates leave of
 the program low down, so there it only bounds the player's. Each line in the
 silence is marked as heard by both recorders alike or by one alone.
 
+A player that stops for a moment is followed. On the Armada, with Audio 1
+and the VX recording at once, Audio 2's DAC stopped two to four times in the
+20 s of program, for 10 to 120 ms each, at 1x and at 2x alike, and both
+recorders heard each stop. The analysis tracks each recording's place
+against the signal in blocks of 0.25 s, reports the stops, and takes the
+program in the runs between them. Pieces of 2 s against the paths of all
+runs together then set each run's place to a small part of a frame and each
+recorder's rate to a few parts in 10^10: a rate a few parts in 10^9 out
+leaves the program in both residuals with opposite signs, which takes from
+what both heard, the more the higher the frequency. The silence follows the
+last run's places, since a stop in it moves no sample.
+
 A coherence estimate reads about 1/K for unrelated signals averaged over K
 windows, which the report gives with each Welch analysis. A coherence that
 falls with frequency while the level holds points at a clock that drifts
