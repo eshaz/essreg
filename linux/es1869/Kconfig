@@ -777,18 +777,19 @@ config SND_ES1869_DEFAULT_A2_ZSTEP
 	default 0
 	help
 	  The DAC's gap at its sign taken back, each code moved about
-	  it. The ALSA control "Audio 2 Zero Step Correction Playback
-	  Switch". The module parameter a2_zstep sets it at load and at
-	  runtime, through /sys/module/snd_es1869/parameters/a2_zstep.
+	  it. The ALSA control "Audio 2 Zero Step Playback Switch". The
+	  module parameter a2_zstep sets it at load and at runtime,
+	  through /sys/module/snd_es1869/parameters/a2_zstep.
 
 config SND_ES1869_DEFAULT_A2_ZSTEP_L
 	int "a2_zstep_l"
 	range 0 8192
 	default 0
 	help
-	  The left DAC's gap in 1/256 LSB, as es1869scope -E measures
-	  it. The ALSA control "Audio 2 Zero Step Left". The module
-	  parameter a2_zstep_l sets it at load and at runtime, through
+	  The left DAC's gap in 1/256 LSB, as a recorder on the line out
+	  measures it: 2048 on the Armada. The ALSA control "Audio 2
+	  Zero Step Left". The module parameter a2_zstep_l sets it at
+	  load and at runtime, through
 	  /sys/module/snd_es1869/parameters/a2_zstep_l.
 
 config SND_ES1869_DEFAULT_A2_ZSTEP_R

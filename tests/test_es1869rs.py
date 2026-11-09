@@ -147,7 +147,7 @@ def library():
         lib.es1869_rs_limit.restype = ul
         lib.es1869_rs_fill.argtypes = [ctypes.POINTER(RS),
                                        ctypes.POINTER(Stream), ul, ul]
-        lib.es1869_rs_fill.restype = None
+        lib.es1869_rs_fill.restype = ctypes.c_uint32
         lib.es1869_rs_seek.argtypes = [ctypes.POINTER(RS),
                                        ctypes.POINTER(Stream), ctypes.c_long]
         lib.es1869_rs_seek.restype = None
@@ -1065,7 +1065,11 @@ class FillTest(unittest.TestCase):
         period, and writes them again. A fill takes budget frames at a
         time, and the plan goes on from the line, as the driver's does.
         lap is the ring's frames, over times the buffer's unless the ring
-        hasn't the room, and room what the fill's limit takes it to hold"""
+        hasn't the room, and room what the fill's limit takes it to hold.
+        A fill writes the frames from the one it reports it began at to
+        where the line went, those and no others, which the zero step's
+        remap takes;
+        self.seeks counts the fills that began off the line"""
         lib = library()
         b, period = self.BUFFER, self.PERIOD
         lap = lap or b * over
@@ -1108,8 +1112,21 @@ class FillTest(unittest.TestCase):
                                          ctypes.byref(start))
                 if not n:
                     return
-                lib.es1869_rs_fill(ctypes.byref(rs), ctypes.byref(st),
-                                   start.value, n)
+                # the filter reads only the stream, so a ring of 0xA5 shows
+                # what the fill wrote, and the rest is put back
+                body = np.ctypeslib.as_array(ring)[:8 * lap]
+                kept = body.copy()
+                body[:] = 0xA5
+                line = rs.w
+                w0 = lib.es1869_rs_fill(ctypes.byref(rs), ctypes.byref(st),
+                                        start.value, n)
+                wrote = (body != 0xA5).reshape(lap, 8).any(axis=1)
+                body[np.repeat(~wrote, 8)] = kept[np.repeat(~wrote, 8)]
+                span = (rs.w - w0) % lap
+                self.assertEqual(span, int(wrote.sum()), (w0, rs.w))
+                self.assertTrue(np.all((np.flatnonzero(wrote) - w0) % lap <
+                                       span), (w0, rs.w))
+                self.seeks += w0 != line
                 last = not plan.backlog
                 if last:
                     lib.es1869_rs_seek(ctypes.byref(rs), ctypes.byref(st),
@@ -1118,6 +1135,7 @@ class FillTest(unittest.TestCase):
                 if last:
                     return
 
+        self.seeks = 0
         write(b)
         fill()
         got = np.ctypeslib.as_array(ring)
@@ -1181,9 +1199,11 @@ class FillTest(unittest.TestCase):
                              0, eps)
 
     def test_a_rewind_goes_back_on_the_line(self):
-        """what the client writes again comes out as it did the first time"""
+        """what the client writes again comes out as it did the first time,
+        from a fill that moves the line back first"""
         for eps in (252e-6, -252e-6):
             self.assertEqual(self.stream(eps, exact=True, rewind=1024), 0, eps)
+            self.assertGreater(self.seeks, 0, eps)
 
     def test_a_step_down_needs_the_limit(self):
         """the bug it mends: with no limit a full buffer's last frames land

@@ -154,8 +154,6 @@ static const struct snd_pcm_hardware a2_hw = {
 
 // --- the ring ------------------------------------------------------------------
 
-// frames from the application's buffer, at absolute position from, into
-// the ring, both wrapping
 // the DAC's gap at its sign taken back over n of the ring's frames from w,
 // as each fill writes them
 static void mirror_zstep(struct es1869 *chip, struct snd_pcm_runtime *rt, u32 w,
@@ -176,6 +174,8 @@ static void mirror_zstep(struct es1869 *chip, struct snd_pcm_runtime *rt, u32 w,
 	}
 }
 
+// frames from the application's buffer, at absolute position from, into
+// the ring, both wrapping
 static void mirror_copy(struct es1869 *chip, struct snd_pcm_runtime *rt,
 			snd_pcm_uframes_t from, snd_pcm_uframes_t frames)
 {
@@ -248,13 +248,13 @@ static void mirror_resample(struct es1869 *chip, struct snd_pcm_runtime *rt,
 	if (s.mmx)
 		kernel_fpu_begin();
 #endif
-	w0 = rs->w;
-	es1869_rs_fill(rs, &s, start, frames);
+	w0 = es1869_rs_fill(rs, &s, start, frames);
 #ifdef ES1869_RS_MMX
 	if (s.mmx)
 		kernel_fpu_end();
 #endif
-	// what this fill wrote, the frames it will write again included
+	// what this fill wrote, from where its plan put the line, the frames
+	// it will write again included
 	mirror_zstep(chip, rt, w0, (rs->w + m->lap - w0) % m->lap);
 	m->rs_quiet = rs->w * 2 * frames_to_bytes(rt, 1);
 	// a frame more than the filter reaches: on a step down a ring frame

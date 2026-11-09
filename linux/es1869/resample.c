@@ -817,17 +817,19 @@ static u32 rs_chunk(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 }
 
 // a fill's frames through the filter, from where the line stands: a plan
-// that begins elsewhere moves it first
-void es1869_rs_fill(struct es1869_rs *rs, const struct es1869_rs_stream *s,
-		    unsigned long start, unsigned long frames)
+// that begins elsewhere moves it first. The ring frame it began at
+u32 es1869_rs_fill(struct es1869_rs *rs, const struct es1869_rs_stream *s,
+		   unsigned long start, unsigned long frames)
 {
 	unsigned long bound = s->boundary;
 	long d = (long)((start + bound - rs->pos) % bound);
+	u32 w0;
 
 	if ((unsigned long)d > bound / 2)
 		d -= (long)bound;
 	if (d < -1 || d > 1)
 		es1869_rs_seek(rs, s, d * (long)rs->over);
+	w0 = rs->w;
 	while (frames) {
 		u32 most = ES_RS_CHUNK / rs->over;
 		u32 n = frames < most ? frames : most;
@@ -837,6 +839,7 @@ void es1869_rs_fill(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 			break;
 		frames -= used < frames ? used : frames;
 	}
+	return w0;
 }
 
 // how far a fill may go, up to the stream's frame to, with the DMA at hw. room

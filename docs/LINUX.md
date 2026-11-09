@@ -409,10 +409,11 @@ moving.
 The machine's other clocks, and how chrony's frequency follows the board's
 temperature, are in [CLOCK_CORRECTION.md](CLOCK_CORRECTION.md).
 
-Audio 2's DAC puts its codes from 0 up about 7 LSB higher than those below.
+Audio 2's DAC puts its codes from 0 up about 8 LSB higher than those below.
 With `a2_zstep` on, each code moves about that gap as it goes to the ring,
-by `a2_zstep_l` and `a2_zstep_r`, which `es1869scope -E` measures from the
-music ([LOOP_TRANSFORM.md](LOOP_TRANSFORM.md#the-dacs-gap-at-its-sign)).
+by `a2_zstep_l` and `a2_zstep_r`, 2048 on the Armada as the VX measured it
+on the line out
+([LOOP_TRANSFORM.md](LOOP_TRANSFORM.md#the-dacs-gap-at-its-sign)).
 
 A correction of the rate is not one of jitter. Jitter is in the DAC's clock
 at the moment of each conversion, after all of this, and no change to the
@@ -907,10 +908,11 @@ saved state wins over a parameter. The defaults are the Kconfig options
 * `a2_resample_dither` ("Audio 2 Rate Dither Playback Switch"): 0 to 1,
   default 0. The rate correction's rounding to 16 bits with triangular noise
   of 1 LSB: 3 dB more noise for spurs at about -100 dBFS.
-* `a2_zstep` ("Audio 2 Zero Step Correction Playback Switch"): 0 to 1,
-  default 0. The DAC's gap at its sign taken back, each code moved about it.
+* `a2_zstep` ("Audio 2 Zero Step Playback Switch"): 0 to 1, default 0. The
+  DAC's gap at its sign taken back, each code moved about it.
 * `a2_zstep_l` ("Audio 2 Zero Step Left"): 0 to 8192, default 0. The left
-  DAC's gap in 1/256 LSB, as es1869scope -E measures it.
+  DAC's gap in 1/256 LSB, as a recorder on the line out measures it: 2048 on
+  the Armada.
 * `a2_zstep_r` ("Audio 2 Zero Step Right"): 0 to 8192, default 0. The right
   DAC's.
 * `a2_oversample` ("Audio 2 Output Rate"): 0 1x, 1 2x, 2 3x, default 1x. The

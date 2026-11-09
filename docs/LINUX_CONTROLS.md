@@ -379,12 +379,12 @@ Parameters only:
   1, default 0. The rate correction's rounding to 16 bits with triangular
   noise of 1 LSB: 3 dB more noise for spurs at about -100 dBFS. Parameter
   `a2_resample_dither`.
-* **Audio 2 Zero Step Correction** (`Audio 2 Zero Step Correction Playback
-  Switch`, F3): 0 to 1, default 0. The DAC's gap at its sign taken back,
-  each code moved about it. Parameter `a2_zstep`.
+* **Audio 2 Zero Step** (`Audio 2 Zero Step Playback Switch`, F3): 0 to 1,
+  default 0. The DAC's gap at its sign taken back, each code moved about it.
+  Parameter `a2_zstep`.
 * **Audio 2 Zero Step Left** (`Audio 2 Zero Step Left`, F3 and F4): 0 to
-  8192, default 0. The left DAC's gap in 1/256 LSB, as es1869scope -E
-  measures it. Parameter `a2_zstep_l`.
+  8192, default 0. The left DAC's gap in 1/256 LSB, as a recorder on the
+  line out measures it: 2048 on the Armada. Parameter `a2_zstep_l`.
 * **Audio 2 Zero Step Right** (`Audio 2 Zero Step Right`, F3 and F4): 0 to
   8192, default 0. The right DAC's. Parameter `a2_zstep_r`.
 * **Audio 2 Output Rate** (`Audio 2 Output Rate`, F3): 0 1x, 1 2x, 2 3x,

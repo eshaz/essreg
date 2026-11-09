@@ -108,8 +108,8 @@ void es1869_rs_start(struct es1869_rs *rs, unsigned long pos);
 void es1869_rs_pace(struct es1869_rs *rs, s32 step);
 void es1869_rs_seek(struct es1869_rs *rs, const struct es1869_rs_stream *s,
 		    long d);
-void es1869_rs_fill(struct es1869_rs *rs, const struct es1869_rs_stream *s,
-		    unsigned long start, unsigned long frames);
+u32 es1869_rs_fill(struct es1869_rs *rs, const struct es1869_rs_stream *s,
+		   unsigned long start, unsigned long frames);
 unsigned long es1869_rs_at(const struct es1869_rs *rs, unsigned long a,
 			   unsigned long buffer);
 unsigned long es1869_rs_limit(unsigned long to, unsigned long hw,

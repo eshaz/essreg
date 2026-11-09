@@ -133,6 +133,17 @@ class TableTest(unittest.TestCase):
                 if r["control"]]
         self.assertEqual(len(keys), len(set(keys)))
 
+    def test_control_names_fit(self):
+        """ALSA keeps 43 characters of a control's name and 63 of an enum
+        item's, and cuts the rest when the control is added, so that
+        alsactl and amixer would find it only by the shorter name"""
+        for r in self.rows:
+            if r["control"]:
+                self.assertLessEqual(len(r["control"]), 43, r["control"])
+            if r["kind"] == "S_ENUM":
+                for item in r["items"].split("|"):
+                    self.assertLessEqual(len(item), 63, (r["id"], item))
+
     def test_dac_stages_off_by_default(self):
         """1 is ESS's setting of a stage, the default 0 turns it off, as
         DRIVER_CONFIG.md has it for the rebuilt Windows drivers"""
