@@ -279,6 +279,41 @@ Measured on the Armada, 2026-11-08, before the filter:
 * Record path at 20 kHz: -4.2 dB on the left, -5.4 dB on the right.
 * At 10 kHz: -0.9 dB and -1.3 dB.
 
+## The DAC and the ADC apart
+
+The loop gives the DAC and the ADC together. The VX Pocket, cabled both
+ways, splits them. The setup:
+* **Cabling:** the ES1869's output to the VX's input, L to L and R to R. The
+  VX's output goes to the ES1869's Aux input (AUXB), which arrives with left
+  and right swapped.
+* **The anchor:** Audio 2 at 2x, whose DAC's response below 20 kHz is known
+  from the hold and the 0.062 of the last sample that each sample keeps
+  ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md)).
+* **The method:** dividing that model out of the loop at 2x leaves the
+  record path. Dividing it out of the VX's recording at 2x leaves the
+  ES1869's output stage with the VX's input. The DAC at 1x is then the VX's
+  recording at 1x over that chain.
+
+Measured 2026-11-08, with noise independent between the channels at -12 dBFS
+rms and a 2 x 2 solve, at the calibrated levels of
+[TEST_LEVELS.md](TEST_LEVELS.md) (in dB against 1 kHz, the left channel):
+
+|                     | 10 kHz | 15 kHz | 18 kHz | 20 kHz |
+|---------------------|--------|--------|--------|--------|
+| 1x DAC, measured    | -1.19  | -2.49  | -3.43  | -4.11  |
+| 1x DAC, the model   | -1.16  | -2.51  | -3.49  | -4.21  |
+| 1x DAC, treble on   | -0.01  | +0.10  | +0.15  | -0.07  |
+| record path, 69h    | -0.93  | -2.23  | -3.34  | -4.21  |
+| output and VX input | -0.65  | -1.45  | -1.95  | -2.43  |
+
+The right channel agrees for the DAC within 0.05 dB. Its record path rolls
+off more: -1.30, -2.97, -4.31 and -5.35 dB.
+
+So the DAC follows the model within 0.1 dB to 20 kHz. The treble correction,
+as it was before its refit to 22.05 kHz, held it within 0.15 dB, which was
+its design. The record path keeps 4 to 5 dB of loss at 20 kHz, which Audio
+1's correction filter takes back.
+
 ## On the Armada
 
 With the USB WiFi stick in, 12 % of the chip's interrupts come 1 to 3 ms
