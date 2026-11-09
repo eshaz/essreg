@@ -875,6 +875,41 @@ void es1869_spread(u8 *dst, const u8 *src, u32 n)
 	}
 }
 
+// the target on the scale of 1/256 LSB, the gap's middle on 0: below the
+// gap the code that reaches it, above it the code less the gap, and in it
+// whichever edge is nearer, which is the side of the code's sign
+s16 es1869_zstep(s16 c, u32 step)
+{
+	s32 s = step, t = c * 256 + ((s32)step - 256) / 2, v;
+
+	if (!step)
+		return c;
+	if (t >= s)
+		v = (t - s + 128) >> 8;
+	else if (t <= -256)
+		v = (t + 128) >> 8;
+	else
+		v = c < 0 ? -1 : 0;
+	return clamp(v, -32768, 32767);
+}
+
+void es1869_zstep_words(u8 *w, u32 frames, const u32 *step, bool stereo)
+{
+	u32 n = stereo ? 2 * frames : frames, i;
+
+	for (i = 0; i < n; i++) {
+		u32 s = step[stereo ? i & 1 : 0];
+		u8 *p = w + 4 * i;
+		u16 c;
+
+		if (!s)
+			continue;
+		c = (u16)es1869_zstep((s16)(p[0] | p[2] << 8), s);
+		p[0] = c;
+		p[2] = c >> 8;
+	}
+}
+
 // n frames of two halves of half bytes: the first half to a, the second in
 // the low bytes of the words at w
 void es1869_split(u8 *a, u8 *w, const u8 *src, u32 n, u32 half)

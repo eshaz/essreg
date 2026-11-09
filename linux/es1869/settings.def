@@ -265,6 +265,15 @@ ES1869_SET(a2_trim_ppb, A2_TRIM_PPB, S_INT, B_NONE, 0, 0, 0, -2000000, 2000000, 
 ES1869_SET(a2_resample_dither, A2_RESAMPLE_DITHER, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
 	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Rate Dither Playback Switch", "",
 	   "the rate correction's rounding to 16 bits with triangular noise of 1 LSB: 3 dB more noise for spurs at about -100 dBFS")
+ES1869_SET(a2_zstep, A2_ZSTEP, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
+	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Zero Step Correction Playback Switch", "",
+	   "the DAC's gap at its sign taken back, each code moved about it")
+ES1869_SET(a2_zstep_l, A2_ZSTEP_L, S_INT, B_NONE, 0, 0, 0, 0, 8192, 0,
+	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Zero Step Left", "",
+	   "the left DAC's gap in 1/256 LSB, as es1869scope -E measures it")
+ES1869_SET(a2_zstep_r, A2_ZSTEP_R, S_INT, B_NONE, 0, 0, 0, 0, 8192, 0,
+	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Zero Step Right", "",
+	   "the right DAC's")
 ES1869_SET(a2_oversample, A2_OVERSAMPLE, S_ENUM, B_NONE, 0, 0, 0, 0, 2, 0,
 	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Output Rate",
 	   "1x|2x|3x",

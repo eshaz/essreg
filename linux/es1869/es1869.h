@@ -114,6 +114,7 @@ struct es1869_mirror {
 	u32 over; // the ring frames to a stream frame
 	u32 lap; // the ring's frames, as the 8237 runs through them
 	u32 rs_quiet; // where in the ring its silence has reached, in bytes
+	u32 zstep[2]; // the DAC's gap at its sign taken back, 1/256 LSB, or 0
 	unsigned long rs_to; // the stream frame the last whole run came to
 	u32 clk_period; // the master's ticks to a period of this stream
 };

@@ -399,6 +399,11 @@ The fields, by line:
 * **eq:** the deviation against 1 kHz, the largest predicted drift, and the
   correction's change at 20 kHz since it began.
 * **noise:** the density in dB a Hz.
+* **zstep:** the DAC's gap at its sign on each side in LSB, from the music
+  ([LOOP_TRANSFORM.md](LOOP_TRANSFORM.md#the-dacs-gap-at-its-sign)), and
+  `(told)` when the driver's `a2_zstep_l` and `a2_zstep_r` took it, from the
+  second block on and once it moves by 0.1 LSB. They stay after -E stops,
+  and alsactl keeps them, since the gap is the DAC's.
 
 On the Armada (2026-11-08, test build 4, 20-s blocks), the record path was
 tilted halfway through a run: Audio 1's correction taps, refitted 0.5 dB

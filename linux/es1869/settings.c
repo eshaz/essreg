@@ -334,6 +334,9 @@ void es1869_setting_apply(struct es1869 *chip, int id)
 	case ES_S_a2_trim_ppb:
 	case ES_S_a2_resample_dither:
 	case ES_S_a2_treble:
+	case ES_S_a2_zstep:
+	case ES_S_a2_zstep_l:
+	case ES_S_a2_zstep_r:
 		es1869_a2_rate_changed(chip);
 		break;
 	}

@@ -68,7 +68,8 @@ class Lib:
                 ["gcc", "-shared", "-fPIC", "-O2", "-Wall", "-Wextra",
                  "-Werror", "-o", so, os.path.join(SCOPE, "tie.c"),
                  os.path.join(SCOPE, "phase.c"), os.path.join(SCOPE, "fft.c"),
-                 os.path.join(SCOPE, "loop.c"), "-lm"])
+                 os.path.join(SCOPE, "loop.c"), os.path.join(SCOPE, "zstep.c"),
+                 "-lm"])
             lib = ctypes.CDLL(so)
             for name in ("tie_adev", "tie_mdev", "tie_tdev", "tie_acov"):
                 getattr(lib, name).restype = D
@@ -590,6 +591,80 @@ class EqTest(unittest.TestCase):
             self.assertLess(abs(change), 0.35, fk)
 
 
+class ZStep(ctypes.Structure):
+    _fields_ = [("bins", ctypes.c_uint)] + \
+        [(n, DP) for n in ("xl", "xr", "lr")] + \
+        [(n, DP * 2) for n in ("qq", "ql", "qr", "yl", "yr", "yq")] + \
+        [("segments", ctypes.c_ulong)]
+
+
+class StepTest(unittest.TestCase):
+    """zstep.c: the DAC's gap at its sign, from music through the loop"""
+
+    N = 8192
+
+    def gap(self, gap, corr=0.6, seconds=20, noise=0.3):
+        lib = Lib.get()
+        lib.zstep_gap.restype = D
+        lib.zstep_gap.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                  ctypes.c_uint, ctypes.c_uint, DP]
+        rate = 44100
+        n = rate * seconds
+        rng = np.random.RandomState(5)
+        f = np.fft.rfftfreq(n, 1.0 / rate)
+        shape = 1 / np.sqrt(np.maximum(f, 50.0))
+
+        def music():
+            w = np.fft.irfft(np.fft.rfft(rng.standard_normal(n)) * shape, n)
+            return w / np.sqrt(np.mean(w * w))
+
+        a = music()
+        u = np.column_stack([a, corr * a + np.sqrt(1 - corr ** 2) * music()])
+        # codes of about -30 dBFS rms, music's crest
+        u = np.rint(u * 1000.0)
+        dac = u + gap * (u >= 0)
+        # the loop: a lowpass of 31 taps, three frames late, a gain
+        t = np.arange(-15, 16)
+        h = np.sinc(2 * 18000 / rate * t) * np.hanning(33)[1:-1]
+        h *= 0.8 / h.sum()
+        y = np.column_stack([np.convolve(dac[:, c], h)[:n] for c in (0, 1)])
+        y = np.roll(y, 3, axis=0) + noise * rng.standard_normal((n, 2))
+        z = ZStep()
+        bins = self.N // 2 + 1
+        self.assertEqual(lib.zstep_init(ctypes.byref(z), bins), 0)
+        win = 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(self.N) / self.N)
+        q = (u >= 0) - 0.5
+
+        def spec(v):
+            s = np.fft.rfft(v * win)
+            out = np.empty(2 * bins)
+            out[0::2], out[1::2] = s.real, s.imag
+            return out
+
+        for at in range(0, n - self.N, self.N // 2):
+            sl = slice(at, at + self.N)
+            sp = [spec(u[sl, 0]), spec(u[sl, 1]), spec(q[sl, 0]),
+                  spec(q[sl, 1]), spec(y[sl, 0]), spec(y[sl, 1])]
+            lib.zstep_add(ctypes.byref(z), *[dp(v) for v in sp])
+        lo, hi = int(1000 / rate * self.N), int(8000 / rate * self.N)
+        out = []
+        for c in (0, 1):
+            spread = D()
+            out.append((lib.zstep_gap(ctypes.byref(z), c, lo, hi,
+                                      ctypes.byref(spread)), spread.value))
+        lib.zstep_free(ctypes.byref(z))
+        return out
+
+    def test_gap(self):
+        for c, (g, spread) in enumerate(self.gap(7.4)):
+            self.assertAlmostEqual(g, 7.4, delta=0.2, msg=c)
+            self.assertLess(spread, 0.2)
+
+    def test_no_gap(self):
+        for g, _spread in self.gap(0.0):
+            self.assertLess(abs(g), 0.2)
+
+
 class ShotTest(unittest.TestCase):
     """es1869scope draws a log into a picture: two pairs that share the
     Focusrite, interrupts with pulses, and the system's lines"""
@@ -604,7 +679,8 @@ class ShotTest(unittest.TestCase):
         cls.prog = os.path.join(cls.tmp, "es1869scope")
         src = [os.path.join(SCOPE, f) for f in
                ("es1869scope.c", "tie.c", "draw.c", "fb.c", "plot.c",
-                "fft.c", "spectro.c", "loop.c", "loopview.c", "eq.c")]
+                "fft.c", "spectro.c", "loop.c", "loopview.c", "eq.c",
+                "zstep.c")]
         subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall",
                                "-Wextra", "-Werror", "-o", cls.prog] + src +
                               ["-lasound", "-lz", "-lm", "-lpthread"])

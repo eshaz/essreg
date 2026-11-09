@@ -406,30 +406,13 @@ correction off ran 28.9 ppm slow and 223 ppm fast. Over a single minute a
 stream follows the driver's slope within 0.3 ppm, since both fits are still
 moving.
 
-Of the machine's clocks, only the RTC is an oscillator of its own that
-software can read. The ES1869's master, the CPU's time stamp counter, the
-PCI bus (the RTL8169's timer counts it, not the card's crystal) and the USB
-host's frames all run off the board's crystal: the TSC and the bus move with
-the raw clock to 2 ppb over 8 minutes across 40 degrees, and the USB frames
-are exactly 12 MHz / 11998. The RTC, a 32.768 kHz crystal of its own, reads
--8 to -12 ppm against the raw clock, and the kernel's 11-minute write sets
-its phase. The Play! 3 is no second clock: its capture runs 48008.015 Hz,
-locked to the USB frames, so it is an outside meter of the chip's phase and
-nothing more. It reads the chip against itself to 470 ppb at 1 s and 11 ppb
-at 128 s, and shows Trim's +10 and -10 ppm as +9.99 and -9.996 ppm, and no
-phase jump of over about 2 us when the filter turns on or the mode changes.
+The machine's other clocks, and how chrony's frequency follows the board's
+temperature, are in [CLOCK_CORRECTION.md](CLOCK_CORRECTION.md).
 
-chrony's frequency moved by over 2 ppm in a day (28.7 to 31.2), which the
-fit of the steered clock follows within about 20 minutes. Most of that is
-temperature, late: over 20 hours it follows the board's System sensor at
-+0.23 ppm a degree, delayed by about an hour, which takes the swing from
-0.52 to 0.24 ppm rms. Part of the delay may be chrony's own averaging.
-Overnight, with the machine idle and the sensors flat, the frequency held
-within 0.1 ppm. The Clock mode doesn't need the map, since it holds a
-half-hour within 0.1 ppm with no sign of it. chrony's `tempcomp` directive
-could still apply one, which the Clock mode would inherit with no change
-here. The RTC is no help as a reference: it moved by 5 ppm in the same log,
-more with temperature than with chrony.
+Audio 2's DAC puts its codes from 0 up about 7 LSB higher than those below.
+With `a2_zstep` on, each code moves about that gap as it goes to the ring,
+by `a2_zstep_l` and `a2_zstep_r`, which `es1869scope -E` measures from the
+music ([LOOP_TRANSFORM.md](LOOP_TRANSFORM.md#the-dacs-gap-at-its-sign)).
 
 A correction of the rate is not one of jitter. Jitter is in the DAC's clock
 at the moment of each conversion, after all of this, and no change to the
@@ -924,6 +907,12 @@ saved state wins over a parameter. The defaults are the Kconfig options
 * `a2_resample_dither` ("Audio 2 Rate Dither Playback Switch"): 0 to 1,
   default 0. The rate correction's rounding to 16 bits with triangular noise
   of 1 LSB: 3 dB more noise for spurs at about -100 dBFS.
+* `a2_zstep` ("Audio 2 Zero Step Correction Playback Switch"): 0 to 1,
+  default 0. The DAC's gap at its sign taken back, each code moved about it.
+* `a2_zstep_l` ("Audio 2 Zero Step Left"): 0 to 8192, default 0. The left
+  DAC's gap in 1/256 LSB, as es1869scope -E measures it.
+* `a2_zstep_r` ("Audio 2 Zero Step Right"): 0 to 8192, default 0. The right
+  DAC's.
 * `a2_oversample` ("Audio 2 Output Rate"): 0 1x, 1 2x, 2 3x, default 1x. The
   DAC clocked at this many times a 16-bit stream's rate on DMA 5 (70h),
   through the rate filter, where a divisor of the stream's own gives that

@@ -212,6 +212,15 @@ unsigned long es1869_fill_plan(struct es1869_fill *f, unsigned long appl,
 void es1869_spread(u8 *dst, const u8 *src, u32 n);
 void es1869_split(u8 *a, u8 *w, const u8 *src, u32 n, u32 half);
 
+// Audio 2's DAC puts its codes from 0 up step/256 LSB higher than those
+// below, a gap at its sign. A code moves by half the gap, less half a code,
+// below it and by that less the gap above it, and one that would fall in
+// the gap goes to its nearer edge (a2_zstep)
+s16 es1869_zstep(s16 c, u32 step);
+// the same over the frames in the low bytes of a ring's words, each side by
+// its own step
+void es1869_zstep_words(u8 *w, u32 frames, const u32 *step, bool stereo);
+
 // --- FM ---------------------------------------------------------------------
 
 void es1869_fm_reset(struct es1869_hw *hw);

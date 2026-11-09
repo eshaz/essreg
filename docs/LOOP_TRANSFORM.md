@@ -198,6 +198,40 @@ proportional to the file's, with the ring's rounding dithered or not, so a
 cancellation would make its tone in the driver and set it from what Audio 1
 hears, a loop that corrects its own level, rather than from a table.
 
+## The DAC's gap at its sign
+
+Audio 2's DAC puts its codes from 0 up about 7 LSB higher than those below,
+a gap between -1 and 0 where its sign changes, the error an R-2R ladder
+makes at its largest carry. Fitted as a function of the code, what the loop
+and the VX heard of the program (`residual`, both 1x takes of 2026-11-09)
+less the paths' response to the codes stepped from about -3 LSB below 0 to
+about +4 from 0 up, flat on each side to 64 LSB, 7.6 and 8.0 LSB apart on
+the loop's sides and alike on the line out's within their noise. Audio 1
+adds an S-curve of its own, about 3 LSB at 4096, which the VX doesn't hear;
+that one is the record path's and isn't taken back. The gap adds about 2/pi
+of itself to every small signal's fundamental, which is what made the beat
+test's tones of 2.4 and 5.4 LSB come out 8.7 and 5.1 dB louder than the
+path.
+
+The driver takes it back: with `a2_zstep` on, each code goes to the ring
+moved about the gap, `a2_zstep_l` and `a2_zstep_r` of it in 1/256 LSB. A
+sample more than half the gap from 0 then comes out where it asks, within
+half an LSB, and one within that goes to the gap's nearer edge, since no
+code reaches inside it. The monitor reads the codes moved, which are what
+the DAC takes.
+
+-E learns the gap from the music alone. Each kept frame of the monitor
+carries the share of the DAC's codes from 0 up that it stands for, less a
+half, each side's sign, which goes into the segments as a third input beside
+both sides' codes. The sign follows the music, so the three are solved
+together in each bin; the sign's transfer over the side's own path is the
+gap. Low down the sign is mostly the music, so the gap comes from 1 to 8
+kHz, as the median over the bins, measured in each run and weighed into the
+block by its segments. The fit sees the DAC's own codes, moved or not, so it
+measures the DAC either way, and nothing feeds back. On a simulated DAC with
+a gap of 7.4 LSB, through a delayed lowpass and noise, it read 7.33 and 7.46
+from 20 s of music.
+
 ## What the loop measures
 
 Name the parts of the chain in the frequency domain:

@@ -83,6 +83,7 @@
 
 #include "loop.h"
 #include "eq.h"
+#include "zstep.h"
 #include "plot.h"
 #include "tie.h"
 
@@ -124,6 +125,9 @@ static const double lv_cal_at[LV_CAL_AT] = { 1000,  5000,  10000,
 #define LV_EQ_SPAN 3.0 // the most the refits move it from the start, dB
 #define LV_READ_US 10000 // the reader's wait between its reads
 #define LV_IDLE_S 10 // seconds with no frame from the monitor before resting
+#define LV_ZS_LO 1000.0 // the band the DAC's gap at its sign comes from, Hz
+#define LV_ZS_HI 8000.0
+#define LV_ZS_MOVE 0.1 // the least change of the gap the driver is told, LSB
 #define LV_SEG_RHO 0.5 // the least |r| of a segment that counts
 #define LV_SEG_BAD 8 // segments in a row under it that lose the lag
 #define LV_SEG_QUIET 3.0 // an input this quiet, rms in steps, says nothing
@@ -169,6 +173,15 @@ struct loopview {
 	int reading, rstop, rerr, rwhich;
 	int again; // the streams a retry starts
 	int idle; // nothing plays: Audio 1 and the reader stopped
+	// the DAC's gap at its sign: each kept monitor frame's count of codes
+	// from 0 up among those it stands for, each side's sign in a segment
+	// and its spectra, a run's sums, the block's gaps weighted by their
+	// segments, and what the driver was last told, LSB
+	uint8_t *qring;
+	double *segq[2], *zq[2];
+	struct zstep zst;
+	double zs_w[2], zs_n, zs_set[2];
+	int zs_blocks;
 	uint64_t seen; // the monitor's frames at seen_at, when they last moved
 	long long seen_at;
 	long long slowest; // the longest step since the last status line, ns
@@ -873,6 +886,13 @@ static void lv_segment(struct loopview *v)
 	}
 	v->bad = 0;
 	lv_add(v);
+	// over time, the DAC's gap: the sign's spectra beside the segment's
+	if (v->mon && v->cfg.equalize) {
+		loop_spectra(&v->path[LL], v->segq[0], v->segq[1], v->zq[0],
+			     v->zq[1]);
+		zstep_add(&v->zst, v->zs[0], v->zs[1], v->zq[0], v->zq[1],
+			  v->zs[2], v->zs[3]);
+	}
 	v->ov_n++;
 	v->ov_r += b;
 	// the peak between frames, a parabola through the three, later +
@@ -923,6 +943,15 @@ static void lv_live_segments(struct loopview *v)
 				v->seg[1][k] = xp[1];
 				v->seg[2][k] = yp[0];
 				v->seg[3][k] = yp[1];
+			}
+			// each side's sign, the share of the DAC's codes from
+			// 0 up that a kept frame stands for, less a half
+			for (k = 0; v->mon && k < n; k++) {
+				const uint8_t *q =
+					&v->qring[2 * ((xs + k) % LV_RING)];
+
+				v->segq[0][k] = (double)q[0] / v->factor - 0.5;
+				v->segq[1][k] = (double)q[1] / v->factor - 0.5;
 			}
 			lv_segment(v);
 		}
@@ -1059,13 +1088,26 @@ static int lv_take(struct loopview *v)
 		if (r < 0)
 			return (int)r;
 		for (i = 0; i < r; i++, v->mon_frames++) {
+			const int16_t *b = &buf[2 * i];
 			int16_t *x;
+			uint8_t *q;
 
-			if (v->mon_frames % v->factor)
+			if (v->mon_frames % v->factor) {
+				// a frame the kept one stands for: its codes
+				// from 0 up too, for the DAC's gap
+				if (at) {
+					q = &v->qring[2 * ((at - 1) % LV_RING)];
+					q[0] += b[0] >= 0;
+					q[1] += b[1] >= 0;
+				}
 				continue;
+			}
 			x = &v->xring[2 * (at % LV_RING)];
-			x[0] = buf[2 * i];
-			x[1] = buf[2 * i + 1];
+			x[0] = b[0];
+			x[1] = b[1];
+			q = &v->qring[2 * (at % LV_RING)];
+			q[0] = b[0] >= 0;
+			q[1] = b[1] >= 0;
 			at++;
 		}
 		__atomic_store_n(&v->played, at, __ATOMIC_RELEASE);
@@ -1398,10 +1440,15 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 		v->inc[i] = calloc(v->bins, sizeof(double));
 		v->xt[i] = calloc(v->bins, sizeof(double));
 		v->ir[i] = calloc(2 * LV_IR + 1, sizeof(double));
+		v->segq[i] = malloc(n * sizeof(double));
+		v->zq[i] = malloc((n + 2) * sizeof(double));
 		if (!v->coh[i] || !v->mag[i] || !v->ph[i] || !v->inc[i] ||
-		    !v->xt[i] || !v->ir[i])
+		    !v->xt[i] || !v->ir[i] || !v->segq[i] || !v->zq[i])
 			goto bad;
+		v->zs_set[i] = -1;
 	}
+	if (zstep_init(&v->zst, v->bins))
+		goto bad;
 	if (cfg->ref && cfg->rec) {
 		if (lv_files(v))
 			goto bad;
@@ -1409,7 +1456,8 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 	}
 	v->xring = calloc(2 * (size_t)LV_RING, sizeof(int16_t));
 	v->yring = calloc(2 * (size_t)LV_RING, sizeof(int16_t));
-	if (!v->xring || !v->yring)
+	v->qring = calloc(2 * (size_t)LV_RING, sizeof(uint8_t));
+	if (!v->xring || !v->yring || !v->qring)
 		goto bad;
 	v->seed[0] = 0x12345678;
 	v->seed[1] = 0x9abcdef1;
@@ -1502,7 +1550,11 @@ void loopview_close(struct loopview *v)
 		free(v->inc[i]);
 		free(v->xt[i]);
 		free(v->ir[i]);
+		free(v->segq[i]);
+		free(v->zq[i]);
 	}
+	zstep_free(&v->zst);
+	free(v->qring);
 	free(v->f);
 	free(v->t);
 	free(v->zir);
@@ -1928,6 +1980,16 @@ static void lv_eq_run(struct loopview *v)
 		}
 		v->eq_segs += segs;
 	}
+	// the DAC's gap from this run, in LSB, into the block by its segments
+	if (v->zst.segments >= LV_EQ_RUN) {
+		unsigned int lo = lv_bin(v, LV_ZS_LO), hi = lv_bin(v, LV_ZS_HI);
+
+		for (k = 0; k < 2; k++)
+			v->zs_w[k] += v->zst.segments *
+				      zstep_gap(&v->zst, k, lo, hi, NULL);
+		v->zs_n += v->zst.segments;
+	}
+	zstep_reset(&v->zst);
 	for (k = 0; k < PATHS; k++)
 		loop_reset(&v->path[k]);
 }
@@ -2013,6 +2075,34 @@ static int lv_eq_refit(struct loopview *v, const double *drift, int have,
 // a block's end: the loop's deviation in bands and the clock's residual
 // into their trends, each predicted a block ahead; the DAC's correction
 // refitted to the drift and loaded, and the trim moved; lines to the log
+// the DAC's gap at its sign over the block, each side's in LSB, which the
+// driver's a2_zstep_l and a2_zstep_r take back while a2_zstep is on: told
+// from the second block on, once it moves by LV_ZS_MOVE, and kept after,
+// since it is the DAC's, as alsactl keeps its controls
+static void lv_eq_zstep(struct loopview *v, double now, FILE *out)
+{
+	static const char *const name[2] = { "a2_zstep_l", "a2_zstep_r" };
+	int c, told = 0;
+
+	if (!v->zs_n)
+		return;
+	fprintf(out, "%.0f zstep", now - v->t0);
+	for (c = 0; c < 2; c++)
+		fprintf(out, " %.2f", v->zs_w[c] / v->zs_n);
+	if (++v->zs_blocks >= 2)
+		for (c = 0; c < 2; c++) {
+			double g = fmin(fmax(v->zs_w[c] / v->zs_n, 0), 32);
+			long want = lrint(g * 256);
+
+			if (fabs(g - v->zs_set[c]) < LV_ZS_MOVE ||
+			    lv_param(name[c], NULL, &want))
+				continue;
+			v->zs_set[c] = want / 256.0;
+			told = 1;
+		}
+	fprintf(out, " LSB, %.0f segments%s\n", v->zs_n, told ? " (told)" : "");
+}
+
 static void lv_eq_block(struct loopview *v, double now)
 {
 	double m[LV_EQ_BANDS], drift[LV_EQ_BANDS], chip, tie, applied, ahead;
@@ -2134,12 +2224,14 @@ static void lv_eq_block(struct loopview *v, double now)
 		fprintf(out, " %.0f:%.1f\n", 20000.0,
 			lv_eq_noise(v, LV_EQ_BANDS - 1));
 	}
+	lv_eq_zstep(v, now, out);
 	fflush(out);
 	v->blocks++;
 	// the next block from here, with the lag kept
 	for (b = 0; b < LV_EQ_BANDS; b++)
 		v->eq_w[b] = v->eq_v[b] = v->eq_n[b] = 0;
 	v->eq_segs = 0;
+	v->zs_w[0] = v->zs_w[1] = v->zs_n = 0;
 }
 
 int loopview_idle(const struct loopview *v)

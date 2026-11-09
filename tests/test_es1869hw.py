@@ -23,6 +23,7 @@ usage: python3 -m unittest tests.test_es1869hw   (needs gcc and unicorn)
 """
 
 import ctypes
+import math
 import os
 import subprocess
 import sys
@@ -1253,6 +1254,92 @@ class SplitTest(unittest.TestCase):
         self.assertEqual(a, src[0:2] + src[4:6] + src[8:10])
         self.assertEqual(w[0::2], src[2:4] + src[6:8] + src[10:12])
         self.assertEqual(w[1::2], bytes(6))
+
+
+class ZeroStepTest(unittest.TestCase):
+    """es1869_zstep: Audio 2's DAC puts its codes from 0 up a gap higher
+    than those below; each code moved about the gap comes out where the
+    sample asks, but for a sample that falls within the gap"""
+
+    def setUp(self):
+        self.lib = library()
+        self.lib.es1869_zstep.restype = ctypes.c_int16
+        self.lib.es1869_zstep.argtypes = [ctypes.c_int16, u32]
+
+    @staticmethod
+    def dac(c, gap):
+        """the level of code c, in LSB, with the gap at the sign"""
+        return c + (gap if c >= 0 else 0)
+
+    def test_codes(self):
+        self.assertEqual([self.lib.es1869_zstep(x, 0) for x in (-3, 0, 5)],
+                         [-3, 0, 5])
+        for gap in (1.0, 6.7, 7.4, 12.0):
+            step = round(gap * 256)
+            g = step / 256
+            # what the remap aims at: the sample, the gap's middle on 0
+            mid = (g - 1) / 2
+            last = None
+            for x in range(-60, 61):
+                c = self.lib.es1869_zstep(x, step)
+                err = self.dac(c, g) - (x + mid)
+                if abs(x) > (g + 1) / 2:
+                    self.assertLessEqual(abs(err), 0.5 + 1e-9, (gap, x, c))
+                else:
+                    self.assertLessEqual(abs(err), (g + 1) / 2 + 0.5,
+                                         (gap, x, c))
+                    self.assertEqual(c, -1 if x < 0 else 0, (gap, x))
+                if last is not None:
+                    self.assertGreaterEqual(c, last, (gap, x))
+                last = c
+            # the ends stay in range
+            self.assertEqual(self.lib.es1869_zstep(32767, step),
+                             32767 + round(-(g + 1) / 2 + 1e-9))
+            self.assertGreaterEqual(self.lib.es1869_zstep(-32768, step),
+                                    -32768)
+
+    def test_words(self):
+        """each side by its own step, in the low bytes of the ring's words"""
+        frames = [(-200, 100), (0, -1), (3, 7), (-4, 30000)]
+        ring = bytearray()
+        for f in frames:
+            for v in f:
+                u = v & 0xFFFF
+                ring += bytes([u & 0xFF, 0, u >> 8, 0])
+        buf = ctypes.create_string_buffer(bytes(ring), len(ring))
+        steps = (u32 * 2)(round(7.4 * 256), 0)
+        self.lib.es1869_zstep_words(buf, len(frames), steps, True)
+        out = buf.raw
+        for i, (lv, rv) in enumerate(frames):
+            got_l = int.from_bytes(bytes([out[8 * i], out[8 * i + 2]]),
+                                   "little", signed=True)
+            got_r = int.from_bytes(bytes([out[8 * i + 4],
+                                          out[8 * i + 6]]), "little",
+                                   signed=True)
+            self.assertEqual(got_l, self.lib.es1869_zstep(lv, steps[0]))
+            self.assertEqual(got_r, rv)
+        self.assertEqual(out[1::2], bytes(len(ring) // 2))
+
+    def test_small_sine(self):
+        """a sine of 20 LSB: the gap adds most of its size to the
+        fundamental, as the beat test heard, and the remap takes that back"""
+        n = 4096
+        x = [20 * math.sin(2 * math.pi * 37 * i / n) for i in range(n)]
+        g = 7.4
+        step = round(g * 256)
+        for remap, most in ((False, 4.0), (True, 0.4)):
+            y = []
+            for v in x:
+                c = round(v)
+                if remap:
+                    c = self.lib.es1869_zstep(c, step)
+                y.append(self.dac(c, g))
+            a = 2 / n * sum(y[i] * math.sin(2 * math.pi * 37 * i / n)
+                            for i in range(n))
+            if remap:
+                self.assertLess(abs(a - 20), most)
+            else:
+                self.assertGreater(a - 20, most)
 
 
 if __name__ == "__main__":

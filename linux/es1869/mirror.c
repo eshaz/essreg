@@ -156,6 +156,25 @@ static const struct snd_pcm_hardware a2_hw = {
 
 // frames from the application's buffer, at absolute position from, into
 // the ring, both wrapping
+// the DAC's gap at its sign taken back over n of the ring's frames from w,
+// as each fill writes them
+static void mirror_zstep(struct es1869_mirror *m, struct snd_pcm_runtime *rt,
+			 u32 w, u32 n)
+{
+	u32 fb = frames_to_bytes(rt, 1);
+
+	if (!m->zstep[0] && !m->zstep[1])
+		return;
+	while (n) {
+		u32 k = min(n, m->lap - w);
+
+		es1869_zstep_words(m->ring.area + 2 * w * fb, k, m->zstep,
+				   rt->channels == 2);
+		w = (w + k) % m->lap;
+		n -= k;
+	}
+}
+
 static void mirror_copy(struct es1869 *chip, struct snd_pcm_runtime *rt,
 			snd_pcm_uframes_t from, snd_pcm_uframes_t frames)
 {
@@ -172,14 +191,18 @@ static void mirror_copy(struct es1869 *chip, struct snd_pcm_runtime *rt,
 			// ahead of the DMA at the ring's rate, each frame again
 			u32 k;
 
-			for (k = 0; k < m->over; k++)
-				es1869_spread(m->ring.area +
-					      2 * ((r * m->over + k) % m->lap) * fb,
+			for (k = 0; k < m->over; k++) {
+				u32 w = (r * m->over + k) % m->lap;
+
+				es1869_spread(m->ring.area + 2 * w * fb,
 					      rt->dma_area + a * fb, fb);
+				mirror_zstep(m, rt, w, 1);
+			}
 			n = 1;
 		} else {
 			es1869_spread(m->ring.area + 2 * r * fb,
 				      rt->dma_area + a * fb, n * fb);
+			mirror_zstep(m, rt, r, n);
 		}
 		from += n;
 		frames -= n;
@@ -195,6 +218,7 @@ static void mirror_resample(struct es1869 *chip, struct snd_pcm_runtime *rt,
 {
 	struct es1869_mirror *m = &chip->mirror;
 	struct es1869_rs *rs = &m->rs;
+	unsigned long w0;
 	struct es1869_rs_stream s = {
 		.src = rt->dma_area,
 		.ring = m->ring.area,
@@ -223,11 +247,14 @@ static void mirror_resample(struct es1869 *chip, struct snd_pcm_runtime *rt,
 	if (s.mmx)
 		kernel_fpu_begin();
 #endif
+	w0 = rs->w;
 	es1869_rs_fill(rs, &s, start, frames);
 #ifdef ES1869_RS_MMX
 	if (s.mmx)
 		kernel_fpu_end();
 #endif
+	// what this fill wrote, the frames it will write again included
+	mirror_zstep(m, rt, w0, (rs->w + m->lap - w0) % m->lap);
 	m->rs_quiet = rs->w * 2 * frames_to_bytes(rt, 1);
 	// a frame more than the filter reaches: on a step down a ring frame
 	// covers less than a stream frame, so that the reach alone left a frame
@@ -783,9 +810,15 @@ static void rs_apply(struct es1869 *chip, struct snd_pcm_runtime *rt)
 		    m->spread && rt->format == SNDRV_PCM_FORMAT_S16_LE &&
 		    rt->buffer_size >= MIRROR_RS_MIN;
 	u32 clk = want && mode == 2 ? m->clk_period : 0;
+	bool zstep;
 
 	rs->dither = es1869_val(ES_S_a2_resample_dither);
 	rs->treble = treble;
+	// the DAC's gap at its sign, on a 16-bit stream in the ring of words
+	zstep = es1869_val(ES_S_a2_zstep) && m->spread &&
+		rt->format == SNDRV_PCM_FORMAT_S16_LE;
+	m->zstep[0] = zstep ? es1869_val(ES_S_a2_zstep_l) : 0;
+	m->zstep[1] = zstep ? es1869_val(ES_S_a2_zstep_r) : 0;
 	rs->trim = es1869_clock_q32(es1869_trim_ppb(es1869_val(ES_S_a2_trim)) +
 				    es1869_val(ES_S_a2_trim_ppb));
 	rs->clock = mode == 2;
