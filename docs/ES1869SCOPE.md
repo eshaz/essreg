@@ -431,7 +431,10 @@ After 10 s with no frame from the monitor, nothing plays: the run ends,
 Audio 1 and the reader stop, and the view only asks the monitor twice a
 second whether frames have come, which start both streams again as after a
 break. Beside an idle MPD on the Armada, with Audio 1 recording on, es1869eq
-had taken 6 % of the CPU and more than doubled the CPU's entries into C2.
+had taken 6 % of the CPU and more than doubled the CPU's entries into C2,
+129 a second against 47. Resting, it takes 0.7 % and 47 entries a second, as
+the machine without it. It rested 10 s after the music ended and came back
+with the music's first frames.
 
 `linux/config/es1869eq.initd` runs it as a service after es1869cal and MPD.
 

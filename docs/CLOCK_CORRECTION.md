@@ -133,8 +133,8 @@ What disturbed it is not known. Two causes are ruled out:
   fit read every 10 s. The fit stood at +0.483 ppm before it, on that boot's
   raw clock, rose 20 ppb during it and fell 30 ppb after it. The interrupts
   came earlier during the spin, a median of 3 us late against 26 us before,
-  since the CPU never sat idle. That boot had no C2, though, and the
-  evening's had.
+  since the CPU never sat idle. The same run on a boot with C2 held the fit
+  within 30 ppb of +0.873 ppm.
 
 es1869test's `rs.clock.long44` had earlier read 0.197 ppm over half an hour,
 against its limit of 0.1, under its own loads.
@@ -161,11 +161,8 @@ second.
 
 ## Open questions
 
-* What disturbed the chip's fit on 2026-11-08. The faulty read loop moved it
-  by 30 ppb at most without C2; with C2, an idle CPU wakes each interrupt
-  some 30 us later, which a load that comes and goes turns into a step in
-  the earliest interrupts' lateness, but a step that size moves a line of
-  256 s by about 0.2 ppm, not 1.2.
+* What disturbed the chip's fit on 2026-11-08. The faulty read loop, run on
+  purpose, moved it by 30 ppb at most with C2 and without.
 * The fit of the steered clock lags chrony's frequency by about 20 minutes
   by design, so that chronyd's offset corrections don't reach the pitch. A
   faster fit would follow temperature sooner but carry more of those

@@ -186,6 +186,18 @@ while their own recordings went to the disk
 ([TEST_SIGNALS.md](TEST_SIGNALS.md#analyzing)), moves such a tone's phase
 against the line's, which keeps running, until Audio 1 measures it again.
 
+A tone added through Audio 2 tested it, 0.025 Hz off the line at the level
+the line out has it, so that the two beat once in 40 s. Recorded to
+/dev/shm, two takes held the line's phase on the DAC's clock and gave Audio
+1's prediction of the line out's line within 3 to 16 %, through the ratio
+taken from the 1.4 s of silence before the tone, which is 16 to 31 dB of
+cancellation. At the line out the sum fell 5 to 10 dB under the line alone
+as the beat passed, no further: the tone came out 3.6 dB stronger than the
+line. At 2 to 5 LSB, the tone's level through the treble correction wasn't
+proportional to the file's, with the ring's rounding dithered or not, so a
+cancellation would make its tone in the driver and set it from what Audio 1
+hears, a loop that corrects its own level, rather than from a table.
+
 ## What the loop measures
 
 Name the parts of the chain in the frequency domain:
