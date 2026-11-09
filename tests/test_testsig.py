@@ -596,6 +596,59 @@ class AnalysisTest(unittest.TestCase):
             self.assertAlmostEqual(db(at(v["vs-ref:L>L"], hz)),
                                    db(lp2(8000, 0.9)(hz)), delta=0.05)
 
+    def test_residual_apart(self):
+        """the player's noise and a line of it, heard through two paths by
+        recorders on clocks apart, each with its own noise and one with a
+        line of its own: what both heard and what each heard alone"""
+        m = made("residual")
+        x = m.floats()
+        t = np.arange(len(x)) / RATE
+        dac = noise(x.shape, -95, seed=7)
+        dac += 10 ** (-100 / 20) * np.sin(2 * np.pi * 1000 * t)[:, None]
+
+        def pa(f):
+            return lp2(12000, 0.8)(f) * hp1(15)(f) * 0.8
+
+        def px(f):
+            return lp2(16000, 0.7)(f) * 0.5
+
+        rec = shift(filt(x + dac, pa), 3000.3)
+        rec += noise(rec.shape, -90, seed=8)
+        tr = np.arange(len(rec)) / RATE
+        rec += 10 ** (-105 / 20) * np.sin(2 * np.pi * 3000 * tr)[:, None]
+        # a recorder at 48 kHz, its clock 30 ppm slow against the player
+        k = np.arange(int(len(x) * 48000 / RATE) + 9000, dtype=float)
+        ref = at_times(filt(x + dac, px),
+                       (k - 5000.0) * (RATE / 48000) * (1 + 30e-6))
+        ref += noise(ref.shape, -92, seed=9)
+        _text, ctx = sigan.analyze(m, sigan.Rec.of(rec, RATE),
+                                   sigan.Rec.of(ref, 48000))
+        v = ctx.rep.values
+        both = -95 - 10 * math.log10(RATE / 2)
+        for side in "LR":
+            b = v["both:" + side]
+            for hz in (2000, 4000, 8000):
+                i = b["hz"].index(hz)
+                self.assertAlmostEqual(b["silence"][i], both, delta=0.5)
+                self.assertAlmostEqual(b["music"][i], both, delta=0.5)
+                self.assertAlmostEqual(
+                    b["own_rec"][i], -90 - 10 * math.log10(RATE / 2) -
+                    db(abs(pa(hz))), delta=0.3)
+                self.assertAlmostEqual(
+                    b["own_ref"][i], -92 - 10 * math.log10(24000) -
+                    db(abs(px(hz))), delta=0.3)
+            # with the music, the residual meets the floor from 250 Hz,
+            # past the paths' estimate under the program's loud low end
+            hz, music, silence = v["thirds:rec:" + side]
+            for f, a, s in zip(hz, music, silence):
+                if f >= 250:
+                    self.assertAlmostEqual(a, s, delta=1.0, msg=f)
+        heard = [(r[0], float(r[2]), r[5]) for r in v["lines"]]
+        for who, f0, what in (("rec", 1000, "both"), ("ref", 1000, "both"),
+                              ("rec", 3000, "own")):
+            self.assertIn(what, [h for w, f, h in heard
+                                 if w == who and abs(f - f0) < 3], who)
+
     def test_boot_method(self):
         y = shift(filt(made("cal").floats(), path_h), 6000.3) * 0.8
         y += noise(y.shape, -100)

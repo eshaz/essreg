@@ -457,6 +457,7 @@ class Ctx:
         self.info = made.info
         self.al = None
         self.y = None           # the recording on the signal's frames
+        self.yr, self.ral = None, None  # the same of the ref, its Align
         self.outs = list(range(rec.x.shape[1]))
 
     def sides(self):
@@ -2345,6 +2346,311 @@ def running(ctx, x, y, href, f, nfft, segs, tau=2.0):
             np.column_stack([times, devs]).tolist())
 
 
+def ref_onto(ctx):
+    """the second recording on the signal's frames, aligned by its own
+    markers and said in the report once: (frames, Align), or (None, None)
+    where its markers aren't found"""
+    if ctx.ral is None:
+        ref, rep = ctx.ref, ctx.rep
+        al = find_markers(ref, ctx.made) if ctx.info.get("marks") else \
+            align_periodic(ref, ctx.made)
+        ctx.ral = al or False
+        if al is None:
+            rep.say("ref      no markers found in %s" % ref.path)
+            return None, None
+        if unswap(ref, al):
+            rep.say("ref      its channels hear the other sides: swapped "
+                    "back")
+        rep.say()
+        rep.say("ref      %s, %d Hz: signal frame 0 at %.3f s, the player "
+                "against it %+.3f ppm" % (os.path.basename(ref.path),
+                                          ref.rate, al.lag / ref.rate,
+                                          al.ppm))
+        ctx.yr = warp(ref.x, al.lag, al.rho, len(ctx.x))
+    return (ctx.yr, ctx.ral) if ctx.ral else (None, None)
+
+
+def against_ref(ctx):
+    """the recording against a second one made at the same time"""
+    yr, _al = ref_onto(ctx)
+    if yr is None:
+        return
+    y = ctx.onto()
+    an_welch(ctx, x=yr, y=y, label="the recording against the ref",
+             sides=list(range(min(2, yr.shape[1]))))
+
+
+# --- the residual --------------------------------------------------------------
+
+OCTAVES = (31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+# Welch's windows, Hann and half overlapping, vary as 1.33 / K of K
+# independent ones, and a band of M bins as about 1.5 / M of M independent
+# bins
+K_VAR, M_VAR = 1.33, 1.5
+
+
+def autos(ys, nfft):
+    """Welch's spectral matrix of ys alone and its window count"""
+    _gxx, _gyx, gyy, k = welch(ys[:, :1], ys, nfft)
+    return gyy, k
+
+
+def bands_of(f, centres, frac, top):
+    """the bands of 1/frac octave about each centre, cut at top, that hold
+    a bin: (centre, the bins' indices)"""
+    out = []
+    for c in centres:
+        lo, hi = c * 2 ** (-0.5 / frac), min(c * 2 ** (0.5 / frac), top)
+        sel = np.flatnonzero((f >= lo) & (f < hi))
+        if lo < top and len(sel):
+            out.append((c, sel))
+    return out
+
+
+LOW_HZ = (150.0, 400.0)
+
+
+def through(x, at, n, h, nfft):
+    """x's frames from at to at + n through the transfers h (bins of a
+    window of nfft by outputs by inputs) as impulse responses nfft/2 either
+    way of their time 0, x taken as silent outside it"""
+    half = nfft // 2
+    xs = np.zeros((n + 2 * half, x.shape[1]))
+    lo, hi = max(at - half, 0), min(at + n + half, len(x))
+    xs[lo - at + half:hi - at + half] = x[lo:hi]
+    hir = np.roll(np.fft.irfft(h, nfft, axis=0), half, axis=0)
+    m = next_pow2(len(xs) + nfft)
+    z = np.fft.irfft(np.einsum("fci,fi->fc", np.fft.rfft(hir, m, axis=0),
+                               np.fft.rfft(xs, m, axis=0)), m, axis=0)
+    return z[nfft:nfft + n]
+
+
+def blend(hl, fl, hs, fs):
+    """the long windows' transfers hl under LOW_HZ and the short ones' hs
+    over it, crossfaded between, on the long windows' grid fl"""
+    hi = np.empty_like(hl)
+    for c in range(hl.shape[1]):
+        for i in range(hl.shape[2]):
+            hi[:, c, i] = np.interp(fl, fs, hs[:, c, i].real) + \
+                1j * np.interp(fl, fs, hs[:, c, i].imag)
+    u = np.clip((fl - LOW_HZ[0]) / (LOW_HZ[1] - LOW_HZ[0]), 0, 1)
+    wl = (0.5 + 0.5 * np.cos(np.pi * u))[:, None, None]
+    return wl * hl + (1 - wl) * hi
+
+
+def lines_of(p, f, lo, hi, count):
+    """the lines of a spectrum of tones' levels p: bins over ten times their
+    neighbourhood's median and over their neighbours, the highest first"""
+    idx = np.flatnonzero((f >= lo) & (f <= hi))
+    out = []
+    for i in idx[np.argsort(p[idx])[::-1]]:
+        med = np.median(p[max(i - 40, 0):i + 41])
+        if p[i] < 10 * med or len(out) >= count:
+            break
+        if p[i] >= p[i - 1] and p[i] >= p[i + 1]:
+            out.append((i, med))
+    return out
+
+
+def an_residual(ctx):
+    """what the recording holds beyond the program through the path
+    measured from it, with the music and in the silence after it. With a
+    second recording made at the same time, the cross-spectrum of the two
+    residuals keeps what both heard, which the player put out, and leaves
+    each recorder's own noise apart"""
+    rep, made = ctx.rep, ctx.made
+    rate = made.rate
+    seg = {s["kind"]: s for s in ctx.info["segments"]}
+    cut = int(0.1 * rate)
+    span = {k: (seg[k]["at"] + cut, seg[k]["len"] - 2 * cut)
+            for k in ("program", "silence")}
+    nfft = nfft_for(rate)
+    w = hann(nfft)
+    f = np.fft.rfftfreq(nfft, 1.0 / rate)
+    chans = [(0, c) for c in ctx.outs]
+    ys = [ctx.onto()[:, ctx.outs]]
+    rates = [rate, ctx.rec.rate]
+    if ctx.ref is not None:
+        yr, _al = ref_onto(ctx)
+        if yr is not None:
+            rc = list(range(min(2, yr.shape[1])))
+            chans += [(1, c) for c in rc]
+            ys.append(yr[:, rc])
+            rates.append(ctx.ref.rate)
+    yy = np.concatenate(ys, axis=1)
+    top = min(20000.0, 0.48 * min(rates))
+    a, n = span["program"]
+    seg_y = yy[a:a + n] - yy[a:a + n].mean(axis=0)
+    gxx, gyx, gyy, k = welch(ctx.x[a:a + n, :2], seg_y, nfft)
+    h, _coh, _mult = transfers(gxx, gyx, gyy)
+    # what the program, through the paths measured, leaves of each channel,
+    # taken in time: within a window, a path whose phase turns fast, as a
+    # highpass's does, would leak the loud low end of the program into the
+    # residual. Low down, windows eight times as long estimate the paths
+    # with that much less of the window's error, where the program's level
+    # makes up for their fewer averages
+    nlo, hfull, nir = 8 * nfft, h, nfft
+    if n >= 2 * nlo:
+        gl = welch(ctx.x[a:a + n, :2], seg_y, nlo)
+        hl, _c, _m = transfers(*gl[:3])
+        hfull, nir = blend(hl, np.fft.rfftfreq(nlo, 1.0 / rate), h, f), nlo
+    e = seg_y - through(ctx.x[:, :2], a, n, hfull, nir)
+    gee, _k = autos(e, nfft)
+    a, n = span["silence"]
+    gss, k1 = autos(yy[a:a + n] - yy[a:a + n].mean(axis=0), nfft)
+    sw2, df = (w * w).sum(), rate / nfft
+    band = (f >= 20) & (f <= top)
+    wa = 10 ** (a_weight(f) / 10)
+
+    def dens(g, kk):
+        """sums over kk windows as a density, dBFS a Hz of a full-scale
+        sine, in power"""
+        return 4.0 * g / (kk * rate * sw2)
+
+    def total(d, weight=None):
+        v = d[band] * (wa[band] if weight else 1)
+        return float(v.sum() * df)
+
+    rep.say()
+    rep.say("residual: the program's %.1f s through the paths measured from "
+            "it, and %.1f s of the silence after it; Hann windows of %d, half "
+            "overlapping, %d and %d of them" % (
+                span["program"][1] / rate, span["silence"][1] / rate, nfft,
+                k, k1))
+    names = ("rec", "ref")
+    octs = bands_of(f, OCTAVES, 1, top)
+    thirds = bands_of(f, ts.THIRDS, 3, top)
+    csv_rows, res = [], {}
+    a, n = span["program"]
+    for j, (r, c) in enumerate(chans):
+        dm, ds = dens(gee[:, j, j].real, k), dens(gss[:, j, j].real, k1)
+        sig = dens(gyy[:, j, j].real, k)
+        res[j] = (dm, ds)
+        key = "%s:%s" % (names[r], SIDE[c])
+        rep.put("res:" + key, (pdb(total(dm)), pdb(total(ds))))
+        rep.put("thirds:" + key, (
+            [b for b, _s in thirds],
+            [pdb(dm[s].mean()) for _b, s in thirds],
+            [pdb(ds[s].mean()) for _b, s in thirds]))
+        rep.say("  %s %s: the recording %.1f dBFS; the residual with the "
+                "music %.1f (A-wtd %.1f), in the silence %.1f (A-wtd %.1f), "
+                "from 20 Hz to %.0f kHz" % (
+                    names[r], SIDE[c], pdb(total(sig)), pdb(total(dm)),
+                    pdb(total(dm, "A")), pdb(total(ds)),
+                    pdb(total(ds, "A")), top / 1000))
+        for b, s in thirds:
+            csv_rows.append([names[r], SIDE[c], b, pdb(dm[s].mean()),
+                             pdb(ds[s].mean())])
+    rep.say("the residual in octaves, dBFS a Hz at each recording, with the "
+            "music and in the silence:")
+    rep.table(["Hz"] + ["%s %s %s" % (names[r], SIDE[c], t)
+                        for r, c in chans for t in ("music", "silence")],
+              [["%g" % b] + ["%.1f" % pdb(res[j][i][s].mean())
+                             for j in range(len(chans)) for i in (0, 1)]
+               for b, s in octs])
+    rep.csv("residual", ["recorder", "side", "hz", "music_dbfs_hz",
+                         "silence_dbfs_hz"], csv_rows)
+    pairs = [(c, chans.index((0, c)), chans.index((1, c)))
+             for c in range(2) if (0, c) in chans and (1, c) in chans]
+    if pairs:
+        apart(ctx, f, h, gee, gss, k, k1, pairs, octs, thirds, dens, total)
+    found = []
+    for j, (r, c) in enumerate(chans):
+        p = 4.0 * gss[:, j, j].real / (k1 * w.sum() ** 2)
+        for i, med in lines_of(p, f, 20, top, 6):
+            heard = "-"
+            for cc, ia, ix in pairs:
+                if cc == c:
+                    o = ix if j == ia else ia
+                    s = slice(i - 1, i + 2)
+                    coh = np.abs(gss[s, j, o]) ** 2 / np.maximum(
+                        gss[s, j, j].real * gss[s, o, o].real, 1e-60)
+                    heard = "both" if coh.max() >= 0.5 else "own"
+            found.append([names[r], SIDE[c], "%.1f" % f[i],
+                          "%.1f" % pdb(p[i]), "%.1f" % pdb(p[i] / med),
+                          heard])
+    rep.put("lines", found)
+    if found:
+        rep.say("lines in the silence (dBFS as a tone, dB over the local "
+                "floor, and whether both recorders heard it alike):")
+        rep.table(["", "", "Hz", "dBFS", "over", "heard"], found)
+
+
+def apart(ctx, f, h, gee, gss, k, k1, pairs, octs, thirds, dens, total):
+    """the part both recorders heard, referred to the player's input, and
+    each one's own, from the cross-spectra of the residuals: the paths'
+    phases taken out, the cross-spectrum's real part is what both heard
+    times both paths' gains, and the rest of each channel its own"""
+    rep = ctx.rep
+    out, rows = [], []
+    for c, ia, ix in pairs:
+        ha, hx = h[:, ia, c], h[:, ix, c]
+        g = np.maximum(np.abs(ha) * np.abs(hx), 1e-30)
+        turn = np.exp(-1j * np.angle(ha * np.conj(hx)))
+        parts = {}
+        for name, mat, kk in (("music", gee, k), ("silence", gss, k1)):
+            both = (mat[:, ia, ix] * turn).real / g
+            own_a = mat[:, ia, ia].real / np.abs(ha) ** 2 - both
+            own_x = mat[:, ix, ix].real / np.abs(hx) ** 2 - both
+            parts[name] = (dens(both, kk), dens(own_a, kk), dens(own_x, kk),
+                           mat[:, ia, ia].real, mat[:, ix, ix].real, kk)
+
+        def band(name, s):
+            """a band's part both heard and twice its uncertainty"""
+            both, _oa, _ox, paa, pxx, kk = parts[name]
+            two = 2 * math.sqrt(paa[s].mean() * pxx[s].mean() * K_VAR *
+                                M_VAR / (2 * kk * len(s))) / g[s].mean()
+            return both[s].mean(), dens(two, kk)
+
+        def cell(v, two):
+            return "%.1f" % pdb(v) if v > two else "<%.1f" % pdb(two)
+
+        for b, s in octs:
+            vm, tm = band("music", s)
+            vs, tsl = band("silence", s)
+            out.append(["%g" % b, SIDE[c], cell(vm, tm), cell(vs, tsl),
+                        "%.1f" % pdb(parts["silence"][1][s].mean()),
+                        "%.1f" % pdb(parts["silence"][2][s].mean())])
+        vals = {"hz": [], "music": [], "silence": [], "two": [],
+                "own_rec": [], "own_ref": []}
+        for b, s in thirds:
+            vm, tm = band("music", s)
+            vs, tsl = band("silence", s)
+            vals["hz"].append(b)
+            vals["music"].append(pdb(vm) if vm > tm else float("nan"))
+            vals["silence"].append(pdb(vs) if vs > tsl else float("nan"))
+            vals["two"].append(pdb(tsl))
+            vals["own_rec"].append(pdb(parts["silence"][1][s].mean()))
+            vals["own_ref"].append(pdb(parts["silence"][2][s].mean()))
+            rows.append([SIDE[c], b, pdb(vm), pdb(tm), pdb(vs), pdb(tsl),
+                         vals["own_rec"][-1], vals["own_ref"][-1]])
+        tot = {}
+        for name in ("music", "silence"):
+            both, _oa, _ox, paa, pxx, kk = parts[name]
+            tot[name] = (pdb(total(both)), pdb(total(both, "A")))
+        vals["total"] = tot
+        rep.put("both:%s" % SIDE[c], vals)
+    rep.say()
+    rep.say("what both recorders heard, which the player put out, and each "
+            "one's own, at the player's input in dBFS a Hz; < marks a part "
+            "under twice its uncertainty:")
+    rep.table(["Hz", "side", "both music", "both silence", "rec own",
+               "ref own"], out)
+    for c, _ia, _ix in pairs:
+        t = ctx.rep.values["both:%s" % SIDE[c]]["total"]
+        rep.say("  %s: what both heard from 20 Hz to 20 kHz, %.1f dBFS "
+                "(A-wtd %.1f) with the music, %.1f (A-wtd %.1f) in the "
+                "silence" % (SIDE[c], t["music"][0], t["music"][1],
+                             t["silence"][0], t["silence"][1]))
+    rep.say("  with the music, distortion that each recorder adds of the "
+            "same program correlates too, so that part bounds the player's; "
+            "in the silence it is the player's and what the paths share "
+            "before they part")
+    rep.csv("both", ["side", "hz", "music_dbfs_hz", "music_2sd",
+                     "silence_dbfs_hz", "silence_2sd", "rec_own", "ref_own"],
+            rows)
+
+
 ANALYSES = {"ess": an_ess, "linsweep": an_linsweep,
             "multitone": an_periodic, "noise": an_welch, "mls": an_mls,
             "impulses": an_impulses, "tones": an_tones,
@@ -2352,28 +2658,7 @@ ANALYSES = {"ess": an_ess, "linsweep": an_linsweep,
             "imd": an_imd, "jtest": an_jtest, "pilot": an_pilot,
             "chirps": an_chirps, "dual": an_dual, "bursts": an_bursts,
             "polarity": an_polarity, "program": an_program,
-            "track": an_track}
-
-
-def against_ref(ctx):
-    """the recording against a second one made at the same time"""
-    rep = ctx.rep
-    ref = ctx.ref
-    al = find_markers(ref, ctx.made) if ctx.info.get("marks") else \
-        align_periodic(ref, ctx.made)
-    if al is None:
-        rep.say("ref      no markers found in %s" % ref.path)
-        return
-    if unswap(ref, al):
-        rep.say("ref      its channels hear the other sides: swapped back")
-    rep.say()
-    rep.say("ref      %s, %d Hz: signal frame 0 at %.3f s, the player "
-            "against it %+.3f ppm" % (os.path.basename(ref.path), ref.rate,
-                                      al.lag / ref.rate, al.ppm))
-    yr = warp(ref.x, al.lag, al.rho, len(ctx.x))
-    y = ctx.onto()
-    an_welch(ctx, x=yr, y=y, label="the recording against the ref",
-             sides=list(range(min(2, yr.shape[1]))))
+            "track": an_track, "residual": an_residual}
 
 
 def analyze(made, rec, ref=None, prefix=None):
@@ -2401,7 +2686,8 @@ def analyze(made, rec, ref=None, prefix=None):
                 "in this recording")
         return rep.done(), ctx
     ANALYSES[made.sig.family](ctx)
-    if ref is not None:
+    # the residual's analysis takes the ref its own way
+    if ref is not None and made.sig.family != "residual":
         against_ref(ctx)
     return rep.done(), ctx
 

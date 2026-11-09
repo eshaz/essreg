@@ -694,7 +694,7 @@ FAMILIES = {"ess": fam_ess, "linsweep": fam_linsweep,
             "imd": fam_imd, "jtest": fam_jtest, "pilot": fam_pilot,
             "chirps": fam_chirps, "dual": fam_dual, "bursts": fam_bursts,
             "polarity": fam_polarity, "program": fam_program,
-            "track": fam_track}
+            "track": fam_track, "residual": fam_track}
 
 
 # --- the signals -------------------------------------------------------------
@@ -992,6 +992,21 @@ SIGNALS = [
         "Expect the silence's floor within 1 dB, since 16-bit dither lies "
         "some 30 dB under the analog noise.",
         dither=False, seconds=8.0, mode="tpdf"),
+    Sig("residual", "residual", R1, None, "amplitude", "LO",
+        "Noise with music's long-term spectrum plays for 20 s, each side its "
+        "own, then digital silence for 20 s.",
+        "What the recording holds beyond the program through the path "
+        "measured from it is the residual, with the music and in the "
+        "silence. With a second recording made at the same time through "
+        "another path, such as the VX on the line out beside Audio 1's loop, "
+        "the cross-spectrum of the two residuals keeps what both heard, the "
+        "DAC's own noise, and leaves each recorder's own noise apart.",
+        "Expect the silence's floor near what es1869scope -E logs on the "
+        "loop, -115 to -120 dBFS a Hz, and the residual with the music over "
+        "it by what the music adds. Where the DAC's noise lies under both "
+        "recorders' own, its part reads under its uncertainty.",
+        dither=False,
+        segments=(("program", 20.0, -24), ("silence", 20.0, None))),
     Sig("lsb", "lsb", R1, None, "amplitude", "LOID",
         "Square waves of 1, 2, 4 and 8 LSB about zero play for 3 s each at "
         "1002 Hz, 44 frames a period, with no dither.",
@@ -1423,6 +1438,8 @@ def level_text(s, long=False):
         return "-96 dBFS" if long else "-96"
     if s.family == "track":
         return "-40 to -20 dBFS" if long else "-40 to -20"
+    if s.family == "residual":
+        return "-24 dBFS, then digital zero" if long else "-24, zero"
     return "-20 dBFS peak" if long else "-20 pk"
 
 

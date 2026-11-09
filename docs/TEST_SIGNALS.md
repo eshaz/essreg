@@ -205,6 +205,37 @@ of what Audio 2 played or a second card's, aligned on its own, and reports
 Welch's transfers from it to the first. `--chans A,B` picks two channels of
 a recording with more. The analysis needs numpy only.
 
+`residual` takes `--ref` its own way, to tell a player's noise from its
+recorders'. Record it through two paths at once, such as Audio 1 on the loop
+and the VX on the line out, and analyze one against the other:
+
+```
+python3 tools/sigan.py residual-44k a1.wav --ref vx.wav -o out/res
+```
+
+The program's 20 s give each recording's paths from both sides of the file.
+The program through them, subtracted in time, leaves the residual: the
+noise, the distortion and whatever else the recording holds beyond the
+program. Within a window, a path whose phase turns fast, as a highpass's
+does, leaks the program's loud low end into the residual, so the paths come
+from windows of 16384 frames over 400 Hz and of eight times that under 150
+Hz, crossfaded between. On simulated paths with a highpass at 15 Hz, the
+residual with the music met the silence's floor within 1 dB from 250 Hz, and
+what the estimate left of the program stayed over the floor below it, by up
+to 18 dB at 31.5 Hz. The 20 s of silence give the floor alone.
+
+The cross-spectrum of the two recordings' residuals, with the paths' phases
+taken out, keeps what both heard: what the player put out, its noise and
+whatever the two paths share before they part. The rest of each channel is
+that recorder's own. The report gives each part in octaves, as a density at
+the player's input in dBFS a Hz of a full-scale sine, and marks with < a
+part under twice its uncertainty, which falls with the windows averaged and
+the bins in a band. In the silence, what both heard is the player's alone.
+With the music, distortion that each recorder adds to the same program
+correlates between them too, and so does what the paths' estimates leave of
+the program low down, so there it only bounds the player's. Each line in the
+silence is marked as heard by both recorders alike or by one alone.
+
 A coherence estimate reads about 1/K for unrelated signals averaged over K
 windows, which the report gives with each Welch analysis. A coherence that
 falls with frequency while the level holds points at a clock that drifts
@@ -255,6 +286,7 @@ is, what its analysis gives and what a good result looks like.
 | `dr60`             | 44k             | 7.6 s  | -60         | l, r  |
 | `silence`          | 44k 48k         | 9.5 s  | zero        |       |
 | `dither`           | 44k 48k         | 9.5 s  | -96         |       |
+| `residual`         | 44k             | 41.5 s | -24, zero   |       |
 | `lsb`              | 44k             | 14.5 s | 1-8 LSB     | l     |
 | `dc-step`          | 44k             | 9.5 s  | -20 DC      | l     |
 | `imd-smpte`        | 44k             | 6.5 s  | -12 pk      | l     |
@@ -460,6 +492,17 @@ is, what its analysis gives and what a good result looks like.
   floor shows the idle tones that only digital zero brings out, with the
   DAC's input moving. Expect the silence's floor within 1 dB, since 16-bit
   dither lies some 30 dB under the analog noise.
+* **residual** (44.1 kHz, 41.5 s, -24 dBFS, then digital zero). Noise with
+  music's long-term spectrum plays for 20 s, each side its own, then digital
+  silence for 20 s. What the recording holds beyond the program through the
+  path measured from it is the residual, with the music and in the silence.
+  With a second recording made at the same time through another path, such
+  as the VX on the line out beside Audio 1's loop, the cross-spectrum of the
+  two residuals keeps what both heard, the DAC's own noise, and leaves each
+  recorder's own noise apart. Expect the silence's floor near what
+  es1869scope -E logs on the loop, -115 to -120 dBFS a Hz, and the residual
+  with the music over it by what the music adds. Where the DAC's noise lies
+  under both recorders' own, its part reads under its uncertainty.
 * **lsb** (44.1 kHz, 14.5 s, 1 to 8 LSB). Square waves of 1, 2, 4 and 8 LSB
   about zero play for 3 s each at 1002 Hz, 44 frames a period, with no
   dither. Each square's fundamental against 4/pi of its height, and its even
@@ -602,6 +645,7 @@ for.
 | `dr60`             | x    | x   | x   |     |      |
 | `silence`          | x    | x   | x   | x   |      |
 | `dither`           | x    | x   | x   | x   |      |
+| `residual`         | x    | x   |     |     |      |
 | `lsb`              | x    | x   | x   | x   |      |
 | `dc-step`          | x    | x   | x   | x   |      |
 | `imd-smpte`        | x    | x   | x   |     |      |
