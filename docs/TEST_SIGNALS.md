@@ -239,15 +239,21 @@ silence is marked as heard by both recorders alike or by one alone.
 A player whose program stops for a moment is followed. On the Armada, with
 Audio 1 and the VX recording at once, the program came 10 to 120 ms later
 two to four times in its 20 s, at 1x and at 2x alike, in both recordings at
-the same moments. a2stall found no stop of the DAC's DMA under the same
-captures, so the frames that it took jumped, not the DAC; where is open. The
-analysis tracks each recording's place against the signal in blocks of 0.25
-s, reports the stops, and takes the program in the runs between them. Pieces
-of 2 s against the paths of all runs together then set each run's place to a
-small part of a frame and each recorder's rate to a few parts in 10^10: a
-rate a few parts in 10^9 out leaves the program in both residuals with
-opposite signs, which takes from what both heard, the more the higher the
-frequency. The silence follows the last run's places, since a stop in it
+the same moments, while the monitor's frames held it whole, so Audio 2's DMA
+paused. The recordings' own writes to the disk hold it off beside the VX's
+capture ([LINUX.md](LINUX.md#rate-correction)): at 1x with the treble
+correction on, with Audio 1 and the VX capturing into files, a2stall found
+17 stops of the DMA in 30 s, of up to 3.9 ms, and with the same captures
+written to /dev/null none, nor at 2x with Audio 1 alone, as es1869eq records
+beside MPD. The takes' pauses were longer than any of those, which a2stall's
+own load didn't reach. So record a take whose timing matters to /dev/shm.
+The analysis tracks each recording's place against the signal in blocks of
+0.25 s, reports the stops, and takes the program in the runs between them.
+Pieces of 2 s against the paths of all runs together then set each run's
+place to a small part of a frame and each recorder's rate to a few parts in
+10^10: a rate a few parts in 10^9 out leaves the program in both residuals
+with opposite signs, which takes from what both heard, the more the higher
+the frequency. The silence follows the last run's places, since a stop in it
 moves no sample.
 
 A coherence estimate reads about 1/K for unrelated signals averaged over K

@@ -178,8 +178,8 @@ the ring through the line out's path could cancel it there. Over the six
 takes in five minutes the ratio held within 0.15 dB and 7 degrees, which
 allows some 15 to 20 dB of cancellation. By 11:16 it had moved 10 dB on the
 left and 1.4 dB on the right, so a recorder on the line out would have to
-set it again from time to time. A jump of the frames that the DAC takes, as
-the takes had while the VX captured
+set it again from time to time. A pause of the DAC's DMA, as the takes had
+while their own recordings went to the disk
 ([TEST_SIGNALS.md](TEST_SIGNALS.md#analyzing)), moves such a tone's phase
 against the line's, which keeps running, until Audio 1 measures it again.
 
