@@ -77,6 +77,10 @@ int loopview_step(struct loopview *v, struct canvas *c);
 void loopview_key(struct loopview *v, int key);
 /* the seconds measured since the last start */
 double loopview_seconds(const struct loopview *v);
+// whether nothing plays: with the monitor, after LV_IDLE_S seconds with no
+// frame from it, Audio 1 rests and a step only looks for the music, so that
+// the caller can wait longer between steps
+int loopview_idle(const struct loopview *v);
 /* the measurement over: secs of it, or the calibration through; never while
  * it equalizes */
 int loopview_done(const struct loopview *v);

@@ -798,7 +798,8 @@ int main(int argc, char **argv)
 				// over time, the picture of a block
 				if (r == 2 && canvas_ppm(&c, shot))
 					perror(shot);
-				usleep(10000);
+				// half a second while nothing plays
+				usleep(loopview_idle(lv) ? 500000 : 10000);
 			}
 			loopview_frame(lv, &c);
 			loopview_report(lv, stdout);

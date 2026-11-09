@@ -35,7 +35,10 @@
  * break of the music (a pause, a stop, the next file) stops the monitor with
  * an xrun. The view then starts the monitor alone again, at the rate it ran,
  * so that the next start of Audio 2 carries it on, while Audio 1 records on,
- * and finds the lag again.
+ * and finds the lag again. After LV_IDLE_S seconds with no frame from the
+ * monitor, nothing plays: Audio 1 and the reader stop, which saved the
+ * Armada 6 % of its CPU and half its wakes beside an idle MPD, and the step
+ * only asks the monitor whether frames have come, which start both again.
  *
  * Each start puts the DAC and the ADC another fraction of a frame apart, and
  * the monitor's every other frame at 2x half a frame either way, so the
@@ -120,6 +123,7 @@ static const double lv_cal_at[LV_CAL_AT] = { 1000,  5000,  10000,
 #define LV_EQ_AFTER 3 // and the blocks after them before it counts
 #define LV_EQ_SPAN 3.0 // the most the refits move it from the start, dB
 #define LV_READ_US 10000 // the reader's wait between its reads
+#define LV_IDLE_S 10 // seconds with no frame from the monitor before resting
 #define LV_SEG_RHO 0.5 // the least |r| of a segment that counts
 #define LV_SEG_BAD 8 // segments in a row under it that lose the lag
 #define LV_SEG_QUIET 3.0 // an input this quiet, rms in steps, says nothing
@@ -164,6 +168,9 @@ struct loopview {
 	pthread_t rthread; // the streams' reader
 	int reading, rstop, rerr, rwhich;
 	int again; // the streams a retry starts
+	int idle; // nothing plays: Audio 1 and the reader stopped
+	uint64_t seen; // the monitor's frames at seen_at, when they last moved
+	long long seen_at;
 	long long slowest; // the longest step since the last status line, ns
 	uint32_t seed[2];
 	double amp;
@@ -2135,6 +2142,11 @@ static void lv_eq_block(struct loopview *v, double now)
 	v->eq_segs = 0;
 }
 
+int loopview_idle(const struct loopview *v)
+{
+	return v->idle;
+}
+
 int loopview_done(const struct loopview *v)
 {
 	if (v->cfg.equalize)
@@ -2362,6 +2374,69 @@ static void lv_redraw(struct loopview *v, struct canvas *c)
 		lv_draw(v, c);
 }
 
+// nothing played for LV_IDLE_S seconds: the run ends, Audio 1 and the reader
+// stop, and the monitor waits for Audio 2's next start
+static void lv_idle(struct loopview *v)
+{
+	lv_reader_stop(v);
+	lv_run_end(v);
+	pthread_mutex_lock(&v->clk_lock);
+	lv_clock_fold(v);
+	v->cfirst = 0;
+	pthread_mutex_unlock(&v->clk_lock);
+	snd_pcm_drop(v->cap);
+	snd_pcm_drop(v->mon);
+	if (snd_pcm_prepare(v->mon) >= 0)
+		snd_pcm_start(v->mon);
+	v->played = v->mon_frames = v->captured = v->next = 0;
+	v->lagged = 0;
+	v->lag_at = 0;
+	v->bad = 0;
+	v->idle = 1;
+	snprintf(v->why, sizeof(v->why), "nothing plays: Audio 1 rests");
+	fprintf(stderr,
+		"es1869scope: nothing played for %d s, Audio 1 rests "
+		"until the music comes\n",
+		LV_IDLE_S);
+}
+
+// whether the view rests, as it starts to or goes on: the monitor's first
+// frames, or a stop of it, as a start of Audio 2 at another rate brings,
+// start both streams again
+static int lv_rest(struct loopview *v, long long now)
+{
+	uint64_t p;
+
+	if (v->idle) {
+		snd_pcm_sframes_t a = snd_pcm_avail_update(v->mon);
+
+		if (!a)
+			return 1;
+		// a stop of the monitor while nothing plays is started again;
+		// one that won't prepare means Audio 2 runs at another rate
+		if (a < 0 && snd_pcm_prepare(v->mon) >= 0 &&
+		    snd_pcm_start(v->mon) >= 0)
+			return 1;
+		v->idle = 0;
+		v->seen_at = 0;
+		fprintf(stderr, "es1869scope: the music came, Audio 1 again\n");
+		if (lv_start(v, LV_BOTH, 0)) {
+			v->again = LV_BOTH;
+			v->retry = lv_now() + 1000000000LL;
+		}
+		return 1;
+	}
+	p = __atomic_load_n(&v->played, __ATOMIC_ACQUIRE);
+	if (!v->seen_at || p != v->seen) {
+		v->seen = p;
+		v->seen_at = now;
+	} else if (now - v->seen_at > LV_IDLE_S * 1000000000LL) {
+		lv_idle(v);
+		return 1;
+	}
+	return 0;
+}
+
 int loopview_step(struct loopview *v, struct canvas *c)
 {
 	unsigned long before = v->path[LL].segments;
@@ -2402,6 +2477,10 @@ int loopview_step(struct loopview *v, struct canvas *c)
 		if (!v->retry)
 			snprintf(v->why, sizeof(v->why), "%s, started again",
 				 snd_strerror(err));
+		lv_redraw(v, c);
+		return 1;
+	}
+	if (v->mon && lv_rest(v, t0)) {
 		lv_redraw(v, c);
 		return 1;
 	}

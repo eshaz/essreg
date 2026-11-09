@@ -427,6 +427,12 @@ Music at 48 kHz isn't followed, since Audio 1 records at 44.1 kHz. A thread
 of its own reads both streams, so that the work of a block, which can take
 the Celeron longer than Audio 1's buffer lasts, holds up neither.
 
+After 10 s with no frame from the monitor, nothing plays: the run ends,
+Audio 1 and the reader stop, and the view only asks the monitor twice a
+second whether frames have come, which start both streams again as after a
+break. Beside an idle MPD on the Armada, with Audio 1 recording on, es1869eq
+had taken 6 % of the CPU and more than doubled the CPU's entries into C2.
+
 `linux/config/es1869eq.initd` runs it as a service after es1869cal and MPD.
 
 ## The DAC and the ADC apart

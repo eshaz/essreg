@@ -10,7 +10,8 @@
 # The chip's rate on the steered clock, from the monitor's positions, gives
 # the driver's own clock error, whose trend a2_trim_ppb takes back. It holds
 # Audio 2 at 2x and its treble correction on, and puts both back when it
-# stops; a break of the music only restarts the monitor. The log is
+# stops; a break of the music only restarts the monitor, and after 10 s with
+# nothing playing Audio 1 rests until the music comes. The log is
 # /var/log/es1869eq.log and the picture /var/lib/es1869/eq.ppm.
 #
 # Install as /etc/init.d/es1869eq and add it to the default runlevel:
