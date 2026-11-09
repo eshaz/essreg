@@ -308,6 +308,10 @@ The taps lift the left by 4.2 dB at most and the right by 5.4 dB.
 
 ## Corrections over time
 
+[LOOP_TRANSFORM.md](LOOP_TRANSFORM.md) explains this measurement and its
+differential logic in full, and [CLOCK_CORRECTION.md](CLOCK_CORRECTION.md)
+the clock's.
+
 `es1869scope -E` follows the corrections while the music plays. It reads
 what Audio 2's DAC took through the monitor and what came back on Audio 1
 through the record mixer, in blocks of `-T` seconds (a minute from the
@@ -369,7 +373,7 @@ After each block:
   under 0.5 is left out of the sums, and 8 in a row end the run, after which
   the lag is found again. A stop of the DAC or a lost block moves one
   against the other that way: on the Armada one such block, before the
-  check, read the DAC 1.1 dB low at 7.7 kHz, and a refit followed it. The
+  check, read the DAC 0.9 dB low at 7.7 kHz, and a refit followed it. The
   parabola through the three gives the delay between frames, segment by
   segment; within the loop it holds still, since the DAC and the ADC share
   one crystal. A block's clock rate 0.5 ppm off its trend is left out until
@@ -415,13 +419,13 @@ again on its own, at the rate it ran, while Audio 1 records on, and finds
 the lag again. Each start puts the DAC and the ADC another fraction of a
 frame apart, and the monitor's every other frame at 2x half a frame either
 way. So the cross-spectra of two runs don't add at the top, where their
-phases differ by up to 80 degrees: mixed, they took 2.4 dB off 20 kHz on the
-Armada. Each run is measured alone, and its deviation in each band goes into
-the block, weighted by its segments: a block is `-T` seconds of music,
-however broken. A change of the DAC's rate starts the block afresh. Music at
-48 kHz isn't followed, since Audio 1 records at 44.1 kHz. A thread of its
-own reads both streams, so that the work of a block, which can take the
-Celeron longer than Audio 1's buffer lasts, holds up neither.
+phases differ by up to 80 degrees: mixed, they took up to 2.3 dB off 20 kHz
+on the Armada. Each run is measured alone, and its deviation in each band
+goes into the block, weighted by its segments: a block is `-T` seconds of
+music, however broken. A change of the DAC's rate starts the block afresh.
+Music at 48 kHz isn't followed, since Audio 1 records at 44.1 kHz. A thread
+of its own reads both streams, so that the work of a block, which can take
+the Celeron longer than Audio 1's buffer lasts, holds up neither.
 
 `linux/config/es1869eq.initd` runs it as a service after es1869cal and MPD.
 

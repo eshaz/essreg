@@ -40,9 +40,10 @@
  * Each start puts the DAC and the ADC another fraction of a frame apart, and
  * the monitor's every other frame at 2x half a frame either way, so the
  * cross-spectra of two runs of the music don't add: at the top their phases
- * differ by up to 80 degrees, which took 2.4 dB off 20 kHz on the Armada. So
- * a run is measured alone, and its sums start again at the next. Over time, a
- * run's deviation in each band goes into the block, weighted by its segments.
+ * differ by up to 80 degrees, which took up to 2.3 dB off 20 kHz on the
+ * Armada. So a run is measured alone, and its sums start again at the next.
+ * Over time, a run's deviation in each band goes into the block, weighted by
+ * its segments.
  *
  * Over time, the chip's clock comes from the monitor's positions, which the
  * driver reads from the 8237 right before the core stamps them, after the
