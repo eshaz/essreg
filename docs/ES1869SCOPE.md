@@ -441,6 +441,23 @@ as it was before its refit to 22.05 kHz, held it within 0.15 dB, which was
 its design. The record path keeps 4 to 5 dB of loss at 20 kHz, which Audio
 1's correction filter takes back.
 
+The refitted treble correction (test build 4), measured the same way later
+that evening, the output chain divided out (dB against 1 kHz, L / R):
+
+|         | 5 kHz       | 15 kHz      | 19 kHz      | 20 kHz      |
+|---------|-------------|-------------|-------------|-------------|
+| 1x, off | -0.30/-0.31 | -2.47/-2.47 | -3.78/-3.78 | -4.13/-4.10 |
+| 1x, on  | +0.06/+0.07 | +0.03/+0.03 | +0.15/+0.16 | +0.04/+0.18 |
+| 2x, on  | +0.02/+0.02 | -0.01/+0.01 | +0.03/+0.02 | +0.00/+0.01 |
+
+Above 20 kHz, where the chain isn't known, the correction's own gain at 1x
+(on over off) was +4.17 to +5.20 dB to 22 kHz. With the DAC's model that
+leaves -0.09 to +0.23 dB to 22 kHz. 3x can't be measured this way: the VX's
+programmed-I/O capture takes the bus each of its periods (2048 frames, 42.7
+ms), long enough to stall the DAC at 3x. A 1 kHz tone came back at 986.6 Hz
+with sidebands every 23.4 Hz, where 1x and 2x gave it clean. es1869test's
+`rs.treble` checks 3x on the chip's own paths.
+
 ## On the Armada
 
 With the USB WiFi stick in, 12 % of the chip's interrupts come 1 to 3 ms
