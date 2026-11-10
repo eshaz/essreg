@@ -51,6 +51,11 @@ struct loopview_cfg {
 	int equalize;
 	const char *log;
 	/*
+	 * where the engine shares what it knows with a viewer, eqstate.h's
+	 * file, with the commands' FIFO eq.cmd beside it; NULL for none
+	 */
+	const char *state;
+	/*
 	 * no screen: the picture only at the end, or every few blocks with
 	 * equalize, since a drawing takes longer on the Armada's Celeron than
 	 * Audio 1's buffer lasts

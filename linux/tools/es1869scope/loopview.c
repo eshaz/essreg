@@ -83,6 +83,8 @@
 
 #include "loop.h"
 #include "eq.h"
+#include "eqstate.h"
+#include "fft.h"
 #include "zstep.h"
 #include "plot.h"
 #include "say.h"
@@ -126,6 +128,10 @@ static const double lv_cal_at[LV_CAL_AT] = { 1000,  5000,  10000,
 #define LV_EQ_SPAN 3.0 // the most the refits move it from the start, dB
 #define LV_READ_US 10000 // the reader's wait between its reads
 #define LV_IDLE_S 10 // seconds with no frame from the monitor before resting
+#define LV_RAW 4096 // the monitor's newest frames at its own rate, for a viewer
+#define LV_ROW_LOG2 10 // a spectrogram row's FFT, 1024 points
+#define LV_WATCH_S 10 // how long a viewer's watch lasts
+#define LV_REST_S 10 // Audio 1's rest as asked, with no new rate meanwhile
 #define LV_ZS_LO 1000.0 // the band the DAC's gap at its sign comes from, Hz
 #define LV_ZS_HI 8000.0
 #define LV_SEG_RHO 0.5 // the least |r| of a segment that counts
@@ -182,6 +188,19 @@ struct loopview {
 	char not_counted[160]; // why the block's last run wasn't counted
 	unsigned long blk_segs; // the block's segments, counted or not
 	long taps_set[3 * EQ_SIDES]; // the DAC's correction as last loaded
+	// shared with a viewer (eqstate.h)
+	struct eqs_state *st;
+	int cmd_fd;
+	uint32_t ack; // the number of the last command done
+	int hold; // the refits and the trim held, as a viewer asked
+	int asked_rest; // Audio 1 rests as asked, until the rate changes
+	long long watch_until, pub_at, resp_at, rest_until;
+	int16_t *rawring; // the monitor's newest frames, each one
+	uint64_t raw_frames;
+	uint32_t zhist[2][EQS_ZBINS]; // the monitor's codes from -16 to 16
+	struct fft sfft; // a spectrogram row's
+	int16_t *sx, *sz, *sdb;
+	int have_sfft;
 	struct lv_saved saved[LV_SAVED];
 	int nsaved, treble, over;
 	char journal[64];
@@ -1140,8 +1159,8 @@ static void lv_clear(struct loopview *v)
 static int lv_take(struct loopview *v)
 {
 	int16_t buf[2 * LV_CHUNK];
-	uint64_t at = v->played;
-	int got = 0;
+	uint64_t at = v->played, raw = v->raw_frames;
+	int got = 0, c;
 
 	for (;;) {
 		snd_pcm_sframes_t r = snd_pcm_readi(v->mon, buf, LV_CHUNK), i;
@@ -1155,6 +1174,14 @@ static int lv_take(struct loopview *v)
 			int16_t *x;
 			uint8_t *q;
 
+			// for a viewer, each frame as the DAC takes it, and the
+			// codes near 0
+			if (v->rawring) {
+				memcpy(&v->rawring[2 * (raw++ % LV_RAW)], b, 4);
+				for (c = 0; c < 2; c++)
+					if (b[c] >= -16 && b[c] <= 16)
+						v->zhist[c][b[c] + 16]++;
+			}
 			if (v->mon_frames % v->factor) {
 				// a frame the kept one stands for: its codes
 				// from 0 up too, for the DAC's gap
@@ -1174,6 +1201,7 @@ static int lv_take(struct loopview *v)
 			at++;
 		}
 		__atomic_store_n(&v->played, at, __ATOMIC_RELEASE);
+		__atomic_store_n(&v->raw_frames, raw, __ATOMIC_RELEASE);
 		got = 1;
 		if (r < LV_CHUNK)
 			break;
@@ -1313,6 +1341,7 @@ static int lv_follow(struct loopview *v)
 	char why[160];
 	int was = v->a1_rest;
 
+	v->asked_rest = 0;
 	v->a1_rest = !!(eq_policy(&s, NULL, why, sizeof(why)) & EQ_REST);
 	if (v->a1_rest) {
 		if (!was && v->cap)
@@ -1490,6 +1519,7 @@ static int lv_design(struct loopview *v, int c);
 static int lv_param(const char *name, long *v, const long *set);
 static void lv_eq_block(struct loopview *v, double now);
 static void lv_figures(struct loopview *v);
+static void lv_publish(struct loopview *v, int force);
 static unsigned int lv_bin(const struct loopview *v, double hz);
 
 static int lv_files(struct loopview *v)
@@ -1567,6 +1597,7 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 	if (!v)
 		return NULL;
 	v->cfg = *cfg;
+	v->cmd_fd = -1;
 	v->chip_out = NAN;
 	pthread_mutex_init(&v->clk_lock, NULL);
 	v->clk_init = 1;
@@ -1604,9 +1635,32 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 	}
 	if (zstep_init(&v->zst, v->bins))
 		goto bad;
+	// the state for a viewer, with the monitor's frames and a row's FFT
+	if (cfg->state) {
+		char cmd[256], *slash;
+		int err;
+
+		snprintf(cmd, sizeof(cmd), "%s", cfg->state);
+		slash = strrchr(cmd, '/');
+		snprintf(slash ? slash + 1 : cmd,
+			 sizeof(cmd) - (size_t)(slash ? slash + 1 - cmd : 0),
+			 "eq.cmd");
+		err = eqs_create(cfg->state, cmd, &v->st, &v->cmd_fd);
+		if (err)
+			say("%s: %s: no state for a viewer", cfg->state,
+			    strerror(-err));
+		v->rawring = calloc(2 * LV_RAW, sizeof(int16_t));
+		v->sx = calloc(5u << LV_ROW_LOG2, sizeof(int16_t));
+		v->sz = v->sx ? v->sx + (1u << LV_ROW_LOG2) : NULL;
+		v->sdb = v->sx ? v->sz + (2u << LV_ROW_LOG2) : NULL;
+		v->have_sfft = v->sx &&
+			       !fft_init(&v->sfft, LV_ROW_LOG2, fft_have_mmx());
+	}
 	if (cfg->ref && cfg->rec) {
 		if (lv_files(v))
 			goto bad;
+		// from files, the response once, as a viewer would see it
+		lv_publish(v, 1);
 		return v;
 	}
 	v->xring = calloc(2 * (size_t)LV_RING, sizeof(int16_t));
@@ -1705,6 +1759,18 @@ void loopview_close(struct loopview *v)
 	}
 	if (v->evctl)
 		snd_ctl_close(v->evctl);
+	// a viewer sees the engine end; its lock ends with the process
+	if (v->st) {
+		eqs_begin(v->st);
+		v->st->state = EQS_STOPPED;
+		eqs_end(v->st);
+	}
+	if (v->cmd_fd >= 0)
+		close(v->cmd_fd);
+	if (v->have_sfft)
+		fft_free(&v->sfft);
+	free(v->sx);
+	free(v->rawring);
 	for (i = 0; i < PATHS; i++)
 		loop_free(&v->path[i]);
 	for (i = 0; i < 4; i++) {
@@ -2280,6 +2346,31 @@ static void lv_eq_zstep(struct loopview *v, double now, FILE *out)
 // a block's end: the loop's deviation in bands and the clock's residual
 // into their trends, each predicted a block ahead; the DAC's correction
 // refitted to the drift and loaded, and the trim moved; lines to the log
+_Static_assert(EQS_BANDS == LV_EQ_BANDS, "the state's bands are -E's");
+
+// a block into the state's history, and the bands as they now stand
+static void lv_pub_block(struct loopview *v, const struct eqs_block *blk,
+			 const double *drift)
+{
+	struct eqs_state *s = v->st;
+	int b;
+
+	if (!s)
+		return;
+	eqs_begin(s);
+	s->hist[s->hist_next % EQS_HIST] = *blk;
+	s->hist_next++;
+	if (s->hist_count < EQS_HIST)
+		s->hist_count++;
+	for (b = 0; b < EQS_BANDS; b++) {
+		s->band_hz[b] = (float)lv_eq_fc(b, NULL, NULL);
+		s->band_dev[b] = blk->dev[b];
+		s->band_base[b] = v->nbase[b] ? (float)v->base[b] : NAN;
+		s->band_drift[b] = (float)drift[b];
+	}
+	eqs_end(s);
+}
+
 static void lv_eq_block(struct loopview *v, double now)
 {
 	double m[LV_EQ_BANDS], drift[LV_EQ_BANDS], chip, tie, applied, ahead;
@@ -2291,8 +2382,11 @@ static void lv_eq_block(struct loopview *v, double now)
 	long trim, mode[2];
 	char why[160];
 	struct eq_setup at_now;
+	struct eqs_block blk = { .t = (int32_t)(now - v->t0) };
 	FILE *out = v->eqlog ? v->eqlog : stdout;
 
+	blk.drift = blk.drift_hz = blk.corr20k = NAN;
+	blk.chip = blk.tie = blk.applied = blk.resid = NAN;
 	lv_eq_run(v);
 	ahead = now + v->cfg.secs;
 	// music measured otherwise than the trends started says so, once
@@ -2334,7 +2428,7 @@ static void lv_eq_block(struct loopview *v, double now)
 	    !cal[0])
 		fprintf(out, "0 the record path isn't calibrated (es1869scope "
 			     "-C): the DAC's correction stays as it is\n");
-	if (have)
+	if (have && !v->hold)
 		fitted = lv_eq_refit(v, drift, have, &corr);
 	if (based && !v->based) {
 		v->based = 1;
@@ -2355,6 +2449,11 @@ static void lv_eq_block(struct loopview *v, double now)
 		// no clock this block
 	} else if (!tmode) {
 		// the trend and the trim are the Clock mode's: held
+		blk.chip = (float)chip;
+		blk.tie = (float)tie;
+		blk.applied = (float)(applied / 1e3);
+		blk.trim = (int32_t)trim;
+		blk.held = 1;
 		fprintf(out,
 			"%.0f clock chip %+.4f tie %.1f applied %+.4f trim %ld "
 			"(held: %s)\n",
@@ -2377,11 +2476,18 @@ static void lv_eq_block(struct loopview *v, double now)
 			       want < trim - LV_EQ_TRIM ? -LV_EQ_TRIM :
 							  want - trim);
 		if (v->bias.n >= 3 && labs(want - trim) >= LV_EQ_TRIM_MIN &&
-		    !lv_param("a2_trim_ppb", NULL, &want)) {
+		    !v->hold && !lv_param("a2_trim_ppb", NULL, &want)) {
 			trim = want;
 			trimmed = 1;
 		}
 		v->trim = trim;
+		blk.chip = (float)chip;
+		blk.tie = (float)tie;
+		blk.applied = (float)(applied / 1e3);
+		blk.resid = (float)resid;
+		blk.trim = (int32_t)trim;
+		blk.moved = trimmed;
+		blk.held = v->hold;
 		fprintf(out,
 			"%.0f clock chip %+.4f tie %.1f applied %+.4f resid %+.4f bias %+.4f pred %+.4f trim %ld%s\n",
 			now - v->t0, chip, tie, applied / 1e3, resid, bias,
@@ -2422,6 +2528,20 @@ static void lv_eq_block(struct loopview *v, double now)
 	}
 	lv_eq_zstep(v, now, out);
 	fflush(out);
+	// the block for a viewer
+	blk.counted = v->eq_segs > 0;
+	blk.refitted = fitted;
+	for (b = 0; b < LV_EQ_BANDS; b++)
+		blk.dev[b] = (float)m[b];
+	if (have) {
+		blk.drift = (float)drift[at];
+		blk.drift_hz = (float)lv_eq_fc(at, NULL, NULL);
+	}
+	blk.corr20k = (float)corr;
+	for (b = 0; b < 2; b++)
+		blk.zstep[b] = v->zs_n ? (float)(v->zs_w[b] / v->zs_n) : NAN;
+	lv_pub_block(v, &blk, drift);
+	memset(v->zhist, 0, sizeof(v->zhist));
 	v->blocks++;
 	// the next block from here, with the lag kept
 	for (b = 0; b < LV_EQ_BANDS; b++)
@@ -2727,6 +2847,268 @@ static int lv_rest(struct loopview *v, long long now)
 	return 0;
 }
 
+// --- shared with a viewer ------------------------------------------------------
+
+// rms and peak in dBFS of a stereo ring's newest n frames, len in the ring
+static void lv_level(const int16_t *ring, uint64_t at, unsigned int len,
+		     unsigned int n, float *rms, float *peak)
+{
+	double ss[2] = { 0, 0 };
+	int pk[2] = { 0, 0 }, c;
+	unsigned int k;
+
+	if (n > len)
+		n = len;
+	if (at < n)
+		n = (unsigned int)at;
+	for (k = 0; k < n; k++) {
+		const int16_t *f = &ring[2 * ((at - n + k) % len)];
+
+		for (c = 0; c < 2; c++) {
+			ss[c] += (double)f[c] * f[c];
+			if (abs(f[c]) > pk[c])
+				pk[c] = abs(f[c]);
+		}
+	}
+	for (c = 0; c < 2; c++) {
+		rms[c] = n && ss[c] > 0 ?
+				 (float)(10 *
+					 log10(ss[c] / n / 32768.0 / 32768.0)) :
+				 -120;
+		peak[c] = pk[c] ? (float)(20 * log10(pk[c] / 32768.0)) : -120;
+	}
+}
+
+// a spectrogram row of a stereo ring's newest frames, the sides together,
+// as the state keeps it: dB against full scale at EQS_BINS points, the
+// loudest of the bins each stands for
+static void lv_row(struct loopview *v, const int16_t *ring, uint64_t at,
+		   unsigned int len, int8_t *row)
+{
+	unsigned int n = v->sfft.n, per = n / 2 / EQS_BINS, k, j;
+
+	if (at < n) {
+		memset(row, -128, EQS_BINS);
+		return;
+	}
+	for (k = 0; k < n; k++) {
+		const int16_t *f = &ring[2 * ((at - n + k) % len)];
+
+		v->sx[k] = (int16_t)((f[0] + f[1]) / 2);
+	}
+	fft_run(&v->sfft, v->sx, v->sz);
+	fft_db(&v->sfft, v->sz, v->sdb);
+	for (j = 0; j < EQS_BINS; j++) {
+		int m = -1280;
+
+		for (k = j * per; k < (j + 1) * per; k++)
+			if (v->sdb[k] > m)
+				m = v->sdb[k];
+		m /= 10;
+		row[j] = (int8_t)(m < -128 ? -128 : m > 0 ? 0 : m);
+	}
+}
+
+// the run's response at the state's points, log-spaced from 20 Hz to 20
+// kHz, from the arrays lv_figures made, with the impulse response
+static void lv_pub_response(const struct loopview *v, struct eqs_state *s)
+{
+	unsigned int i, c, k;
+
+	for (i = 0; i < EQS_POINTS; i++) {
+		double f = 20 * pow(1000, (double)i / (EQS_POINTS - 1));
+
+		k = lv_bin(v, f);
+		s->hz[i] = (float)f;
+		for (c = 0; c < 2; c++) {
+			s->mag[c][i] = (float)v->mag[c][k];
+			s->phase[c][i] = (float)v->ph[c][k];
+			s->coh[c][i] = (float)v->coh[c][k];
+		}
+	}
+	for (c = 0; c < 2; c++)
+		for (k = 0; k < EQS_IR; k++)
+			s->ir[c][k] = (float)v->ir[c][k];
+}
+
+// Audio 1 at rest now, as a viewer asks before it sets 3x, so that the DAC
+// doesn't stall in the moment the reader takes to see the change: the
+// monitor's next start, at the new rate, decides again, or LV_REST_S later
+static void lv_ask_rest(struct loopview *v, long long now)
+{
+	if (!v->mon || v->a1_rest)
+		return;
+	lv_reader_stop(v);
+	if (v->cap)
+		snd_pcm_drop(v->cap);
+	lv_run_end(v);
+	v->a1_rest = 1;
+	v->asked_rest = 1;
+	v->lagged = 0;
+	v->rest_until = now + LV_REST_S * 1000000000LL;
+	snprintf(v->why, sizeof(v->why),
+		 "Audio 1 rests, as a viewer asked before a change of the "
+		 "output rate");
+	say("%s", v->why);
+	lv_reader_start(v);
+}
+
+// the trends start again from here, as a viewer asks once a setup has
+// changed for good: the next blocks are their start, and the DAC's
+// correction as it is now the refits'
+static void lv_rebase(struct loopview *v)
+{
+	int b;
+
+	v->have_setup = 0;
+	v->based = 0;
+	for (b = 0; b < LV_EQ_BANDS; b++) {
+		v->nbase[b] = 0;
+		v->base[b] = 0;
+		eq_reset(&v->band[b]);
+	}
+	memcpy(v->taps0, v->taps_set, sizeof(v->taps0));
+	say("the trends start again from here, as a viewer asked");
+}
+
+// a viewer's commands, each done and its number echoed into the state
+static void lv_commands(struct loopview *v, long long now)
+{
+	char word[16];
+	uint32_t num;
+	int i, r;
+
+	for (i = 0; i < 8; i++) {
+		r = eqs_command(v->cmd_fd, word, sizeof(word), &num);
+		if (!r)
+			break;
+		if (r < 0) {
+			say("a line on the FIFO that isn't a command");
+			continue;
+		}
+		if (!strcmp(word, "watch")) {
+			v->watch_until = now + LV_WATCH_S * 1000000000LL;
+		} else if (!strcmp(word, "hold")) {
+			if (!v->hold)
+				say("the refits and the trim held, as a viewer "
+				    "asked");
+			v->hold = 1;
+		} else if (!strcmp(word, "resume")) {
+			if (v->hold)
+				say("the refits and the trim go on again");
+			v->hold = 0;
+		} else if (!strcmp(word, "rest")) {
+			lv_ask_rest(v, now);
+		} else if (!strcmp(word, "restart")) {
+			if (v->mon && lv_start(v, LV_BOTH, 0)) {
+				v->again = LV_BOTH;
+				v->retry = lv_now() + 1000000000LL;
+			}
+		} else if (!strcmp(word, "rebase")) {
+			lv_rebase(v);
+		} else {
+			say("a command it doesn't know: %s", word);
+			continue;
+		}
+		v->ack = num;
+	}
+}
+
+// the state for a viewer: the status once a second, and while one watches,
+// levels and a row of each source's spectrogram ten times a second and the
+// run's response once a second. All copies, but for lv_figures, which runs
+// before the write begins, so that a viewer seldom waits
+static void lv_publish(struct loopview *v, int force)
+{
+	struct eqs_state *s = v->st;
+	long long now = lv_now();
+	long val[2], a1[EQS_A1TAPS];
+	unsigned int n, k;
+	int watched, resp = 0;
+
+	if (!s)
+		return;
+	lv_commands(v, now);
+	watched = now < v->watch_until;
+	if (!force && now - v->pub_at < (watched ? 100000000LL : 1000000000LL))
+		return;
+	v->pub_at = now;
+	if ((force || (watched && now - v->resp_at >= 1000000000LL)) &&
+	    v->lagged && v->path[LL].segments >= 2) {
+		v->resp_at = now;
+		lv_figures(v);
+		resp = 1;
+	}
+	eqs_begin(s);
+	s->now_ms = (uint32_t)(now / 1000000);
+	s->ack = v->ack;
+	s->watched = watched;
+	s->state = !v->mon    ? EQS_MEASURING :
+		   v->idle    ? EQS_RESTING :
+		   v->a1_rest ? EQS_A1_RESTS :
+		   v->lagged  ? EQS_MEASURING :
+				EQS_FINDING;
+	snprintf(s->why, sizeof(s->why), "%s", v->why);
+	s->stream_rate = v->stream_rate;
+	s->factor = v->factor;
+	s->a1_rate = v->rate;
+	s->a1_rest = v->a1_rest;
+	s->a1c = v->a1c_applied;
+	s->hold = v->hold;
+	if (v->ctl) {
+		s->mode =
+			!ctl_read(v->ctl, "Audio 2 Rate Correction", val, &n) ?
+				(uint32_t)val[0] :
+				0;
+		s->treble =
+			!ctl_read(v->ctl,
+				  "Audio 2 Treble Correction Playback Switch",
+				  val, &n) &&
+			val[0];
+		if (!ctl_read_all(v->ctl, "Audio 1 Correction Capture Taps", a1,
+				  EQS_A1TAPS))
+			for (k = 0; k < EQS_A1TAPS; k++)
+				s->a1taps[k] = (int32_t)a1[k];
+	}
+	s->lagged = v->lagged;
+	s->lag = (int32_t)v->lag;
+	s->segments = (uint32_t)v->path[LL].segments;
+	s->blocks = (uint32_t)v->blocks;
+	s->restarts = v->restarts;
+	s->overlay = v->ov_n ? (float)(v->ov_r / v->ov_n) : 0;
+	s->delay = v->ov_n ? (float)(v->ov_d / v->ov_n) : 0;
+	memcpy(s->zhist, v->zhist, sizeof(s->zhist));
+	for (k = 0; k < 3 * EQS_SIDES; k++) {
+		s->taps[k] = (int32_t)v->taps_set[k];
+		s->taps0[k] = (int32_t)v->taps0[k];
+	}
+	if (resp)
+		lv_pub_response(v, s);
+	if (watched && v->rawring) {
+		uint64_t raw =
+			__atomic_load_n(&v->raw_frames, __ATOMIC_ACQUIRE);
+		uint64_t cap = lv_captured(v);
+		unsigned int *next = s->row_next;
+
+		lv_level(v->rawring, raw, LV_RAW, v->rate * v->factor / 10,
+			 s->rms, s->peak);
+		lv_level(v->yring, cap, LV_RING, v->rate / 10, s->rms + 2,
+			 s->peak + 2);
+		if (v->have_sfft) {
+			lv_row(v, v->rawring, raw, LV_RAW,
+			       s->rows[EQS_MON][next[EQS_MON]++ % EQS_ROWS]);
+			s->row_hz[EQS_MON] = v->rate * v->factor / 2;
+			if (!v->a1_rest) {
+				lv_row(v, v->yring, cap, LV_RING,
+				       s->rows[EQS_A1]
+					      [next[EQS_A1]++ % EQS_ROWS]);
+				s->row_hz[EQS_A1] = v->rate / 2;
+			}
+		}
+	}
+	eqs_end(s);
+}
+
 // what the reader saw change: Audio 1 started again to take its correction
 // as switched, the DAC's correction that another program loaded taken as the
 // refits' start, and a control the run set that another program changed left
@@ -2782,6 +3164,15 @@ int loopview_step(struct loopview *v, struct canvas *c)
 	int lagged = v->lagged, which, err, r = 0;
 	long long t0 = lv_now(), now;
 
+	// a viewer's commands and the state it reads
+	lv_publish(v, 0);
+	if (v->asked_rest && t0 > v->rest_until) {
+		v->asked_rest = 0;
+		if (lv_start(v, LV_BOTH, 0)) {
+			v->again = LV_BOTH;
+			v->retry = lv_now() + 1000000000LL;
+		}
+	}
 	// the music stopped or changed its rate: try again each second
 	if (v->retry) {
 		if (t0 < v->retry)

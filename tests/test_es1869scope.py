@@ -10,6 +10,7 @@ usage: python3 -m unittest tests.test_es1869scope   (needs gcc and numpy)
 """
 
 import ctypes
+import errno
 import os
 import re
 import shutil
@@ -53,6 +54,47 @@ class PhEst(ctypes.Structure):
 
 def dp(a):
     return a.ctypes.data_as(DP)
+
+
+# eqstate.h's layout, the engine's state that a viewer reads
+EQS_POINTS, EQS_BANDS, EQS_ROWS, EQS_BINS = 128, 24, 64, 128
+EQS_HIST, EQS_ZBINS, EQS_A1TAPS, EQS_WHY = 64, 33, 34, 160
+F32, U32, I32 = ctypes.c_float, ctypes.c_uint32, ctypes.c_int32
+
+
+class EqsBlock(ctypes.Structure):
+    _fields_ = [("t", I32), ("counted", I32), ("refitted", I32),
+                ("trim", I32), ("moved", I32), ("held", I32),
+                ("dev", F32 * EQS_BANDS), ("drift", F32), ("drift_hz", F32),
+                ("corr20k", F32), ("chip", F32), ("tie", F32),
+                ("applied", F32), ("resid", F32), ("zstep", F32 * 2)]
+
+
+class EqsState(ctypes.Structure):
+    _fields_ = [("magic", U32), ("version", U32), ("size", U32),
+                ("seq", U32), ("pid", I32), ("now_ms", U32), ("ack", U32),
+                ("watched", U32), ("state", I32),
+                ("why", ctypes.c_char * EQS_WHY),
+                ("stream_rate", U32), ("factor", U32), ("a1_rate", U32),
+                ("a1_rest", U32), ("a1c", U32), ("mode", U32),
+                ("treble", U32), ("hold", U32),
+                ("lagged", U32), ("segments", U32), ("runs", U32),
+                ("blocks", U32), ("restarts", U32), ("lag", I32),
+                ("delay", F32), ("overlay", F32),
+                ("rms", F32 * 4), ("peak", F32 * 4),
+                ("hz", F32 * EQS_POINTS), ("mag", (F32 * EQS_POINTS) * 2),
+                ("phase", (F32 * EQS_POINTS) * 2),
+                ("coh", (F32 * EQS_POINTS) * 2), ("ir", (F32 * 65) * 2),
+                ("band_hz", F32 * EQS_BANDS), ("band_dev", F32 * EQS_BANDS),
+                ("band_base", F32 * EQS_BANDS),
+                ("band_drift", F32 * EQS_BANDS),
+                ("row_next", U32 * 2), ("row_hz", U32 * 2),
+                ("rows", ((ctypes.c_int8 * EQS_BINS) * EQS_ROWS) * 2),
+                ("taps", I32 * 48), ("taps0", I32 * 48),
+                ("a1taps", I32 * EQS_A1TAPS),
+                ("zhist", (U32 * EQS_ZBINS) * 2),
+                ("hist_next", U32), ("hist_count", U32),
+                ("hist", EqsBlock * EQS_HIST)]
 
 
 class Lib:
@@ -488,6 +530,135 @@ class LoopTest(unittest.TestCase):
             self.assertLess(abs(frac.value), 0.5)
 
 
+class StateTest(unittest.TestCase):
+    """eqstate.c: the engine's state in a file, copied whole between its
+    writes, its lock telling a viewer that the engine runs, and the FIFO's
+    commands"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        cls.so = os.path.join(cls.tmp, "eqstate.so")
+        subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall", "-Wextra",
+                               "-Werror", "-fPIC", "-shared", "-o", cls.so,
+                               os.path.join(SCOPE, "eqstate.c")])
+        lib = ctypes.CDLL(cls.so)
+        sp = ctypes.POINTER(ctypes.POINTER(EqsState))
+        lib.eqs_create.argtypes = [ctypes.c_char_p, ctypes.c_char_p, sp,
+                                   ctypes.POINTER(ctypes.c_int)]
+        lib.eqs_begin.argtypes = [ctypes.POINTER(EqsState)]
+        lib.eqs_end.argtypes = [ctypes.POINTER(EqsState)]
+        lib.eqs_command.argtypes = [ctypes.c_int, ctypes.c_char_p,
+                                    ctypes.c_uint, ctypes.POINTER(U32)]
+        lib.eqs_map.argtypes = [ctypes.c_char_p, sp]
+        lib.eqs_alive.argtypes = [ctypes.c_char_p]
+        lib.eqs_copy.argtypes = [ctypes.POINTER(EqsState),
+                                 ctypes.POINTER(EqsState)]
+        lib.eqs_send.argtypes = [ctypes.c_char_p, ctypes.c_char_p, U32]
+        cls.lib = lib
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp)
+
+    def create(self, name, cmd=None):
+        path = os.path.join(self.tmp, name).encode()
+        s = ctypes.POINTER(EqsState)()
+        fd = ctypes.c_int(-1)
+        r = self.lib.eqs_create(path, cmd and os.path.join(
+            self.tmp, cmd).encode(), ctypes.byref(s), ctypes.byref(fd))
+        self.assertEqual(r, 0)
+        return path, s, fd.value
+
+    def test_the_layout_is_the_same_here_and_on_the_armada(self):
+        """the engine's size, which a 32-bit build gives too"""
+        path, s, _fd = self.create("layout.state")
+        self.assertEqual(ctypes.sizeof(EqsState), 31956)
+        self.assertEqual(s.contents.size, ctypes.sizeof(EqsState))
+        self.assertEqual(s.contents.magic, 0x31534545)
+        self.assertEqual(s.contents.pid, os.getpid())
+
+    def test_a_copy_is_taken_whole_between_writes(self):
+        path, s, _fd = self.create("copy.state")
+        self.lib.eqs_begin(s)
+        s.contents.stream_rate = 44100
+        s.contents.mag[1][5] = -0.25
+        s.contents.hist[3].trim = 282
+        self.lib.eqs_end(s)
+        m = ctypes.POINTER(EqsState)()
+        self.assertEqual(self.lib.eqs_map(path, ctypes.byref(m)), 0)
+        out = EqsState()
+        self.assertEqual(self.lib.eqs_copy(m, ctypes.byref(out)), 0)
+        self.assertEqual((out.stream_rate, out.hist[3].trim), (44100, 282))
+        self.assertAlmostEqual(out.mag[1][5], -0.25)
+        # in the middle of a write no copy is whole
+        self.lib.eqs_begin(s)
+        self.assertEqual(self.lib.eqs_copy(m, ctypes.byref(out)), -1)
+        self.lib.eqs_end(s)
+        self.assertEqual(self.lib.eqs_copy(m, ctypes.byref(out)), 0)
+
+    def test_the_lock_tells_whether_the_engine_runs(self):
+        """an engine in another process holds the file's lock until it
+        ends, and a second can't take the file meanwhile"""
+        path = os.path.join(self.tmp, "alive.state")
+        child = subprocess.Popen(
+            [sys.executable, "-c",
+             "import ctypes, sys, time\n"
+             "lib = ctypes.CDLL(sys.argv[1])\n"
+             "s = ctypes.c_void_p(); fd = ctypes.c_int(-1)\n"
+             "assert lib.eqs_create(sys.argv[2].encode(), None,"
+             " ctypes.byref(s), ctypes.byref(fd)) == 0\n"
+             "print('ready', flush=True); time.sleep(30)\n",
+             self.so, path], stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(child.stdout.readline().strip(), "ready")
+            self.assertEqual(self.lib.eqs_alive(path.encode()), child.pid)
+            s = ctypes.POINTER(EqsState)()
+            fd = ctypes.c_int(-1)
+            self.assertLess(self.lib.eqs_create(path.encode(), None,
+                                                ctypes.byref(s),
+                                                ctypes.byref(fd)), 0)
+        finally:
+            child.kill()
+            child.wait()
+            child.stdout.close()
+        self.assertEqual(self.lib.eqs_alive(path.encode()), 0)
+
+    def test_commands_come_whole_and_nothing_else_does(self):
+        path, s, fd = self.create("cmd.state", "eq.cmd")
+        cmd = os.path.join(self.tmp, "eq.cmd").encode()
+        word = ctypes.create_string_buffer(16)
+        num = U32()
+        self.assertEqual(self.lib.eqs_command(fd, word, 16,
+                                              ctypes.byref(num)), 0)
+        self.assertEqual(self.lib.eqs_send(cmd, b"hold", 7), 0)
+        self.assertEqual(self.lib.eqs_send(cmd, b"watch", 8), 0)
+        got = []
+        for _ in range(2):
+            self.assertEqual(self.lib.eqs_command(fd, word, 16,
+                                                  ctypes.byref(num)), 1)
+            got.append((word.value, num.value))
+        self.assertEqual(got, [(b"hold", 7), (b"watch", 8)])
+        w = os.open(cmd, os.O_WRONLY | os.O_NONBLOCK)
+        os.write(w, b"junk\n")
+        os.close(w)
+        self.assertEqual(self.lib.eqs_command(fd, word, 16,
+                                              ctypes.byref(num)), -1)
+        # no engine reading: the viewer is told so at once
+        lone = os.path.join(self.tmp, "lone.cmd")
+        os.mkfifo(lone)
+        self.assertEqual(self.lib.eqs_send(lone.encode(), b"hold", 1),
+                         -errno.ENXIO)
+
+    def test_another_layout_is_refused(self):
+        path = os.path.join(self.tmp, "other.state")
+        with open(path, "wb") as fh:
+            fh.write(b"\0" * ctypes.sizeof(EqsState))
+        m = ctypes.POINTER(EqsState)()
+        self.assertEqual(self.lib.eqs_map(path.encode(), ctypes.byref(m)),
+                         -errno.ESTALE)
+
+
 class EqTest(unittest.TestCase):
     """eq.c: a value's trend over blocks, predicted ahead, and the DAC
     correction's side taps fitted to a response"""
@@ -725,7 +896,7 @@ class ShotTest(unittest.TestCase):
         src = [os.path.join(SCOPE, f) for f in
                ("es1869scope.c", "tie.c", "draw.c", "fb.c", "plot.c",
                 "fft.c", "spectro.c", "loop.c", "loopview.c", "eq.c",
-                "zstep.c", "say.c")]
+                "zstep.c", "say.c", "eqstate.c")]
         subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall",
                                "-Wextra", "-Werror", "-o", cls.prog] + src +
                               ["-lasound", "-lz", "-lm", "-lpthread"])
@@ -884,6 +1055,50 @@ class ShotTest(unittest.TestCase):
         seen = self.colours(ppm)
         for rgb in self.PAIR:
             self.assertIn(rgb, seen, "%06x missing" % rgb)
+
+    def test_the_engine_shares_what_it_measured(self):
+        """-P: the loop from two files into the state a viewer reads,
+        the response at its log-spaced points and the impulse response,
+        and the engine ended"""
+        rng = np.random.default_rng(13)
+        n = 44100 * 4
+        x = rng.uniform(-0.17, 0.17, (n, 2))
+        y = np.zeros((n + 300, 2))
+        y[300:, 0] = np.convolve(x[:, 0], [0.25, 0.5, 0.25])[:n]
+        y[300:, 1] = 0.5 * x[:, 1]
+        y += rng.normal(0, 1e-4, y.shape)
+        ref = os.path.join(self.tmp, "shared-played.wav")
+        rec = os.path.join(self.tmp, "shared-back.wav")
+        self.wav(ref, x)
+        self.wav(rec, y)
+        state = os.path.join(self.tmp, "eq.state")
+        r = subprocess.run([self.prog, "-l", os.devnull, "-v", "3", "-x", ref,
+                            "-i", rec, "-s",
+                            os.path.join(self.tmp, "shared.ppm"), "-P",
+                            state], capture_output=True, text=True)
+        if r.returncode == 2 and "no console font" in r.stderr:
+            self.skipTest("no console font on this machine")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(state, "rb") as fh:
+            s = EqsState.from_buffer_copy(fh.read())
+        self.assertEqual((s.magic, s.size), (0x31534545, ctypes.sizeof(s)))
+        self.assertEqual(s.state, 5)  # EQS_STOPPED
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "eq.cmd")))
+        hz = np.array(s.hz)
+        self.assertAlmostEqual(hz[0], 20, delta=0.01)
+        self.assertAlmostEqual(hz[-1], 20000, delta=1)
+        h1k = 0.5 + 0.5 * np.cos(2 * np.pi * 1000 / 44100)
+        for i in (40, 80, 110):
+            want = 20 * np.log10((0.5 + 0.5 * np.cos(2 * np.pi * hz[i] /
+                                                     44100)) / h1k)
+            self.assertAlmostEqual(s.mag[0][i], want, delta=0.1, msg=hz[i])
+            self.assertAlmostEqual(s.mag[1][i], 0, delta=0.1, msg=hz[i])
+            self.assertGreater(s.coh[0][i], 0.99)
+        # each side's impulse response peaks where its path does: the
+        # left's filter at the lag, which it found, and the right's
+        # single tap a frame before it
+        self.assertEqual(int(np.argmax(np.abs(np.array(s.ir[0])))), 32)
+        self.assertEqual(int(np.argmax(np.abs(np.array(s.ir[1])))), 31)
 
     def test_the_calibration_fits_taps_that_flatten_a_path(self):
         """-C on two files: a path that rolls off like the record path, -4

@@ -66,6 +66,7 @@
 #include <unistd.h>
 
 #include "draw.h"
+#include "eqstate.h"
 #include "fb.h"
 #include "loopview.h"
 #include "plot.h"
@@ -654,7 +655,7 @@ static void usage(void)
 		"                   [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]\n"
 		"                   [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL]\n"
 		"                   [-T SECONDS] [-m MONITOR] [-L DBFS] [-G PCM,ADC]\n"
-		"                   [-C] [-E] [-O LOG]\n");
+		"                   [-C] [-E] [-O LOG] [-P STATE]\n");
 }
 
 int main(int argc, char **argv)
@@ -680,7 +681,7 @@ int main(int argc, char **argv)
 	int o, got, held = 0;
 
 	while ((o = getopt(argc, argv,
-			   "l:d:s:W:H:v:c:r:i:x:p:a:k:T:m:L:G:CEO:")) != -1) {
+			   "l:d:s:W:H:v:c:r:i:x:p:a:k:T:m:L:G:CEO:P:")) != -1) {
 		switch (o) {
 		case 'l':
 			log = optarg;
@@ -744,6 +745,9 @@ int main(int argc, char **argv)
 		case 'O':
 			lc.log = optarg;
 			break;
+		case 'P':
+			lc.state = optarg;
+			break;
 		case 'L':
 			lc.level = atof(optarg);
 			break;
@@ -765,9 +769,12 @@ int main(int argc, char **argv)
 	}
 	if (view == 3 && lc.ref)
 		lc.rec = wav;
-	// over time, beside the music: from the monitor, a block of -T seconds
+	// over time, beside the music: from the monitor, a block of -T seconds,
+	// and its state for a viewer where the service keeps it
 	if (lc.equalize && !lc.monitor)
 		lc.monitor = "hw:CARD=ES1869,DEV=3";
+	if (lc.equalize && !lc.state && !access(EQS_DIR, W_OK))
+		lc.state = EQS_PATH;
 	if (view == 3 && lc.ref && !lc.rec) {
 		say("-x needs -i, what came back");
 		return 1;

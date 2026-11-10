@@ -96,6 +96,7 @@ es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]
             [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]
             [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL] [-T SECONDS]
             [-m MONITOR] [-L DBFS] [-G PCM,ADC] [-C] [-E] [-O LOG]
+            [-P STATE]
 ```
 
 It takes a virtual terminal's framebuffer, `/dev/fb0` by default, gives the
@@ -481,6 +482,47 @@ the machine without it. It rested 10 s after the music ended and came back
 with the music's first frames.
 
 `linux/config/es1869eq.initd` runs it as a service after es1869cal and MPD.
+
+## Shared with a viewer
+
+`-E` shares what it knows in a file that a viewer maps: `-P STATE`, or
+`/run/es1869/eq.state` when that directory is writable, as es1869eq's script
+makes it (root's, with the audio group). The engine writes it between two
+steps of a sequence count, and a viewer copies it whole, taking the copy
+only if the count was even and the same before and after. The engine holds a
+lock on the file for as long as it runs, so a file that a crash left behind
+reads as stale, and the lock gives the engine's pid. The layout is
+`eqstate.h`, of 32-bit fields only, so the i386 engine and a 64-bit host lay
+it out alike.
+
+It holds, all as the engine applied them:
+* the state (measuring, finding the lag, resting, Audio 1 at rest and why);
+* the stream's rate, the DAC's factor, Audio 1's rate and correction, the
+  rate correction's mode, the treble correction, and whether the refits are
+  held;
+* the run's lag, delay, overlay, segments and blocks;
+* while a viewer watches, ten times a second, the levels of the monitor and
+  of Audio 1 and a row of each one's spectrogram: the monitor's at the DAC's
+  own rate, from all its frames, so that 2x and 3x show above 22 kHz; once a
+  second, the run's response at 128 points from 20 Hz to 20 kHz, with its
+  coherence and impulse response;
+* the DAC's correction now and at the start, Audio 1's taps, and how often
+  the monitor's codes came to each value from -16 to 16;
+* the last 64 blocks, as the log has them, and the bands as they stand.
+
+A FIFO beside it, `eq.cmd`, which the audio group may write, takes a command
+a line, a word and a number, whose number the state echoes once it is done:
+* `watch N`: the live parts for the next 10 s;
+* `hold N` and `resume N`: the refits and the trim held, or going on;
+* `rest N`: Audio 1 at rest now, before a viewer sets 3x, so that the DAC
+  doesn't stall while the reader sees the change; the monitor's next start
+  decides again, or 10 s later;
+* `restart N`: a new run;
+* `rebase N`: the trends start again from the next blocks, after a change of
+  setup that is to stay.
+
+Nothing in a command carries a value or a path. The audio group may already
+write every control; holding the trim is the one power a command adds.
 
 ## The DAC and the ADC apart
 
