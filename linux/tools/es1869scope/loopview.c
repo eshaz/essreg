@@ -130,6 +130,8 @@ static const double lv_cal_at[LV_CAL_AT] = { 1000,  5000,  10000,
 #define LV_EQ_BASE 3 // the blocks the drift is measured from
 #define LV_EQ_AFTER 3 // and the blocks after them before it counts
 #define LV_EQ_SPAN 3.0 // the most the refits move it from the start, dB
+#define LV_EQ_STEP_DEG 2.0 // the most an update turns the correction, degrees
+#define LV_EQ_SPAN_DEG 10.0 // and the most the refits turn it from the start
 #define LV_READ_US 10000 // the reader's wait between its reads
 #define LV_IDLE_S 10 // seconds with no frame from the monitor before resting
 #define LV_RAW 4096 // the monitor's newest frames at its own rate, for a viewer
@@ -269,9 +271,11 @@ struct loopview {
 	// coherence and of the deviation weighted by it, and the segments; each
 	// band's start over the first LV_EQ_BASE blocks
 	double eq_w[LV_EQ_BANDS], eq_v[LV_EQ_BANDS];
+	double eq_p[LV_EQ_BANDS]; // and of the phase past the delay, degrees
 	double eq_n[LV_EQ_BANDS]; // what the music doesn't explain, Syy (1 - coh)
 	unsigned long eq_segs;
-	double base[LV_EQ_BANDS];
+	double base[LV_EQ_BANDS], base_p[LV_EQ_BANDS];
+	struct eq_series band_p[LV_EQ_BANDS]; // each band's phase, its trend
 	int nbase[LV_EQ_BANDS], based;
 	// how what went in and what came back overlay, segment by segment:
 	// those in a row that didn't, and the block's sums of |r| at the lag,
@@ -303,7 +307,8 @@ struct loopview {
 	long lgap[2]; // the DAC's gap a side, 1/256 LSB
 	long trim;
 	long taps0[3 * EQ_SIDES]; // the DAC's correction when it began
-	int have0;
+	long ptaps0[3 * EQ_SIDES]; // and its phase taps, if the driver has them
+	int have0, have_p0;
 	FILE *eqlog;
 	double before[2][LV_CAL_AT]; // the record path before, dB against 1 kHz
 	double before_ph[2][LV_CAL_AT]; // and its phase past the delay, degrees
@@ -1050,7 +1055,7 @@ static void lv_clear(struct loopview *v)
 	for (i = 0; i < PATHS; i++)
 		loop_reset(&v->path[i]);
 	for (i = 0; i < LV_EQ_BANDS; i++)
-		v->eq_w[i] = v->eq_v[i] = v->eq_n[i] = 0;
+		v->eq_w[i] = v->eq_v[i] = v->eq_n[i] = v->eq_p[i] = 0;
 	v->eq_segs = v->blk_segs = 0;
 	pthread_mutex_lock(&v->clk_lock);
 	v->cn = v->cu = v->cy = v->cuu = v->cuy = v->cyy = 0;
@@ -1783,6 +1788,11 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 		v->have0 = !ctl_read_all(v->ctl,
 					 "Audio 2 Treble Correction Taps",
 					 v->taps0, 3 * EQ_SIDES);
+		v->have_p0 =
+			v->have0 &&
+			!ctl_read_all(v->ctl,
+				      "Audio 2 Treble Correction Phase Taps",
+				      v->ptaps0, 3 * EQ_SIDES);
 		memcpy(v->taps_set, v->taps0, sizeof(v->taps_set));
 		if (cfg->log && !(v->eqlog = fopen(cfg->log, "a")))
 			say("%s: %s", cfg->log, strerror(errno));
@@ -2409,6 +2419,8 @@ static void lv_eq_run(struct loopview *v)
 				v->eq_w[b] += segs * c;
 				v->eq_v[b] += segs * c *
 					      (v->mag[0][k] + v->mag[1][k]) / 2;
+				v->eq_p[b] += segs * c *
+					      (v->ph[0][k] + v->ph[1][k]) / 2;
 			}
 		}
 		v->eq_segs += segs;
@@ -2446,16 +2458,18 @@ static double lv_eq_noise(const struct loopview *v, int b)
 // drift predicted in each band: a step of LV_EQ_STEP at most towards the
 // correction it began with less the drift, within LV_EQ_SPAN of that; 1 if
 // loaded. *corr is its change at 20 kHz since it began, dB
-static int lv_eq_refit(struct loopview *v, const double *drift, int have,
-		       double *corr)
+static int lv_eq_refit(struct loopview *v, const double *drift,
+		       const double *drift_p, int have, double *corr)
 {
 	double f[LV_EQ_BANDS + 3], target[LV_EQ_BANDS + 3], w[LV_EQ_BANDS + 3];
-	long all[3 * EQ_SIDES], sides[EQ_SIDES], over[2], cal[2];
+	double ptarget[LV_EQ_BANDS + 3];
+	long all[3 * EQ_SIDES], pall[3 * EQ_SIDES], sides[EQ_SIDES];
+	long phase[EQ_SIDES], over[2], cal[2];
 	double off = 0;
-	const long *row0;
+	const long *row0, *prow0;
 	unsigned int n;
-	long *row;
-	int b, k, nf = 0, fitted = 0;
+	long *row, *prow;
+	int b, k, nf = 0, fitted = 0, ph;
 
 	*corr = NAN;
 	if (!v->have0 ||
@@ -2465,37 +2479,65 @@ static int lv_eq_refit(struct loopview *v, const double *drift, int have,
 	    ctl_read_all(v->ctl, "Audio 2 Treble Correction Taps", all,
 			 3 * EQ_SIDES))
 		return 0;
+	// the phase taps too, where the driver has them
+	ph = v->have_p0 &&
+	     !ctl_read_all(v->ctl, "Audio 2 Treble Correction Phase Taps", pall,
+			   3 * EQ_SIDES);
+	if (!ph)
+		memset(pall, 0, sizeof(pall));
 	row = all + over[0] * EQ_SIDES;
+	prow = pall + over[0] * EQ_SIDES;
 	row0 = v->taps0 + over[0] * EQ_SIDES;
+	prow0 = ph ? v->ptaps0 + over[0] * EQ_SIDES : prow;
+	// each band's correction as a complex number, S + jP: the start's
+	// over the drift since then, a step at most a refit, the gain within
+	// LV_EQ_SPAN of the start and the phase within LV_EQ_SPAN_DEG
 	for (b = 0; b < LV_EQ_BANDS; b++) {
 		double fc = lv_eq_fc(b, NULL, NULL);
-		double g0 = eq_sides_gain(row0, fc, v->rate);
-		double g = eq_sides_gain(row, fc, v->rate), want = g, step;
+		double complex c0 = eq_sides_gain(row0, fc, v->rate) +
+				    I * eq_phase_resp(prow0, fc, v->rate);
+		double complex c = eq_sides_gain(row, fc, v->rate) +
+				   I * eq_phase_resp(prow, fc, v->rate);
+		double dg = 0, dp = 0, gstep, pstep;
+		double complex want;
 
 		if (isfinite(drift[b]))
-			want = g0 * pow(10, -drift[b] / 20);
-		want = fmax(g0 * pow(10, -LV_EQ_SPAN / 20),
-			    fmin(g0 * pow(10, LV_EQ_SPAN / 20), want));
-		step = 20 * log10(want / g);
-		off = fmax(off, fabs(step));
+			dg = -fmax(-LV_EQ_SPAN, fmin(LV_EQ_SPAN, drift[b]));
+		if (ph && isfinite(drift_p[b]))
+			dp = -fmax(-LV_EQ_SPAN_DEG,
+				   fmin(LV_EQ_SPAN_DEG, drift_p[b]));
+		want = c0 * pow(10, dg / 20) * cexp(I * dp * M_PI / 180);
+		gstep = 20 * log10(cabs(want) / cabs(c));
+		pstep = carg(want / c) * 180 / M_PI;
+		off = fmax(off, fmax(fabs(gstep), fabs(pstep) / 10));
+		gstep = fmax(-LV_EQ_STEP, fmin(LV_EQ_STEP, gstep));
+		pstep = fmax(-LV_EQ_STEP_DEG, fmin(LV_EQ_STEP_DEG, pstep));
+		want = c * pow(10, gstep / 20) * cexp(I * pstep * M_PI / 180);
 		f[nf] = fc;
-		target[nf] =
-			g *
-			pow(10, fmax(-LV_EQ_STEP, fmin(LV_EQ_STEP, step)) / 20);
+		target[nf] = creal(want);
+		ptarget[nf] = cimag(want);
 		w[nf++] = 1;
 	}
 	// the low end held where it is
 	for (k = 0; k < 3; k++, nf++) {
 		f[nf] = 50 * (k + 1);
 		target[nf] = eq_sides_gain(row, f[nf], v->rate);
+		ptarget[nf] = eq_phase_resp(prow, f[nf], v->rate);
 		w[nf] = 0.2;
 	}
 	if (have >= LV_EQ_BANDS / 2 && off >= LV_EQ_MIN &&
-	    !eq_fit_sides(f, target, w, nf, v->rate, row, sides)) {
+	    !eq_fit_sides(f, target, w, nf, v->rate, row, sides) &&
+	    (!ph || !eq_fit_phase(f, ptarget, w, nf, v->rate, prow, phase))) {
 		memcpy(row, sides, sizeof(sides));
 		fitted = !ctl_write_all(v->ctl,
 					"Audio 2 Treble Correction Taps", all,
 					3 * EQ_SIDES);
+		if (fitted && ph) {
+			memcpy(prow, phase, sizeof(phase));
+			fitted = !ctl_write_all(
+				v->ctl, "Audio 2 Treble Correction Phase Taps",
+				pall, 3 * EQ_SIDES);
+		}
 		if (!fitted)
 			ctl_read_all(v->ctl, "Audio 2 Treble Correction Taps",
 				     all, 3 * EQ_SIDES);
@@ -3016,7 +3058,7 @@ _Static_assert(EQS_BANDS == LV_EQ_BANDS, "the state's bands are -E's");
 
 // a block into the state's history, and the bands as they now stand
 static void lv_pub_block(struct loopview *v, const struct eqs_block *blk,
-			 const double *drift)
+			 const double *drift, const double *drift_p)
 {
 	struct eqs_state *s = v->st;
 	int b;
@@ -3033,6 +3075,9 @@ static void lv_pub_block(struct loopview *v, const struct eqs_block *blk,
 		s->band_dev[b] = blk->dev[b];
 		s->band_base[b] = v->nbase[b] ? (float)v->base[b] : NAN;
 		s->band_drift[b] = (float)drift[b];
+		s->band_deg[b] = blk->deg[b];
+		s->band_base_deg[b] = v->nbase[b] ? (float)v->base_p[b] : NAN;
+		s->band_drift_deg[b] = (float)drift_p[b];
 	}
 	eqs_end(s);
 }
@@ -3040,6 +3085,7 @@ static void lv_pub_block(struct loopview *v, const struct eqs_block *blk,
 static void lv_eq_block(struct loopview *v, double now)
 {
 	double m[LV_EQ_BANDS], drift[LV_EQ_BANDS], chip, tie, applied, ahead;
+	double mp[LV_EQ_BANDS], drift_p[LV_EQ_BANDS], most_p = 0;
 	double corr = NAN, most = 0;
 	unsigned int n;
 	long cal[2];
@@ -3064,15 +3110,23 @@ static void lv_eq_block(struct loopview *v, double now)
 			      0 :
 			      (int)mode[0];
 	tmode = !!(eq_policy(&at_now, NULL, why, sizeof(why)) & EQ_TRIM);
+	// each band's deviation as a complex number, its log: the gain in dB
+	// and the phase past the run's delay in degrees, each with its start
+	// and its trend, so that the two drift together
 	for (b = 0; b < LV_EQ_BANDS; b++) {
-		m[b] = drift[b] = NAN;
+		m[b] = drift[b] = mp[b] = drift_p[b] = NAN;
 		if (v->eq_w[b] > 0) {
 			m[b] = v->eq_v[b] / v->eq_w[b];
+			mp[b] = v->eq_p[b] / v->eq_w[b];
 			// where it starts from: the first blocks with this band
-			if (v->nbase[b] < LV_EQ_BASE)
+			if (v->nbase[b] < LV_EQ_BASE) {
 				v->base[b] +=
-					(m[b] - v->base[b]) / ++v->nbase[b];
+					(m[b] - v->base[b]) / (v->nbase[b] + 1);
+				v->base_p[b] +=
+					(mp[b] - v->base_p[b]) / ++v->nbase[b];
+			}
 			eq_push(&v->band[b], now, m[b]);
+			eq_push(&v->band_p[b], now, mp[b]);
 		}
 		if (v->nbase[b] < LV_EQ_BASE)
 			based = 0;
@@ -3081,11 +3135,14 @@ static void lv_eq_block(struct loopview *v, double now)
 		    v->band[b].n < LV_EQ_BASE + LV_EQ_AFTER)
 			continue;
 		drift[b] = eq_predict(&v->band[b], ahead, NULL) - v->base[b];
+		drift_p[b] =
+			eq_predict(&v->band_p[b], ahead, NULL) - v->base_p[b];
 		have++;
 		if (fabs(drift[b]) > most) {
 			most = fabs(drift[b]);
 			at = b;
 		}
+		most_p = fmax(most_p, fabs(drift_p[b]));
 	}
 	// only through a record path that the calibration made flat: without
 	// it, the deviation is the record path's own loss, not the DAC's
@@ -3095,7 +3152,7 @@ static void lv_eq_block(struct loopview *v, double now)
 		fprintf(out, "0 the record path isn't calibrated (es1869scope "
 			     "-C): the DAC's correction stays as it is\n");
 	if (have && !v->hold)
-		fitted = lv_eq_refit(v, drift, have, &corr);
+		fitted = lv_eq_refit(v, drift, drift_p, have, &corr);
 	if (based && !v->based) {
 		v->based = 1;
 		fprintf(out, "%.0f base", now - v->t0);
@@ -3181,6 +3238,14 @@ static void lv_eq_block(struct loopview *v, double now)
 	if (isfinite(corr))
 		fprintf(out, " corr %+.2f", corr);
 	fprintf(out, "%s\n", fitted ? " (refitted)" : "");
+	// and the phase past the run's delay, degrees, with its drift
+	fprintf(out, "%.0f eqph", now - v->t0);
+	for (b = 0; b < LV_EQ_BANDS; b += 3)
+		fprintf(out, " %.0f:%+.2f", lv_eq_fc(b, NULL, NULL), mp[b]);
+	fprintf(out, " %.0f:%+.2f", 20000.0, mp[LV_EQ_BANDS - 1]);
+	if (have)
+		fprintf(out, " drift %.2f at most", most_p);
+	fprintf(out, "\n");
 	// the noise in each band, dB a Hz against a full-scale sine: Hann's
 	// window keeps 3/8 of a segment's power, and the band's bins sum one
 	// side
@@ -3207,12 +3272,14 @@ static void lv_eq_block(struct loopview *v, double now)
 	blk.corr20k = (float)corr;
 	for (b = 0; b < 2; b++)
 		blk.zstep[b] = v->zs_n ? (float)(v->zs_w[b] / v->zs_n) : NAN;
-	lv_pub_block(v, &blk, drift);
+	for (b = 0; b < LV_EQ_BANDS; b++)
+		blk.deg[b] = (float)mp[b];
+	lv_pub_block(v, &blk, drift, drift_p);
 	memset(v->zhist, 0, sizeof(v->zhist));
 	v->blocks++;
 	// the next block from here, with the lag kept
 	for (b = 0; b < LV_EQ_BANDS; b++)
-		v->eq_w[b] = v->eq_v[b] = v->eq_n[b] = 0;
+		v->eq_w[b] = v->eq_v[b] = v->eq_n[b] = v->eq_p[b] = 0;
 	v->eq_segs = v->blk_segs = 0;
 	v->not_counted[0] = 0;
 	v->zs_w[0] = v->zs_w[1] = v->zs_n = 0;
@@ -3689,7 +3756,7 @@ static void lv_publish(struct loopview *v, int force)
 {
 	struct eqs_state *s = v->st;
 	long long now = lv_now();
-	long val[2], a1[EQS_A1TAPS];
+	long val[2], a1[EQS_A1TAPS], pt[3 * EQS_SIDES];
 	unsigned int n, k;
 	int watched, resp = 0;
 
@@ -3742,6 +3809,11 @@ static void lv_publish(struct loopview *v, int force)
 				  EQS_A1PTAPS))
 			for (k = 0; k < EQS_A1PTAPS; k++)
 				s->a1ptaps[k] = (int32_t)a1[k];
+		if (!ctl_read_all(v->ctl,
+				  "Audio 2 Treble Correction Phase Taps", pt,
+				  3 * EQS_SIDES))
+			for (k = 0; k < 3 * EQS_SIDES; k++)
+				s->ptaps[k] = (int32_t)pt[k];
 	}
 	s->lagged = v->lagged;
 	s->lag = (int32_t)v->lag;
@@ -3754,6 +3826,7 @@ static void lv_publish(struct loopview *v, int force)
 	for (k = 0; k < 3 * EQS_SIDES; k++) {
 		s->taps[k] = (int32_t)v->taps_set[k];
 		s->taps0[k] = (int32_t)v->taps0[k];
+		s->ptaps0[k] = (int32_t)v->ptaps0[k];
 	}
 	if (resp)
 		lv_pub_response(v, s);

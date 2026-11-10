@@ -57,6 +57,7 @@ struct eqs_block {
 	float corr20k; /* the correction's change at 20 kHz since the start */
 	float chip, tie, applied, resid; /* ppm, us, ppm, ppm */
 	float zstep[2]; /* the loop's step at the sign, LSB */
+	float deg[EQS_BANDS]; /* the phase past the delay, degrees */
 };
 
 struct eqs_state {
@@ -84,10 +85,13 @@ struct eqs_state {
 	float hz[EQS_POINTS];
 	float mag[2][EQS_POINTS], phase[2][EQS_POINTS], coh[2][EQS_POINTS];
 	float ir[2][EQS_IR]; /* the path's impulse response, each side's */
-	/* the 24 bands: the last block's deviation, the start, the drift */
+	/* the 24 bands: the last block's deviation, the start, the drift, in
+	 * dB, and the same of the phase past the delay, in degrees */
 	float band_hz[EQS_BANDS];
 	float band_dev[EQS_BANDS], band_base[EQS_BANDS];
 	float band_drift[EQS_BANDS];
+	float band_deg[EQS_BANDS], band_base_deg[EQS_BANDS];
+	float band_drift_deg[EQS_BANDS];
 	/* the spectrogram: rows of dB against full scale, newest at
 	 * row_next - 1, across 0 Hz to row_hz */
 	uint32_t row_next[EQS_SOURCES], row_hz[EQS_SOURCES];
@@ -95,6 +99,7 @@ struct eqs_state {
 	/* the DAC's correction now and at the start, at 1x, 2x and 3x, and
 	 * Audio 1's correction */
 	int32_t taps[3 * EQS_SIDES], taps0[3 * EQS_SIDES];
+	int32_t ptaps[3 * EQS_SIDES], ptaps0[3 * EQS_SIDES]; /* phase taps */
 	int32_t a1taps[EQS_A1TAPS], a1ptaps[EQS_A1PTAPS];
 	/* how often the monitor's codes came to each value from -16 to 16 */
 	uint32_t zhist[2][EQS_ZBINS];

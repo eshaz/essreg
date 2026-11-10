@@ -139,6 +139,75 @@ int eq_fit_sides(const double *f, const double *target, const double *w, int n,
 	return 0;
 }
 
+double eq_phase_resp(const long *phase, double f, double rate)
+{
+	double p = 0, w = 2 * M_PI * f / rate;
+	int k;
+
+	for (k = 1; k <= EQ_SIDES; k++)
+		p += 2.0 * phase[k - 1] / EQ_Q30 * sin(k * w);
+	return p;
+}
+
+int eq_fit_phase(const double *f, const double *target, const double *w, int n,
+		 double rate, const long *prior, long *phase)
+{
+	enum { N = EQ_SIDES };
+	double a[N][N + 1], x[N];
+	int i, j, k, r;
+
+	memset(a, 0, sizeof(a));
+	for (k = 0; k < n; k++) {
+		double b[N], wk = 2 * M_PI * f[k] / rate;
+
+		for (i = 0; i < N; i++)
+			b[i] = 2 * sin((i + 1) * wk);
+		for (i = 0; i < N; i++) {
+			for (j = 0; j < N; j++)
+				a[i][j] += w[k] * b[i] * b[j];
+			a[i][N] += w[k] * b[i] * target[k];
+		}
+	}
+	for (i = 0; i < N; i++) {
+		a[i][i] += EQ_RIDGE;
+		a[i][N] += EQ_RIDGE * (prior ? prior[i] / EQ_Q30 : 0);
+	}
+	// Gauss with the largest pivot of each column
+	for (i = 0; i < N; i++) {
+		r = i;
+		for (j = i + 1; j < N; j++)
+			if (fabs(a[j][i]) > fabs(a[r][i]))
+				r = j;
+		if (fabs(a[r][i]) < 1e-15)
+			return -1;
+		for (j = 0; j <= N; j++) {
+			double t = a[i][j];
+
+			a[i][j] = a[r][j];
+			a[r][j] = t;
+		}
+		for (j = i + 1; j < N; j++) {
+			double q = a[j][i] / a[i][i];
+
+			for (k = i; k <= N; k++)
+				a[j][k] -= q * a[i][k];
+		}
+	}
+	for (i = N; i-- > 0;) {
+		double s = a[i][N];
+
+		for (j = i + 1; j < N; j++)
+			s -= a[i][j] * x[j];
+		x[i] = s / a[i][i];
+	}
+	for (i = 0; i < N; i++)
+		if (!(fabs(x[i]) < 1))
+			return -1;
+	for (i = 0; i < N; i++)
+		phase[i] = lrint(x[i] * EQ_Q30);
+	return 0;
+}
+
 // The rules of what music may do, apart from the code that measures it:
 // - at 3x Audio 1 can't record, since the ISA bus can't carry both and the
 //   DAC stalls, and a rate past Audio 1's it can't record at all;

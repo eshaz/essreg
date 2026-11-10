@@ -164,7 +164,8 @@ The stages and what each picture shows:
   has it.
 * **[d] rounding dither:** the floor under the music.
 * **[t] treble correction:** the DAC's droop at the rate in use, the
-  correction's live taps, and what comes out of both.
+  correction's live taps, and what comes out of both, in gain and in phase
+  past the delay.
 * **[o] output rate** (1x, 2x, 3x): what the DAC took up to half its own
   rate, where the images of the stream's top would lie, with the hold's
   droop.
@@ -441,27 +442,34 @@ After each block:
   leave. It takes one segment in 16, the middle half of it, some 70 ms of
   the Armada's Celeron every 1.5 s, so a refit comes after about 2.5 minutes
   of music.
-* **The DAC:** the loop's deviation against 1 kHz goes into 24 bands from
-  250 Hz to 20 kHz, each band weighted by its coherence, since music may
-  leave a band empty. The monitor's frames carry Audio 2's DAC correction,
-  so the loop against them doesn't see it: through the record path that
-  `es1869scope -C` calibrated, the loop is the DAC itself. The first 3
-  blocks give each band's start, when the calibration had just made the
-  chain flat. Each band keeps a trend, a line through its last 16 blocks,
-  predicted a block ahead. Once the trend has 3 blocks more than the start,
-  the correction (the treble correction's table at the rate in use) takes
-  back what it drifts from the start:
-  * a step of 0.5 dB at most an update;
-  * within 3 dB of where it began;
-  * nothing for less than 0.05 dB.
+* **The DAC:** the loop's deviation goes into 24 bands from 250 Hz to 20 kHz
+  as a complex number: its gain against 1 kHz in dB and its phase past the
+  run's own delay in degrees, the real and imaginary parts of its log, each
+  band weighted by its coherence, since music may leave a band empty. Each
+  run's delay is its own, since each start puts the DAC and the ADC another
+  fraction of a frame apart, so the phase is taken past it. The monitor's
+  frames carry Audio 2's DAC correction, so the loop against them doesn't
+  see it: through the record path that `es1869scope -C` calibrated, the loop
+  is the DAC itself. The first 3 blocks give each band's start, when the
+  calibration had just made the chain flat. Each band keeps a trend, a line
+  through its last 16 blocks, predicted a block ahead, of its gain and of
+  its phase. Once the trend has 3 blocks more than the start, the correction
+  (the treble correction's table at the rate in use) takes back what it
+  drifts from the start, as the start's correction over the drift, both
+  complex:
+  * a step of 0.5 dB and 2 degrees at most an update;
+  * within 3 dB and 10 degrees of where it began;
+  * nothing for less than 0.05 dB or 0.5 degrees.
 
-  The table's 16 taps are fitted to the bands by least squares. Most bands
-  lie low, where every tap's response looks alike, so the fit alone is all
-  but singular; a ridge towards the taps before keeps the table where the
-  bands leave it free, above 20 kHz among them. The table is loaded live,
-  and the driver swaps it in between the filter's runs. Without a calibrated
-  record path, the deviation is the record path's own loss, and the
-  correction stays.
+  The table's 16 side taps are fitted to the real part of the bands'
+  corrections and its 16 phase taps to the imaginary part, each by least
+  squares; a driver with no phase taps takes the gain alone. Most bands lie
+  low, where every tap's response looks alike, so the fit alone is all but
+  singular; a ridge towards the taps before keeps the table where the bands
+  leave it free, above 20 kHz among them. The table is loaded live, and the
+  driver swaps it in between the filter's runs. Without a calibrated record
+  path, the deviation is the record path's own loss, and the correction
+  stays.
 * **The clock:** the monitor's positions give the chip's rate against the
   steered clock. The driver reads each from the 8237 right before the core
   stamps it on the monotonic clock. A line goes through each run of the
@@ -508,6 +516,7 @@ fifth block. The first `base` line gives each band's start:
 210 clock chip -28.9778 tie 5.7 applied +29.0550 resid +0.0772 ...
 210 overlay r 0.99550 delay +0.101 sd 0.011 missed 0
 210 eq 250:-0.01 ... 20000:-2.08 drift 20000:-0.28 corr +0.28 (refitted)
+210 eqph 250:+0.01 ... 20000:+0.40 drift 0.12 at most
 210 noise 250:-115.0 443:-115.4 ... 13663:-118.7 20000:-107.5
 ```
 
@@ -521,6 +530,8 @@ The fields, by line:
   segments left out.
 * **eq:** the deviation against 1 kHz, the largest predicted drift, and the
   correction's change at 20 kHz since it began.
+* **eqph:** each band's phase past the run's delay in degrees, and the
+  largest predicted drift of it.
 * **noise:** the density in dB a Hz.
 * **zstep:** the loop's step at the sign of the DAC's codes on each side in
   LSB, from the music, logged only. Through Audio 1 it is the DAC's gap less

@@ -41,6 +41,15 @@ double eq_sides_gain(const long *sides, double f, double rate);
  */
 int eq_fit_sides(const double *f, const double *target, const double *w, int n,
 		 double rate, const long *prior, long *sides);
+/* the phase taps' response at f, the sine series that j times it adds:
+ * tap k adds that much of the frame k after and takes the one k before */
+double eq_phase_resp(const long *phase, double f, double rate);
+/*
+ * phase taps whose sine series comes to target at f[0..n-1], weighted by w,
+ * pulled lightly to prior (or 0): 0, or -1
+ */
+int eq_fit_phase(const double *f, const double *target, const double *w, int n,
+		 double rate, const long *prior, long *phase);
 
 /*
  * what the music was measured under: the stream's rate, which Audio 1

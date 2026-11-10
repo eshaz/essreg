@@ -68,7 +68,8 @@ class EqsBlock(ctypes.Structure):
                 ("trim", I32), ("moved", I32), ("held", I32),
                 ("dev", F32 * EQS_BANDS), ("drift", F32), ("drift_hz", F32),
                 ("corr20k", F32), ("chip", F32), ("tie", F32),
-                ("applied", F32), ("resid", F32), ("zstep", F32 * 2)]
+                ("applied", F32), ("resid", F32), ("zstep", F32 * 2),
+                ("deg", F32 * EQS_BANDS)]
 
 
 class EqsState(ctypes.Structure):
@@ -89,9 +90,13 @@ class EqsState(ctypes.Structure):
                 ("band_hz", F32 * EQS_BANDS), ("band_dev", F32 * EQS_BANDS),
                 ("band_base", F32 * EQS_BANDS),
                 ("band_drift", F32 * EQS_BANDS),
+                ("band_deg", F32 * EQS_BANDS),
+                ("band_base_deg", F32 * EQS_BANDS),
+                ("band_drift_deg", F32 * EQS_BANDS),
                 ("row_next", U32 * 2), ("row_hz", U32 * 2),
                 ("rows", ((ctypes.c_int8 * EQS_BINS) * EQS_ROWS) * 2),
                 ("taps", I32 * 48), ("taps0", I32 * 48),
+                ("ptaps", I32 * 48), ("ptaps0", I32 * 48),
                 ("a1taps", I32 * EQS_A1TAPS), ("a1ptaps", I32 * 32),
                 ("zhist", (U32 * EQS_ZBINS) * 2),
                 ("hist_next", U32), ("hist_count", U32),
@@ -584,7 +589,7 @@ class StateTest(unittest.TestCase):
     def test_the_layout_is_the_same_here_and_on_the_armada(self):
         """the engine's size, which a 32-bit build gives too"""
         path, s, _fd = self.create("layout.state")
-        self.assertEqual(ctypes.sizeof(EqsState), 34496)
+        self.assertEqual(ctypes.sizeof(EqsState), 41312)
         self.assertEqual(s.contents.size, ctypes.sizeof(EqsState))
         self.assertEqual(s.contents.magic, 0x31534545)
         self.assertEqual(s.contents.pid, os.getpid())
@@ -694,6 +699,11 @@ class EqTest(unittest.TestCase):
         cls.lib.eq_sides_gain.restype = D
         cls.lib.eq_sides_gain.argtypes = [ctypes.POINTER(ctypes.c_long), D, D]
         cls.lib.eq_fit_sides.argtypes = [DP, DP, DP, ctypes.c_int, D,
+                                         ctypes.POINTER(ctypes.c_long),
+                                         ctypes.POINTER(ctypes.c_long)]
+        cls.lib.eq_phase_resp.restype = D
+        cls.lib.eq_phase_resp.argtypes = [ctypes.POINTER(ctypes.c_long), D, D]
+        cls.lib.eq_fit_phase.argtypes = [DP, DP, DP, ctypes.c_int, D,
                                          ctypes.POINTER(ctypes.c_long),
                                          ctypes.POINTER(ctypes.c_long)]
 
@@ -815,6 +825,30 @@ class EqTest(unittest.TestCase):
             change = 20 * np.log10(self.lib.eq_sides_gain(sides, fk, rate) /
                                    self.lib.eq_sides_gain(prior, fk, rate))
             self.assertLess(abs(change), 0.35, fk)
+
+    def test_phase_taps_fit_a_turn(self):
+        """the phase taps' sine series fitted to the turn that treble.h's
+        phase taps make at 1x: within 1e-4 of it, and the taps alike"""
+        lib = self.lib
+        L = ctypes.c_long * 16
+        want = L(-40142702, 44711051, -33316449, 25153521, -19642226,
+                 15708982, -12749858, 10431719, -8560393, 7016073, -5720952,
+                 4622071, -3682292, 2881258, -2254243, 1806345)
+        f = np.linspace(100, 21000, 120)
+        target = np.array([lib.eq_phase_resp(want, ff, 44100.0)
+                           for ff in f])
+        w = np.ones(len(f))
+        got = L()
+        self.assertEqual(lib.eq_fit_phase(
+            f.ctypes.data_as(DP), target.ctypes.data_as(DP),
+            w.ctypes.data_as(DP), len(f), 44100.0, None, got), 0)
+        back = np.array([lib.eq_phase_resp(got, ff, 44100.0) for ff in f])
+        self.assertLess(np.abs(back - target).max(), 1e-4)
+        # the sine series is odd: no turn at 0 Hz, and the sign as the
+        # driver's phase taps have it, a frame after against one before
+        self.assertAlmostEqual(lib.eq_phase_resp(want, 0.0, 44100.0), 0.0)
+        one = L(1 << 20)
+        self.assertGreater(lib.eq_phase_resp(one, 5000.0, 44100.0), 0)
 
 
 class ZStep(ctypes.Structure):
@@ -1144,6 +1178,9 @@ class ShotTest(unittest.TestCase):
                 for j in range(EQS_BINS):
                     s.rows[src][r][j] = -50 if j == 20 else -110
         s.a1taps[0] = s.a1taps[17] = 16384
+        # the treble correction's phase taps at 2x, treble.h's first few
+        for k, v in enumerate((-4422847, 4817666, -3523667, 2663384)):
+            s.ptaps[16 + k] = s.ptaps0[16 + k] = v
         for k in range(3):
             s.a1ptaps[k] = s.a1ptaps[16 + k] = (900, -300, 80)[k]
         for i in range(10):

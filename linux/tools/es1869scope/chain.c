@@ -28,6 +28,7 @@
 
 #include "chain.h"
 
+#include <complex.h>
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -680,29 +681,48 @@ static void ch_vis_treble(struct chain *w, struct canvas *c, int bx, int by,
 {
 	const struct eqs_state *s = w->st;
 	struct axes a = { .xunit = "Hz", .yunit = "dB", .logx = 1 };
-	double f[96], y[3][96];
-	long side[EQS_SIDES];
+	struct axes p = { .xunit = "Hz", .yunit = "deg", .logx = 1 };
+	double f[96], y[3][96], q[3][96];
+	long side[EQS_SIDES], phase[EQS_SIDES];
 	double rate = w->have && s->stream_rate ? s->stream_rate : 44100;
 	unsigned int over = w->have && s->factor ? s->factor : 1, i, k;
-	int on = w->have ? (int)s->treble : 0;
+	int on = w->have ? (int)s->treble : 0, top = bh * 3 / 5;
 
-	for (k = 0; k < EQS_SIDES; k++)
+	for (k = 0; k < EQS_SIDES; k++) {
 		side[k] = w->have ? s->taps[(over - 1) % 3 * EQS_SIDES + k] : 0;
+		phase[k] = w->have ? s->ptaps[(over - 1) % 3 * EQS_SIDES + k] :
+				     0;
+	}
+	// each as a complex number: the DAC's, the correction's S + jP, and
+	// their product, the gain and the phase past the low end's delay
 	for (i = 0; i < 96; i++) {
-		double g;
+		double x, sg, pg;
+		double complex d, cc;
 
 		f[i] = 100 * pow(rate / 2 / 100, i / 95.0);
-		g = ch_dac(f[i], rate, over);
-		y[0][i] = 20 * log10(g);
-		y[1][i] =
-			20 * log10(fmax(eq_sides_gain(side, f[i], rate), 1e-6));
-		y[2][i] = y[0][i] + (on ? y[1][i] : 0);
+		x = 2 * M_PI * f[i] / (rate * over);
+		d = ch_dac(f[i], rate, over) /
+		    cabs(1 + CH_LAST * cexp(-I * x)) *
+		    (1 + CH_LAST * cexp(-I * x)) *
+		    cexp(I * x * CH_LAST / (1 + CH_LAST));
+		sg = eq_sides_gain(side, f[i], rate);
+		pg = eq_phase_resp(phase, f[i], rate);
+		cc = on ? sg + I * pg : 1;
+		y[0][i] = 20 * log10(cabs(d));
+		y[1][i] = 20 * log10(fmax(cabs(sg + I * pg), 1e-6));
+		y[2][i] = 20 * log10(cabs(d * cc));
+		q[0][i] = carg(d) * 180 / M_PI;
+		q[1][i] = carg(sg + I * pg) * 180 / M_PI;
+		q[2][i] = carg(d * cc) * 180 / M_PI;
 	}
-	a.x0 = 100;
-	a.x1 = rate / 2;
+	a.x0 = p.x0 = 100;
+	a.x1 = p.x1 = rate / 2;
 	a.y0 = -6;
 	a.y1 = 6;
-	axes_draw(c, &a, bx, by, bw, bh, "the DAC, its correction, and both");
+	p.y0 = -10;
+	p.y1 = 10;
+	axes_draw(c, &a, bx, by, bw, top - 4,
+		  "the DAC, its correction, and both");
 	axes_series(c, &a, f, y[0], 96, C_DIM);
 	axes_series(c, &a, f, y[1], 96, on ? ch_rgb[1] : C_GRID);
 	axes_series(c, &a, f, y[2], 96, ch_rgb[0]);
@@ -710,6 +730,11 @@ static void ch_vis_treble(struct chain *w, struct canvas *c, int bx, int by,
 	axes_key(c, &a, 1, on ? ch_rgb[1] : C_GRID,
 		 on ? "the correction" : "the correction, off");
 	axes_key(c, &a, 2, ch_rgb[0], "what comes out");
+	axes_draw(c, &p, bx, by + top, bw, bh - top,
+		  "their phase past the delay");
+	axes_series(c, &p, f, q[0], 96, C_DIM);
+	axes_series(c, &p, f, q[1], 96, on ? ch_rgb[1] : C_GRID);
+	axes_series(c, &p, f, q[2], 96, ch_rgb[0]);
 }
 
 // the output rate: what the DAC took, to half its own rate, where the
