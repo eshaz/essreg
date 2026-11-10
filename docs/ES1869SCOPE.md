@@ -359,12 +359,16 @@ What it measures and why:
 What it does then:
 1. After `-T` seconds (12 by default, 3 at boot) it fits each channel's
    correction to the inverse of the measured response as a complex number:
-   its magnitude against 1 kHz, and its phase past the line that the loop's
-   delay draws through 200 Hz to 3 kHz. The symmetric taps' cosines take the
-   real part and the phase taps' sines the imaginary part, each by weighted
-   least squares. The fit runs up to 20 kHz, holds the magnitude above, and
-   lifts 12 dB at most; the phase fades out under 2 kHz to none at 500 Hz,
-   since 33 taps can't follow the AC coupling's there.
+   its magnitude against 1 kHz, and its phase's curvature, what is left past
+   a line fitted by coherence to the phase from 1 to 18 kHz. A line takes
+   the band's delay and nothing of its shape. The loop's delay, the line
+   through 200 Hz to 3 kHz, would mislead here: the AC coupling's turn tilts
+   it, and the tilt reads up the band as a phase that grows with the
+   frequency, which is a delay and no distortion. The symmetric taps'
+   cosines take the real part and the phase taps' sines the imaginary part,
+   each by weighted least squares. The fit runs up to 20 kHz, holds the
+   magnitude above, and lifts 12 dB at most; the phase fades out under 2 kHz
+   to none at 500 Hz, since 33 taps can't follow the AC coupling's there.
 2. It loads them into "Audio 1 Correction Capture Taps" and "Audio 1
    Correction Capture Phase Taps" and switches "Audio 1 Correction Capture
    Switch" on. A driver without the phase taps takes the magnitude only, and
@@ -374,11 +378,12 @@ What it does then:
 
 With `-s` it writes the verification's picture, and the report gives the
 taps and the phase taps, each channel's largest gain, and the response
-before and after at 1, 5, 10, 15, 18 and 20 kHz, in dB and in degrees past
-the delay. From two files (`-x`, `-i`) it fits and shows the taps without
-loading them. Through a path whose phase reaches 28 degrees at 20 kHz, as
-the record path's anti-alias filter makes, the phase taps leave 2 degrees up
-to 18 kHz where the symmetric taps alone leave 24.
+before and after at 1, 5, 10, 15, 18 and 20 kHz, in dB and in degrees of
+curvature. From two files (`-x`, `-i`) it fits and shows the taps without
+loading them. Through paths whose phase bends 3.7 and 3.3 degrees off the
+line between 2 and 18 kHz, as an anti-alias filter does, the phase taps
+leave 0.4 and 0.25 degrees, where the symmetric taps alone leave the paths'
+own.
 
 `linux/config/es1869cal.initd` is the OpenRC service that runs it at boot,
 after alsasound and before MPD, so that MPD finds Audio 2 free. It writes

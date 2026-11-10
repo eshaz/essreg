@@ -113,6 +113,8 @@
 #define LV_CAL_MAX 4.0 // the most it may lift, 12 dB
 #define LV_CAL_TOP 20000.0 // the top of the band it flattens, Hz
 #define LV_DAC_LAST 0.062 // the DAC's share of the last sample (treble.h)
+#define LV_PH_LO 1000.0 // the band whose own line a phase is taken past, Hz
+#define LV_PH_HI 18000.0
 #define LV_CAL_AT 6
 
 static const double lv_cal_at[LV_CAL_AT] = { 1000,  5000,  10000,
@@ -1461,6 +1463,7 @@ bad:
 }
 
 static int lv_design(struct loopview *v, int c);
+static void lv_curve_at(const struct loopview *v, int c, double *out);
 static int lv_param(const char *name, long *v, const long *set);
 static void lv_eq_block(struct loopview *v, double now);
 static void lv_figures(struct loopview *v);
@@ -1521,12 +1524,10 @@ static int lv_files(struct loopview *v)
 
 		lv_figures(v);
 		for (c = 0; c < 2; c++) {
-			for (i = 0; i < LV_CAL_AT; i++) {
+			for (i = 0; i < LV_CAL_AT; i++)
 				v->before[c][i] =
 					v->mag[c][lv_bin(v, lv_cal_at[i])];
-				v->before_ph[c][i] =
-					v->ph[c][lv_bin(v, lv_cal_at[i])];
-			}
+			lv_curve_at(v, c, v->before_ph[c]);
 			if (lv_design(v, c))
 				return 0;
 		}
@@ -2130,49 +2131,90 @@ static int lv_solve_n(double (*a)[LV_CF_HALF + 2], int n, double *x)
 	return 0;
 }
 
+// channel c's phase past the line through it from LV_PH_LO to LV_PH_HI, the
+// DAC's turn at rate dac taken out first (none for 0), in radians into ph[]
+// for every bin: what is left once the band's own delay is taken, its
+// curvature. The line through 200 Hz to 3 kHz that the loop's delay is would
+// mislead here: the AC coupling's turn under it tilts it, which reads up the
+// band as a phase growing with the frequency, a delay and no distortion
+static void lv_curve_phase(const struct loopview *v, int c, double dac,
+			   double *ph)
+{
+	double hz = (double)v->rate / v->n, prev = 0, u = 0, sw = 0, swf = 0;
+	double swu = 0, swff = 0, swfu = 0, den, a = 0, b = 0;
+	double turn = v->invert[c] ? M_PI : 0;
+	unsigned int k;
+
+	// unwrapped from the bottom up
+	for (k = 1; k < v->bins; k++) {
+		double f = k * hz, p = carg(v->h[c][k]) - turn -
+				       (dac ? lv_dac_phase(f, dac) : 0);
+
+		u = k == 1 ? lv_wrap(p) : u + lv_wrap(p - prev);
+		prev = p;
+		ph[k] = u;
+		if (f >= LV_PH_LO && f <= LV_PH_HI) {
+			double co = v->coh[c][k], w = co / fmax(1 - co, 1e-6);
+
+			sw += w;
+			swf += w * f;
+			swu += w * u;
+			swff += w * f * f;
+			swfu += w * f * u;
+		}
+	}
+	den = sw * swff - swf * swf;
+	if (sw > 0 && den != 0) {
+		b = (sw * swfu - swf * swu) / den;
+		a = (swu - b * swf) / sw;
+	}
+	ph[0] = 0;
+	for (k = 1; k < v->bins; k++)
+		ph[k] = lv_wrap(ph[k] - a - b * k * hz);
+}
+
+// channel c's curvature at the calibration's points, degrees
+static void lv_curve_at(const struct loopview *v, int c, double *out)
+{
+	double *ph = malloc(v->bins * sizeof(*ph));
+	double dac = v->play && v->cal_dac ? 2.0 * v->rate : 0;
+	int i;
+
+	for (i = 0; i < LV_CAL_AT; i++)
+		out[i] = NAN;
+	if (!ph)
+		return;
+	lv_curve_phase(v, c, dac, ph);
+	for (i = 0; i < LV_CAL_AT; i++)
+		out[i] = ph[lv_bin(v, lv_cal_at[i])] * 180 / M_PI;
+	free(ph);
+}
+
 // taps that take back channel c's measured response, magnitude and phase,
-// against its gain at 1 kHz and its delay, up to LV_CAL_TOP: the inverse as
-// a complex number, its real part by the symmetric taps' cosines and its
-// imaginary part by the phase taps' sines, each by least squares, held at
-// the top's value above it with little weight, and lifting by LV_CAL_MAX at
-// most. The phase is the response's past the line through it over the
-// delay's band, the DAC's own taken out first where the calibration played
-// it and the treble correction has no phase taps to take it back; under 2 kHz it fades out to 0 by 500 Hz, since 33 taps can't follow
-// the AC coupling's
+// against its gain at 1 kHz, up to LV_CAL_TOP: the inverse as a complex
+// number, its real part by the symmetric taps' cosines and its imaginary
+// part by the phase taps' sines, each by least squares, held at the top's
+// value above it with little weight, and lifting by LV_CAL_MAX at most. The
+// phase is the curvature (lv_curve_phase()), the DAC's own turn taken out
+// first where the calibration played it and the treble correction has no
+// phase taps to take it back; under 2 kHz it fades out to 0 by 500 Hz,
+// since 33 taps can't follow the AC coupling's
 static int lv_design(struct loopview *v, int c)
 {
 	enum { N = LV_CF_HALF + 1, P = LV_CF_HALF };
 	double a[N][N + 1], b[P][N + 1], x[N], y[P];
 	double ref = cabs(v->h[c][lv_bin(v, 1000)]);
 	double top = cabs(v->h[c][lv_bin(v, LV_CAL_TOP)]) / ref, hz;
-	double dac = v->play && v->cal_dac ? 2.0 * v->rate : 0, slope = 0;
-	double sw = 0, swf = 0;
-	double swu = 0, swff = 0, swfu = 0, den, u = 0, prev = 0, turn;
-	unsigned int k, i, j, k0 = lv_bin(v, LV_FIT_LO),
-			      kh = lv_bin(v, LV_FIT_HI);
+	double dac = v->play && v->cal_dac ? 2.0 * v->rate : 0, *curve;
+	unsigned int k, i, j;
 
 	if (!(ref > 0) || !(top > 0))
 		return -1;
+	curve = malloc(v->bins * sizeof(*curve));
+	if (!curve)
+		return -1;
 	hz = (double)v->rate / v->n;
-	// the delay, as lv_figures() finds it, with the DAC's phase out
-	for (k = k0; k <= kh; k++) {
-		double f = k * hz,
-		       ph = carg(v->h[c][k]) - (dac ? lv_dac_phase(f, dac) : 0);
-		double co = v->coh[c][k], w;
-
-		u = k == k0 ? ph : u + lv_wrap(ph - prev);
-		prev = ph;
-		w = co / fmax(1 - co, 1e-6);
-		sw += w;
-		swf += w * f;
-		swu += w * u;
-		swff += w * f * f;
-		swfu += w * f * u;
-	}
-	den = sw * swff - swf * swf;
-	if (sw > 0 && den != 0)
-		slope = (sw * swfu - swf * swu) / den;
-	turn = v->invert[c] ? M_PI : 0;
+	lv_curve_phase(v, c, dac, curve);
 	memset(a, 0, sizeof(a));
 	memset(b, 0, sizeof(b));
 	for (k = 1; k < v->bins; k++) {
@@ -2184,9 +2226,7 @@ static int lv_design(struct loopview *v, int c)
 			continue;
 		if (f <= LV_CAL_TOP) {
 			t = fmin(m > 0 ? 1 / m : LV_CAL_MAX, LV_CAL_MAX);
-			ph = lv_wrap(carg(v->h[c][k]) -
-				     (dac ? lv_dac_phase(f, dac) : 0) -
-				     slope * f - turn);
+			ph = curve[k];
 			fade = f >= 2000 ? 1 :
 			       f <= 500	 ? 0 :
 					   log(f / 500) / log(4.0);
@@ -2212,6 +2252,7 @@ static int lv_design(struct loopview *v, int c)
 			b[i][P] -= w * bp[i] * cimag(target);
 		}
 	}
+	free(curve);
 	if (lv_solve_n(a, N, x) || lv_solve_n(b, P, y))
 		return -1;
 	for (i = 0; i < N; i++) {
@@ -2252,10 +2293,9 @@ static int lv_calibrate(struct loopview *v)
 				v->cal_dac = 0;
 	lv_figures(v);
 	for (c = 0; c < 2; c++) {
-		for (i = 0; i < LV_CAL_AT; i++) {
+		for (i = 0; i < LV_CAL_AT; i++)
 			v->before[c][i] = v->mag[c][lv_bin(v, lv_cal_at[i])];
-			v->before_ph[c][i] = v->ph[c][lv_bin(v, lv_cal_at[i])];
-		}
+		lv_curve_at(v, c, v->before_ph[c]);
 		if (lv_design(v, c))
 			return -1;
 		for (i = 0; i <= LV_CF_HALF; i++)
@@ -4050,6 +4090,7 @@ void loopview_report(struct loopview *v, FILE *f)
 {
 	static const double at[] = { 20,    50,	   100,	  1000,	 5000, 10000,
 				     15000, 18000, 20000, 21000, 22000 };
+	double after[LV_CAL_AT];
 	unsigned int i;
 	int c;
 
@@ -4096,10 +4137,10 @@ void loopview_report(struct loopview *v, FILE *f)
 			fprintf(f, " %g:%.2f/%+.1f", lv_cal_at[i],
 				v->before[c][i], v->before_ph[c][i]);
 		fprintf(f, "\nafter %c", "LR"[c]);
+		lv_curve_at(v, c, after);
 		for (i = 0; i < LV_CAL_AT; i++)
 			fprintf(f, " %g:%.2f/%+.1f", lv_cal_at[i],
-				v->mag[c][lv_bin(v, lv_cal_at[i])],
-				v->ph[c][lv_bin(v, lv_cal_at[i])]);
+				v->mag[c][lv_bin(v, lv_cal_at[i])], after[i]);
 		fprintf(f, "\n");
 	}
 }

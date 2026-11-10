@@ -1354,13 +1354,16 @@ class ShotTest(unittest.TestCase):
     def test_the_calibration_takes_back_the_phase_too(self):
         """-C on two files through paths whose phase isn't linear, as the
         record path's anti-alias filter: the symmetric taps and the phase
-        taps together leave the path flat within 0.2 dB and its phase past
-        the delay within 2.5 degrees from 500 Hz to 18 kHz, as near as 33
-        taps come, where the symmetric taps alone leave up to 24 degrees"""
+        taps together leave the path flat within 0.2 dB from 500 Hz to
+        18 kHz, and its phase within a degree of a line from 2 to 18 kHz,
+        the line through 1 to 18 kHz that the calibration takes, since the
+        AC coupling tilts the phase below, where the symmetric taps alone
+        leave more than 3 degrees"""
         rng = np.random.default_rng(15)
         n = 44100 * 4
         x = rng.uniform(-0.17, 0.17, (n, 2))
-        # 5 and 7.6 dB down at 20 kHz, 28 and -12 degrees past the delay
+        # 5 and 7.6 dB down at 20 kHz, and 3.7 and 3.3 degrees off the
+        # line from 2 to 18 kHz
         paths = ([0.06, 0.74, 0.16, 0.04], [0.2, 0.7, 0.1])
         y = np.zeros((n + 300, 2))
         for c, h in enumerate(paths):
@@ -1393,20 +1396,21 @@ class ShotTest(unittest.TestCase):
                              for ww in w])
             S = taps[side][0] + 2 * np.cos(np.outer(w, m)) @ taps[side][1:]
             A = 2 * np.sin(np.outer(w, m)) @ ptaps[side]
-            for corr, tol in ((S - 1j * A, 2.5), (S, None)):
+            for corr, tol in ((S - 1j * A, 1), (S, None)):
                 total = corr * path
                 ph = np.unwrap(np.angle(total))
-                fit = (hz >= 200) & (hz <= 3000)
+                fit = (hz >= 1000) & (hz <= 18000)
                 line = np.polyfit(hz[fit], ph[fit], 1)
                 resid = np.degrees(ph - np.polyval(line, hz))
-                band = (hz >= 500) & (hz <= 18000)
+                band = (hz >= 2000) & (hz <= 18000)
                 if tol is None:
                     # the symmetric taps alone leave the path's phase
-                    self.assertGreater(np.abs(resid[band]).max(), 5, side)
+                    self.assertGreater(np.abs(resid[band]).max(), 3, side)
                     continue
+                flat = (hz >= 500) & (hz <= 18000)
                 mag = 20 * np.log10(np.abs(total) /
                                     np.abs(total[np.argmin(abs(hz - 1000))]))
-                self.assertLess(np.abs(mag[band]).max(), 0.2, side)
+                self.assertLess(np.abs(mag[flat]).max(), 0.2, side)
                 self.assertLess(np.abs(resid[band]).max(), tol, side)
 
     def test_the_loop_view_says_when_there_is_no_loop(self):
