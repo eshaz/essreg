@@ -344,6 +344,9 @@ enum et_result c_a1rec_restart(struct et_ctx *c, const struct et_case *k)
 {
 	static const struct et_fmt pf = { ET_S16, 2, 44100 };
 	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	// the gap between the drop and the start: at once, as es1869scope
+	// begins its second run, and longer, the FIFO full meanwhile
+	static const double gaps[] = { 0, 0.002, 0.01, 0.05 };
 	unsigned long pn = 2 * 44100, cn = 44100;
 	long at = (long)(0.4 * f.rate), len = f.rate / 5;
 	double worst = 0;
@@ -364,7 +367,7 @@ enum et_result c_a1rec_restart(struct et_ctx *c, const struct et_case *k)
 		s[1] = et_rec(ET_A1C, &f, cn, 0.3);
 		s[1].flags |= ET_RESTART;
 		s[1].pause_at = 0.4;
-		s[1].pause_for = 0.05;
+		s[1].pause_for = gaps[i % 4];
 		if (et_run(c, s, 2)) {
 			free(s[0].data);
 			free(s[1].data);
@@ -383,8 +386,8 @@ enum et_result c_a1rec_restart(struct et_ctx *c, const struct et_case *k)
 		if (fabs(after - before) > fabs(worst)) {
 			worst = after - before;
 			et_note(c,
-				"run %d: the tone's share %.1f dB before the restart, %.1f after",
-				i, before, after);
+				"run %d, a gap of %g ms: the tone's share %.1f dB before the restart, %.1f after",
+				i, 1000 * gaps[i % 4], before, after);
 			et_dump(c, "a1c", &f, s[1].data, s[1].done);
 		}
 		free(x);

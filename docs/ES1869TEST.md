@@ -239,11 +239,11 @@ against the stream, the filter's C code and the dig path.
   the VX Pocket's programmed I/O, starved that long, played a gap each
   period: a recording of it came out 6 % long. `a1rec.restart` records a
   tone eight times, each dropped, prepared and started again on its open
-  stream after 0.4 s, and the tone's share of the recording after the
-  restart has to stay within 1 dB of its share before. A recording begun
-  again with its channel unmasked before the start could come back a byte
-  off, as noise, the tone's share 30 dB down: es1869scope -C's second run
-  did now and then.
+  stream after 0.4 s, at once or 2, 10 or 50 ms later, and the tone's share
+  of the recording after the restart has to stay within 1 dB of its share
+  before. A recording begun again with its channel unmasked before the start
+  could come back a byte off, as noise, the tone's share 30 dB down:
+  es1869scope -C's second run did now and then.
 * `a1play`: Audio 1's playback through the cable: formats, rates and twenty
   starts, measured late in each tone, with THD+N over 600 Hz: the second
   card's clock wanders while it records, which leaves sidebands within 20 Hz
