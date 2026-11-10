@@ -145,6 +145,7 @@ static const double lv_cal_at[LV_CAL_AT] = { 1000,  5000,  10000,
 #define LV_LIN_AFTER 8 // a run's segments before its path predicts
 #define LV_LIN_MIN 400000.0 // the frames a side the linearity refits with
 #define LV_LIN_STEP 0.7 // the share of the way a refit moves the tables
+#define LV_LIN_EVERY 16 // the segments a linearity's one, for the Celeron
 #define LV_LIN_LO 2 // up to this bin, what should have come is the recording's
 #define LV_LIN_HI 6 // and from this one, the path's prediction
 
@@ -2639,12 +2640,14 @@ static void lv_lin_segment(struct loopview *v)
 {
 	unsigned int n = v->n, f = v->factor, nn = n * f, q = n / 4, k, c;
 	unsigned int lg = LV_LOG2N + (f == 2);
+	unsigned int from = q / 2 - 2 * ES_CF_HALF, to = 3 * q + 2 * ES_CF_HALF;
 	double *z = v->lz, *zy = v->lzy, dcs[2];
 	double complex low[2][LV_LIN_HI + 1];
 	int16_t *ri = v->lr16, *si = v->lys16;
 	int64_t xs = v->seg_xs;
 
-	if (!v->lin || f > 2 || xs < 0 || (v->lskip++ & 1) ||
+	if (!v->lin || f > 2 || xs < 0 ||
+	    v->lskip++ % (v->replay ? 2 : LV_LIN_EVERY) ||
 	    lv_played(v) < (uint64_t)xs + n)
 		return;
 	// the DAC's output at the monitor's rate, both sides as a + jb
@@ -2658,34 +2661,25 @@ static void lv_lin_segment(struct loopview *v)
 				o[c] + (o[c] >= 0 ? v->lgap[c] / 256.0 : 0);
 	}
 	tie_fft(z, lg);
-	// what came back, raw: as recorded, or with the driver's stage taken
-	// back, two passes of it in software
+	// what came back, raw: as recorded, or about the frames that count,
+	// the driver's stage taken back to first order, r = 2 y - S(y), since
+	// it moves a sample by a few LSB at most; and what the stage gives:
+	// the recording, or the stage in software over those frames
 	for (k = 0; k < 2 * n; k++)
-		ri[k] = (int16_t)lrint(v->seg[2 + (k & 1)][k / 2]);
-	if (v->lin_applied && v->have_ldc >= 16) {
-		int pass;
+		ri[k] = si[k] = (int16_t)lrint(v->seg[2 + (k & 1)][k / 2]);
+	if (v->have_ldc >= 16) {
+		lv_lin_stage(v, si + 2 * from, to - from);
+		for (k = 2 * from; k < 2 * (to - ES_CF_HALF); k++) {
+			long r = 2L * ri[k] - si[k];
 
-		for (pass = 0; pass < 2; pass++) {
-			memcpy(si, ri, 2 * n * sizeof(*si));
-			lv_lin_stage(v, si, n);
-			for (k = 0; k < 2 * (n - ES_CF_HALF); k++) {
-				long r = ri[k] +
-					 lrint(v->seg[2 + (k & 1)][k / 2]) -
-					 si[k];
-
+			if (v->lin_applied) {
+				si[k] = ri[k];
 				ri[k] = (int16_t)(r > 32767  ? 32767 :
 						  r < -32768 ? -32768 :
 							       r);
 			}
 		}
 	}
-	// what the stage gives: the recording, or the stage in software
-	for (k = 0; k < 2 * n; k++)
-		si[k] = v->lin_applied ?
-				(int16_t)lrint(v->seg[2 + (k & 1)][k / 2]) :
-				ri[k];
-	if (!v->lin_applied && v->have_ldc >= 16)
-		lv_lin_stage(v, si, n);
 	// the raw recording's spectrum, both sides, and its lowest bins kept
 	for (k = 0; k < n; k++) {
 		zy[2 * k] = ri[2 * k];
