@@ -10,6 +10,7 @@
 #define ES1869_HW_COMPAT_H
 
 #ifdef __KERNEL__
+#include <linux/bitops.h>
 #include <linux/bits.h>
 #include <linux/errno.h>
 #include <linux/limits.h>
@@ -47,6 +48,8 @@ typedef int64_t s64;
 #define __aligned(n) __attribute__((aligned(n)))
 #define noinline_for_stack __attribute__((noinline))
 
+static inline int fls(unsigned int x) { return x ? 32 - __builtin_clz(x) : 0; }
+static inline int fls64(u64 x) { return x ? 64 - __builtin_clzll(x) : 0; }
 static inline u64 div_u64(u64 n, u32 d) { return n / d; }
 static inline s64 div_s64(s64 n, s32 d) { return n / d; }
 static inline s64 div64_s64(s64 n, s64 d) { return n / d; }

@@ -932,6 +932,14 @@ saved state wins over a parameter. The defaults are the Kconfig options
   Correction Capture Taps" (es1869scope -v 3 -C measures and loads them):
   the frames come 16 later, and the FM recording stays exact. It takes
   effect at the next prepare.
+* `a1c_linear` ("Audio 1 Linearity Capture Switch"): 0 to 1, default 0.
+  Audio 1's 16-bit recordings, after the correction filter, through a stage
+  that takes back what the record path does to a sample's size: a curve
+  about each side's centre, then a gain and a turn of the phase by the
+  analytic signal's envelope and instantaneous frequency, from "Audio 1
+  Linearity Capture Curve", "Gain" and "Turn" (es1869scope -C and -E measure
+  and load them); the frames come 16 later, as through the filter. It takes
+  effect at the next prepare.
 * `a1p_max_rate`: 3101 to 793800, default 48000. Audio 1 playback's highest
   rate (Hz). It takes effect at the next prepare.
 * `a1c_max_rate`: 3101 to 793800, default 52920. Audio 1 recording's highest

@@ -26,6 +26,12 @@
  * so that a correction can follow the path as it drifts. es1869scope -C
  * measures the loop, fits them and loads them.
  *
+ * The linearity stage after the filter (capfilt.c) runs in the same pass,
+ * with a1c_linear, and takes its tables the same way from "Audio 1 Linearity
+ * Capture Curve", "Gain" and "Turn". A recording with it and without
+ * a1c_filter goes through a FIR that only delays, so that its frames come as
+ * late either way.
+ *
  * ESS's drivers have no such filter: ES1869.DRV and ES1869.VXD record the
  * DMA's bytes as they come. The roll-off it takes back is measured, not from
  * the data sheet, which gives only the switched-capacitor filter's corner as a
@@ -57,11 +63,17 @@ static void a1c_work_fn(struct work_struct *work)
 	rt = ss->runtime;
 	pos = es1869_dma_pos(&chip->hw, chip->dma1,
 			     snd_pcm_lib_buffer_bytes(ss));
-	// taps loaded while it records: from this pass on, the history kept
+	// taps or tables loaded while it records: from this pass on, the
+	// history kept
 	if (chip->a1c_new) {
-		memcpy(chip->a1c_cf.taps, chip->a1c_taps,
-		       sizeof(chip->a1c_cf.taps));
+		if (chip->a1c_fir)
+			memcpy(chip->a1c_cf.taps, chip->a1c_taps,
+			       sizeof(chip->a1c_cf.taps));
 		chip->a1c_new = false;
+	}
+	if (chip->a1c_cl_new) {
+		chip->a1c_cf.cl = chip->a1c_cl;
+		chip->a1c_cl_new = false;
 	}
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	to = es1869_forward(&chip->a1_last, bytes_to_frames(rt, pos),
@@ -90,21 +102,31 @@ void es1869_a1c_period(struct es1869 *chip, struct snd_pcm_substream *ss)
 		snd_pcm_period_elapsed(ss);
 }
 
-// a recording's start: through the filter if a1c_filter asks and the frames
-// are Audio 1's own at 16 bits, from silence, with the taps as they are now
+// a recording's start: through the filter if a1c_filter or a1c_linear asks
+// and the frames are Audio 1's own at 16 bits, from silence, with the taps
+// and tables as they are now
 void es1869_a1c_prepare(struct es1869 *chip, struct snd_pcm_substream *ss)
 {
 	struct snd_pcm_runtime *rt = ss->runtime;
+	bool fir = es1869_val(ES_S_a1c_filter);
+	bool lin = es1869_val(ES_S_a1c_linear);
 	unsigned long flags;
 
 	spin_lock_irqsave(&chip->reg_lock, flags);
-	chip->a1c_on = es1869_val(ES_S_a1c_filter) &&
-		       chip->a1_owner == ES_OWN_A1C &&
+	chip->a1c_on = (fir || lin) && chip->a1_owner == ES_OWN_A1C &&
 		       rt->format == SNDRV_PCM_FORMAT_S16_LE &&
 		       rt->channels <= 2;
+	chip->a1c_fir = fir;
 	chip->a1c_at = 0;
-	memcpy(chip->a1c_cf.taps, chip->a1c_taps, sizeof(chip->a1c_cf.taps));
+	if (fir)
+		memcpy(chip->a1c_cf.taps, chip->a1c_taps,
+		       sizeof(chip->a1c_cf.taps));
+	else
+		es1869_cf_identity(&chip->a1c_cf);
 	chip->a1c_new = false;
+	chip->a1c_cf.cl_on = lin;
+	chip->a1c_cf.cl = chip->a1c_cl;
+	chip->a1c_cl_new = false;
 	es1869_cf_reset(&chip->a1c_cf);
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 }
@@ -172,6 +194,77 @@ static int taps_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 	return changed;
 }
 
+// the linearity tables, each side's values in a row: the curve's centre and
+// its values (CL_CURVE), the gains (CL_GAIN), the turns (CL_TURN)
+enum { CL_CURVE, CL_GAIN, CL_TURN };
+
+static unsigned int cl_row(unsigned long which)
+{
+	return which == CL_CURVE ? 1 + ES_CL_VALS : ES_CL_PER;
+}
+
+static s16 *cl_at(struct es1869_cl *cl, unsigned long which, unsigned int c,
+		  unsigned int i)
+{
+	if (which == CL_GAIN)
+		return &cl->gain[c][i];
+	if (which == CL_TURN)
+		return &cl->turn[c][i];
+	return i ? &cl->curve[c][i - 1] : &cl->centre[c];
+}
+
+static int cl_info(struct snd_kcontrol *kc, struct snd_ctl_elem_info *ui)
+{
+	ui->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	ui->count = 2 * cl_row(kc->private_value);
+	ui->value.integer.min = -32768;
+	ui->value.integer.max = 32767;
+	ui->value.integer.step = 1;
+	return 0;
+}
+
+static int cl_get(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
+{
+	struct es1869 *chip = snd_kcontrol_chip(kc);
+	unsigned int row = cl_row(kc->private_value), c, i;
+	unsigned long flags;
+
+	spin_lock_irqsave(&chip->reg_lock, flags);
+	for (c = 0; c < 2; c++)
+		for (i = 0; i < row; i++)
+			uv->value.integer.value[c * row + i] =
+				*cl_at(&chip->a1c_cl, kc->private_value, c, i);
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	return 0;
+}
+
+static int cl_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
+{
+	struct es1869 *chip = snd_kcontrol_chip(kc);
+	unsigned int row = cl_row(kc->private_value), c, i;
+	unsigned long flags;
+	int changed = 0;
+
+	for (i = 0; i < 2 * row; i++)
+		if (uv->value.integer.value[i] < -32768 ||
+		    uv->value.integer.value[i] > 32767)
+			return -EINVAL;
+	// under the lock the filter's work takes them by
+	spin_lock_irqsave(&chip->reg_lock, flags);
+	for (c = 0; c < 2; c++)
+		for (i = 0; i < row; i++) {
+			s16 *at = cl_at(&chip->a1c_cl, kc->private_value, c, i);
+			s16 v = uv->value.integer.value[c * row + i];
+
+			changed |= *at != v;
+			*at = v;
+		}
+	if (changed)
+		chip->a1c_cl_new = true;
+	spin_unlock_irqrestore(&chip->reg_lock, flags);
+	return changed;
+}
+
 int es1869_a1c_new(struct es1869 *chip)
 {
 	static const struct snd_kcontrol_new knew = {
@@ -181,16 +274,41 @@ int es1869_a1c_new(struct es1869 *chip)
 		.get = taps_get,
 		.put = taps_put,
 	};
+	static const char *const cl_names[] = {
+		[CL_CURVE] = "Audio 1 Linearity Capture Curve",
+		[CL_GAIN] = "Audio 1 Linearity Capture Gain",
+		[CL_TURN] = "Audio 1 Linearity Capture Turn",
+	};
+	struct snd_kcontrol_new cl = {
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.info = cl_info,
+		.get = cl_get,
+		.put = cl_put,
+	};
+	unsigned int i;
+	int err;
+
 	INIT_WORK(&chip->a1c_work, a1c_work_fn);
-	// until a measurement loads its own: the filter changes nothing
+	// until a measurement loads its own: the filter and the stage change
+	// nothing
 	memset(chip->a1c_taps, 0, sizeof(chip->a1c_taps));
 	chip->a1c_taps[0][0] = ES_CF_ONE;
 	chip->a1c_taps[1][0] = ES_CF_ONE;
-	return snd_ctl_add(chip->card, snd_ctl_new1(&knew, chip));
+	es1869_cl_identity(&chip->a1c_cl);
+	err = snd_ctl_add(chip->card, snd_ctl_new1(&knew, chip));
+	for (i = 0; !err && i < ARRAY_SIZE(cl_names); i++) {
+		cl.name = cl_names[i];
+		cl.private_value = i;
+		err = snd_ctl_add(chip->card, snd_ctl_new1(&cl, chip));
+	}
+	return err;
 }
 
 void es1869_a1c_proc(struct es1869 *chip, struct snd_info_buffer *buf)
 {
-	snd_iprintf(buf, "Audio 1 correction: %s; %llu frames filtered\n",
-		    chip->a1c_on ? "on" : "off", chip->a1c_frames);
+	snd_iprintf(buf,
+		    "Audio 1 correction: %s, linearity %s; %llu frames filtered\n",
+		    chip->a1c_on ? (chip->a1c_fir ? "on" : "delay only") : "off",
+		    chip->a1c_on && chip->a1c_cf.cl_on ? "on" : "off",
+		    chip->a1c_frames);
 }

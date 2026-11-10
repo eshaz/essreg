@@ -205,6 +205,9 @@ struct es1869 {
 	bool a1c_new; // and the one recording now takes them at its next pass
 	struct work_struct a1c_work;
 	bool a1c_on; // this recording goes through it
+	bool a1c_fir; // with the taps, else with a FIR that only delays
+	struct es1869_cl a1c_cl; // the linearity tables the next one takes
+	bool a1c_cl_new; // and the one recording now takes at its next pass
 	snd_pcm_uframes_t a1c_at; // the next frame of the buffer to filter
 	u64 a1c_frames; // filtered since the driver loaded
 

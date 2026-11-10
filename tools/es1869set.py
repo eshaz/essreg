@@ -70,6 +70,18 @@ EXTRA = {
                   "outward, in units of 1/16384; the identity until a "
                   "calibration (`es1869scope -C`) loads its own. A "
                   "recording under way takes them at its next pass.\n",
+    "a1c_linear": "* **Audio 1 Linearity Tables** (`Audio 1 Linearity "
+                  "Capture Curve`, `Gain` and `Turn`): the stage's tables, "
+                  "the left's first. The curve: its centre, a recorded "
+                  "value, then what it adds at 33 knots from -512 to +512 "
+                  "about it (0, 2, 4, 6, 8, 12, 16 and on in half octaves "
+                  "each way), in 1/256 LSB. The gains, 16384 for 1, and the "
+                  "turns of the phase, 16384 for a radian ahead, 40 each: "
+                  "4 bands of the instantaneous frequency (under 200, 800 "
+                  "and 3200 Hz at 44.1 kHz, and over), each 10 bins of the "
+                  "envelope from 4 to 2048 LSB, an octave apart. The "
+                  "identity until a measurement loads its own; a recording "
+                  "under way takes them at its next pass.\n",
 }
 
 SUFFIXES = (" Playback Enum", " Playback Switch", " Playback Route",
