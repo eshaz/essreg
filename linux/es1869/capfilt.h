@@ -32,6 +32,7 @@
 #define ES_CL_BANDS 4 // the instantaneous frequency's bands
 #define ES_CL_PER (ES_CL_BANDS * ES_CL_ENV) // a side's gains, and turns
 #define ES_CL_SMOOTH 8 // the envelope's time constant, 2^8 frames
+#define ES_CL_DC 15 // the DC's under the envelope, 2^15 frames
 #define ES_CL_POS_ONE 256 // a bin, in what es1869_cl_place() gives
 
 struct es1869_cl {
@@ -51,14 +52,17 @@ struct es1869_cf {
 	s16 raw[2][ES_CF_TAPS - 1 + ES_CF_CHUNK];
 	// the linearity stage, its tables, and each channel's analytic signal:
 	// its power and phase advance smoothed, 2^ES_CL_SMOOTH times their
-	// mean, and the last frame's
+	// mean, the last frame's, and the DC under it, 2^ES_CL_DC times its
+	// mean in 1/16 LSB
 	bool cl_on;
 	struct es1869_cl cl;
 	s64 cl_pow[2], cl_adv[2];
 	s32 cl_re[2], cl_im[2];
+	s64 cl_dc[2];
 };
 
-/* silence behind the next frame, as at a stream's start */
+/* silence behind the next frame, as at a stream's start, with the DC under
+ * the stage's envelope from its curve's centres */
 void es1869_cf_reset(struct es1869_cf *cf);
 /* taps that change nothing but the delay */
 void es1869_cf_identity(struct es1869_cf *cf);

@@ -28,9 +28,12 @@
  * the path took, between knots at 0, 2, 4, 6, 8, 12, 16 and on in half
  * octaves to 512, and its last value past that. Then the analytic signal: the
  * FIR's output with its Hilbert transform, from a FIR of 31 taps on the same
- * raw samples, whose odd taps alone count. Its power and its phase advance
- * from frame to frame, smoothed over 256 frames, give the envelope and the
- * instantaneous frequency, which pick a gain and a turn of the phase from the
+ * raw samples, whose odd taps alone count, and the FIR's output less its DC,
+ * followed over 2^15 frames from the curve's centre, since the ADC's offset
+ * of some -175 LSB would read as the envelope of every quiet signal. Its
+ * power and its phase advance from frame to frame, smoothed over 256 frames,
+ * give the envelope and the instantaneous frequency, which pick a gain and a
+ * turn of the phase from the
  * tables, by band and by envelope between bins an octave apart. The turn
  * adds the Hilbert transform: Re((y + jh) e^(jt)) = y - t h for a small t.
  *
@@ -54,11 +57,15 @@ static const s32 cl_edge[ES_CL_BANDS - 1] = { 124, 1508, 7214 };
 
 void es1869_cf_reset(struct es1869_cf *cf)
 {
+	int c;
+
 	memset(cf->raw, 0, sizeof(cf->raw));
 	memset(cf->cl_pow, 0, sizeof(cf->cl_pow));
 	memset(cf->cl_adv, 0, sizeof(cf->cl_adv));
 	memset(cf->cl_re, 0, sizeof(cf->cl_re));
 	memset(cf->cl_im, 0, sizeof(cf->cl_im));
+	for (c = 0; c < 2; c++)
+		cf->cl_dc[c] = (s64)cf->cl.centre[c] * 16 * (1 << ES_CL_DC);
 }
 
 void es1869_cl_identity(struct es1869_cl *cl)
@@ -146,9 +153,11 @@ static s64 cl_frame(struct es1869_cf *cf, u32 c, s64 acc, const s16 *x)
 	u32 band, pos, at;
 	s32 u, g, t;
 
-	// the analytic signal in 1/16 LSB: power and phase advance, smoothed,
-	// with ES_CL_SMOOTH bits more than they have, so that the smallest
-	// signals still move them
+	// the analytic signal in 1/16 LSB, about the DC: power and phase
+	// advance, smoothed, with ES_CL_SMOOTH bits more than they have, so
+	// that the smallest signals still move them
+	cf->cl_dc[c] += re - (cf->cl_dc[c] >> ES_CL_DC);
+	re -= cf->cl_dc[c] >> ES_CL_DC;
 	cf->cl_pow[c] += re * re + im * im - (cf->cl_pow[c] >> ES_CL_SMOOTH);
 	cf->cl_adv[c] += im * cf->cl_re[c] - re * cf->cl_im[c] -
 			 (cf->cl_adv[c] >> ES_CL_SMOOTH);

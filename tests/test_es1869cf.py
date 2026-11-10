@@ -51,7 +51,8 @@ class Cf(ctypes.Structure):
                 ("cl_pow", ctypes.c_int64 * 2),
                 ("cl_adv", ctypes.c_int64 * 2),
                 ("cl_re", ctypes.c_int32 * 2),
-                ("cl_im", ctypes.c_int32 * 2)]
+                ("cl_im", ctypes.c_int32 * 2),
+                ("cl_dc", ctypes.c_int64 * 2)]
 
 
 # the struct's size and a few places, from the C, against the mirror above
@@ -284,6 +285,7 @@ def reference_cl(x, taps, cl):
     pad = np.concatenate([np.zeros(TAPS - 1, np.int64), x.astype(np.int64)])
     accs = np.convolve(pad, full[::-1], "valid")[:len(x)]
     pw = adv = pre = pim = 0
+    dc = cl["centre"] * 16 * (1 << 15)
     out = np.empty(len(x), np.int64)
     for i in range(len(x)):
         acc = int(accs[i])
@@ -291,6 +293,8 @@ def reference_cl(x, taps, cl):
         h = sum(HILB[k] * int(pad[c0 - (2 * k + 1)] - pad[c0 + 2 * k + 1])
                 for k in range(8))
         re, im = acc >> 10, h >> 10
+        dc += re - (dc >> 15)
+        re -= dc >> 15
         pw += re * re + im * im - (pw >> 8)
         adv += im * pre - re * pim - (adv >> 8)
         pre, pim = re, im
@@ -344,6 +348,8 @@ class LinearityTest(unittest.TestCase):
         if taps is not None:
             set_taps(cf, taps, taps)
         set_cl(cf, sides or (identity_cl(), identity_cl()))
+        # the DC under the envelope starts from the curves' centres
+        lib.es1869_cf_reset(ctypes.byref(cf))
         return cf
 
     def test_identity_tables_leave_the_filter_as_it_was(self):
