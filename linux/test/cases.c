@@ -89,6 +89,7 @@ FN(c_dac_images)
 FN(c_dac_corner)
 FN(c_dac_fold)
 FN(c_a1rec_correct)
+FN(c_a1rec_yield)
 FN(c_a2_rate)
 FN(c_mix_cable)
 FN(c_3d_quick)
@@ -328,6 +329,8 @@ const struct et_case et_cases[] = {
 	     "the ADC's filter takes the image that moves a tone's level")
 	CASE("a1rec.correct", N | ET_ROOT, c_a1rec_correct, 0,
 	     "Audio 1's correction filter changes a tone by its taps' response")
+	CASE("a1rec.yield", N, c_a1rec_yield, 0,
+	     "through the correction, its work holds the CPU for 1 ms at most")
 	CASE("dac.over.44", R | N | ET_ROOT, c_dac_over, 0,
 	     "Audio 2 Output Rate clocks the DAC up, on 793.8 kHz's divisors")
 	CASE("dac.over.48", R | N | ET_ROOT, c_dac_over, 1,

@@ -64,6 +64,7 @@ FAULTS = {
     0x800000000: "a1rec.correct",  # the correction filter does nothing
     0x1000000000: "mon.off.trim",  # the trim moves the rate with it Off
     0x2000000000: "dual.a1c",      # the dual device through the correction
+    0x4000000000: "a1rec.yield",   # the correction's work a period at once
 }
 
 # the cases that run only when named, or with someone at the machine

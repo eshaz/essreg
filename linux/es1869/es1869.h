@@ -212,6 +212,7 @@ struct es1869 {
 	bool a1c_cl_new; // and the one recording now takes at its next pass
 	snd_pcm_uframes_t a1c_at; // the next frame of the buffer to filter
 	u64 a1c_frames; // filtered since the driver loaded
+	u64 a1c_longest; // ns, the longest piece of this recording's work
 
 	// the chip's clock, from the interrupts of a running stream (clock.c)
 	struct es1869_clock clk;

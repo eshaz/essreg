@@ -49,6 +49,7 @@ struct sim {
 	int r70; // the last rate Audio 2 played at
 	long cf_taps[2 * (SIM_CF_HALF + 1)]; // Audio 1's correction's taps
 	int a1c_ran; // SIM_A1C_DUAL: a recording went through it since load
+	long a1c_piece; // frames of the correction's longest piece, 0 for none
 };
 
 static struct sim sim;
@@ -718,6 +719,10 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 	    !(sim.faults & SIM_CF_OFF)) {
 		sim_cf_run(sim.cf_taps, r->data, r->frames, r->fmt.channels);
 		sim.a1c_ran = 1;
+		// the driver's pieces of 256 frames, or the period whole
+		sim.a1c_piece = sim.faults & SIM_A1C_WHOLE ?
+					(r->period ? (long)r->period : 1024) :
+					256;
 	}
 }
 
@@ -1337,17 +1342,22 @@ static int sim_proc(void *ctx, char *buf, int len)
 {
 	(void)ctx;
 	// the cost as a stream of 10 s at 21.5 interrupts a second leaves it
-	return snprintf(buf, len,
-			"ES1869 (simulated)\nAudio 1: free; Audio 2: free; power: %s\n"
-			"interrupts: Audio 1 0, Audio 2 0, buttons 0, MPU-401 0, none 0\n"
-			"Audio 2 ring: late refills 0, largest 1024 bytes, longest 20000 cycles\n"
-			"cost: interrupts %lu, 20000 cycles each; ring ticks %lu, 4000 cycles each; 8237 readings 0\n"
-			"clock: the master %+d ppb of 23814000 Hz on the raw clock, 257 samples in the line, 300 in all, from Audio 2\n"
-			"clock: the steered clock %+d ppb of the raw one, 300 samples\n",
-			!param("pwr_save") ? "up" :
-			param("pwr_full") ? "fully down" : "partly down",
-			(unsigned long)(sim.now * 21.5),
-			(unsigned long)(sim.now * 75), SIM_MASTER_PPB, 0);
+	return snprintf(
+		buf, len,
+		"ES1869 (simulated)\nAudio 1: free; Audio 2: free; power: %s\n"
+		"interrupts: Audio 1 0, Audio 2 0, buttons 0, MPU-401 0, none 0\n"
+		"Audio 2 ring: late refills 0, largest 1024 bytes, longest 20000 cycles\n"
+		"cost: interrupts %lu, 20000 cycles each; ring ticks %lu, 4000 cycles each; 8237 readings 0\n"
+		"clock: the master %+d ppb of 23814000 Hz on the raw clock, 257 samples in the line, 300 in all, from Audio 2\n"
+		"clock: the steered clock %+d ppb of the raw one, 300 samples\n"
+		"Audio 1 correction: off, linearity off; 0 frames filtered, the longest piece %ld us\n",
+		!param("pwr_save") ? "up" :
+		param("pwr_full")  ? "fully down" :
+				     "partly down",
+		(unsigned long)(sim.now * 21.5), (unsigned long)(sim.now * 75),
+		SIM_MASTER_PPB, 0,
+		// the Celeron's 1.2 us a stereo frame
+		sim.a1c_piece * 12 / 10);
 }
 
 static int sim_cpu(void *ctx, double *busy, double *total)

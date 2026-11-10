@@ -610,6 +610,40 @@ enum et_result c_mix_adc(struct et_ctx *c, const struct et_case *k)
 // the filter off, then with it on and known taps: a lift of the top on the
 // left and a plain -1 dB on the right. Each tone changes by the taps' own
 // response at its frequency
+// a1rec.yield: a recording through Audio 1's correction lets the machine
+// in while its work filters, no piece of it over a millisecond. A period of
+// 4096 frames at once took the Armada's Celeron some 5 ms, and the VX
+// Pocket's programmed I/O played a gap of that length each period
+enum et_result c_a1rec_yield(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	struct et_stream s;
+	char proc[4096];
+	const char *at;
+	long us;
+
+	(void)k;
+	if (et_ctl_set(c, "Audio 1 Correction Capture Switch", 0, 1, 1) < 0)
+		return ET_ERROR;
+	s = et_rec(ET_A1C, &f, 2 * 44100, 0);
+	s.period = 4096;
+	s.buffer = 4 * 4096;
+	if (et_run(c, &s, 1)) {
+		free(s.data);
+		return ET_ERROR;
+	}
+	free(s.data);
+	if (c->hal->proc(c->hal->ctx, proc, sizeof(proc)) < 0)
+		return ET_ERROR;
+	at = strstr(proc, "the longest piece ");
+	if (!at || sscanf(at, "the longest piece %ld us", &us) != 1) {
+		et_fail(c, "the driver reports no longest piece of its filter");
+		return ET_FAIL;
+	}
+	et_measure(c, "the correction's longest piece", us, "us", 0, 1000);
+	return ET_PASS;
+}
+
 #define A1C_PHASE "Audio 1 Correction Capture Phase Taps"
 
 enum et_result c_a1rec_correct(struct et_ctx *c, const struct et_case *k)

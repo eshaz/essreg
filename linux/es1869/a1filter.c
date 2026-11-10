@@ -45,6 +45,8 @@
 #include <sound/control.h>
 #include <sound/info.h>
 
+#define A1C_PIECE 256 // frames a piece of the work filters, some 0.1 ms
+
 static void a1c_work_fn(struct work_struct *work)
 {
 	struct es1869 *chip = container_of(work, struct es1869, a1c_work);
@@ -84,17 +86,26 @@ static void a1c_work_fn(struct work_struct *work)
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	to = es1869_forward(&chip->a1_last, bytes_to_frames(rt, pos),
 			    rt->buffer_size, bytes_to_frames(rt, 32));
-	// the frames since the last pass, in at most two pieces of the ring
+	// the frames since the last pass, in pieces of the ring of at most
+	// A1C_PIECE, with the rest of the machine let in between: a period of
+	// 4096 frames takes the Celeron some 2 ms, which in one go stalled the
+	// VX Pocket's programmed I/O, a gap in what it played each period
 	n = (to + rt->buffer_size - chip->a1c_at) % rt->buffer_size;
 	while (n) {
-		snd_pcm_uframes_t k = min(n, rt->buffer_size - chip->a1c_at);
+		snd_pcm_uframes_t k = min3(n, rt->buffer_size - chip->a1c_at,
+					   (snd_pcm_uframes_t)A1C_PIECE);
 		s16 *p = (s16 *)(rt->dma_area +
 				 frames_to_bytes(rt, chip->a1c_at));
+		u64 t = ktime_get_ns();
 
 		es1869_cf_run(&chip->a1c_cf, p, k, rt->channels);
+		t = ktime_get_ns() - t;
+		if (t > chip->a1c_longest)
+			chip->a1c_longest = t;
 		WRITE_ONCE(chip->a1c_at, (chip->a1c_at + k) % rt->buffer_size);
 		chip->a1c_frames += k;
 		n -= k;
+		cond_resched();
 	}
 	snd_pcm_period_elapsed(ss);
 }
@@ -127,6 +138,7 @@ void es1869_a1c_prepare(struct es1869 *chip, struct snd_pcm_substream *ss)
 		       rt->channels <= 2;
 	chip->a1c_fir = fir;
 	chip->a1c_at = 0;
+	chip->a1c_longest = 0;
 	es1869_cf_identity(&chip->a1c_cf);
 	if (fir) {
 		memcpy(chip->a1c_cf.taps, chip->a1c_taps,
@@ -343,9 +355,10 @@ int es1869_a1c_new(struct es1869 *chip)
 
 void es1869_a1c_proc(struct es1869 *chip, struct snd_info_buffer *buf)
 {
-	snd_iprintf(buf,
-		    "Audio 1 correction: %s, linearity %s; %llu frames filtered\n",
-		    chip->a1c_on ? (chip->a1c_fir ? "on" : "delay only") : "off",
-		    chip->a1c_on && chip->a1c_cf.cl_on ? "on" : "off",
-		    chip->a1c_frames);
+	snd_iprintf(
+		buf,
+		"Audio 1 correction: %s, linearity %s; %llu frames filtered, the longest piece %llu us\n",
+		chip->a1c_on ? (chip->a1c_fir ? "on" : "delay only") : "off",
+		chip->a1c_on && chip->a1c_cf.cl_on ? "on" : "off",
+		chip->a1c_frames, div_u64(chip->a1c_longest, 1000));
 }

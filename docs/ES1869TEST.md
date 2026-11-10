@@ -232,7 +232,12 @@ against the stream, the filter's C code and the dig path.
   the correction filter (`a1c_filter`) off, then on with known taps, a lift
   of the top on the left and -1 dB on the right. Audio 2 runs at 2x with its
   treble correction, so that no image folds back and moves a tone. Each tone
-  has to change by the taps' own response within 0.15 dB.
+  has to change by the taps' own response within 0.15 dB. `a1rec.yield`
+  records through the filter at periods of 4096 frames, and no piece of its
+  work may hold the CPU over 1 ms, the longest piece the driver's /proc page
+  reports. A whole period at once took the Armada's Celeron about 5 ms, and
+  the VX Pocket's programmed I/O, starved that long, played a gap each
+  period: a recording of it came out 6 % long.
 * `a1play`: Audio 1's playback through the cable: formats, rates and twenty
   starts, measured late in each tone, with THD+N over 600 Hz: the second
   card's clock wanders while it records, which leaves sidebands within 20 Hz
