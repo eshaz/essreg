@@ -391,8 +391,13 @@ at most at those points, with the magnitude within 0.05 dB to 20 kHz.
 
 `linux/config/es1869cal.initd` is the OpenRC service that runs it at boot,
 after alsasound and before MPD, so that MPD finds Audio 2 free. It writes
-`/var/lib/es1869/cal.txt` and `cal.ppm`. A run that finds no loop leaves the
-filter as it was and says so.
+`/var/lib/es1869/cal.txt` and `cal.ppm`. A run that finds no loop at first
+leaves the filter as it was and says so. Its run through the new taps, with
+the filter on, found no loop at the Armada's boot on 2026-11-10 and twice
+before, and passed every time by hand, cause not yet known: the service then
+tries once more, keeping the failed run's figures in `cal-failed.txt`, and
+the message gives the levels of what was played and what came back, so a
+failure says whether Audio 1 heard nothing or something else.
 
 `es1869scope -C -T 6` on the Armada, 2026-11-08, with test build 4 (dB
 against 1 kHz):

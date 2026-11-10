@@ -25,11 +25,20 @@ depend() {
 }
 
 start() {
+	local try
 	ebegin "Calibrating the ES1869's record path"
 	checkpath -d -m 0755 /var/lib/es1869
-	"${ES1869SCOPE}" -C -T "${ES1869CAL_SECONDS}" -l /dev/null \
-		-s /var/lib/es1869/cal.ppm > /var/lib/es1869/cal.txt 2>&1
-	# a measurement that found no loop leaves the filter as it was
+	# a second try where the first found no loop: the run with Audio 1's
+	# correction on found none at the boot of 2026-11-10 and twice before,
+	# its cause not yet known. The failed try's figures stay in
+	# cal-failed.txt
+	rm -f /var/lib/es1869/cal-failed.txt
+	for try in 1 2; do
+		"${ES1869SCOPE}" -C -T "${ES1869CAL_SECONDS}" -l /dev/null \
+			-s /var/lib/es1869/cal.ppm > /var/lib/es1869/cal.txt 2>&1
+		grep -q '^taps L' /var/lib/es1869/cal.txt && break
+		cp /var/lib/es1869/cal.txt /var/lib/es1869/cal-failed.txt
+	done
 	grep -q '^taps L' /var/lib/es1869/cal.txt
 	eend $? "no calibration: see /var/lib/es1869/cal.txt"
 }

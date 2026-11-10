@@ -705,6 +705,14 @@ static uint64_t lv_captured(const struct loopview *v)
 	return __atomic_load_n(&v->captured, __ATOMIC_ACQUIRE);
 }
 
+// the level of a sum of squares over n frames of both channels summed, dBFS
+static double lv_dbfs(double sum, unsigned int n)
+{
+	double rms = sqrt(sum / (n ? n : 1)) / 2;
+
+	return rms > 0 ? 20 * log10(rms / 32768) : -200;
+}
+
 #define LV_DECIMATE 8 // the coarse search's step, frames
 #define LV_FINE 16 // and the fine one's reach each way about it
 
@@ -773,13 +781,16 @@ static int lv_live_lag(struct loopview *v)
 			ey += y[k + lag] * y[k + lag];
 		}
 		free(x);
+		// with the two levels, so that a failure says whether Audio 1
+		// heard nothing or something else
 		if (ex <= 0 || ey <= 0 || fabs(num) < 0.3 * sqrt(ex * ey)) {
 			snprintf(v->why, sizeof(v->why),
 				 "no loop: what came back doesn't follow what "
-				 "was played (%.2f at %ld)",
+				 "was played (%.2f at %ld, played %.0f dBFS, "
+				 "back %.0f dBFS)",
 				 ex > 0 && ey > 0 ? fabs(num) / sqrt(ex * ey) :
 						    0.0,
-				 lag);
+				 lag, lv_dbfs(ex, n), lv_dbfs(ey, n));
 			return -1;
 		}
 	}
