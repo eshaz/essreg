@@ -33,8 +33,11 @@ snd-es18xx, which stays built and is blacklisted where snd-es1869 is used:
   with ESS's bank as firmware;
 * Audio 2 resampled in the driver: its rate locked to the clock NTP steers
   (the Clock mode, the default), its output at 2x or 3x, and its DAC's
-  treble taken back by a table that loads under a playing stream; Audio
-  1's recordings through a correction filter whose taps load the same way;
+  treble taken back in gain and phase by a table that loads under a
+  playing stream; the DAC's gap at its sign taken back (zero step);
+* Audio 1's recordings through a correction filter, in gain and phase,
+  whose taps load the same way, and a linearity stage after it, from the
+  analytic signal's envelope and instantaneous frequency;
 * on PIIX4 machines whose BIOS sets Type F DMA timing on Audio 1's channel,
   that timing turned off, since a recording then hangs the machine;
 * every setting a module parameter writable at runtime, an ALSA control
