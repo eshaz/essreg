@@ -1195,7 +1195,8 @@ static int lv_fault(struct loopview *v, int *which)
 // DAC's rate changed; the noise and Audio 1 always start together
 // Audio 1 for the stream as it now plays, as eq_policy has it: at rest at
 // 3x or at a rate it can't record, else at the stream's rate, opened again
-// if that moved; 0, or -1 if Audio 1 couldn't be opened at its new rate
+// if that moved: 1 then, for the caller to start it from its first frame,
+// else 0, or -1 if Audio 1 couldn't be opened at its new rate
 static int lv_follow(struct loopview *v)
 {
 	struct eq_setup s = { .rate = v->stream_rate ? v->stream_rate : v->rate,
@@ -1222,6 +1223,10 @@ static int lv_follow(struct loopview *v)
 			return -1;
 		say("Audio 1 records at %u Hz, as the stream plays", s.rate);
 		v->rate = s.rate;
+		if (was)
+			say("Audio 1 records again: the stream plays at %ux",
+			    v->factor);
+		return 1;
 	}
 	if (was)
 		say("Audio 1 records again: the stream plays at %ux",
@@ -1254,12 +1259,18 @@ static int lv_start(struct loopview *v, int which, int clear)
 	if (which & LV_CAP)
 		v->captured = v->next = 0;
 	if (v->cfg.monitor) {
-		int rest = v->a1_rest;
+		int rest = v->a1_rest, opened = 0;
 
-		if ((which & LV_IN) && (lv_mon_open(v) || lv_follow(v)))
-			return -1;
-		// Audio 1 with the stream once it may again, and not at rest
-		if (rest && !v->a1_rest) {
+		if (which & LV_IN) {
+			if (lv_mon_open(v))
+				return -1;
+			opened = lv_follow(v);
+			if (opened < 0)
+				return -1;
+		}
+		// Audio 1 with the stream once it may again, or opened anew at
+		// its rate, from its first frame; and not at rest
+		if ((rest && !v->a1_rest) || opened > 0) {
 			which |= LV_CAP;
 			v->captured = v->next = 0;
 		}
