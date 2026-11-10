@@ -397,7 +397,11 @@ the filter on, found no loop at the Armada's boot on 2026-11-10 and twice
 before, and passed every time by hand, cause not yet known: the service then
 tries once more, keeping the first try's figures in `cal-failed.txt`, and
 the message gives the levels of what was played and what came back, so a
-failure says whether Audio 1 heard nothing or something else.
+failure says whether Audio 1 heard nothing or something else. New taps that
+don't verify go again: Audio 1's correction is left with the taps, phase
+taps and switch it had before. The failures were Audio 1's recording begun
+again a byte off; snd-es1869 starts a recording with its channel masked
+since 2026-11-10, and es1869test's `a1rec.restart` checks it.
 
 `es1869scope -C -T 6` on the Armada, 2026-11-08, with test build 4 (dB
 against 1 kHz):

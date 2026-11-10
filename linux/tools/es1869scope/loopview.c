@@ -242,6 +242,11 @@ struct loopview {
 	uint32_t seed[2];
 	double amp;
 	unsigned int restarts;
+	// the correction a calibration found, put back if its new taps don't
+	// verify: the symmetric and phase taps, the switch, and what was read
+	long cal_old_taps[2 * (LV_CF_HALF + 1)], cal_old_ptaps[2 * LV_CF_HALF];
+	long cal_old_on[2];
+	int cal_old, cal_oldp, cal_loaded;
 	// files
 	double *fx, *fy; // stereo frames
 	size_t nx, ny;
@@ -497,7 +502,16 @@ static int lv_route(struct loopview *v)
 	// images is far above the band; the recording without the filter
 	if (v->cfg.calibrate) {
 		long off[2] = { 0, 0 };
+		unsigned int n;
 
+		v->cal_old =
+			!ctl_read(v->ctl, "Audio 1 Correction Capture Switch",
+				  v->cal_old_on, &n) &&
+			!ctl_read_all(v->ctl, "Audio 1 Correction Capture Taps",
+				      v->cal_old_taps, 2 * (LV_CF_HALF + 1));
+		v->cal_oldp = !ctl_read_all(
+			v->ctl, "Audio 1 Correction Capture Phase Taps",
+			v->cal_old_ptaps, 2 * LV_CF_HALF);
 		if (lv_set(v, "Audio 2 Treble Correction Playback Switch", 1,
 			   1) ||
 		    lv_set(v, "Audio 2 Output Rate", 1, 1) ||
@@ -1860,6 +1874,21 @@ void loopview_close(struct loopview *v)
 	if (v->cap)
 		snd_pcm_close(v->cap);
 	if (v->ctl) {
+		// new taps that didn't verify go: the correction as it was
+		if (v->cal_loaded && v->cal_old &&
+		    (v->phase < 2 || !v->lagged || !v->path[LL].segments)) {
+			ctl_write_all(v->ctl, "Audio 1 Correction Capture Taps",
+				      v->cal_old_taps, 2 * (LV_CF_HALF + 1));
+			if (v->cal_oldp)
+				ctl_write_all(
+					v->ctl,
+					"Audio 1 Correction Capture Phase Taps",
+					v->cal_old_ptaps, 2 * LV_CF_HALF);
+			ctl_write(v->ctl, "Audio 1 Correction Capture Switch",
+				  v->cal_old_on, 2);
+			say("the new taps didn't verify: Audio 1's correction "
+			    "is as it was");
+		}
 		lv_restore(v);
 		snd_ctl_close(v->ctl);
 	}
@@ -2328,6 +2357,7 @@ static int lv_calibrate(struct loopview *v)
 		for (i = 0; i < LV_CF_HALF; i++)
 			ph[c * LV_CF_HALF + i] = v->ptaps[c][i];
 	}
+	v->cal_loaded = 1;
 	if (ctl_write_all(v->ctl, "Audio 1 Correction Capture Taps", all,
 			  2 * (LV_CF_HALF + 1)) ||
 	    ctl_write(v->ctl, "Audio 1 Correction Capture Switch", on, 2))
