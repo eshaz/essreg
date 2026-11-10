@@ -197,6 +197,9 @@ void sim_cf_run(const long *taps, short *buf, unsigned long frames,
 	struct es1869_cf cf;
 	int c, k;
 
+	// no phase taps and no linearity stage: the symmetric taps alone
+	memset(&cf, 0, sizeof(cf));
+	es1869_cf_identity(&cf);
 	for (c = 0; c < 2; c++)
 		for (k = 0; k <= ES_CF_HALF; k++)
 			cf.taps[c][k] = (s16)taps[c * (ES_CF_HALF + 1) + k];

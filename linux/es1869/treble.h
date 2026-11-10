@@ -8,7 +8,9 @@
  * and keeps ES_TREBLE_LAST_PPM of the one before. For the DAC at 1x, 2x and
  * 3x of the stream's rate, the taps each side of the centre, a stream frame
  * apart, in Q30, with a centre that makes their sum 1: the minimax fit of
- * the DAC's inverse from 0 Hz to half the stream's rate.
+ * the DAC's inverse from 0 Hz to half the stream's rate. And the phase taps,
+ * opposite each side of the centre, which take back the phase that the last
+ * sample's share turns, past the delay that the low end draws.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
@@ -21,18 +23,33 @@
 
 // the side taps for the DAC at 1x, 2x and 3x of the stream's rate
 static const s32 es1869_treble[3][ES_TREBLE_SIDES] = {
-	// 1x: within 0.051 dB, the gain 4.95 dB at most
-	{ -165090832, 45572389, -20880276, 11664560, -7854010, 5208208,
-	  -4183803, 2910227, -2670649, 1846132, -1926724, 1293394, -1571182,
-	  1126065, -1997744, 4043894 },
+	// 1x: within 0.056 dB, the gain 4.94 dB at most
+	{ -161924075, 43721467, -20221401, 11636717, -8197005, 5691221,
+	  -4796337, 3534125, -3351989, 2491795, -2602113, 1911740, -2209329,
+	  1699657, -2593802, 4617447 },
 	// 2x: within 0.015 dB, the gain 1.40 dB at most
-	{ -38358183, 9861001, -4487781, 2451851, -1664688, 1069324, -887057,
-	  584317, -569774, 359627, -413142, 238731, -330387, 175939, -332358,
-	  1048534 },
+	{ -38306819, 9829808, -4475611, 2449845, -1669300, 1076401, -896763,
+	  594245, -581048, 370271, -424654, 249258, -341687, 186220, -343443,
+	  1060185 },
 	// 3x: within 0.007 dB, the gain 0.64 dB at most
-	{ -16770453, 4235192, -1926478, 1048773, -715136, 455920, -381871,
-	  247955, -245934, 151452, -178719, 99097, -142478, 69449, -132095,
-	  472248 },
+	{ -16766045, 4232516, -1925439, 1048598, -715530, 456520, -382701,
+	  248799, -246899, 152358, -179705, 99995, -143450, 70332, -133057,
+	  473289 },
+};
+
+// and the phase taps, opposite each side, against the last sample's turn
+static const s32 es1869_treble_phase[3][ES_TREBLE_SIDES] = {
+	// 1x: within 0.32 degrees to 20 kHz at 44.1 kHz
+	{ -39958557, 44410054, -32982169, 24840818, -19371339, 15481213,
+	  -12560619, 10275770, -8433186, 6913953, -5641103, 4562478, -3641852,
+	  2860208, -2255922, 1829508 },
+	// 2x: within 0.05 degrees to 20 kHz at 44.1 kHz
+	{ -4422418, 4816953, -3522854, 2662601, -2083869, 1669760, -1357625,
+	  1112859, -915190, 752073, -615364, 499538, -400690, 316012, -245291,
+	  188267 },
+	// 3x: within 0.01 degrees to 20 kHz at 44.1 kHz
+	{ -1267893, 1369512, -992308, 747813, -584591, 468195, -380621, 312025,
+	  -256670, 211017, -172776, 140396, -112788, 89160, -69176, 52586 },
 };
 
 #endif /* ES1869_TREBLE_H */

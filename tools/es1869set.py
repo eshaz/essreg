@@ -63,7 +63,15 @@ EXTRA = {
                  "2x and 3x in Q30, as `tools/es1869treble.py` fits them; "
                  "treble.h's until others are loaded, for a DAC measured "
                  "apart. A playing stream takes them within milliseconds, between the "
-                 "filter's runs, with no break.\n",
+                 "filter's runs, with no break.\n"
+                 "* **Audio 2 Treble Correction Phase Taps** (`Audio 2 "
+                 "Treble Correction Phase Taps`): the same correction's "
+                 "phase taps, 16 at each of 1x, 2x and 3x in Q30: tap k "
+                 "adds that much of the frame k after and takes as much "
+                 "of the one k before, which takes back the turn of the "
+                 "phase that the DAC's last sample makes, 2 degrees at "
+                 "20 kHz at 1x. treble.h's until others are loaded, and "
+                 "taken the same way.\n",
     "a1c_filter": "* **Audio 1 Correction Taps** (`Audio 1 Correction "
                   "Capture Taps`): the correction filter's taps, 17 for "
                   "each channel, the left's first, each the centre then "

@@ -48,7 +48,15 @@
  * of the one before, which takes 4.2 dB from 20 kHz at 44.1 kHz and 5 dB from
  * half the rate, 1.4 dB at 2x and 0.65 at 3x. A table for each rate takes that
  * back by treble.h's taps, 16 a side a frame apart, which tools/es1869treble.py
- * fits to that model to 0.05 dB up to half the stream's rate at 1x. They go on
+ * fits to that model to 0.06 dB up to half the stream's rate at 1x. The kept
+ * sample also turns the phase, 8.4 degrees at 20 kHz at 1x past the delay its
+ * low end draws and 2.0 against the band's best line, which a symmetric filter
+ * can't take back, so each rate has 16 phase taps too, opposite each side,
+ * whose response is j times a sine series: tap k adds that much of the frame
+ * k after and takes as much of the one k before, which leaves 0.3 degrees to
+ * 20 kHz. With them the filter
+ * isn't symmetric, so its places past the middle are made as the first ones
+ * are, and not mirrored. They go on
  * the sinc before its window, so that the table's 68 taps hold all of them and
  * a frame costs what it did: folded into the windowed sinc they reach past it,
  * and what the table couldn't hold of 12 a side let the image of a 20 kHz tone
@@ -179,24 +187,28 @@ static s64 rs_sinc(const s64 *series, s64 s, int m, unsigned int i)
 // that makes their sum 1
 _Static_assert(ES_RS_FIT == ES_TREBLE_SIDES, "resample.h's ES_RS_FIT");
 
-static void rs_side(s32 *side, const s64 *series, const s32 *fit)
+static void rs_side(s32 *side, s32 *pside, const s64 *series, const s32 *fit,
+		    const s32 *phase)
 {
 	s64 centre = Q30;
 	int k;
 
 	for (k = 1; k <= ES_TREBLE_SIDES; k++) {
+		s64 win = kaiser(series, (s64)k * ES_RS_ROWS);
+
 		centre -= 2LL * fit[k - 1];
-		side[k] = div_s64(fit[k - 1] * Q30,
-				  kaiser(series, (s64)k * ES_RS_ROWS));
+		side[k] = div_s64(fit[k - 1] * Q30, win);
+		pside[k] = div_s64(phase[k - 1] * Q30, win);
 	}
 	side[0] = div_s64(centre * Q30, kaiser(series, 0));
+	pside[0] = 0;
 }
 
 // a tap of the filter with the DAC's response taken back: the correction's
 // taps on the sinc, then the window, so that none of it reaches past the
 // table. bare is the sinc from ES_TREBLE_SIDES frames before the first tap
 static s64 rs_flat(const s64 *series, const s32 *bare, const s32 *side,
-		   unsigned int n, unsigned int i)
+		   const s32 *pside, unsigned int n, unsigned int i)
 {
 	s64 d = ((s64)n - ES_RS_BEHIND) * ES_RS_ROWS - i, v;
 	const s32 *b = bare + ES_TREBLE_SIDES + n;
@@ -205,8 +217,10 @@ static s64 rs_flat(const s64 *series, const s32 *bare, const s32 *side,
 	if (d >= RS_SPAN || d <= -RS_SPAN)
 		return 0;
 	v = q30_mul(b[0], side[0]);
+	// b[k] weighs the stream a frame k before the place, b[-k] one after
 	for (k = 1; k <= ES_TREBLE_SIDES; k++)
-		v += q30_mul((s64)b[-k] + b[k], side[k]);
+		v += q30_mul((s64)b[-k] + b[k], side[k]) +
+		     q30_mul((s64)b[-k] - b[k], pside[k]);
 	return q30_mul(v, kaiser(series, d));
 }
 
@@ -216,9 +230,12 @@ static s64 rs_flat(const s64 *series, const s32 *bare, const s32 *side,
 // nearest the place takes what the rounding left of that. Apart from the
 // table's own frame, which holds it, since the two are too large together
 static noinline_for_stack void rs_row(s16 *row, unsigned int i,
-				      const s64 *series, const s32 *side)
+				      const s64 *series, const s32 *side,
+				      const s32 *pside)
 {
-	s64 s = q30_sin(div_s64(RS_PI_Q30 * i, ES_RS_ROWS));
+	// sin(pi i / rows), from the nearer end: q30_sin() holds to pi / 2
+	s64 s = q30_sin(
+		div_s64(RS_PI_Q30 * min(i, ES_RS_ROWS - i), ES_RS_ROWS));
 	unsigned int centre = side ? RS_CENTRE_FLAT : RS_CENTRE;
 	s32 bare[ES_RS_TAPS + 2 * ES_TREBLE_SIDES], taps[ES_RS_TAPS];
 	s64 sum = 0;
@@ -231,7 +248,7 @@ static noinline_for_stack void rs_row(s16 *row, unsigned int i,
 		int m = (int)n - ES_RS_BEHIND;
 		unsigned int bits = n / 4 == RS_WORD_CENTRE ? centre :
 				    rs_scale[n / 4] - (side ? 1U : 0U);
-		s64 v = side ? rs_flat(series, bare, side, n, i) :
+		s64 v = side ? rs_flat(series, bare, side, pside, n, i) :
 			       rs_sinc(series, s, m, i);
 
 		if (n == ES_RS_BEHIND || n == ES_RS_BEHIND + 1)
@@ -261,28 +278,42 @@ static s16 rs_up(s16 v)
 // is the DAC's rate over the stream's, for its correction, or 0
 void es1869_rs_table(s16 *tab, unsigned int flat)
 {
-	es1869_rs_table_fit(tab, flat, NULL);
+	es1869_rs_table_fit(tab, flat, NULL, NULL);
 }
 
-void es1869_rs_table_fit(s16 *tab, unsigned int flat, const s32 *fit)
+void es1869_rs_table_fit(s16 *tab, unsigned int flat, const s32 *fit,
+			 const s32 *phase)
 {
 	s16 end[ES_RS_TAPS];
 	s64 series[RS_TERMS];
-	s32 side[ES_TREBLE_SIDES + 1];
-	unsigned int i, n;
+	s32 side[ES_TREBLE_SIDES + 1], pside[ES_TREBLE_SIDES + 1];
+	unsigned int i, n, places = RS_PLACES;
 
 	kaiser_series(series);
-	if (flat)
-		rs_side(side, series, fit ? fit : es1869_treble[flat - 1]);
-	for (i = 0; i < RS_PLACES; i++)
-		rs_row(tab + i * ES_RS_STRIDE, i, series, flat ? side : NULL);
-	for (i = RS_PLACES; i < ES_RS_ROWS; i++)
+	if (flat) {
+		const s32 *p = phase ? phase : es1869_treble_phase[flat - 1];
+
+		rs_side(side, pside, series,
+			fit ? fit : es1869_treble[flat - 1], p);
+		// phase taps make the filter lopsided: every place its own
+		for (n = 0; n < ES_TREBLE_SIDES; n++)
+			if (p[n])
+				places = ES_RS_ROWS;
+	}
+	for (i = 0; i < places; i++)
+		rs_row(tab + i * ES_RS_STRIDE, i, series, flat ? side : NULL,
+		       pside);
+	for (i = places; i < ES_RS_ROWS; i++)
 		for (n = 0; n < ES_RS_TAPS; n++)
 			tab[i * ES_RS_STRIDE + n] =
 				tab[(ES_RS_ROWS - i) * ES_RS_STRIDE +
 				    ES_RS_TAPS - 1 - n];
-	for (n = 0; n < ES_RS_TAPS; n++)
-		end[n] = tab[ES_RS_TAPS - 1 - n];
+	// the place a whole frame on: the first one's mirror, or its own
+	if (places == ES_RS_ROWS)
+		rs_row(end, ES_RS_ROWS, series, side, pside);
+	else
+		for (n = 0; n < ES_RS_TAPS; n++)
+			end[n] = tab[ES_RS_TAPS - 1 - n];
 	for (n = 0; n < ES_RS_TAPS; n += 2) {
 		for (i = 0; i < ES_RS_ROWS; i++)
 			tab[i * ES_RS_STRIDE + n] =

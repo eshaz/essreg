@@ -309,6 +309,7 @@ struct loopview {
 	double before_ph[2][LV_CAL_AT]; // and its phase past the delay, degrees
 	long taps[2][LV_CF_HALF + 1];
 	long ptaps[2][LV_CF_HALF]; // the correction's phase taps
+	int cal_dac; // the DAC's turn is the calibration's to take out
 	double peak[2]; // the correction's most gain, dB
 };
 
@@ -2126,7 +2127,7 @@ static int lv_solve_n(double (*a)[LV_CF_HALF + 2], int n, double *x)
 // the top's value above it with little weight, and lifting by LV_CAL_MAX at
 // most. The phase is the response's past the line through it over the
 // delay's band, the DAC's own taken out first where the calibration played
-// it; under 2 kHz it fades out to 0 by 500 Hz, since 33 taps can't follow
+// it and the treble correction has no phase taps to take it back; under 2 kHz it fades out to 0 by 500 Hz, since 33 taps can't follow
 // the AC coupling's
 static int lv_design(struct loopview *v, int c)
 {
@@ -2134,7 +2135,8 @@ static int lv_design(struct loopview *v, int c)
 	double a[N][N + 1], b[P][N + 1], x[N], y[P];
 	double ref = cabs(v->h[c][lv_bin(v, 1000)]);
 	double top = cabs(v->h[c][lv_bin(v, LV_CAL_TOP)]) / ref, hz;
-	double dac = v->play ? 2.0 * v->rate : 0, slope = 0, sw = 0, swf = 0;
+	double dac = v->play && v->cal_dac ? 2.0 * v->rate : 0, slope = 0;
+	double sw = 0, swf = 0;
 	double swu = 0, swff = 0, swfu = 0, den, u = 0, prev = 0, turn;
 	unsigned int k, i, j, k0 = lv_bin(v, LV_FIT_LO),
 			      kh = lv_bin(v, LV_FIT_HI);
@@ -2227,8 +2229,17 @@ static int lv_design(struct loopview *v, int c)
 static int lv_calibrate(struct loopview *v)
 {
 	long all[2 * (LV_CF_HALF + 1)], ph[2 * LV_CF_HALF], on[2] = { 1, 1 };
+	long tr[3 * LV_CF_HALF];
 	int c, i;
 
+	// the DAC's turn: the treble correction's phase taps at 2x take it
+	// back, and without them the fit takes it out by the DAC's model
+	v->cal_dac = 1;
+	if (!ctl_read_all(v->ctl, "Audio 2 Treble Correction Phase Taps", tr,
+			  3 * LV_CF_HALF))
+		for (i = 0; i < LV_CF_HALF; i++)
+			if (tr[LV_CF_HALF + i])
+				v->cal_dac = 0;
 	lv_figures(v);
 	for (c = 0; c < 2; c++) {
 		for (i = 0; i < LV_CAL_AT; i++) {

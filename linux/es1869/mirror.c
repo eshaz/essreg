@@ -711,8 +711,8 @@ static s16 *rs_table_new(struct es1869 *chip, unsigned int flat)
 		dev_err(chip->dev, "no memory for the rate correction: off\n");
 		return NULL;
 	}
-	es1869_rs_table_fit(tab, flat,
-			    flat ? chip->mirror.fit[flat - 1] : NULL);
+	es1869_rs_table_fit(tab, flat, flat ? chip->mirror.fit[flat - 1] : NULL,
+			    flat ? chip->mirror.phase[flat - 1] : NULL);
 	return tab;
 }
 
@@ -1223,6 +1223,7 @@ int es1869_mirror_init(struct es1869 *chip)
 	INIT_WORK(&m->copy_work, mirror_copy_work);
 	INIT_WORK(&m->fit_work, mirror_fit_work);
 	memcpy(m->fit, es1869_treble, sizeof(m->fit));
+	memcpy(m->phase, es1869_treble_phase, sizeof(m->phase));
 	m->over = 1;
 	m->rs.over = 1;
 	m->lead_low = U32_MAX;
@@ -1262,12 +1263,13 @@ static void mirror_fit_work(struct work_struct *work)
 		container_of(work, struct es1869, mirror.fit_work);
 	struct es1869_mirror *m = &chip->mirror;
 	struct es1869_rs *rs = &m->rs;
-	s32 fit[ES_RS_OVER][ES_RS_FIT];
+	s32 fit[ES_RS_OVER][ES_RS_FIT], phase[ES_RS_OVER][ES_RS_FIT];
 	unsigned long flags;
 	int k;
 
 	mutex_lock(&chip->state_mutex);
 	memcpy(fit, m->fit, sizeof(fit));
+	memcpy(phase, m->phase, sizeof(phase));
 	for (k = 0; k < ES_RS_OVER; k++) {
 		struct snd_pcm_substream *ss;
 		s16 *old;
@@ -1278,7 +1280,7 @@ static void mirror_fit_work(struct work_struct *work)
 			m->spare[k] = rs_table_new(chip, k + 1);
 		if (!m->spare[k])
 			continue;
-		es1869_rs_table_fit(m->spare[k], k + 1, fit[k]);
+		es1869_rs_table_fit(m->spare[k], k + 1, fit[k], phase[k]);
 		ss = chip->a2_sub;
 		if (ss)
 			snd_pcm_stream_lock_irqsave(ss, flags);
@@ -1301,6 +1303,12 @@ static int fit_info(struct snd_kcontrol *kc, struct snd_ctl_elem_info *ui)
 	return 0;
 }
 
+// the side taps (private_value 0) or the phase taps (1) at a rate
+static s32 *fit_row(struct es1869 *chip, unsigned long phase, unsigned int k)
+{
+	return phase ? chip->mirror.phase[k] : chip->mirror.fit[k];
+}
+
 static int fit_get(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 {
 	struct es1869 *chip = snd_kcontrol_chip(kc);
@@ -1310,7 +1318,7 @@ static int fit_get(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 	for (k = 0; k < ES_RS_OVER; k++)
 		for (i = 0; i < ES_RS_FIT; i++)
 			uv->value.integer.value[k * ES_RS_FIT + i] =
-				chip->mirror.fit[k][i];
+				fit_row(chip, kc->private_value, k)[i];
 	mutex_unlock(&chip->state_mutex);
 	return 0;
 }
@@ -1329,9 +1337,10 @@ static int fit_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 	for (k = 0; k < ES_RS_OVER; k++)
 		for (i = 0; i < ES_RS_FIT; i++) {
 			s32 v = uv->value.integer.value[k * ES_RS_FIT + i];
+			s32 *at = &fit_row(chip, kc->private_value, k)[i];
 
-			changed |= chip->mirror.fit[k][i] != v;
-			chip->mirror.fit[k][i] = v;
+			changed |= *at != v;
+			*at = v;
 		}
 	mutex_unlock(&chip->state_mutex);
 	if (changed)
@@ -1341,16 +1350,31 @@ static int fit_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 
 // "Audio 2 Treble Correction Taps": a2_treble's correction of the DAC at 1x,
 // 2x and 3x, 16 side taps each in Q30 as tools/es1869treble.py makes them,
-// loaded in place of treble.h's, for a model fitted to a measured DAC
+// loaded in place of treble.h's, for a model fitted to a measured DAC; and
+// "Audio 2 Treble Correction Phase Taps", its phase taps the same way
 int es1869_treble_ctl_new(struct es1869 *chip)
 {
-	static const struct snd_kcontrol_new knew = {
-		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
-		.name = "Audio 2 Treble Correction Taps",
-		.info = fit_info,
-		.get = fit_get,
-		.put = fit_put,
+	static const struct snd_kcontrol_new knew[] = {
+		{
+			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+			.name = "Audio 2 Treble Correction Taps",
+			.info = fit_info,
+			.get = fit_get,
+			.put = fit_put,
+		},
+		{
+			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+			.name = "Audio 2 Treble Correction Phase Taps",
+			.info = fit_info,
+			.get = fit_get,
+			.put = fit_put,
+			.private_value = 1,
+		},
 	};
+	unsigned int i;
+	int err = 0;
 
-	return snd_ctl_add(chip->card, snd_ctl_new1(&knew, chip));
+	for (i = 0; !err && i < ARRAY_SIZE(knew); i++)
+		err = snd_ctl_add(chip->card, snd_ctl_new1(&knew[i], chip));
+	return err;
 }

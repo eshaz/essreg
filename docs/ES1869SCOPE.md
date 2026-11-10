@@ -347,10 +347,10 @@ What it measures and why:
   the DAC's images lie far above the ADC's band. So the loop's response is
   the record path's own: 69h, the switched-capacitor filter (whose corner
   ESS sets at 0.875 of half the rate, register A2h) and the ADC. The treble
-  correction takes back the DAC's magnitude only, not the phase of the 0.062
-  of the last sample that it keeps, some 3.5 degrees at 20 kHz at 2x, so the
-  calibration takes that phase out of the loop's response by the DAC's model
-  before it fits.
+  correction takes back the DAC's phase too, the turn of the 0.062 of the
+  last sample that it keeps, with its phase taps. With a driver that has
+  none, the calibration takes that turn out of the loop's response by the
+  DAC's model before it fits.
 * **The settings:** the record mixer takes Audio 2 alone at the calibrated
   levels, with the master off, as in the loop view. Before the measurement
   the correction filter goes off.

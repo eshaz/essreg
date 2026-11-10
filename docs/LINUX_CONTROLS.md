@@ -395,16 +395,23 @@ Parameters only:
   while Audio 1 records. Parameter `a2_oversample`.
 * **Audio 2 Treble Correction** (`Audio 2 Treble Correction Playback
   Switch`, F3): 0 to 1, default 0. Audio 2 through the filter with the DAC's
-  own response taken back, at 1x, 2x and 3x: within 0.05 dB up to half the
-  stream's rate, or up to the filter's edge at 20 kHz where it moves the
-  samples, with the DAC's stages off, for 5 dB less headroom at the top.
-  Parameter `a2_treble`.
+  own response, its magnitude and its phase, taken back, at 1x, 2x and 3x:
+  within 0.06 dB up to half the stream's rate, or up to the filter's edge at
+  20 kHz where it moves the samples, and 0.35 degrees to 20 kHz, with the
+  DAC's stages off, for 5 dB less headroom at the top. Parameter
+  `a2_treble`.
 * **Audio 2 Treble Correction Taps** (`Audio 2 Treble Correction Taps`): the
   DAC's correction that a2_treble folds into the rate filter, 16 side taps
   at each of 1x, 2x and 3x in Q30, as `tools/es1869treble.py` fits them;
   treble.h's until others are loaded, for a DAC measured apart. A playing
   stream takes them within milliseconds, between the filter's runs, with no
   break.
+* **Audio 2 Treble Correction Phase Taps**
+  (`Audio 2 Treble Correction Phase Taps`): the same correction's phase
+  taps, 16 at each of 1x, 2x and 3x in Q30: tap k adds that much of the
+  frame k after and takes as much of the one k before, which takes back the
+  turn of the phase that the DAC's last sample makes, 2 degrees at 20 kHz at
+  1x. treble.h's until others are loaded, and taken the same way.
 * **Audio 1 Correction** (`Audio 1 Correction Capture Switch`, F4): 0 to 1,
   default 0. Audio 1's 16-bit recordings through a filter of 33 taps a
   channel that takes back the record path's own response, its magnitude and

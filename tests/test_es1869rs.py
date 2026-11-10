@@ -841,23 +841,30 @@ def kaiser(t):
         np.i0(BETA)
 
 
-def flat_row(i, side):
+def flat_row(i, side, phase=None):
     """the filter with the DAC's correction at the place i, by numpy: the
     correction's taps on the sinc, over the window at their frames, then
-    the window"""
+    the window. A phase tap adds the sinc of the frame after the place and
+    takes the one before (resample.c)"""
     k = np.arange(1, len(side) + 1)
     t = np.arange(TAPS) - BEHIND - i / ROWS
     s = (1 - 2 * np.sum(side)) * np.sinc(t)
-    for kk, c in zip(k, side / kaiser(k.astype(float))):
-        s = s + c * (np.sinc(t - kk) + np.sinc(t + kk))
+    if phase is None:
+        phase = np.zeros(len(side))
+    win = kaiser(k.astype(float))
+    for kk, c, p in zip(k, side / win, phase / win):
+        s = s + c * (np.sinc(t - kk) + np.sinc(t + kk)) + \
+            p * (np.sinc(t - kk) - np.sinc(t + kk))
     return s * kaiser(t)
 
 
-def header_taps():
-    """treble.h's side taps for each rate, as fractions"""
+def header_taps(phase=False):
+    """treble.h's side taps for each rate, or its phase taps, as
+    fractions"""
     with open(os.path.join(DRV, "treble.h"), encoding="utf-8") as f:
         text = f.read()
     rows = re.findall(r"\{([-\d,\s]+)\}", text.split("= {", 1)[1])
+    rows = rows[3:6] if phase else rows[:3]
     return [np.array([int(v) for v in r.split(",")]) / 2.0 ** 30
             for r in rows]
 
@@ -965,23 +972,67 @@ class TrebleTest(unittest.TestCase):
         self.assertLess(fit[0][2], 5.0)
 
     def test_header_fits_the_model(self):
-        """treble.h's taps with the DAC as tools/es1869treble.py has it"""
+        """treble.h's taps with the DAC as tools/es1869treble.py has it:
+        the side and phase taps together within 0.06 dB of the DAC's inverse
+        at 1x, and the phase past the delay within 0.35 degrees to 20 kHz"""
         w = np.linspace(0, np.pi, 4097)
-        for over, side in zip((1, 2, 3), header_taps()):
-            db = 20 * np.log10(treble().response(side, w) *
-                               treble().dac(w, over))
+        top = w <= 2 * np.pi * 20000 / 44100
+        for over, side, phase in zip((1, 2, 3), header_taps(),
+                                     header_taps(True)):
+            c = treble().response(side, w) + \
+                treble().phase_response(phase, w)
+            db = 20 * np.log10(np.abs(c) * treble().dac(w, over))
             self.assertLess(np.abs(db).max(), (0.06, 0.02, 0.01)[over - 1])
+            left = np.degrees(np.angle(c) + treble().past_delay(w, over))
+            self.assertLess(np.abs(left[top]).max(),
+                            (0.35, 0.06, 0.02)[over - 1])
 
     def test_rows_are_the_windowed_correction(self):
         """every coefficient within what the rounding and the sum's fix
         leave, against numpy's"""
-        for flat, side in zip((1, 2, 3), header_taps()):
+        for flat, side, phase in zip((1, 2, 3), header_taps(),
+                                     header_taps(True)):
             rows = self.rows(flat)
             for i in range(0, ROWS, 3):
-                err = np.abs(row_taps(rows, i, flat) - flat_row(i, side))
+                err = np.abs(row_taps(rows, i, flat) -
+                             flat_row(i, side, phase))
                 self.assertLess(np.max(np.delete(err, [BEHIND, BEHIND + 1])),
                                 5e-5, (flat, i))
                 self.assertLess(np.max(err), 1.1e-4, (flat, i))
+
+    def test_takes_back_the_dacs_phase(self):
+        """the table's own response times the DAC's, the 0.062 of the last
+        sample it keeps with its turn: against the band's best line, within
+        0.35 degrees to 20 kHz at 1x and 0.06 at 2x, where a table with no
+        phase taps leaves 2.0 and 0.37"""
+        lib = library()
+        lib.es1869_rs_table_fit.argtypes = [
+            ctypes.POINTER(ctypes.c_int16), ctypes.c_uint,
+            ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32)]
+        lib.es1869_rs_table_fit.restype = None
+        hz = np.arange(100, 20001, 100.0)
+        w = 2 * np.pi * hz / 44100
+        m = np.arange(TAPS) - BEHIND
+        for flat, side, tol, bare in ((1, header_taps()[0], 0.35, 1.8),
+                                      (2, header_taps()[1], 0.06, 0.3)):
+            sides = (ctypes.c_int32 * 16)(*[int(round(v * 2 ** 30))
+                                            for v in side])
+            zero = (ctypes.c_int32 * 16)()
+            for phase, want in ((None, tol), (zero, None)):
+                tab = (ctypes.c_int16 * TABLE)()
+                lib.es1869_rs_table_fit(tab, flat, sides, phase)
+                rows = np.array(tab, dtype=np.int64).reshape(ROWS, STRIDE)
+                v = row_taps(rows, 0, flat)
+                h = np.exp(1j * np.outer(w, m)) @ v
+                x = w / flat
+                dac = np.sinc(x / (2 * np.pi)) * (1 + 0.062 * np.exp(-1j * x))
+                ph = np.unwrap(np.angle(h * dac))
+                line = np.polyfit(w, ph, 1)
+                left = np.degrees(np.abs(ph - np.polyval(line, w)))
+                if want is None:
+                    self.assertGreater(left.max(), bare, flat)
+                else:
+                    self.assertLess(left.max(), want, flat)
 
     def test_gain_is_one(self):
         for flat in (1, 2, 3):

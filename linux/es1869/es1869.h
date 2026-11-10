@@ -104,9 +104,10 @@ struct es1869_mirror {
 	snd_pcm_uframes_t silent_to; // the absolute frame it has reached
 	struct es1869_rs rs;
 	// the DAC's correction at each rate that a2_treble's tables take:
-	// treble.h's fit until "Audio 2 Treble Correction Taps" loads others,
-	// which a stream takes at its prepare
+	// treble.h's fit until "Audio 2 Treble Correction Taps" and "Phase
+	// Taps" load others
 	s32 fit[ES_RS_OVER][ES_RS_FIT];
+	s32 phase[ES_RS_OVER][ES_RS_FIT]; // and its phase taps
 	// a load of them made into spare tables and swapped in between runs,
 	// so that a playing stream takes them with no break
 	s16 *spare[ES_RS_OVER];

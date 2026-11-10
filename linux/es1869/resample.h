@@ -93,10 +93,11 @@ struct es1869_rs_stream {
 };
 
 void es1869_rs_table(s16 *tab, unsigned int flat);
-// the same with the correction's side taps (Q30, ES_RS_FIT of them) given,
-// or treble.h's for NULL
+// the same with the correction's side taps and phase taps (Q30, ES_RS_FIT
+// of each) given, or treble.h's for NULL
 #define ES_RS_FIT 16
-void es1869_rs_table_fit(s16 *tab, unsigned int flat, const s32 *fit);
+void es1869_rs_table_fit(s16 *tab, unsigned int flat, const s32 *fit,
+			 const s32 *phase);
 void es1869_rs_split(s16 *l, s16 *r, const void *src, u32 frames, bool stereo);
 void es1869_rs_shift(struct es1869_rs *rs, struct es1869_rs_job *j, u32 n,
 		     bool stereo);

@@ -922,10 +922,11 @@ saved state wins over a parameter. The defaults are the Kconfig options
   stream takes it at once, restarting as at a pause. 3x can't run while
   Audio 1 records.
 * `a2_treble` ("Audio 2 Treble Correction Playback Switch"): 0 to 1,
-  default 0. Audio 2 through the filter with the DAC's own response taken
-  back, at 1x, 2x and 3x: within 0.05 dB up to half the stream's rate, or up
-  to the filter's edge at 20 kHz where it moves the samples, with the DAC's
-  stages off, for 5 dB less headroom at the top.
+  default 0. Audio 2 through the filter with the DAC's own response, its
+  magnitude and its phase, taken back, at 1x, 2x and 3x: within 0.06 dB up
+  to half the stream's rate, or up to the filter's edge at 20 kHz where it
+  moves the samples, and 0.35 degrees to 20 kHz, with the DAC's stages off,
+  for 5 dB less headroom at the top.
 * `a1c_filter` ("Audio 1 Correction Capture Switch"): 0 to 1, default 0.
   Audio 1's 16-bit recordings through a filter of 33 taps a channel that
   takes back the record path's own response, its magnitude and its phase,

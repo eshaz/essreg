@@ -26,10 +26,22 @@ response is flat, and the hold's still falls, so the error shrinks only as
 about 1 / SIDES. The taps cost nothing a frame, since they fold into the
 filter's own.
 
+The last sample's share turns the phase too: (1 + LAST e^-jx) lags the
+line it starts on less and less up the band, so past the delay that the
+low end draws the DAC leads by 8.4 degrees at 20 kHz at 1x and 1.3 at 2x,
+or 2.0 and 0.37 against the band's best line.
+A symmetric filter's response is real and can't take that back, so each
+rate has SIDES phase taps beside the side taps, opposite each side of the
+centre, whose response is j times a sine series: by least squares, the
+sines that bring the phase of the correction times the DAC to 0 up to 0.95
+of half the stream's rate, given the side taps' gain. They leave 0.3
+degrees up to 20 kHz at 1x and 0.05 at 2x.
+
 To follow a new measurement of the DAC, change LAST and run the tool. A
-running driver takes a fit without a rebuild through its control "Audio 2
-Treble Correction Taps", 16 side taps at 1x, 2x and 3x in turn, which the
-next stream takes at its prepare; alsactl store keeps them over a boot.
+running driver takes a fit without a rebuild through its controls "Audio 2
+Treble Correction Taps" and "Audio 2 Treble Correction Phase Taps", 16
+taps at 1x, 2x and 3x in turn each, which a playing stream takes within
+milliseconds; alsactl store keeps them over a boot.
 """
 
 import argparse
@@ -58,7 +70,9 @@ HEADER = """\
  * and keeps ES_TREBLE_LAST_PPM of the one before. For the DAC at 1x, 2x and
  * 3x of the stream's rate, the taps each side of the centre, a stream frame
  * apart, in Q30, with a centre that makes their sum 1: the minimax fit of
- * the DAC's inverse from 0 Hz to half the stream's rate.
+ * the DAC's inverse from 0 Hz to half the stream's rate. And the phase taps,
+ * opposite each side of the centre, which take back the phase that the last
+ * sample's share turns, past the delay that the low end draws.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
@@ -83,13 +97,46 @@ def response(side, w):
     return 1 + (2 * np.cos(np.outer(w, k)) - 2) @ side
 
 
-def fit(over, last=LAST, sides=None):
+def past_delay(w, over, last=LAST):
+    """the DAC's phase at w past the delay that its low end draws: the last
+    sample's share, (1 + last e^-jx), less the line it starts on"""
+    x = w / over
+    return np.angle(1 + last * np.exp(-1j * x)) + x * last / (1 + last)
+
+
+def phase_response(phase, w):
+    """the phase taps' response at w, j times their sine series: tap k
+    adds that much of the frame k after and takes as much of the one k
+    before (resample.c)"""
+    phase = np.asarray(phase, dtype=float)
+    k = np.arange(1, len(phase) + 1)
+    return 1j * (2 * np.sin(np.outer(w, k)) @ phase)
+
+
+def phase_fit(over, side, last=LAST):
+    """the phase taps that bring the phase of the correction times the DAC
+    to 0 up to 0.95 of half the stream's rate, by least squares, given the
+    side taps' gain: S + jP = |C| e^-j(past_delay), so P = -S tan(...)"""
+    w = np.linspace(0, np.pi, POINTS + 1)[1:]
+    w = w[w <= 0.95 * np.pi]
+    want = -response(side, w) * np.tan(past_delay(w, over, last))
+    basis = 2 * np.sin(np.outer(w, np.arange(1, SIDES + 1)))
+    phase, *_ = np.linalg.lstsq(basis, want, rcond=None)
+    return phase
+
+
+def fit(over, last=LAST, sides=None, phase=None):
     """the side taps by Remez's exchange, and the worst error of the gain
     with the DAC, relative. The basis 2 cos kw - 2 keeps the gain 1 at 0 Hz,
-    where the error is none, so the grid starts past it"""
+    where the error is none, so the grid starts past it. Given phase taps,
+    the side taps' target is what they leave of the inverse's magnitude,
+    since |S + jP| is more than S"""
     sides = sides or SIDES
     w = np.linspace(0, np.pi, POINTS + 1)[1:]
     h = dac(w, over, last)
+    if phase is not None:
+        p = np.imag(phase_response(phase, w))
+        h = 1 / np.sqrt(np.maximum(1 / h ** 2 - p ** 2, 1e-12))
     f = 1 / h - 1
     basis = 2 * np.cos(np.outer(w, np.arange(1, sides + 1))) - 2
     ref = np.round((1 - np.cos(np.linspace(0, np.pi, sides + 1))) / 2 *
@@ -118,17 +165,30 @@ def fit(over, last=LAST, sides=None):
 
 
 def taps(last=LAST):
-    """each rate's side taps in Q30, the worst error in dB and the peak gain
-    of the correction in dB, with where it lies, in radians"""
+    """each rate's side taps and phase taps in Q30, the worst error in dB
+    and the peak gain of the correction in dB, with where it lies, in
+    radians, and the worst phase left to 20 kHz at 44.1 kHz, degrees"""
     out = []
     w = np.linspace(0, np.pi, POINTS + 1)
     for over in OVERS:
+        # the side taps, the phase taps for their gain, and the side taps
+        # again for what the phase taps add to the magnitude, twice over
         side, _ = fit(over, last)
+        for _ in range(2):
+            phase = phase_fit(over, side, last)
+            side, _ = fit(over, last, phase=phase)
         q = [int(round(v * Q30)) for v in side]
-        db = 20 * np.log10(response(np.array(q) / Q30, w) * dac(w, over, last))
-        gain = 20 * np.log10(response(np.array(q) / Q30, w))
+        pq = [int(round(v * Q30)) for v in
+              phase_fit(over, np.array(q) / Q30, last)]
+        c = response(np.array(q) / Q30, w) + \
+            phase_response(np.array(pq) / Q30, w)
+        db = 20 * np.log10(np.abs(c) * dac(w, over, last))
+        gain = 20 * np.log10(np.abs(c))
+        left = np.degrees(np.angle(c) + past_delay(w, over, last))
+        top = w <= 2 * np.pi * 20000 / 44100
         out.append((q, float(np.abs(db).max()), float(gain.max()),
-                    float(w[np.argmax(gain)])))
+                    float(w[np.argmax(gain)]), pq,
+                    float(np.abs(left[top]).max())))
     return out
 
 
@@ -138,23 +198,35 @@ def header(last=LAST):
                  "last sample\n" % round(last * 1e6))
     lines.append("#define ES_TREBLE_SIDES %d // the taps each side of the "
                  "centre\n\n" % SIDES)
-    lines.append("// the side taps for the DAC at 1x, 2x and 3x of the "
-                 "stream's rate\n")
-    lines.append("static const s32 es1869_treble[%d][ES_TREBLE_SIDES] = {\n"
-                 % len(OVERS))
-    for over, (q, err, gain, at) in zip(OVERS, taps(last)):
-        lines.append("\t// %dx: within %.3f dB, the gain %.2f dB at most\n"
-                     % (over, err, gain))
-        row = ", ".join(str(v) for v in q)
-        text = "\t{ "
-        for v in row.split(", "):
-            piece = v + ", "
-            if len(text.expandtabs(8)) + len(piece.rstrip()) > 79:
-                lines.append(text.rstrip() + "\n")
-                text = "\t  "
-            text += piece
-        lines.append(text.rstrip(", ") + " },\n")
-    lines.append("};\n\n#endif /* ES1869_TREBLE_H */\n")
+    fits = taps(last)
+
+    def rows(name, what, pick):
+        lines.append(what)
+        lines.append("static const s32 %s[%d][ES_TREBLE_SIDES] = {\n"
+                     % (name, len(OVERS)))
+        for over, fit in zip(OVERS, fits):
+            q, note = pick(fit)
+            lines.append("\t// %dx: %s\n" % (over, note))
+            text = "\t{ "
+            for v in [str(v) for v in q]:
+                piece = v + ", "
+                if len(text.expandtabs(8)) + len(piece.rstrip()) > 79:
+                    lines.append(text.rstrip() + "\n")
+                    text = "\t  "
+                text += piece
+            lines.append(text.rstrip(", ") + " },\n")
+        lines.append("};\n")
+
+    rows("es1869_treble", "// the side taps for the DAC at 1x, 2x and 3x of "
+         "the stream's rate\n",
+         lambda f: (f[0], "within %.3f dB, the gain %.2f dB at most" %
+                    (f[1], f[2])))
+    lines.append("\n")
+    rows("es1869_treble_phase", "// and the phase taps, opposite each side, "
+         "against the last sample's turn\n",
+         lambda f: (f[4], "within %.2f degrees to 20 kHz at 44.1 kHz" %
+                    f[5]))
+    lines.append("\n#endif /* ES1869_TREBLE_H */\n")
     return "".join(lines)
 
 
@@ -169,16 +241,20 @@ def main():
                    help="with --last, the amixer command that loads it")
     a = p.parse_args()
     if a.last is not None and a.amixer:
-        fit = [v for q, _, _, _ in taps(a.last) for v in q]
+        fits = taps(a.last)
         print("amixer -c ES1869 cset name='Audio 2 Treble Correction Taps' "
-              + ",".join(str(v) for v in fit))
+              + ",".join(str(v) for f in fits for v in f[0]))
+        print("amixer -c ES1869 cset name='Audio 2 Treble Correction Phase "
+              "Taps' " + ",".join(str(v) for f in fits for v in f[4]))
         return 0
     if a.last is not None:
         w = np.linspace(0, np.pi, 9)
-        for over, (q, err, gain, at) in zip(OVERS, taps(a.last)):
+        for over, (q, err, gain, at, pq, left) in zip(OVERS, taps(a.last)):
             print("%dx: within %.3f dB, the gain %.2f dB at most, at %.3f of "
-                  "the rate" % (over, err, gain, at / (2 * np.pi)))
+                  "the rate, within %.2f degrees to 20 kHz" %
+                  (over, err, gain, at / (2 * np.pi), left))
             print("  taps " + ", ".join(str(v) for v in q))
+            print("  phase taps " + ", ".join(str(v) for v in pq))
             print("  dB   " + " ".join(
                 "%.3f" % v for v in 20 * np.log10(dac(w, over, a.last))))
         return 0
