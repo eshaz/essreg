@@ -36,6 +36,7 @@
  * turn of the phase from the
  * tables, by band and by envelope between bins an octave apart. The turn
  * adds the Hilbert transform: Re((y + jh) e^(jt)) = y - t h for a small t.
+ * The gain scales the signal about its DC, not the DC.
  *
  * The Hilbert FIR is short, so below some 2 kHz it falls short of the true
  * transform (0.61 at 1 kHz, 0.14 at 200 Hz). The bands' edges and the
@@ -149,7 +150,7 @@ static s32 cl_lerp(const s16 *t, u32 pos)
 static s64 cl_frame(struct es1869_cf *cf, u32 c, s64 acc, const s16 *x)
 {
 	const struct es1869_cl *cl = &cf->cl;
-	s64 h = es1869_cl_hilbert(x), re = acc >> 10, im = h >> 10;
+	s64 h = es1869_cl_hilbert(x), re = acc >> 10, im = h >> 10, ac;
 	u32 band, pos, at;
 	s32 u, g, t;
 
@@ -167,12 +168,15 @@ static s64 cl_frame(struct es1869_cf *cf, u32 c, s64 acc, const s16 *x)
 	// the curve, about the side's centre
 	u = (s32)((acc + ES_CF_ONE / 2) >> 14) - cl->centre[c];
 	acc += (s64)cl_curve(cl->curve[c], u) * (ES_CF_ONE / ES_CL_ONE);
-	// the turn, then the gain, so that the one doesn't scale the other
+	// the turn, then the gain, so that the one doesn't scale the other,
+	// the gain about the DC, which it would move by as much as the ADC's
+	// offset times it
 	at = band * ES_CL_ENV;
 	g = cl_lerp(cl->gain[c] + at, pos);
 	t = cl_lerp(cl->turn[c] + at, pos);
 	acc -= (t * h) >> 14;
-	return acc + ((acc * (g - ES_CF_ONE)) >> 14);
+	ac = acc - (cf->cl_dc[c] >> ES_CL_DC) * (ES_CF_ONE / 16);
+	return acc + ((ac * (g - ES_CF_ONE)) >> 14);
 }
 
 void es1869_cf_identity(struct es1869_cf *cf)

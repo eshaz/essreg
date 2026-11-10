@@ -304,7 +304,8 @@ def reference_cl(x, taps, cl):
         g = lerp(cl["gain"][b * ENV:(b + 1) * ENV], pos)
         t = lerp(cl["turn"][b * ENV:(b + 1) * ENV], pos)
         acc -= (t * h) >> 14
-        acc = acc + ((acc * (g - ONE)) >> 14)
+        ac = acc - (dc >> 15) * (ONE // 16)
+        acc = acc + ((ac * (g - ONE)) >> 14)
         out[i] = min(max((acc + ONE // 2) >> 14, -32768), 32767)
     return out
 
