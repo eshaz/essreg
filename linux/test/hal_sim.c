@@ -302,6 +302,9 @@ static long sim_rs_ppb(long mode, long item, const struct et_stream *a2,
 	long ppb = sim_setting("a2_trim_ppb") + sim_rs_trim(item);
 
 	*on = mode != 0 || sim_setting("a2_treble");
+	// the trim is the rate correction's: Off keeps the stream's rate
+	if (!mode && !(sim.faults & SIM_TRIM_OFF))
+		ppb = 0;
 	if (mode == 2) {
 		ppb -= SIM_MASTER_PPB;
 		if (a2->fmt.rate % 8000 == 0)

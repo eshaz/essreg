@@ -132,6 +132,9 @@ on Audio 2 and records the monitor at once:
 * `mon.trim` plays noise through the rate correction at +1000 ppm, and
   `mon.over.2` at 30 ppm with the ring at 2x, where the monitor records at
   88200 Hz. Every frame has to be what the same filter's C code makes here.
+* `mon.off.trim` plays noise with the ring at 2x and the rate correction
+  Off, with +1000 ppm of trim left set: Off leaves the trim out, so every
+  frame has to be the filter's at the stream's own rate.
 * `mon.clock` plays noise in the Clock mode on the dig path, where PCM
   device 1 records what the DMA took through the chip itself, and the
   monitor and PCM device 1 have to agree frame for frame.

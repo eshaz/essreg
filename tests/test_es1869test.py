@@ -62,6 +62,7 @@ FAULTS = {
     0x200000000: "mon.exact",      # the monitor reads the ring a lap late
     0x400000000: "mon.trim",       # the monitor reads the application's
     0x800000000: "a1rec.correct",  # the correction filter does nothing
+    0x1000000000: "mon.off.trim",  # the trim moves the rate with it Off
 }
 
 # the cases that run only when named, or with someone at the machine

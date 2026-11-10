@@ -820,8 +820,12 @@ static void rs_apply(struct es1869 *chip, struct snd_pcm_runtime *rt)
 		rt->format == SNDRV_PCM_FORMAT_S16_LE;
 	chip->a2_zstep[0] = zstep ? es1869_val(ES_S_a2_zstep_l) : 0;
 	chip->a2_zstep[1] = zstep ? es1869_val(ES_S_a2_zstep_r) : 0;
-	rs->trim = es1869_clock_q32(es1869_trim_ppb(es1869_val(ES_S_a2_trim)) +
-				    es1869_val(ES_S_a2_trim_ppb));
+	// the trim is the rate correction's: Off keeps the stream's rate also
+	// where the treble correction or the output rate runs the filter
+	rs->trim = mode ? es1869_clock_q32(
+				  es1869_trim_ppb(es1869_val(ES_S_a2_trim)) +
+				  es1869_val(ES_S_a2_trim_ppb)) :
+			  0;
 	rs->clock = mode == 2;
 	if (clk != chip->clk_a2) {
 		chip->clk_a2 = clk;

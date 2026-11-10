@@ -378,6 +378,8 @@ const struct et_case et_cases[] = {
 	     "a pause of Audio 2 is one xrun, the frames in order on both sides of it")
 	CASE("mon.loop", N, c_mon, 6,
 	     "beside Audio 1 recording the analog loop: both whole, on one clock")
+	CASE("mon.off.trim", N, c_mon, 7,
+	     "the ring at 2x, the rate correction Off with +1000 ppm of trim set: the stream's own rate, every frame the C code's")
 
 	CASE("both.a1play", R | N, c_both_restart, 0,
 	     "Audio 2 plays on while Audio 1 starts and stops eight times")

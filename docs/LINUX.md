@@ -215,7 +215,9 @@ sharp, unless the Clock mode below corrects it.
 The chip has one clock input and no trim, so that a stream's rate can only
 be changed in its samples. `a2_resample`, the control Audio 2 Rate
 Correction, puts Audio 2's stream through a filter on its way to the ring:
-* `0`, Off, leaves the samples as the application wrote them.
+* `0`, Off, leaves the samples as the application wrote them, and the trim
+  out: where the treble correction or the output rate runs the filter, the
+  stream keeps its rate whatever `a2_trim` and `a2_trim_ppb` hold.
 * `1`, Trim, moves the rate by `a2_trim`, the control Audio 2 Rate Trim, a
   list from -500 to +500 ppm that alsamixer steps through, plus
   `a2_trim_ppb` for a value in between. At 0 the samples stay exact.

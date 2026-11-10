@@ -57,6 +57,7 @@ static const struct mon_case {
 	{ ET_S16, 2, 44100, MON_CLOCK, 0, 1, 1, 0, 0 },
 	{ ET_S16, 2, 44100, MON_OFF, 0, 1, 0, 1, 0 },
 	{ ET_S16, 2, 44100, MON_OFF, 0, 1, 0, 0, 1 },
+	{ ET_S16, 2, 44100, MON_OFF, 1000000, 2, 0, 0, 0 },
 };
 
 // LFSR words in every bit for an exact copy; through the filter, the FM's
@@ -342,7 +343,9 @@ enum et_result c_mon(struct et_ctx *c, const struct et_case *k)
 		ref = dig_ref;
 		rf = (struct et_fmt){ ET_S16, 2, mf.rate };
 	} else if (t->mode || t->over > 1) {
-		ref = sim_rs_over(d, n, f.channels, t->ppb, t->over, 0, &made);
+		// Off leaves a trim out, also with the ring at 2x
+		ref = sim_rs_over(d, n, f.channels, t->mode ? t->ppb : 0,
+				  t->over, 0, &made);
 		rf = (struct et_fmt){ ET_S16, f.channels, mf.rate };
 	}
 
