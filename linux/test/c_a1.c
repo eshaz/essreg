@@ -323,6 +323,79 @@ enum et_result c_a1rec_settle0(struct et_ctx *c, const struct et_case *k)
 	return ET_PASS;
 }
 
+// the tone's share of what a recording holds, in dB: 0 for the tone alone,
+// some 30 dB less for a 16-bit stream a byte off, which is noise
+static double tone_share(const double *x, long n, double rate)
+{
+	double total = an_rms(x, n, 1);
+
+	return total > 0 ? 20 * log10(an_tone(x, n, rate, ET_HZ, NULL) /
+				      M_SQRT2 / total) :
+			   -200;
+}
+
+// a1rec.restart: a recording begun again on its open stream, dropped,
+// prepared and started, as a program does that stops a recording and starts
+// it without closing it: the tone after the restart as in step as before
+// it. With its channel unmasked before the start, the first byte of the
+// start's first DMA request was at risk, and the second run of es1869scope
+// -C came back a byte off now and then (2026-11-10)
+enum et_result c_a1rec_restart(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt pf = { ET_S16, 2, 44100 };
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	unsigned long pn = 2 * 44100, cn = 44100;
+	long at = (long)(0.4 * f.rate), len = f.rate / 5;
+	double worst = 0;
+	int i;
+
+	(void)k;
+	et_mix_quiet(c);
+	et_mix_dig(c, 0);
+	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
+	if (et_mix_rec_a2(c, 13) < 0)
+		return ET_ERROR;
+	for (i = 0; i < 8; i++) {
+		struct et_stream s[2];
+		double *x, before, after;
+
+		s[0] = et_play(ET_A2, &pf,
+			       et_tone(&pf, pn, ET_HZ, ET_HZ_R, AMP), pn, 0);
+		s[1] = et_rec(ET_A1C, &f, cn, 0.3);
+		s[1].flags |= ET_RESTART;
+		s[1].pause_at = 0.4;
+		s[1].pause_for = 0.05;
+		if (et_run(c, s, 2)) {
+			free(s[0].data);
+			free(s[1].data);
+			return ET_ERROR;
+		}
+		if ((long)s[1].done < at + f.rate / 20 + len) {
+			free(s[0].data);
+			free(s[1].data);
+			et_fail(c, "the recording ended at its restart");
+			return ET_FAIL;
+		}
+		x = et_chan(&f, s[1].data, s[1].done, 0);
+		// before the restart, and after it once its FIFO has passed
+		before = tone_share(x + at - len, len, f.rate);
+		after = tone_share(x + at + f.rate / 20, len, f.rate);
+		if (fabs(after - before) > fabs(worst)) {
+			worst = after - before;
+			et_note(c,
+				"run %d: the tone's share %.1f dB before the restart, %.1f after",
+				i, before, after);
+			et_dump(c, "a1c", &f, s[1].data, s[1].done);
+		}
+		free(x);
+		free(s[0].data);
+		free(s[1].data);
+	}
+	et_measure(c, "the tone's share after a restart, less before", worst,
+		   "dB", -1, 1);
+	return ET_PASS;
+}
+
 // --- a1play ------------------------------------------------------------------
 
 static enum et_result a1play_run(struct et_ctx *c, const struct et_fmt *f,

@@ -52,6 +52,7 @@ struct et_fmt {
 #define ET_POLLED 0x20 // as JACK: poll, and the mapped buffer
 #define ET_PAUSEDRAIN 0x40 // paused when all is written, then drained
 #define ET_HOLD 0x80 // the simulated DAC holds each sample, as the chip's does
+#define ET_RESTART 0x100 // the pause is a restart: dropped, prepared, started
 
 // a reading of a stream's position: when, on the clock NTP steers and on the
 // raw one, the frame then playing

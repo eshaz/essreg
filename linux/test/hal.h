@@ -151,6 +151,7 @@ int et_klog_fault(const char *msg);
 #define SIM_TRIM_OFF 0x1000000000ULL // the trim moves the rate with it Off
 #define SIM_A1C_DUAL 0x2000000000ULL // the dual stream through the correction
 #define SIM_A1C_WHOLE 0x4000000000ULL // the correction's work a period at once
+#define SIM_A1_RESTART_OFF 0x8000000000ULL // a recording begun again a byte off
 #define SIM_MIXER 0x80000000u // the record level's scale moves with the source,
 			      // the ADC's list holds its own value, and the
 			      // PC speaker doesn't hear the master

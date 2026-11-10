@@ -511,6 +511,11 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 				      r->fmt.rate * (1 + REC2_PPM * 1e-6) :
 				      r->fmt.rate;
 		double t = r->start + 0.001 + i / rate, v[2] = { 0, 0 };
+
+		// a recording begun again takes up the line after its gap
+		if ((r->flags & ET_RESTART) && r->pause_at > 0 &&
+		    i / rate >= r->pause_at)
+			t += r->pause_for;
 		double hz, len;
 		int ch, side[2] = { 0, 0 };
 
@@ -710,6 +715,18 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 		unsigned long nb = r->frames * et_fmt_bytes(&r->fmt);
 
 		memmove(r->data, (char *)r->data + 1, nb - 1);
+	}
+	// and a recording begun again on its open stream, from there on
+	if ((sim.faults & SIM_A1_RESTART_OFF) && r->role == ET_A1C &&
+	    (r->flags & ET_RESTART) && r->pause_at > 0) {
+		unsigned long b = et_fmt_bytes(&r->fmt);
+		unsigned long at =
+			(unsigned long)(r->pause_at * r->fmt.rate) * b;
+		unsigned long nb = r->frames * b;
+
+		if (at + 1 < nb)
+			memmove((char *)r->data + at, (char *)r->data + at + 1,
+				nb - at - 1);
 	}
 	// the driver's correction filter over what the DMA wrote, as a1filter.c
 	// runs it: Audio 1's own recordings at 16 bits

@@ -339,6 +339,18 @@ static void stream_body(struct alsa *a, struct et_stream *s, snd_pcm_t *pcm)
 			pause_frame = ~0UL;
 			sleep_until(mono() + s->pause_for);
 			end += s->pause_for;
+		} else if (s->done >= pause_frame && (s->flags & ET_RESTART)) {
+			// the same open stream again, as a program that stops
+			// and starts a recording without closing it
+			pause_frame = ~0UL;
+			snd_pcm_drop(pcm);
+			sleep_until(mono() + s->pause_for);
+			s->err = snd_pcm_prepare(pcm);
+			if (s->err >= 0)
+				s->err = snd_pcm_start(pcm);
+			if (s->err < 0)
+				return;
+			end += s->pause_for;
 		} else if (s->done >= pause_frame) {
 			pause_frame = ~0UL;
 			s->err = snd_pcm_pause(pcm, 1);

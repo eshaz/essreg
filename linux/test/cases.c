@@ -59,6 +59,7 @@ FN(c_a1rec_dc)
 FN(c_a1rec_rate)
 FN(c_a1rec_start)
 FN(c_a1rec_settle0)
+FN(c_a1rec_restart)
 FN(c_a1play_fmt)
 FN(c_a1play_rate)
 FN(c_a1play_start)
@@ -276,6 +277,8 @@ const struct et_case et_cases[] = {
 	CASE("a1rec.settle0", ET_ROOT | N, c_a1rec_settle0, 0,
 	     "a1c_settle_ms=0, ESS's start: the input's offset at the start")
 
+	CASE("a1rec.restart", 0, c_a1rec_restart, 0,
+	     "a recording dropped, prepared and started again on its open stream: in step after it")
 	CASE("a1play.fmt.s16", Q | R, c_a1play_fmt, 0,
 	     "Audio 1 plays through the cable: 16-bit stereo")
 	CASE("a1play.fmt.s16m", R, c_a1play_fmt, 1, "the same, 16-bit mono")

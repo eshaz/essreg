@@ -303,6 +303,8 @@ bool es1869_a1_busy(struct es1869 *chip)
 	return chip->a1_owner != ES_OWN_NONE;
 }
 
+static u64 a1_settle_ns(struct snd_pcm_runtime *runtime);
+
 static enum hrtimer_restart a1_settle_fn(struct hrtimer *t)
 {
 	struct es1869 *chip = container_of(t, struct es1869, a1_settle);
@@ -310,13 +312,20 @@ static enum hrtimer_restart a1_settle_fn(struct hrtimer *t)
 
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	if (chip->a1_state == ES_A1_SETTLING_REC) {
-		// the ADC's input settled: the recording's start
+		struct snd_pcm_substream *ss = chip->a1_sub;
+		u64 ns;
+
+		// the ADC's input settled: the recording's start, its channel
+		// unmasked after a settle of its own, as below
 		if (es1869_val(ES_S_irq_trace))
 			dev_info(chip->dev, "Audio 1's input settled\n");
-		chip->io.dma_mask(chip, chip->dma1, false);
 		if (es1869_a1_go(&chip->hw, true))
 			dev_err(chip->dev, "the DSP refused a recording's start\n");
-		chip->a1_state = ES_A1_RUNNING;
+		chip->a1_state = ES_A1_SETTLING;
+		ns = ss ? a1_settle_ns(ss->runtime) : 32 * NSEC_PER_USEC;
+		spin_unlock_irqrestore(&chip->reg_lock, flags);
+		hrtimer_forward_now(t, ns_to_ktime(ns));
+		return HRTIMER_RESTART;
 	} else if (chip->a1_state == ES_A1_SETTLING) {
 		if (es1869_val(ES_S_irq_trace))
 			dev_info(chip->dev, "Audio 1 settled\n");
@@ -597,10 +606,14 @@ static int a1_trigger(struct snd_pcm_substream *substream, int cmd)
 				      HRTIMER_MODE_REL_HARD);
 			break;
 		}
+		// a recording starts with its channel masked over the start's
+		// first DMA request, as playback does: begun again on an open
+		// stream, with the codec left on the ADC and the FIFO filling,
+		// it came back a byte off now and then
 		if (capture) {
-			chip->io.dma_mask(chip, chip->dma1, false);
 			err = es1869_a1_go(&chip->hw, true);
-			chip->a1_state = ES_A1_RUNNING;
+			if (!err)
+				es1869_a1_start_settle(chip, runtime);
 			break;
 		}
 		err = es1869_a1_go(&chip->hw, false);
