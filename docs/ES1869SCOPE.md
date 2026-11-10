@@ -395,7 +395,7 @@ after alsasound and before MPD, so that MPD finds Audio 2 free. It writes
 leaves the filter as it was and says so. Its run through the new taps, with
 the filter on, found no loop at the Armada's boot on 2026-11-10 and twice
 before, and passed every time by hand, cause not yet known: the service then
-tries once more, keeping the failed run's figures in `cal-failed.txt`, and
+tries once more, keeping the first try's figures in `cal-failed.txt`, and
 the message gives the levels of what was played and what came back, so a
 failure says whether Audio 1 heard nothing or something else.
 
