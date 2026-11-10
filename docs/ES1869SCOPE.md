@@ -693,6 +693,17 @@ ms), long enough to stall the DAC at 3x. A 1 kHz tone came back at 986.6 Hz
 with sidebands every 23.4 Hz, where 1x and 2x gave it clean. es1869test's
 `rs.treble` checks 3x on the chip's own paths.
 
+The phase, measured the same way on 2026-11-09 with the treble correction's
+phase taps: each run over the 2x run with its phase taps, which divides out
+the output chain, with a line taken off for the runs' different delays. At
+1x the DAC followed its model, the hold and the 0.062 of the last sample,
+within 0.4 degrees and 0.07 dB to 20 kHz. Its phase bent 4.3 and 4.5 degrees
+at 20 kHz, left and right, off the line that coherence fits from 1 to 18
+kHz. The correction left 0.4 and 0.2 degrees there and 0.5 at most below,
+and with its phase taps zeroed it left the DAC's 4.3 and 4.5. The phase
+taps' own turn, the run with them over the run without, matched their design
+within 0.15 degrees to 21 kHz.
+
 ## On the Armada
 
 With the USB WiFi stick in, 12 % of the chip's interrupts come 1 to 3 ms

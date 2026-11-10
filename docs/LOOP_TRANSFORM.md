@@ -353,15 +353,18 @@ sample that the DAC keeps turns its phase as well as its magnitude: against
 the line that the loop's delay draws through 200 Hz to 3 kHz, 8.4 degrees at
 20 kHz at 1x and 1.3 at 2x (2.0 and 0.37 against the band's best line). So
 `C` has phase taps beside its side taps, which leave 0.3 and 0.05 degrees.
-`R` turns the phase further: its AC coupling 15 degrees at 20 Hz, and its
-anti-alias filter bends the phase off a straight line by 1.1 and 3.7 degrees
-at 20 kHz on the Armada, left and right. `F` takes back both its magnitude
-and its phase, with phase taps of its own, from the curvature of the loop's
-response, its phase past a line through 1 to 18 kHz, and leaves 0.2 and 0.6
-degrees. A line through 200 Hz to 3 kHz, the loop's delay, reads 13 and 16
-degrees at 20 kHz instead, nearly all of it the AC coupling's turn under the
-line, which tilts it: a delay, and nothing that a correction should take
-back.
+Through the VX the DAC followed this within 0.4 degrees to 20 kHz, and the
+phase taps turned as designed within 0.15
+([ES1869SCOPE.md](ES1869SCOPE.md#the-dac-and-the-adc-apart)). `R` turns the
+phase further: its AC coupling 15 degrees at 20 Hz, and its anti-alias
+filter bends the phase by 1.1 and 3.7 degrees at 20 kHz on the Armada, left
+and right, off the line that coherence fits from 1 to 18 kHz. `F` takes back
+both its magnitude and its phase, with phase taps of its own, from the
+curvature of the loop's response, its phase past that line, and leaves 0.2
+and 0.6 degrees. A line through 200 Hz to 3 kHz, the loop's delay, reads 13
+and 16 degrees at 20 kHz instead, nearly all of it the AC coupling's turn
+under the line, which tilts it: a delay, and nothing that a correction
+should take back.
 
 ## The differential logic
 
