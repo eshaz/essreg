@@ -153,11 +153,12 @@ static void klog_check(struct et_ctx *c)
 }
 
 // what every case starts from: the samples as written, at the chip's own
-// pitch and the stream's own rate, whatever the machine keeps them at (the
-// Armada keeps the Clock mode and 3x); the rate filter's cases set them
-// themselves
+// pitch and the stream's own rate, and Audio 1's recordings as the ADC gave
+// them, whatever the machine keeps them at (the Armada keeps the Clock mode,
+// 3x and Audio 1's correction); the cases of the filters set them themselves
 static const char *const plain_params[] = { "a2_resample", "a2_oversample",
-					    "a2_treble" };
+					    "a2_treble",   "a2_zstep",
+					    "a1c_filter",  "a1c_linear" };
 
 static enum et_result run_case(struct et_ctx *c, const struct et_case *k)
 {

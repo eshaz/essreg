@@ -610,12 +610,15 @@ enum et_result c_mix_adc(struct et_ctx *c, const struct et_case *k)
 // the filter off, then with it on and known taps: a lift of the top on the
 // left and a plain -1 dB on the right. Each tone changes by the taps' own
 // response at its frequency
+#define A1C_PHASE "Audio 1 Correction Capture Phase Taps"
+
 enum et_result c_a1rec_correct(struct et_ctx *c, const struct et_case *k)
 {
 	static const struct et_fmt f = { ET_S16, 2, 44100 };
 	static const double hz[4] = { 1000, 5000, 10000, 15000 };
 	static const long lift[3] = { 20480, -2458, 410 }; // 1.25, -0.15, 0.025
 	long taps[2 * (SIM_CF_HALF + 1)];
+	struct et_ctl_info pinfo;
 	unsigned long pn = 3 * 44100, rn = 2 * 44100, i;
 	double lv[2][2][4];
 	int run, ch, j;
@@ -625,6 +628,13 @@ enum et_result c_a1rec_correct(struct et_ctx *c, const struct et_case *k)
 	for (j = 0; j < 3; j++)
 		taps[j] = lift[j];
 	taps[SIM_CF_HALF + 1] = 14602; // -1 dB
+	// the phase taps a calibration loaded would turn the tones too
+	if (!c->hal->ctl_info(c->hal->ctx, A1C_PHASE, 0, &pinfo)) {
+		long none[2 * SIM_CF_HALF] = { 0 };
+
+		if (et_ctl_set_n(c, A1C_PHASE, 0, none, 2 * SIM_CF_HALF) < 0)
+			return ET_ERROR;
+	}
 	et_mix_quiet(c);
 	et_mix_dig(c, 0);
 	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
