@@ -379,11 +379,15 @@ What it does then:
 With `-s` it writes the verification's picture, and the report gives the
 taps and the phase taps, each channel's largest gain, and the response
 before and after at 1, 5, 10, 15, 18 and 20 kHz, in dB and in degrees of
-curvature. From two files (`-x`, `-i`) it fits and shows the taps without
-loading them. Through paths whose phase bends 3.7 and 3.3 degrees off the
-line between 2 and 18 kHz, as an anti-alias filter does, the phase taps
-leave 0.4 and 0.25 degrees, where the symmetric taps alone leave the paths'
-own.
+curvature, the latter each the mean by coherence over 1 % of the frequency
+either side, since a bin alone near 20 kHz moves by a degree from run to
+run. From two files (`-x`, `-i`) it fits and shows the taps without loading
+them. Through paths whose phase bends 3.7 and 3.3 degrees off the line
+between 2 and 18 kHz, as an anti-alias filter does, the phase taps leave 0.4
+and 0.25 degrees, where the symmetric taps alone leave the paths' own. On
+the Armada on 2026-11-09 the record path bent 1.1 and 3.7 degrees off its
+line at 20 kHz, left and right, and the correction left 0.2 and 0.6 degrees
+at most at those points, with the magnitude within 0.05 dB to 20 kHz.
 
 `linux/config/es1869cal.initd` is the OpenRC service that runs it at boot,
 after alsasound and before MPD, so that MPD finds Audio 2 free. It writes

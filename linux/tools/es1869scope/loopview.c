@@ -2173,11 +2173,14 @@ static void lv_curve_phase(const struct loopview *v, int c, double dac,
 		ph[k] = lv_wrap(ph[k] - a - b * k * hz);
 }
 
-// channel c's curvature at the calibration's points, degrees
+// channel c's curvature at the calibration's points, degrees, each the mean
+// by coherence over 1 % of its frequency either side: a bin alone near
+// 20 kHz moves by a degree from run to run
 static void lv_curve_at(const struct loopview *v, int c, double *out)
 {
 	double *ph = malloc(v->bins * sizeof(*ph));
 	double dac = v->play && v->cal_dac ? 2.0 * v->rate : 0;
+	unsigned int k;
 	int i;
 
 	for (i = 0; i < LV_CAL_AT; i++)
@@ -2185,8 +2188,19 @@ static void lv_curve_at(const struct loopview *v, int c, double *out)
 	if (!ph)
 		return;
 	lv_curve_phase(v, c, dac, ph);
-	for (i = 0; i < LV_CAL_AT; i++)
-		out[i] = ph[lv_bin(v, lv_cal_at[i])] * 180 / M_PI;
+	for (i = 0; i < LV_CAL_AT; i++) {
+		double s = 0, sw = 0;
+
+		for (k = lv_bin(v, lv_cal_at[i] * 0.99);
+		     k <= lv_bin(v, lv_cal_at[i] * 1.01); k++) {
+			double co = v->coh[c][k], w = co / fmax(1 - co, 1e-6);
+
+			s += w * ph[k];
+			sw += w;
+		}
+		if (sw > 0)
+			out[i] = s / sw * 180 / M_PI;
+	}
 	free(ph);
 }
 
