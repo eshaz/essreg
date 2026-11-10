@@ -370,7 +370,7 @@ enum et_result c_a1rec_restart(struct et_ctx *c, const struct et_case *k)
 			free(s[1].data);
 			return ET_ERROR;
 		}
-		if ((long)s[1].done < at + f.rate / 20 + len) {
+		if ((long)s[1].done < at + (long)f.rate / 20 + len) {
 			free(s[0].data);
 			free(s[1].data);
 			et_fail(c, "the recording ended at its restart");
@@ -379,7 +379,7 @@ enum et_result c_a1rec_restart(struct et_ctx *c, const struct et_case *k)
 		x = et_chan(&f, s[1].data, s[1].done, 0);
 		// before the restart, and after it once its FIFO has passed
 		before = tone_share(x + at - len, len, f.rate);
-		after = tone_share(x + at + f.rate / 20, len, f.rate);
+		after = tone_share(x + at + (long)f.rate / 20, len, f.rate);
 		if (fabs(after - before) > fabs(worst)) {
 			worst = after - before;
 			et_note(c,
