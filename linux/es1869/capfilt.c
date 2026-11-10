@@ -200,6 +200,10 @@ void es1869_cf_run(struct es1869_cf *cf, s16 *buf, u32 n, u32 channels)
 {
 	const u32 keep = ES_CF_TAPS - 1;
 
+	// a row of taps and history for each of two channels, and no more
+	if (channels > 2)
+		return;
+
 	while (n) {
 		u32 k = n < ES_CF_CHUNK ? n : ES_CF_CHUNK, i, c, m;
 

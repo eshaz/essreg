@@ -56,8 +56,10 @@ static void a1c_work_fn(struct work_struct *work)
 
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	ss = chip->a1_sub;
-	if (!ss || !chip->a1c_on || (chip->a1_state != ES_A1_RUNNING &&
-				     chip->a1_state != ES_A1_SETTLING)) {
+	if (!ss || !chip->a1c_on || chip->a1_owner != ES_OWN_A1C ||
+	    ss->runtime->channels > 2 ||
+	    (chip->a1_state != ES_A1_RUNNING &&
+	     chip->a1_state != ES_A1_SETTLING)) {
 		spin_unlock_irqrestore(&chip->reg_lock, flags);
 		return;
 	}
@@ -97,10 +99,13 @@ static void a1c_work_fn(struct work_struct *work)
 	snd_pcm_period_elapsed(ss);
 }
 
-// the period of a recording through the filter, from the interrupt
+// the period of a recording through the filter, from the interrupt. Only
+// Audio 1's own recording: the dual device takes Audio 1 through a prepare
+// of its own, and its four channels in the filter's two rows wrote past
+// them, over the chip's state (the Armada froze, 2026-11-09)
 void es1869_a1c_period(struct es1869 *chip, struct snd_pcm_substream *ss)
 {
-	if (chip->a1c_on)
+	if (chip->a1c_on && chip->a1_owner == ES_OWN_A1C)
 		queue_work(system_highpri_wq, &chip->a1c_work);
 	else
 		snd_pcm_period_elapsed(ss);

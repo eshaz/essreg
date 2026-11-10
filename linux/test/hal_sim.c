@@ -48,6 +48,7 @@ struct sim {
 	long adc_own; // SIM_MIXER: what the ADC's list holds by itself
 	int r70; // the last rate Audio 2 played at
 	long cf_taps[2 * (SIM_CF_HALF + 1)]; // Audio 1's correction's taps
+	int a1c_ran; // SIM_A1C_DUAL: a recording went through it since load
 };
 
 static struct sim sim;
@@ -664,12 +665,22 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 				 ctl_gain("PCM Playback Volume", 1, 0) *
 					 (a1_on ? at(a1, a1t, a1->fmt.rate, 0) : 0));
 
-			// dual: channel 1 on Audio 1, channel 3 on Audio 2
-			if (dual)
-				l += m * (ctl_gain("PCM Playback Volume", 1, 0) *
-						  at(dual, t, dual->fmt.rate, 0) +
-					  ctl_gain("PCM Playback Volume", 0, 0) *
-						  at(dual, t, dual->fmt.rate, 2));
+			// dual: channel 1 on Audio 1, channel 3 on Audio 2;
+			// SIM_A1C_DUAL: Audio 1's correction runs over it with
+			// rows it hasn't for channels 3 and 4
+			if (dual) {
+				double g3 = (sim.faults & SIM_A1C_DUAL) &&
+							    sim.a1c_ran ?
+						    0.5 :
+						    1;
+
+				l += m *
+				     (ctl_gain("PCM Playback Volume", 1, 0) *
+					      at(dual, t, dual->fmt.rate, 0) +
+				      ctl_gain("PCM Playback Volume", 0, 0) *
+					      g3 *
+					      at(dual, t, dual->fmt.rate, 2));
+			}
 
 			// the PC speaker, which the master doesn't reach
 			if (cmd && strstr(cmd->cmd, "--tone") && t > cmd->start &&
@@ -704,8 +715,10 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 	if (r->role == ET_A1C && r->fmt.format == ET_S16 &&
 	    r->fmt.channels <= 2 &&
 	    ctl("Audio 1 Correction Capture Switch", 0, 0) &&
-	    !(sim.faults & SIM_CF_OFF))
+	    !(sim.faults & SIM_CF_OFF)) {
 		sim_cf_run(sim.cf_taps, r->data, r->frames, r->fmt.channels);
+		sim.a1c_ran = 1;
+	}
 }
 
 // Audio 2's playback in a run, or NULL

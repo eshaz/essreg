@@ -74,7 +74,10 @@ struct es1869_cf {
 void es1869_cf_reset(struct es1869_cf *cf);
 /* taps that change nothing but the delay, the phase taps none */
 void es1869_cf_identity(struct es1869_cf *cf);
-/* n frames of 1 or 2 channels, filtered in place; mono takes the left's taps */
+/*
+ * n frames of 1 or 2 channels, filtered in place; mono takes the left's taps,
+ * and more channels are left as they are
+ */
 void es1869_cf_run(struct es1869_cf *cf, s16 *buf, u32 n, u32 channels);
 
 /* linearity tables that change nothing */

@@ -432,6 +432,8 @@ static int a1_hw_free(struct snd_pcm_substream *substream)
 	// the codec back on the DAC
 	es1869_a1_stop(&chip->hw, a1_capture(chip), chip->dma1, false);
 	chip->adc_on = false;
+	// the correction belongs to this recording, its work stopped by now
+	chip->a1c_on = false;
 	if (chip->a1_owner == ES_OWN_FMC)
 		es1869_mix_update(&chip->hw, 0x7F, 0x11,
 				  es1869_val(ES_S_video_switch) ? 0x01 : 0);

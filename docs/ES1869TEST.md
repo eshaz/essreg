@@ -281,6 +281,11 @@ against the stream, the filter's C code and the dig path.
   after a pause's release, against the tone's peak, six times.
 * `dual`: the four-channel device's channels on their DACs and one clock,
   and when each DAC began, from the phase of its own tone, at three rates.
+  `dual.a1c` plays the device's tones before and after a recording through
+  Audio 1's correction filter, and each has to come back within 0.1 dB. A
+  driver that left the filter on took the dual stream through it, four
+  channels in its two rows, and wrote over its own state; the Armada froze
+  two cases later on 2026-11-09.
 * `mon`: the monitor, PCM device 3
   ([LINUX_MONITOR.md](LINUX_MONITOR.md#tests)). A pattern played on Audio 2
   comes back exactly, in 16-bit stereo and in 8-bit mono, with timestamps at

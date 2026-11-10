@@ -121,6 +121,37 @@ enum et_result c_dual_map(struct et_ctx *c, const struct et_case *k)
 	return ET_PASS;
 }
 
+// dual.a1c: after a recording through Audio 1's correction filter, the
+// dual device's tones as before it. The filter belongs to Audio 1's own
+// recordings: one left on took the dual stream in place, its four channels
+// in two rows, and wrote past them over the driver's state
+enum et_result c_dual_a1c(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f2 = { ET_S16, 2, 44100 };
+	struct an_fit b1, b3, a1, a3;
+	struct et_stream s;
+
+	(void)k;
+	f4.rate = 44100;
+	if (dual_tones(c, &b1, &b3, 0))
+		return ET_ERROR;
+	if (et_ctl_set(c, "Audio 1 Correction Capture Switch", 0, 1, 1) < 0)
+		return ET_ERROR;
+	s = et_rec(ET_A1C, &f2, 44100, 0);
+	if (et_run(c, &s, 1)) {
+		free(s.data);
+		return ET_ERROR;
+	}
+	free(s.data);
+	if (dual_tones(c, &a1, &a3, 0))
+		return ET_ERROR;
+	et_measure(c, "channel 1 against before the recording",
+		   20 * log10(a1.amp / b1.amp), "dB", -0.1, 0.1);
+	et_measure(c, "channel 3 against before the recording",
+		   20 * log10(a3.amp / b3.amp), "dB", -0.1, 0.1);
+	return ET_PASS;
+}
+
 // channel 3's tone against channel 1's start, from their phases, in seconds:
 // a sine from frame 0 has the phase 2 pi f (t - start) at t, so the starts
 // differ by what the phases leave after their own frequencies, within half

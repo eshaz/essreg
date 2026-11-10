@@ -77,6 +77,7 @@ FN(c_mix_adc)
 FN(c_dual_map)
 FN(c_mon)
 FN(c_dual_align)
+FN(c_dual_a1c)
 FN(c_both_restart)
 FN(c_rate_max)
 FN(c_latency_min)
@@ -363,6 +364,8 @@ const struct et_case et_cases[] = {
 	     "the same at 22050 Hz")
 	CASE("dual.align.48000", R | ET_ROOT | N, c_dual_align, 2,
 	     "the same at 48000 Hz")
+	CASE("dual.a1c", R | ET_ROOT | N, c_dual_a1c, 0,
+	     "after a recording through Audio 1's correction, the dual device's tones as before it")
 
 	CASE("mon.exact", Q | N, c_mon, 0,
 	     "PCM 3 returns Audio 2's 16-bit stereo pattern exactly, from its first frame")
