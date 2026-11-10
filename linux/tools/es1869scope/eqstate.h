@@ -18,7 +18,7 @@
 #define EQS_PATH EQS_DIR "/eq.state"
 #define EQS_CMD EQS_DIR "/eq.cmd"
 #define EQS_MAGIC 0x31534545 /* "EES1" */
-#define EQS_VERSION 1
+#define EQS_VERSION 2
 #define EQS_WHY 160
 #define EQS_POINTS 128 /* the response's points, log-spaced */
 #define EQS_BANDS 24
@@ -29,6 +29,8 @@
 #define EQS_SIDES 16 /* the DAC correction's taps each side, at a factor */
 #define EQS_A1TAPS 34 /* Audio 1's correction: 17 a side */
 #define EQS_IR 65 /* the impulse response's taps, 32 each side of 0 */
+#define EQS_LVALS 33 /* Audio 1's linearity curve's knots, -512 to +512 */
+#define EQS_LPER 40 /* its gains and turns: 4 bands by 10 envelope bins */
 
 /* the engine's state, as eqs_state.state */
 enum {
@@ -98,6 +100,21 @@ struct eqs_state {
 	/* the blocks, the newest at hist_next - 1 */
 	uint32_t hist_next, hist_count;
 	struct eqs_block hist[EQS_HIST];
+	/*
+	 * Audio 1's linearity (a1lin.h): whether this start of Audio 1 took
+	 * the stage, the refits, the frames a side behind the last, the
+	 * curve's centre; what the path adds at each knot and what the stage
+	 * in use left, LSB; the tables in use; and by band and envelope bin
+	 * the gain (dB) and phase (degrees) that the stage left, with the
+	 * frames behind each
+	 */
+	uint32_t lin_on, lin_fits;
+	float lin_frames;
+	int32_t lin_centre[2];
+	float lin_path[2][EQS_LVALS], lin_left[2][EQS_LVALS];
+	int32_t lin_curve[2][EQS_LVALS];
+	int32_t lin_gain[2][EQS_LPER], lin_turn[2][EQS_LPER];
+	float lin_db[2][EQS_LPER], lin_deg[2][EQS_LPER], lin_n[2][EQS_LPER];
 };
 
 /*

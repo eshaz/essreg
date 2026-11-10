@@ -59,6 +59,7 @@ def dp(a):
 # eqstate.h's layout, the engine's state that a viewer reads
 EQS_POINTS, EQS_BANDS, EQS_ROWS, EQS_BINS = 128, 24, 64, 128
 EQS_HIST, EQS_ZBINS, EQS_A1TAPS, EQS_WHY = 64, 33, 34, 160
+EQS_LVALS, EQS_LPER, EQS_VERSION = 33, 40, 2
 F32, U32, I32 = ctypes.c_float, ctypes.c_uint32, ctypes.c_int32
 
 
@@ -94,7 +95,17 @@ class EqsState(ctypes.Structure):
                 ("a1taps", I32 * EQS_A1TAPS),
                 ("zhist", (U32 * EQS_ZBINS) * 2),
                 ("hist_next", U32), ("hist_count", U32),
-                ("hist", EqsBlock * EQS_HIST)]
+                ("hist", EqsBlock * EQS_HIST),
+                ("lin_on", U32), ("lin_fits", U32), ("lin_frames", F32),
+                ("lin_centre", I32 * 2),
+                ("lin_path", (F32 * EQS_LVALS) * 2),
+                ("lin_left", (F32 * EQS_LVALS) * 2),
+                ("lin_curve", (I32 * EQS_LVALS) * 2),
+                ("lin_gain", (I32 * EQS_LPER) * 2),
+                ("lin_turn", (I32 * EQS_LPER) * 2),
+                ("lin_db", (F32 * EQS_LPER) * 2),
+                ("lin_deg", (F32 * EQS_LPER) * 2),
+                ("lin_n", (F32 * EQS_LPER) * 2)]
 
 
 class Lib:
@@ -573,7 +584,7 @@ class StateTest(unittest.TestCase):
     def test_the_layout_is_the_same_here_and_on_the_armada(self):
         """the engine's size, which a 32-bit build gives too"""
         path, s, _fd = self.create("layout.state")
-        self.assertEqual(ctypes.sizeof(EqsState), 31956)
+        self.assertEqual(ctypes.sizeof(EqsState), 34368)
         self.assertEqual(s.contents.size, ctypes.sizeof(EqsState))
         self.assertEqual(s.contents.magic, 0x31534545)
         self.assertEqual(s.contents.pid, os.getpid())
@@ -897,8 +908,10 @@ class ShotTest(unittest.TestCase):
                ("es1869scope.c", "tie.c", "draw.c", "fb.c", "plot.c",
                 "fft.c", "spectro.c", "loop.c", "loopview.c", "eq.c",
                 "zstep.c", "say.c", "eqstate.c", "ctl.c", "chain.c",
+                "a1lin.c", os.path.join("..", "..", "es1869", "capfilt.c"),
                 os.path.join("..", "..", "test", "settab.c"))]
         subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall",
+                               "-I" + os.path.join(ROOT, "linux", "es1869"),
                                "-Wextra", "-Werror", "-o", cls.prog] + src +
                               ["-lasound", "-lz", "-lm", "-lpthread"])
 
@@ -1105,7 +1118,8 @@ class ShotTest(unittest.TestCase):
         """an engine's state as a viewer finds it: measuring a 44.1 kHz
         stream at 2x, six blocks in, with a tone in both spectrograms"""
         s = EqsState()
-        s.magic, s.version, s.size = 0x31534545, 1, ctypes.sizeof(s)
+        s.magic, s.version, s.size = (0x31534545, EQS_VERSION,
+                                      ctypes.sizeof(s))
         s.state, s.watched = 2, 1
         s.stream_rate, s.factor, s.a1_rate = 44100, 2, 44100
         s.treble, s.mode, s.a1c = 1, 2, 1
@@ -1140,6 +1154,21 @@ class ShotTest(unittest.TestCase):
             b.corr20k = 0.05 * i
             for k in range(EQS_BANDS):
                 b.dev[k] = 0.1
+        # Audio 1's linearity, refitted twice: a soft dead zone about a
+        # centre 15 LSB under the DC, and what the stage leaves of it
+        s.lin_on, s.lin_fits, s.lin_frames = 1, 2, 4e5
+        knots = [-512, -384, -256, -192, -128, -96, -64, -48, -32, -24,
+                 -16, -12, -8, -6, -4, -2, 0]
+        knots += [-k for k in knots[-2::-1]]
+        for c in range(2):
+            s.lin_centre[c] = -175
+            for i, u in enumerate(knots):
+                s.lin_path[c][i] = -4 * np.tanh((u + 15) / 50.0)
+                s.lin_left[c][i] = 0.05 * np.sin(i)
+                s.lin_curve[c][i] = int(1024 * np.tanh((u + 15) / 50.0))
+            for i in range(EQS_LPER):
+                s.lin_gain[c][i], s.lin_n[c][i] = 16384, 1e4
+                s.lin_db[c][i] = -0.3 / (1 + i % 10)
         with open(path, "wb") as fh:
             fh.write(bytes(s))
 
@@ -1149,7 +1178,7 @@ class ShotTest(unittest.TestCase):
         state = os.path.join(self.tmp, "viewer.state")
         self.state(state)
         runs = [("-v", str(v)) for v in range(1, 6)]
-        runs += [("-v", "5", "-S", str(k)) for k in range(10)]
+        runs += [("-v", "5", "-S", str(k)) for k in range(11)]
         for args in runs:
             ppm = os.path.join(self.tmp, "viewer.ppm")
             r = subprocess.run([self.prog, "-A", state, "-s", ppm] +
@@ -1163,6 +1192,70 @@ class ShotTest(unittest.TestCase):
                         ("-v", "5", "-S", "1"), ("-v", "5", "-S", "3"),
                         ("-v", "5", "-S", "4")):
                 self.assertIn(self.PAIR[0], seen, args)
+
+    def test_e_over_files_finds_audio1s_curve(self):
+        """-E over files, a monitor at 2x and a recording, as the gap
+        study took them: a loop with the DAC's gap, an AC coupling and the
+        record path's soft dead zone about a centre 15 LSB under the DC.
+        The path's curve comes out at the knots within 0.35 LSB, the
+        centre on the DC, and what the stage leaves falls with each pass"""
+        rng = np.random.default_rng(21)
+        ra, f, secs = 44100, 2, 16
+        n = ra * secs * f
+        fr = np.fft.rfftfreq(n, 1.0 / (ra * f))
+        shape = 1 / np.sqrt(np.maximum(fr, 50.0)) * (fr < 20000)
+
+        def music():
+            w = np.fft.irfft(np.fft.rfft(rng.standard_normal(n)) * shape, n)
+            return w / np.sqrt(np.mean(w * w))
+        a = music()
+        codes = np.round(np.column_stack([a, 0.6 * a + 0.8 * music()]) *
+                         1100)
+        d = codes + 8.0 * (codes >= 0)
+        h = -0.81 * (1j * fr / (1j * fr + 4.0)) / (1 + (fr / 30000) ** 4)
+        h *= np.exp(-2j * np.pi * fr * 3.4 / ra)
+        y = np.column_stack([np.fft.irfft(np.fft.rfft(d[:, c]) * h, n)
+                             for c in (0, 1)])[::f]
+        dc, cen = -175.0, -190.0
+        v = y + dc
+        r = v - 4 * np.tanh((v - cen) / 50) + rng.normal(0, 2, v.shape)
+        pre = int(1.3 * ra)
+        rec = np.concatenate([dc + rng.normal(0, 2, (pre, 2)), r])
+        mon_wav = os.path.join(self.tmp, "replay-mon.wav")
+        rec_wav = os.path.join(self.tmp, "replay-a1.wav")
+        self.wav(mon_wav, codes / 32768, rate=ra * f)
+        self.wav(rec_wav, np.round(rec) / 32768, rate=ra)
+        log = os.path.join(self.tmp, "replay.log")
+        r = subprocess.run([self.prog, "-l", os.devnull, "-E", "-x",
+                            mon_wav, "-i", rec_wav, "-O", log, "-s",
+                            os.path.join(self.tmp, "replay.ppm")],
+                           capture_output=True, text=True)
+        if r.returncode == 2 and "no console font" in r.stderr:
+            self.skipTest("no console font on this machine")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(log) as fh:
+            lines = [ln for ln in fh if " lin " in ln]
+        self.assertEqual(len(lines), 3, lines)
+        lefts = []
+        for ln in lines:
+            for side in "LR":
+                m = re.search(side + r" centre (-?\d+) path (.*?) left "
+                              r"([\d.]+)", ln)
+                self.assertTrue(m, ln)
+                # the centre from the first segments' DC, which the
+                # music's lowest notes move by a few LSB
+                centre = int(m.group(1))
+                self.assertLessEqual(abs(centre - dc), 8, ln)
+                for at, got in re.findall(r"(-?\d+):([-+][\d.]+)",
+                                          m.group(2)):
+                    want = -4 * np.tanh((centre + int(at) - cen) / 50)
+                    self.assertAlmostEqual(float(got), want, delta=0.35,
+                                           msg=(side, at, ln))
+                lefts.append(float(m.group(3)))
+        # what the stage leaves, each side, pass by pass
+        self.assertLess(lefts[4], lefts[0])
+        self.assertLess(lefts[5], lefts[1])
+        self.assertLess(max(lefts[4:]), 1.2)
 
     def test_the_viewer_refuses_what_isnt_a_state(self):
         bad = os.path.join(self.tmp, "bad.state")
@@ -1259,6 +1352,239 @@ class ShotTest(unittest.TestCase):
             self.skipTest("no console font on this machine")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn(self.SAY, self.colours(ppm))
+
+
+class A1LinTest(unittest.TestCase):
+    """a1lin.c: Audio 1's record path against what should have come back,
+    and the driver's linearity stage (capfilt.c) loaded from it, in a closed
+    loop on a simulated path: a soft dead zone about a centre under the
+    recording's DC, and the phase of quiet signals turned back"""
+
+    RATE = 44100
+    KNOTS, VALS, ENV, BANDS = 17, 33, 10, 4
+    PER = ENV * BANDS
+    ONE = 16384
+    DC, CENTRE = -175.0, -190.0
+    D, K = 4.0, 50.0  # the dead zone's depth and knee, LSB
+    Q, A0 = 0.35, 8.0  # the turn back: Q / A radians, A no less than A0
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        so = os.path.join(cls.tmp, "a1lin.so")
+        drv = os.path.join(ROOT, "linux", "es1869")
+        shim = os.path.join(cls.tmp, "shim.c")
+        with open(shim, "w") as f:
+            f.write("#include <stddef.h>\n#include \"a1lin.h\"\n"
+                    "#include \"capfilt.h\"\n"
+                    "size_t a1l_size(int i) { return i == 0 ? sizeof(struct "
+                    "a1lin) : i == 1 ? sizeof(struct a1lin_tables) : i == 2"
+                    " ? sizeof(struct a1lin_fit) : sizeof(struct "
+                    "es1869_cf); }\n")
+        subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall", "-Wextra",
+                               "-Werror", "-fPIC", "-shared", "-I" + SCOPE,
+                               "-I" + drv, "-o", so,
+                               os.path.join(SCOPE, "a1lin.c"),
+                               os.path.join(drv, "capfilt.c"), shim, "-lm"])
+        lib = cls.lib = ctypes.CDLL(so)
+        L = ctypes.c_long
+
+        class Tables(ctypes.Structure):
+            _fields_ = [("centre", L * 2), ("curve", (L * cls.VALS) * 2),
+                        ("gain", (L * cls.PER) * 2),
+                        ("turn", (L * cls.PER) * 2)]
+
+        class Fit(ctypes.Structure):
+            _fields_ = [("coh", (D * cls.PER) * 2),
+                        ("path", (D * cls.VALS) * 2),
+                        ("table", (D * cls.VALS) * 2),
+                        ("weight", (D * cls.VALS) * 2),
+                        ("curve", (D * cls.VALS) * 2),
+                        ("g", (D * (2 * cls.PER)) * 2),
+                        ("dg", (D * (2 * cls.PER)) * 2),
+                        ("frames", (D * cls.PER) * 2), ("n", D * 2)]
+        cls.Tables, cls.Fit = Tables, Fit
+        lib.a1l_size.restype = SZ
+        assert lib.a1l_size(1) == ctypes.sizeof(Tables)
+        assert lib.a1l_size(2) == ctypes.sizeof(Fit)
+        VP = ctypes.c_void_p
+        I16 = ctypes.POINTER(ctypes.c_int16)
+        lib.a1lin_knot.argtypes = [ctypes.c_int]
+        lib.a1lin_identity.argtypes = [ctypes.POINTER(Tables),
+                                       ctypes.POINTER(L)]
+        lib.a1lin_reset.argtypes = [VP, DP]
+        lib.a1lin_restart.argtypes = [VP, DP]
+        lib.a1lin_add.argtypes = [VP, ctypes.c_int, DP, D, I16, DP, DP, DP,
+                                  ctypes.c_uint]
+        lib.a1lin_fit.argtypes = [VP, ctypes.POINTER(Fit)]
+        lib.a1lin_next.argtypes = [ctypes.POINTER(Fit),
+                                   ctypes.POINTER(Tables), D,
+                                   ctypes.POINTER(Tables)]
+        lib.a1lin_path.restype = D
+        lib.a1lin_path.argtypes = [ctypes.POINTER(Fit), ctypes.c_int,
+                                   ctypes.c_int]
+        lib.es1869_cf_identity.argtypes = [VP]
+        lib.es1869_cf_reset.argtypes = [VP]
+        lib.es1869_cf_run.argtypes = [VP, I16, ctypes.c_uint32,
+                                      ctypes.c_uint32]
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp)
+
+    @staticmethod
+    def hilbert(x):
+        n = len(x)
+        h = np.zeros(n)
+        h[1:(n + 1) // 2] = 1
+        return np.real(np.fft.ifft(np.fft.fft(x) * -1j * (h - h[::-1])))
+
+    def path(self, p):
+        """the simulated record path on what should come back (AC): the
+        quiet signal's phase turned back by its envelope, then the soft
+        dead zone about the centre, the ADC's noise, the rounding"""
+        hp = self.hilbert(p)
+        k = int(0.006 * self.RATE)
+        env = np.sqrt(np.convolve(p * p + hp * hp, np.ones(k) / k, "same"))
+        turn = -self.Q / np.maximum(env, self.A0)
+        q = p * np.cos(turn) - hp * np.sin(turn)
+        v = q + self.DC
+        y = v - self.D * np.tanh((v - self.CENTRE) / self.K)
+        return np.round(y + self.rng.normal(0, 1.5, len(y)))
+
+    def stage(self, y, t):
+        """the driver's stage on a recording, its FIR only a delay, lined
+        up again"""
+        lib = self.lib
+        cf = ctypes.create_string_buffer(lib.a1l_size(3))
+        lib.es1869_cf_identity(cf)
+        lib.es1869_cf_reset(cf)
+        # struct es1869_cf: taps, raw, then cl_on and the tables
+        off_on = 2 * 17 * 2 + 2 * (32 + 256) * 2
+        cf[off_on] = 1
+        cl = (ctypes.c_int16 * (2 + 2 * self.VALS + 4 * self.PER))()
+        cl[0], cl[1] = t.centre[0], t.centre[1]
+        at = 2
+        for c in range(2):
+            for i in range(self.VALS):
+                cl[at + c * self.VALS + i] = t.curve[c][i]
+        at += 2 * self.VALS
+        for c in range(2):
+            for i in range(self.PER):
+                cl[at + c * self.PER + i] = t.gain[c][i]
+                cl[at + 2 * self.PER + c * self.PER + i] = t.turn[c][i]
+        ctypes.memmove(ctypes.addressof(cf) + off_on + 2, cl,
+                       ctypes.sizeof(cl))
+        # as the driver's prepare: the tables, then the reset, which starts
+        # the DC under the envelope from the centres
+        lib.es1869_cf_reset(cf)
+        x = np.ascontiguousarray(np.column_stack([y, y]).astype(np.int16))
+        n = len(y)
+        lib.es1869_cf_run(cf, x.ctypes.data_as(ctypes.POINTER(
+            ctypes.c_int16)), n, 2)
+        out = np.empty(n)
+        out[:n - 16] = x[16:, 0]
+        out[n - 16:] = x[-1, 0]
+        return out
+
+    def slow(self, n, hz):
+        f = np.fft.rfftfreq(n, 1.0 / self.RATE)
+        e = np.fft.irfft(np.fft.rfft(self.rng.standard_normal(n)) *
+                         np.exp(-0.5 * (f / hz) ** 2), n)
+        return (e - e.min()) / (e.max() - e.min())
+
+    def music(self, secs):
+        """four bands of noise under a fade that goes from -85 to -15 dBFS
+        and back, each band moving 20 dB on its own, so that each leads at
+        every size"""
+        n = int(secs * self.RATE)
+        f = np.fft.rfftfreq(n, 1.0 / self.RATE)
+        out = np.zeros(n)
+        fade = -85 + 70 * (0.5 - 0.5 * np.cos(2 * np.pi * 3 *
+                                              np.arange(n) / n))
+        for lo, hi in ((40, 200), (200, 800), (800, 3200), (3200, 12000)):
+            w = np.fft.irfft(np.fft.rfft(self.rng.standard_normal(n)) *
+                             ((f >= lo) & (f < hi)), n)
+            w /= np.sqrt(np.mean(w * w))
+            lev = fade - 20 * self.slow(n, 0.4)
+            out += w * 32768 * 10 ** (lev / 20)
+        return out
+
+    def measure(self, p, r, y):
+        """what should have come (p), what came raw (r) and what the stage
+        gave (y), into a1lin, fitted"""
+        lib = self.lib
+        a = ctypes.create_string_buffer(lib.a1l_size(0))
+        cen = (D * 2)(self.DC, self.DC)
+        lib.a1lin_reset(a, cen)
+        hp, hy = self.hilbert(p), self.hilbert(y - self.DC)
+        r16 = np.ascontiguousarray(r.astype(np.int16))
+        m = 1 << 16
+        cp = lambda x: np.ascontiguousarray(x).ctypes.data_as(DP)  # noqa
+        for s in range(64, len(p) - m - 64, m):
+            sl = slice(s, s + m)
+            for c in range(2):
+                lib.a1lin_add(a, c, cp(p[sl]), self.DC,
+                              r16[s:].ctypes.data_as(ctypes.POINTER(
+                                  ctypes.c_int16)),
+                              cp(y[sl]), cp(hp[sl]), cp(hy[sl]), m)
+        f = self.Fit()
+        self.assertEqual(lib.a1lin_fit(a, ctypes.byref(f)), 0)
+        return f
+
+    def tone_gain(self, t, level, hz=997.0):
+        """a tone through the path and the stage: its gain and phase
+        against what should have come back"""
+        n = int(0.6 * self.RATE)
+        amp = 32768 * 10 ** (level / 20)
+        p = amp * np.cos(2 * np.pi * hz / self.RATE * np.arange(n))
+        y = self.stage(self.path(p), t)
+        s = slice(4000, n - 4000)
+        e = np.exp(-2j * np.pi * hz / self.RATE * np.arange(n))[s]
+        g = ((y[s] - y[s].mean()) * e).mean() / (p[s] * e).mean()
+        return 20 * np.log10(abs(g)), np.degrees(np.angle(g))
+
+    def test_knots(self):
+        want = [-512, -384, -256, -192, -128, -96, -64, -48, -32, -24, -16,
+                -12, -8, -6, -4, -2, 0]
+        got = [self.lib.a1lin_knot(k) for k in range(self.VALS)]
+        self.assertEqual(got[:17], want)
+        self.assertEqual(got[16:], [-v for v in want[::-1]])
+
+    def test_the_closed_loop_takes_the_path_back(self):
+        """from music alone, a few rounds of measuring what the tables left
+        and loading the next bring tones of -60 and -50 dBFS back to the
+        path's gain within 0.1 dB and its phase within a third of a degree,
+        from 0.6 dB and a degree"""
+        self.rng = np.random.default_rng(11)
+        lib = self.lib
+        t = self.Tables()
+        cen = (ctypes.c_long * 2)(int(self.DC), int(self.DC))
+        lib.a1lin_identity(ctypes.byref(t), cen)
+        g0 = {lev: self.tone_gain(t, lev) for lev in (-60, -50)}
+        self.assertLess(g0[-60][0], -0.4)
+        self.assertLess(g0[-60][1], -0.5)
+        p = self.music(40)
+        y0 = self.path(p)
+        for _ in range(6):
+            f = self.measure(p, y0, self.stage(y0, t))
+            nxt = self.Tables()
+            lib.a1lin_next(ctypes.byref(f), ctypes.byref(t), 0.7,
+                           ctypes.byref(nxt))
+            t = nxt
+        for lev in (-60, -50):
+            db, deg = self.tone_gain(t, lev)
+            self.assertLess(abs(db), 0.1, (lev, db, g0[lev]))
+            self.assertLess(abs(deg), 0.35, (lev, deg, g0[lev]))
+        # what the path itself does, as measured: the dead zone's curve
+        f = self.measure(p, y0, self.stage(y0, t))
+        for k in range(self.VALS):
+            v = self.DC + lib.a1lin_knot(k)
+            want = -self.D * np.tanh((v - self.CENTRE) / self.K)
+            got = lib.a1lin_path(ctypes.byref(f), 0, k)
+            if abs(v - self.DC) <= 256:
+                self.assertAlmostEqual(got, want, delta=0.25,
+                                       msg=v - self.DC)
 
 
 if __name__ == "__main__":

@@ -177,6 +177,10 @@ The stages and what each picture shows:
   engine's refits and trim, or lets them go on.
 * **[a] Audio 1's correction:** the record path as calibrated, the
   correction's taps, and their product.
+* **[l] Audio 1's linearity:** what the record path adds to a sample about
+  its centre and what the stage leaves of it, and the gain the stage leaves
+  by envelope in each band of the instantaneous frequency
+  ([LOOP_TRANSFORM.md](LOOP_TRANSFORM.md#audio-1s-own-curve)).
 * **The engine:** its state, why it stands still if it does, and its run.
 
 A key switches its stage's control as the user, and the row reads `pending`
@@ -406,13 +410,22 @@ The music it measures can change under it, and it follows:
   once the setup comes back.
 * **The trim** moves only in the Clock mode, for the 44.1 kHz family, whose
   clock its trend follows; otherwise the clock line says it is held.
-* **Audio 1's correction** switched starts Audio 1 again, since Audio 1
-  takes the switch at its next start.
+* **Audio 1's correction** or its linearity switched starts Audio 1 again,
+  since Audio 1 takes the switch at its next start.
 * **Another program's changes:** a control that es1869eq set and another
   program changed stays as that program set it, also after es1869eq stops,
   and a DAC correction that another program loads becomes the refits' start.
 
 After each block:
+* **Audio 1's linearity:** with 400,000 frames a side behind it, the record
+  path's curve and what the stage left, from the analytic signals of what
+  should have come back and of what came
+  ([LOOP_TRANSFORM.md](LOOP_TRANSFORM.md#audio-1s-own-curve)), and the
+  stage's next tables loaded, a `lin` line in the log: each side's centre,
+  the path at five knots and what the stage left at most, LSB. Whether Audio
+  1 takes the stage is `a1c_linear`'s; the tables are loaded either way, and
+  while the stage is off -E runs it in software to measure what it would
+  leave.
 * **The DAC:** the loop's deviation against 1 kHz goes into 24 bands from
   250 Hz to 20 kHz, each band weighted by its coherence, since music may
   leave a band empty. The monitor's frames carry Audio 2's DAC correction,
@@ -539,6 +552,18 @@ the machine without it. It rested 10 s after the music ended and came back
 with the music's first frames.
 
 `linux/config/es1869eq.initd` runs it as a service after es1869cal and MPD.
+
+### -E over files
+
+`es1869scope -E -x MONITOR.wav -i RECORDING.wav` replays two files recorded
+at once, what the monitor took (at once or twice the recording's rate) and
+what Audio 1 recorded, as the gap study's takes have them: the rings are fed
+as the reader feeds them, from about where the two line up, through the same
+segments, three passes over, each with the stage's tables from the one
+before, and the `lin` lines go to `-O` or stdout. It opens no device and
+loads nothing. `LV_LIN_TABLES=FILE` in the environment writes the tables the
+passes came to, a side a line (the centre, the curve's 33 values, the 40
+gains and the 40 turns), and `LV_LIN_FROM=FILE` starts from such a file.
 
 ## Shared with a viewer
 

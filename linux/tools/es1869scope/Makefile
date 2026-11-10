@@ -25,7 +25,8 @@ es1869clock: es1869clock.o phase.o
 	$(CC) $(LDFLAGS) -o $@ $^ -lasound -lm
 
 es1869scope: es1869scope.o tie.o draw.o fb.o plot.o fft.o spectro.o loop.o \
-	     loopview.o eq.o zstep.o say.o eqstate.o ctl.o chain.o settab.o
+	     loopview.o eq.o zstep.o say.o eqstate.o ctl.o chain.o settab.o \
+	     a1lin.o capfilt.o
 	$(CC) $(LDFLAGS) -o $@ $^ -lasound -lz -lm -lpthread
 
 es1869clock.o: es1869clock.c phase.h
@@ -40,7 +41,13 @@ fft.o: fft.c fft.h
 loop.o: loop.c loop.h tie.h
 spectro.o: spectro.c spectro.h fft.h draw.h plot.h say.h
 loopview.o: loopview.c loopview.h loop.h draw.h plot.h tie.h eq.h zstep.h \
-	    say.h eqstate.h fft.h ctl.h
+	    say.h eqstate.h fft.h ctl.h a1lin.h ../../es1869/capfilt.h
+	$(CC) $(CFLAGS) -I../../es1869 -c -o $@ $<
+a1lin.o: a1lin.c a1lin.h ../../es1869/capfilt.h
+	$(CC) $(CFLAGS) -I../../es1869 -c -o $@ $<
+capfilt.o: ../../es1869/capfilt.c ../../es1869/capfilt.h \
+	   ../../es1869/hw_compat.h
+	$(CC) $(CFLAGS) -I../../es1869 -c -o $@ $<
 eq.o: eq.c eq.h
 zstep.o: zstep.c zstep.h
 say.o: say.c say.h draw.h plot.h

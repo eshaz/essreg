@@ -274,6 +274,57 @@ so the gap that it would find is the DAC's either way. On a simulated DAC
 with a gap of 7.4 LSB, through a delayed lowpass and noise, it read 7.33 and
 7.46 from 20 s of music.
 
+## Audio 1's own curve
+
+The record path has a curve of its own, which a recorder on the line out
+doesn't hear. Fitted on the gap study's program takes (2026-11-09), against
+what should have come back, the DAC's codes with their gap through the
+loop's linear path, what Audio 1 added to a sample is a soft compression:
+about +4.3 LSB for a value well under the centre and -4.3 well over it,
+moving between the two over some 50 LSB either side, about a centre 14 to 18
+LSB under the recording's mean. Small signals lose the most: a 997 Hz tone
+of -60 dBFS came back 0.8 to 0.9 dB under the VX's against -30 dBFS, -50
+dBFS 0.37 dB under, -40 dBFS 0.08. It also turns a small signal's phase
+back, 0.5 to 0.8 degrees at -60 dBFS beyond the VX's own, 0.2 at -50: a
+quadrature error of about 0.35 LSB whatever the level, as a little
+hysteresis would make. The curve is deeper for quieter music, which a fixed
+curve can't follow: one fitted to the loud program takes -50 dBFS back
+within 0.05 dB of the VX but leaves -0.3 to -0.6 dB at -60.
+
+snd-es1869 takes it back with `a1c_linear`, a stage after Audio 1's
+correction filter in the same pass (capfilt.c). A curve about each side's
+centre adds what the path took, between knots at 0, 2, 4, 6, 8, 12, 16 and
+on in half octaves to 512 LSB. Then the analytic signal, from a Hilbert FIR
+of 31 taps on the filter's own window, gives the envelope and the
+instantaneous frequency, which pick a gain and a turn of the phase from
+tables of 4 bands by 10 envelope bins an octave apart. The frames come 16
+late, as through the filter.
+
+-E learns the tables from the music. Audio 1 and Audio 2 run from one
+crystal, so what came back sits at a fixed place against what the DAC took
+for the whole of a run, and what should have come back is one linear
+operator on the DAC's frames: every frame of the monitor, at its own rate
+(2x included), each code with the DAC's gap from 0 up, low-passed to Audio
+1's grid in the spectrum, through the run's path, fitted by Welch. Under 32
+Hz, where a segment's path can't follow the AC coupling, the recording's own
+spectrum stands in, its DC with it. The analytic signals of what should have
+come and of what the stage gave come from the same spectra. From them:
+* the path's curve, as what came back raw less what should have, against
+  what should have, which carries no noise, so the ADC's noise gives the fit
+  no bias; the stage's curve is its inverse at each raw knot, in one step;
+* the gain and phase the stage leaves, by its own band and envelope, which
+  the next tables take back, the turn by a Newton step on how far a turn
+  moves each bin's phase, measured, since the short FIR hardly turns the
+  bass while it turns the treble riding on it whole. A bin moves only with a
+  coherence of 0.8, so that silence, where what came back is the ADC's
+  noise, moves nothing.
+
+Replayed over the gap study's takes at 1x and 2x, the path's curve comes out
+alike in both, and what the stage leaves falls from 4.5 LSB to about 1 over
+three passes of 20 s. The loud program has no quiet passages, so the
+envelope's bins at -60 dBFS get nothing from it; music with quiet passages
+fills them, and the chip's tones show what they take back.
+
 ## What the loop measures
 
 Name the parts of the chain in the frequency domain:

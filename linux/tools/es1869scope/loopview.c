@@ -81,6 +81,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "a1lin.h"
+#include "capfilt.h"
 #include "loop.h"
 #include "ctl.h"
 #include "eq.h"
@@ -139,6 +141,12 @@ static const double lv_cal_at[LV_CAL_AT] = { 1000,  5000,  10000,
 #define LV_SEG_BAD 8 // segments in a row under it that lose the lag
 #define LV_SEG_QUIET 3.0 // an input this quiet, rms in steps, says nothing
 #define LV_EQ_JUMP 0.5 // a block's clock this far off its trend waits, ppm
+#define LV_OVER 4 // the monitor's frames kept a kept frame, at most
+#define LV_LIN_AFTER 8 // a run's segments before its path predicts
+#define LV_LIN_MIN 400000.0 // the frames a side the linearity refits with
+#define LV_LIN_STEP 0.7 // the share of the way a refit moves the tables
+#define LV_LIN_LO 2 // up to this bin, what should have come is the recording's
+#define LV_LIN_HI 6 // and from this one, the path's prediction
 
 // the streams, for a start of some of them: the view's input (the monitor or
 // the noise) and Audio 1's recording
@@ -272,6 +280,25 @@ struct loopview {
 	// the chip's rate a block, its trend, and a block's that jumped from it
 	struct eq_series chip_s;
 	double chip_out;
+	// Audio 1's linearity (a1lin.h): every frame of the monitor, LV_OVER
+	// places a kept frame; the run's path from them, its gap put in, to
+	// what Audio 1 recorded raw, in Welch's sums; a segment's work; the
+	// stage in software; the sums and the tables in use
+	int16_t *oring;
+	double *lsxx[2], *lsxy[2];
+	unsigned long lsegs;
+	unsigned int lskip;
+	int64_t seg_xs; // the kept frame the segment's first came from
+	double *lz, *lzy, *lp[2], *lhp[2], *lys[2], *lhy[2];
+	int16_t *lr16, *lys16;
+	struct es1869_cf *lcf;
+	struct a1lin *lin;
+	struct a1lin_tables ltab;
+	struct a1lin_fit lfit;
+	int lin_ok, lin_applied, have_lfit, have_ldc, lin_fits;
+	int replay; // -E over files: the segments as the reader would give
+	double ldc[2];
+	long lgap[2]; // the DAC's gap a side, 1/256 LSB
 	long trim;
 	long taps0[3 * EQ_SIDES]; // the DAC's correction when it began
 	int have0;
@@ -754,10 +781,13 @@ static int lv_live_lag(struct loopview *v)
 static void lv_eq_run(struct loopview *v);
 
 // the run's sums end here: over time into the block, else away
+static void lv_lin_run(struct loopview *v);
+
 static void lv_run_end(struct loopview *v)
 {
 	int i;
 
+	lv_lin_run(v);
 	if (v->cfg.equalize) {
 		lv_eq_run(v);
 		return;
@@ -801,6 +831,12 @@ static void lv_pearson(const struct loopview *v, double *r, double *rms)
 	}
 }
 
+static void lv_lin_segment(struct loopview *v);
+static void lv_lin_open(struct loopview *v);
+static void lv_lin_free(struct loopview *v);
+static void lv_lin_block(struct loopview *v, double now, FILE *out);
+static void lv_lin_sums(struct loopview *v);
+
 // a segment that has come back, if it overlays what went in: a stop of the
 // DAC or a lost block moves one against the other, and the sums take only
 // what still overlays. Too many in a row that don't end the run, and the
@@ -831,11 +867,12 @@ static void lv_segment(struct loopview *v)
 	v->bad = 0;
 	lv_add(v);
 	// over time, the DAC's gap: the sign's spectra beside the segment's
-	if (v->mon && v->cfg.equalize) {
+	if ((v->mon || v->replay) && v->cfg.equalize) {
 		loop_spectra(&v->path[LL], v->segq[0], v->segq[1], v->zq[0],
 			     v->zq[1]);
 		zstep_add(&v->zst, v->zs[0], v->zs[1], v->zq[0], v->zq[1],
 			  v->zs[2], v->zs[3]);
+		lv_lin_segment(v);
 	}
 	v->ov_n++;
 	v->ov_r += b;
@@ -890,13 +927,14 @@ static void lv_live_segments(struct loopview *v)
 			}
 			// each side's sign, the share of the DAC's codes from
 			// 0 up that a kept frame stands for, less a half
-			for (k = 0; v->mon && k < n; k++) {
+			for (k = 0; (v->mon || v->replay) && k < n; k++) {
 				const uint8_t *q =
 					&v->qring[2 * ((xs + k) % LV_RING)];
 
 				v->segq[0][k] = (double)q[0] / v->factor - 0.5;
 				v->segq[1][k] = (double)q[1] / v->factor - 0.5;
 			}
+			v->seg_xs = xs;
 			lv_segment(v);
 		}
 		v->next += n / 2;
@@ -1003,6 +1041,7 @@ static void lv_clear(struct loopview *v)
 {
 	int i;
 
+	lv_lin_run(v);
 	for (i = 0; i < PATHS; i++)
 		loop_reset(&v->path[i]);
 	for (i = 0; i < LV_EQ_BANDS; i++)
@@ -1018,11 +1057,54 @@ static void lv_clear(struct loopview *v)
 // short of a chunk has caught up: the monitor's position follows the DMA as
 // it is read, so a read goes on finding a few more frames, and reading on
 // until there were none would read for as long as the music plays
+// a frame of the monitor into the rings, *at the kept frames so far
+static void lv_mon_frame(struct loopview *v, const int16_t *b, uint64_t *at,
+			 uint64_t *raw)
+{
+	unsigned int j = v->mon_frames++ % v->factor;
+	int16_t *x;
+	uint8_t *q;
+	int c;
+
+	// for a viewer, each frame as the DAC takes it, and the codes near 0
+	if (v->rawring) {
+		memcpy(&v->rawring[2 * ((*raw)++ % LV_RAW)], b, 4);
+		for (c = 0; c < 2; c++)
+			if (b[c] >= -16 && b[c] <= 16)
+				v->zhist[c][b[c] + 16]++;
+	}
+	// every frame, by the kept one it goes with
+	if (v->oring && (*at || !j)) {
+		uint64_t k = j ? *at - 1 : *at;
+
+		memcpy(&v->oring[2 * ((k * LV_OVER + j) %
+				      ((uint64_t)LV_OVER * LV_RING))],
+		       b, 4);
+	}
+	if (j) {
+		// a frame the kept one stands for: its codes from 0 up too,
+		// for the DAC's gap
+		if (*at) {
+			q = &v->qring[2 * ((*at - 1) % LV_RING)];
+			q[0] += b[0] >= 0;
+			q[1] += b[1] >= 0;
+		}
+		return;
+	}
+	x = &v->xring[2 * (*at % LV_RING)];
+	x[0] = b[0];
+	x[1] = b[1];
+	q = &v->qring[2 * (*at % LV_RING)];
+	q[0] = b[0] >= 0;
+	q[1] = b[1] >= 0;
+	(*at)++;
+}
+
 static int lv_take(struct loopview *v)
 {
 	int16_t buf[2 * LV_CHUNK];
 	uint64_t at = v->played, raw = v->raw_frames;
-	int got = 0, c;
+	int got = 0;
 
 	for (;;) {
 		snd_pcm_sframes_t r = snd_pcm_readi(v->mon, buf, LV_CHUNK), i;
@@ -1031,37 +1113,8 @@ static int lv_take(struct loopview *v)
 			break;
 		if (r < 0)
 			return (int)r;
-		for (i = 0; i < r; i++, v->mon_frames++) {
-			const int16_t *b = &buf[2 * i];
-			int16_t *x;
-			uint8_t *q;
-
-			// for a viewer, each frame as the DAC takes it, and the
-			// codes near 0
-			if (v->rawring) {
-				memcpy(&v->rawring[2 * (raw++ % LV_RAW)], b, 4);
-				for (c = 0; c < 2; c++)
-					if (b[c] >= -16 && b[c] <= 16)
-						v->zhist[c][b[c] + 16]++;
-			}
-			if (v->mon_frames % v->factor) {
-				// a frame the kept one stands for: its codes
-				// from 0 up too, for the DAC's gap
-				if (at) {
-					q = &v->qring[2 * ((at - 1) % LV_RING)];
-					q[0] += b[0] >= 0;
-					q[1] += b[1] >= 0;
-				}
-				continue;
-			}
-			x = &v->xring[2 * (at % LV_RING)];
-			x[0] = b[0];
-			x[1] = b[1];
-			q = &v->qring[2 * (at % LV_RING)];
-			q[0] = b[0] >= 0;
-			q[1] = b[1] >= 0;
-			at++;
-		}
+		for (i = 0; i < r; i++)
+			lv_mon_frame(v, &buf[2 * i], &at, &raw);
 		__atomic_store_n(&v->played, at, __ATOMIC_RELEASE);
 		__atomic_store_n(&v->raw_frames, raw, __ATOMIC_RELEASE);
 		got = 1;
@@ -1115,7 +1168,9 @@ static int lv_events(struct loopview *v, int reader)
 			continue;
 		name = snd_ctl_event_elem_get_name(ev);
 		bits |= !strcmp(name, "Audio 2 Output Rate") ? LV_CH_OVER :
-			!strcmp(name, "Audio 1 Correction Capture Switch") ?
+			!strcmp(name, "Audio 1 Correction Capture Switch") ||
+					!strcmp(name,
+						"Audio 1 Linearity Capture Switch") ?
 							       LV_CH_A1C :
 			!strcmp(name, "Audio 2 Treble Correction Taps") ?
 							       LV_CH_TAPS :
@@ -1292,6 +1347,11 @@ static int lv_start(struct loopview *v, int which, int clear)
 					  "Audio 1 Correction Capture Switch",
 					  val, &n) &&
 				val[0];
+			v->lin_applied =
+				!ctl_read(v->ctl,
+					  "Audio 1 Linearity Capture Switch",
+					  val, &n) &&
+				val[0];
 			if (snd_pcm_prepare(v->cap) < 0 ||
 			    snd_pcm_start(v->cap) < 0)
 				goto bad;
@@ -1353,7 +1413,9 @@ static double *lv_wav(const char *path, size_t *frames, unsigned int *rate)
 			n = len / fb;
 			raw = malloc(n * fb);
 			out = malloc(2 * n * sizeof(double));
-			if (!raw || !out || fread(raw, fb, n, f) != n) {
+			// a recorder stopped short of its header's length
+			// leaves fewer frames than it says: those that are
+			if (!raw || !out || !(n = fread(raw, fb, n, f))) {
 				free(raw);
 				goto bad;
 			}
@@ -1460,6 +1522,144 @@ static int lv_files(struct loopview *v)
 	return 0;
 }
 
+// -E over two files recorded at once, what the monitor took (at its own
+// rate, once or twice the other's) and what Audio 1 recorded: the rings fed
+// as the reader feeds them, from about where the two line up, through the
+// same segments, passes times over, each with the tables of the one before;
+// the linearity's lines to the log
+static int lv_replay(struct loopview *v, int passes)
+{
+	unsigned int rm = 0, ra = 0, f, lg = 18;
+	size_t nm = 0, na = 0, i, j, k;
+	double *m, *a, *x, *y, frac;
+	long lag;
+	int pass, c;
+
+	m = lv_wav(v->cfg.ref, &nm, &rm);
+	a = lv_wav(v->cfg.rec, &na, &ra);
+	if (!m || !a || !ra || rm % ra || rm / ra > 2) {
+		say("%s and %s: a monitor at once or twice the recording's rate",
+		    v->cfg.ref, v->cfg.rec);
+		goto bad;
+	}
+	f = rm / ra;
+	v->rate = ra;
+	v->factor = f;
+	v->replay = 1;
+	while (lg > LV_LOG2N + 1 &&
+	       (((size_t)1 << lg) * f > nm || ((size_t)1 << lg) > na))
+		lg--;
+	v->xring = calloc(2 * (size_t)LV_RING, sizeof(int16_t));
+	v->yring = calloc(2 * (size_t)LV_RING, sizeof(int16_t));
+	v->qring = calloc(2 * (size_t)LV_RING, sizeof(uint8_t));
+	x = malloc(2 * ((size_t)1 << lg) * sizeof(double));
+	if (!v->xring || !v->yring || !v->qring || !x)
+		goto bad;
+	// where the two line up, roughly: the recorders started apart
+	y = x + ((size_t)1 << lg);
+	for (k = 0; k < ((size_t)1 << lg); k++) {
+		x[k] = m[2 * k * f] + m[2 * k * f + 1];
+		y[k] = a[2 * k] + a[2 * k + 1];
+	}
+	lag = loop_lag(x, y, lg, &frac);
+	free(x);
+	if (v->cfg.log && !(v->eqlog = fopen(v->cfg.log, "a")))
+		say("%s: %s", v->cfg.log, strerror(errno));
+	lv_lin_open(v);
+	if (!v->lin)
+		goto bad;
+	// tables to start from, as a replay wrote them
+	if (getenv("LV_LIN_FROM")) {
+		FILE *t = fopen(getenv("LV_LIN_FROM"), "r");
+		int ok = !!t;
+
+		for (c = 0; ok && c < 2; c++) {
+			ok = fscanf(t, "%ld", &v->ltab.centre[c]) == 1;
+			for (k = 0; ok && k < A1L_VALS; k++)
+				ok = fscanf(t, "%ld", &v->ltab.curve[c][k]) ==
+				     1;
+			for (k = 0; ok && k < A1L_PER; k++)
+				ok = fscanf(t, "%ld", &v->ltab.gain[c][k]) == 1;
+			for (k = 0; ok && k < A1L_PER; k++)
+				ok = fscanf(t, "%ld", &v->ltab.turn[c][k]) == 1;
+		}
+		if (t)
+			fclose(t);
+		if (!ok)
+			say("%s: no tables", getenv("LV_LIN_FROM"));
+		lv_lin_sums(v);
+	}
+	for (pass = 0; pass < passes; pass++) {
+		uint64_t raw = 0;
+
+		v->played = v->captured = v->next = v->mon_frames = 0;
+		v->lagged = 0;
+		v->lag_at = 0;
+		lv_clear(v);
+		for (i = lag < 0 ? (size_t)-lag * f : 0,
+		    j = lag > 0 ? (size_t)lag : 0;
+		     i < nm && j < na;) {
+			// the monitor a few chunks ahead, as live
+			for (k = 0;
+			     k < (v->played ? 1u : 4u) * LV_CHUNK && i < nm;
+			     k++, i++) {
+				int16_t b[2];
+
+				for (c = 0; c < 2; c++)
+					b[c] = (int16_t)lrint(fmax(
+						-32768,
+						fmin(32767,
+						     m[2 * i + c] * 32768)));
+				lv_mon_frame(v, b, &v->played, &raw);
+			}
+			for (k = 0; k < LV_CHUNK / f && j < na; k++, j++) {
+				int16_t *yp =
+					&v->yring[2 * (v->captured % LV_RING)];
+
+				for (c = 0; c < 2; c++)
+					yp[c] = (int16_t)lrint(fmax(
+						-32768,
+						fmin(32767,
+						     a[2 * j + c] * 32768)));
+				v->captured++;
+			}
+			// every whole segment that has come
+			do {
+				uint64_t at = v->next;
+
+				lv_live_segments(v);
+				if (v->next == at)
+					break;
+			} while (v->lagged);
+		}
+		lv_lin_block(v, pass, v->eqlog ? v->eqlog : stdout);
+	}
+	// the tables the passes came to, for a look at them elsewhere
+	if (getenv("LV_LIN_TABLES")) {
+		FILE *t = fopen(getenv("LV_LIN_TABLES"), "w");
+
+		for (c = 0; t && c < 2; c++) {
+			fprintf(t, "%ld", v->ltab.centre[c]);
+			for (k = 0; k < A1L_VALS; k++)
+				fprintf(t, " %ld", v->ltab.curve[c][k]);
+			for (k = 0; k < A1L_PER; k++)
+				fprintf(t, " %ld", v->ltab.gain[c][k]);
+			for (k = 0; k < A1L_PER; k++)
+				fprintf(t, " %ld", v->ltab.turn[c][k]);
+			fprintf(t, "\n");
+		}
+		if (t)
+			fclose(t);
+	}
+	free(m);
+	free(a);
+	return 0;
+bad:
+	free(m);
+	free(a);
+	return -1;
+}
+
 // --- open and close ------------------------------------------------------------
 
 struct loopview *loopview_open(const struct loopview_cfg *cfg)
@@ -1529,6 +1729,11 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 		v->have_sfft = v->sx &&
 			       !fft_init(&v->sfft, LV_ROW_LOG2, fft_have_mmx());
 	}
+	if (cfg->ref && cfg->rec && cfg->equalize) {
+		if (lv_replay(v, 3))
+			goto bad;
+		return v;
+	}
 	if (cfg->ref && cfg->rec) {
 		if (lv_files(v))
 			goto bad;
@@ -1573,6 +1778,8 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 		memcpy(v->taps_set, v->taps0, sizeof(v->taps_set));
 		if (cfg->log && !(v->eqlog = fopen(cfg->log, "a")))
 			say("%s: %s", cfg->log, strerror(errno));
+		if (cfg->monitor)
+			lv_lin_open(v);
 		if (v->eqlog)
 			say_hook(lv_note, v);
 	}
@@ -1662,6 +1869,7 @@ void loopview_close(struct loopview *v)
 		free(v->zq[i]);
 	}
 	zstep_free(&v->zst);
+	lv_lin_free(v);
 	free(v->qring);
 	free(v->f);
 	free(v->t);
@@ -2216,6 +2424,497 @@ static void lv_eq_zstep(struct loopview *v, double now, FILE *out)
 	fprintf(out, " LSB, %.0f segments\n", v->zs_n);
 }
 
+// --- Audio 1's linearity --------------------------------------------------------
+
+#define LV_LIN_CURVE "Audio 1 Linearity Capture Curve"
+#define LV_LIN_GAIN "Audio 1 Linearity Capture Gain"
+#define LV_LIN_TURN "Audio 1 Linearity Capture Turn"
+#define LV_LIN_ROW (1 + A1L_VALS) // a side's centre and curve in its control
+
+// the stage's tables as the driver holds them: 0, or -1 if it has none
+static int lv_lin_read(struct loopview *v, struct a1lin_tables *t)
+{
+	long cv[2 * LV_LIN_ROW], g[2 * A1L_PER], tu[2 * A1L_PER];
+	int c, i;
+
+	if (ctl_read_all(v->ctl, LV_LIN_CURVE, cv, 2 * LV_LIN_ROW) ||
+	    ctl_read_all(v->ctl, LV_LIN_GAIN, g, 2 * A1L_PER) ||
+	    ctl_read_all(v->ctl, LV_LIN_TURN, tu, 2 * A1L_PER))
+		return -1;
+	for (c = 0; c < 2; c++) {
+		t->centre[c] = cv[c * LV_LIN_ROW];
+		for (i = 0; i < A1L_VALS; i++)
+			t->curve[c][i] = cv[c * LV_LIN_ROW + 1 + i];
+		for (i = 0; i < A1L_PER; i++) {
+			t->gain[c][i] = g[c * A1L_PER + i];
+			t->turn[c][i] = tu[c * A1L_PER + i];
+		}
+	}
+	return 0;
+}
+
+static int lv_lin_write(struct loopview *v, const struct a1lin_tables *t)
+{
+	long cv[2 * LV_LIN_ROW], g[2 * A1L_PER], tu[2 * A1L_PER];
+	int c, i;
+
+	for (c = 0; c < 2; c++) {
+		cv[c * LV_LIN_ROW] = t->centre[c];
+		for (i = 0; i < A1L_VALS; i++)
+			cv[c * LV_LIN_ROW + 1 + i] = t->curve[c][i];
+		for (i = 0; i < A1L_PER; i++) {
+			g[c * A1L_PER + i] = t->gain[c][i];
+			tu[c * A1L_PER + i] = t->turn[c][i];
+		}
+	}
+	return ctl_write_all(v->ctl, LV_LIN_CURVE, cv, 2 * LV_LIN_ROW) ||
+			       ctl_write_all(v->ctl, LV_LIN_GAIN, g,
+					     2 * A1L_PER) ||
+			       ctl_write_all(v->ctl, LV_LIN_TURN, tu,
+					     2 * A1L_PER) ?
+		       -1 :
+		       0;
+}
+
+// whether tables are those the driver starts with, about no centre yet
+static int lv_lin_unset(const struct a1lin_tables *t)
+{
+	int c, i;
+
+	for (c = 0; c < 2; c++) {
+		if (t->centre[c])
+			return 0;
+		for (i = 0; i < A1L_VALS; i++)
+			if (t->curve[c][i])
+				return 0;
+	}
+	return 1;
+}
+
+// the sums about the tables' centres, afresh
+static void lv_lin_sums(struct loopview *v)
+{
+	double cen[2] = { v->ltab.centre[0], v->ltab.centre[1] };
+
+	a1lin_reset(v->lin, cen);
+}
+
+// what the linearity needs beside -E's own: nothing if the driver has no
+// stage
+static void lv_lin_open(struct loopview *v)
+{
+	unsigned int n = v->n, c;
+
+	if (v->replay) {
+		// tables of its own, and the Armada's gap
+		a1lin_identity(&v->ltab, NULL);
+		v->lgap[0] = v->lgap[1] = 2048;
+	} else if (lv_lin_read(v, &v->ltab)) {
+		say("the driver has no linearity stage: Audio 1's linearity "
+		    "isn't measured");
+		return;
+	}
+	v->oring = calloc(2 * (size_t)LV_OVER * LV_RING, sizeof(int16_t));
+	v->lz = malloc(4 * (size_t)n * sizeof(double));
+	v->lzy = malloc(2 * (size_t)n * sizeof(double));
+	v->lr16 = malloc(4 * (size_t)n * sizeof(int16_t));
+	v->lys16 = v->lr16 ? v->lr16 + 2 * n : NULL;
+	v->lcf = malloc(sizeof(*v->lcf));
+	v->lin = malloc(sizeof(*v->lin));
+	for (c = 0; c < 2; c++) {
+		v->lsxx[c] = calloc(v->bins, sizeof(double));
+		v->lsxy[c] = calloc(2 * (size_t)v->bins, sizeof(double));
+		v->lp[c] = malloc(n * sizeof(double));
+		v->lhp[c] = malloc(n * sizeof(double));
+		v->lys[c] = malloc(n * sizeof(double));
+		v->lhy[c] = malloc(n * sizeof(double));
+		if (!v->lsxx[c] || !v->lsxy[c] || !v->lp[c] || !v->lhp[c] ||
+		    !v->lys[c] || !v->lhy[c])
+			v->lin_ok = -1;
+	}
+	if (!v->oring || !v->lz || !v->lzy || !v->lr16 || !v->lcf || !v->lin ||
+	    v->lin_ok < 0) {
+		say("no memory for Audio 1's linearity");
+		free(v->lin);
+		v->lin = NULL;
+		return;
+	}
+	lv_lin_sums(v);
+	v->lin_ok = 1;
+}
+
+static void lv_lin_free(struct loopview *v)
+{
+	int c;
+
+	free(v->oring);
+	free(v->lz);
+	free(v->lzy);
+	free(v->lr16);
+	free(v->lcf);
+	free(v->lin);
+	for (c = 0; c < 2; c++) {
+		free(v->lsxx[c]);
+		free(v->lsxy[c]);
+		free(v->lp[c]);
+		free(v->lhp[c]);
+		free(v->lys[c]);
+		free(v->lhy[c]);
+	}
+}
+
+// a run's end: its path from the monitor goes, and the DAC's gap is read
+// again for the next
+static void lv_lin_run(struct loopview *v)
+{
+	unsigned int n;
+	long g[2];
+	int c;
+
+	if (!v->lin)
+		return;
+	v->lsegs = 0;
+	for (c = 0; c < 2; c++) {
+		memset(v->lsxx[c], 0, v->bins * sizeof(double));
+		memset(v->lsxy[c], 0, 2 * v->bins * sizeof(double));
+	}
+	if (v->ctl && !ctl_read(v->ctl, "Audio 2 Zero Step Left", g, &n))
+		v->lgap[0] = g[0];
+	if (v->ctl && !ctl_read(v->ctl, "Audio 2 Zero Step Right", g, &n))
+		v->lgap[1] = g[0];
+}
+
+// the stage in software over n interleaved frames in place, the tables in
+// use and the DC from the recording, lined up again: the FIR only delays
+static void lv_lin_stage(struct loopview *v, int16_t *x, unsigned int n)
+{
+	struct es1869_cf *cf = v->lcf;
+	unsigned int c, i;
+
+	es1869_cf_identity(cf);
+	cf->cl_on = true;
+	for (c = 0; c < 2; c++) {
+		cf->cl.centre[c] = (s16)v->ltab.centre[c];
+		for (i = 0; i < A1L_VALS; i++)
+			cf->cl.curve[c][i] = (s16)v->ltab.curve[c][i];
+		for (i = 0; i < A1L_PER; i++) {
+			cf->cl.gain[c][i] = (s16)v->ltab.gain[c][i];
+			cf->cl.turn[c][i] = (s16)v->ltab.turn[c][i];
+		}
+	}
+	es1869_cf_reset(cf);
+	for (c = 0; c < 2; c++)
+		cf->cl_dc[c] = (s64)lrint(v->ldc[c] * 16) * (1 << ES_CL_DC);
+	es1869_cf_run(cf, x, n, 2);
+	memmove(x, x + 2 * ES_CF_HALF, 2 * (n - ES_CF_HALF) * sizeof(*x));
+}
+
+// a Hilbert transform of both sides of a + jb, from its spectrum z (n complex
+// bins, which this takes), into ha and hb
+static void lv_lin_hilbert(double *z, unsigned int log2n, double *ha,
+			   double *hb)
+{
+	unsigned int n = 1u << log2n, k;
+
+	// -j sgn(k), then the inverse through the forward's conjugate
+	for (k = 0; k < n; k++) {
+		double re = z[2 * k], im = z[2 * k + 1];
+		double s = k == 0 || k == n / 2 ? 0 : k < n / 2 ? 1 : -1;
+
+		z[2 * k] = s * im;
+		z[2 * k + 1] = s * re; // the conjugate of -j s (re + j im)
+	}
+	tie_fft(z, log2n);
+	for (k = 0; k < n; k++) {
+		ha[k] = z[2 * k] / n;
+		hb[k] = -z[2 * k + 1] / n;
+	}
+}
+
+// a segment that overlays, every other: the analytic signals of what should
+// have come back and of what the stage gave, into the linearity's sums. What
+// should have come is the run's path from the DAC's every frame, each code
+// with its gap from 0 up, low-passed to Audio 1's grid in the spectrum
+static void lv_lin_segment(struct loopview *v)
+{
+	unsigned int n = v->n, f = v->factor, nn = n * f, q = n / 4, k, c;
+	unsigned int lg = LV_LOG2N + (f == 2);
+	double *z = v->lz, *zy = v->lzy, dcs[2];
+	double complex low[2][LV_LIN_HI + 1];
+	int16_t *ri = v->lr16, *si = v->lys16;
+	int64_t xs = v->seg_xs;
+
+	if (!v->lin || f > 2 || xs < 0 || (v->lskip++ & 1) ||
+	    lv_played(v) < (uint64_t)xs + n)
+		return;
+	// the DAC's output at the monitor's rate, both sides as a + jb
+	for (k = 0; k < nn; k++) {
+		uint64_t at = ((uint64_t)xs + k / f) * LV_OVER + k % f;
+		const int16_t *o =
+			&v->oring[2 * (at % ((uint64_t)LV_OVER * LV_RING))];
+
+		for (c = 0; c < 2; c++)
+			z[2 * k + c] =
+				o[c] + (o[c] >= 0 ? v->lgap[c] / 256.0 : 0);
+	}
+	tie_fft(z, lg);
+	// what came back, raw: as recorded, or with the driver's stage taken
+	// back, two passes of it in software
+	for (k = 0; k < 2 * n; k++)
+		ri[k] = (int16_t)lrint(v->seg[2 + (k & 1)][k / 2]);
+	if (v->lin_applied && v->have_ldc >= 16) {
+		int pass;
+
+		for (pass = 0; pass < 2; pass++) {
+			memcpy(si, ri, 2 * n * sizeof(*si));
+			lv_lin_stage(v, si, n);
+			for (k = 0; k < 2 * (n - ES_CF_HALF); k++) {
+				long r = ri[k] +
+					 lrint(v->seg[2 + (k & 1)][k / 2]) -
+					 si[k];
+
+				ri[k] = (int16_t)(r > 32767  ? 32767 :
+						  r < -32768 ? -32768 :
+							       r);
+			}
+		}
+	}
+	// what the stage gives: the recording, or the stage in software
+	for (k = 0; k < 2 * n; k++)
+		si[k] = v->lin_applied ?
+				(int16_t)lrint(v->seg[2 + (k & 1)][k / 2]) :
+				ri[k];
+	if (!v->lin_applied && v->have_ldc >= 16)
+		lv_lin_stage(v, si, n);
+	// the raw recording's spectrum, both sides, and its lowest bins kept
+	for (k = 0; k < n; k++) {
+		zy[2 * k] = ri[2 * k];
+		zy[2 * k + 1] = ri[2 * k + 1];
+	}
+	tie_fft(zy, LV_LOG2N);
+	for (k = 0; k <= LV_LIN_HI; k++) {
+		unsigned int kc = (n - k) % n;
+		double complex yy = zy[2 * k] + I * zy[2 * k + 1];
+		double complex yc = zy[2 * kc] - I * zy[2 * kc + 1];
+
+		low[0][k] = (yy + yc) / 2.0;
+		low[1][k] = (yy - yc) / (2.0 * I);
+	}
+	// the run's path, by Welch: the spectra through Hann's window, as
+	// three taps across the bins, then each side's own from a + jb
+	for (k = 0; k < v->bins; k++) {
+		double complex d[2], y[2], dw[2], yw[2];
+		int j;
+
+		for (c = 0; c < 2; c++)
+			dw[c] = yw[c] = 0;
+		for (j = -1; j <= 1; j++) {
+			long b = (long)k + j;
+			unsigned int bz = (unsigned int)((b + (long)nn) % nn);
+			unsigned int bc =
+				(unsigned int)((-b + 2 * (long)nn) % nn);
+			unsigned int by = (unsigned int)((b + (long)n) % n);
+			unsigned int byc =
+				(unsigned int)((-b + 2 * (long)n) % n);
+			double complex zz = z[2 * bz] + I * z[2 * bz + 1];
+			double complex zc = z[2 * bc] - I * z[2 * bc + 1];
+			double complex yy = zy[2 * by] + I * zy[2 * by + 1];
+			double complex yc = zy[2 * byc] - I * zy[2 * byc + 1];
+			double w = j ? -0.25 : 0.5;
+
+			d[0] = (zz + zc) / (2.0 * f);
+			d[1] = (zz - zc) / (2.0 * I * f);
+			y[0] = (yy + yc) / 2.0;
+			y[1] = (yy - yc) / (2.0 * I);
+			for (c = 0; c < 2; c++) {
+				dw[c] += w * d[c];
+				yw[c] += w * y[c];
+			}
+		}
+		for (c = 0; c < 2; c++) {
+			double complex x = yw[c] * conj(dw[c]);
+
+			v->lsxx[c][k] += creal(dw[c] * conj(dw[c]));
+			v->lsxy[c][2 * k] += creal(x);
+			v->lsxy[c][2 * k + 1] += cimag(x);
+		}
+	}
+	if (++v->lsegs < LV_LIN_AFTER)
+		return;
+	// what should have come: the path times the DAC's spectrum, both
+	// sides as one, p_l + j p_r, by bins of the whole circle; at the
+	// bottom, where a segment's path can't follow the AC coupling, the
+	// recording's own, its DC with it, crossing over by LV_LIN_HI
+	for (k = 0; k < n; k++) {
+		unsigned int kk = k <= n / 2 ? k : n - k;
+		double w = kk <= LV_LIN_LO ? 0 :
+			   kk >= LV_LIN_HI ? 1 :
+					     (double)(kk - LV_LIN_LO) /
+						     (LV_LIN_HI - LV_LIN_LO);
+		double complex p[2];
+
+		for (c = 0; c < 2; c++) {
+			double complex d, h = 0;
+			unsigned int bz = kk, bc = (nn - kk) % nn;
+			double complex zz = z[2 * bz] + I * z[2 * bz + 1];
+			double complex zc = z[2 * bc] - I * z[2 * bc + 1];
+
+			d = c ? (zz - zc) / (2.0 * I * f) :
+				(zz + zc) / (2.0 * f);
+			if (kk && kk < n / 2 && v->lsxx[c][kk] > 0)
+				h = (v->lsxy[c][2 * kk] +
+				     I * v->lsxy[c][2 * kk + 1]) /
+				    v->lsxx[c][kk];
+			p[c] = w * h * d;
+			if (kk < LV_LIN_HI)
+				p[c] += (1 - w) * low[c][kk];
+			if (k > n / 2)
+				p[c] = conj(p[c]);
+		}
+		zy[2 * k] = creal(p[0] + I * p[1]);
+		zy[2 * k + 1] = cimag(p[0] + I * p[1]);
+	}
+	// the segment's DC, which p now carries
+	for (c = 0; c < 2; c++)
+		dcs[c] = creal(low[c][0]) / n;
+	// p from the inverse, through the forward's conjugate; and the
+	// Hilbert transforms from a copy
+	memcpy(z, zy, 2 * (size_t)n * sizeof(double));
+	for (k = 0; k < n; k++)
+		zy[2 * k + 1] = -zy[2 * k + 1];
+	tie_fft(zy, LV_LOG2N);
+	for (k = 0; k < n; k++) {
+		v->lp[0][k] = zy[2 * k] / n;
+		v->lp[1][k] = -zy[2 * k + 1] / n;
+	}
+	lv_lin_hilbert(z, LV_LOG2N, v->lhp[0], v->lhp[1]);
+	// what the stage gave, its Hilbert transforms
+	for (k = 0; k < n; k++) {
+		v->lys[0][k] = si[2 * k];
+		v->lys[1][k] = si[2 * k + 1];
+		zy[2 * k] = si[2 * k];
+		zy[2 * k + 1] = si[2 * k + 1];
+	}
+	tie_fft(zy, LV_LOG2N);
+	lv_lin_hilbert(zy, LV_LOG2N, v->lhy[0], v->lhy[1]);
+	// the record path's DC over the segments: the first sixteen's mean,
+	// then slowly on
+	for (c = 0; c < 2; c++) {
+		if (v->have_ldc < 16)
+			v->ldc[c] += (dcs[c] - v->ldc[c]) / (v->have_ldc + 1);
+		else
+			v->ldc[c] += 0.02 * (dcs[c] - v->ldc[c]);
+	}
+	if (v->have_ldc < 16) {
+		// tables the driver started with: about the DC from then on
+		if (++v->have_ldc == 16 && lv_lin_unset(&v->ltab)) {
+			long cen[2] = { lrint(v->ldc[0]), lrint(v->ldc[1]) };
+
+			a1lin_identity(&v->ltab, cen);
+			lv_lin_sums(v);
+		}
+		return;
+	}
+	// raw, each side its own, in the stage's buffer, which lys now holds;
+	// the envelope led in over the eighth before what counts
+	for (c = 0; c < 2; c++)
+		for (k = 0; k < n; k++)
+			si[c * n + k] = ri[2 * k + c];
+	a1lin_restart(v->lin, v->ldc);
+	for (c = 0; c < 2; c++) {
+		// p about the segment's DC, which a1lin adds back
+		for (k = q; k < 3 * q; k++)
+			v->lp[c][k] -= dcs[c];
+		a1lin_lead(v->lin, c, si + c * n + q / 2, q / 2);
+		a1lin_add(v->lin, c, v->lp[c] + q, dcs[c], si + c * n + q,
+			  v->lys[c] + q, v->lhp[c] + q, v->lhy[c] + q, 2 * q);
+	}
+}
+
+// a block's end for the linearity: with enough frames, the fit, the next
+// tables loaded unless held, a line to the log, and the state
+static void lv_lin_block(struct loopview *v, double now, FILE *out)
+{
+	struct a1lin_tables next;
+	int moved = 0, c, loaded = 0;
+	static const int at[] = { 8, 12, 16, 20, 24 };
+
+	if (!v->lin || (!v->replay && (v->lin->s[0].n < LV_LIN_MIN ||
+				       v->lin->s[1].n < LV_LIN_MIN)))
+		return;
+	if (a1lin_fit(v->lin, &v->lfit)) {
+		lv_lin_sums(v);
+		return;
+	}
+	v->have_lfit = 1;
+	v->lin_fits++;
+	moved = a1lin_next(&v->lfit, &v->ltab, LV_LIN_STEP, &next);
+	if (moved && v->replay) {
+		v->ltab = next;
+		loaded = 1;
+	} else if (moved && !v->hold) {
+		if (lv_lin_write(v, &next))
+			say("Audio 1's linearity tables weren't loaded");
+		else {
+			v->ltab = next;
+			loaded = 1;
+		}
+	}
+	fprintf(out, "%.0f lin", now - v->t0);
+	for (c = 0; c < 2; c++) {
+		double left = 0;
+		unsigned int i;
+
+		fprintf(out, " %s centre %ld path", c ? "R" : "L",
+			v->ltab.centre[c]);
+		for (i = 0; i < sizeof(at) / sizeof(at[0]); i++)
+			fprintf(out, " %d:%+.2f", a1lin_knot(at[i]),
+				a1lin_path(&v->lfit, c, at[i]));
+		for (i = 4; i + 4 < A1L_VALS; i++)
+			if (fabs(v->lfit.curve[c][i]) > left)
+				left = fabs(v->lfit.curve[c][i]);
+		fprintf(out, " left %.2f", left);
+	}
+	fprintf(out, " LSB, %.0fk frames%s\n", v->lin->s[0].n / 1e3,
+		loaded		 ? " (loaded)" :
+		moved && v->hold ? " (held)" :
+				   "");
+	// the state for a viewer
+	if (v->st) {
+		struct eqs_state *s = v->st;
+		unsigned int i;
+
+		eqs_begin(s);
+		s->lin_fits = v->lin_fits;
+		s->lin_frames = (float)v->lin->s[0].n;
+		for (c = 0; c < 2; c++) {
+			s->lin_centre[c] = (int32_t)v->ltab.centre[c];
+			for (i = 0; i < A1L_VALS; i++) {
+				s->lin_path[c][i] =
+					(float)a1lin_path(&v->lfit, c, i);
+				s->lin_left[c][i] = (float)v->lfit.curve[c][i];
+				s->lin_curve[c][i] =
+					(int32_t)v->ltab.curve[c][i];
+			}
+			for (i = 0; i < A1L_PER; i++) {
+				double complex g = v->lfit.g[c][i];
+
+				s->lin_gain[c][i] = (int32_t)v->ltab.gain[c][i];
+				s->lin_turn[c][i] = (int32_t)v->ltab.turn[c][i];
+				s->lin_db[c][i] =
+					cabs(g) > 0 ?
+						(float)(20 * log10(cabs(g))) :
+						NAN;
+				s->lin_deg[c][i] =
+					(float)(carg(g) * 180 / M_PI);
+				s->lin_n[c][i] = (float)v->lfit.frames[c][i];
+			}
+		}
+		eqs_end(s);
+	}
+	lv_lin_sums(v);
+}
+
 // a block's end: the loop's deviation in bands and the clock's residual
 // into their trends, each predicted a block ahead; the DAC's correction
 // refitted to the drift and loaded, and the trim moved; lines to the log
@@ -2400,6 +3099,7 @@ static void lv_eq_block(struct loopview *v, double now)
 			lv_eq_noise(v, LV_EQ_BANDS - 1));
 	}
 	lv_eq_zstep(v, now, out);
+	lv_lin_block(v, now, out);
 	fflush(out);
 	// the block for a viewer
 	blk.counted = v->eq_segs > 0;
@@ -2927,6 +3627,7 @@ static void lv_publish(struct loopview *v, int force)
 	s->a1_rate = v->rate;
 	s->a1_rest = v->a1_rest;
 	s->a1c = v->a1c_applied;
+	s->lin_on = v->lin_applied;
 	s->hold = v->hold;
 	if (v->ctl) {
 		s->mode =
@@ -2997,8 +3698,8 @@ static void lv_changes(struct loopview *v)
 	if (!bits)
 		return;
 	if ((bits & LV_CH_A1C) && v->reading && !v->a1_rest && !v->retry) {
-		say("Audio 1's correction was switched: Audio 1 starts again "
-		    "to take it");
+		say("Audio 1's correction or linearity was switched: Audio 1 "
+		    "starts again to take it");
 		if (lv_start(v, LV_CAP, 0)) {
 			v->again = LV_BOTH;
 			v->retry = lv_now() + 1000000000LL;

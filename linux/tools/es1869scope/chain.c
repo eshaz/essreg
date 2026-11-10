@@ -66,6 +66,7 @@ enum {
 	ST_DAC,
 	ST_LIVE,
 	ST_A1C,
+	ST_LIN,
 	ST_ENGINE,
 	ST_N
 };
@@ -87,6 +88,7 @@ static const struct ch_stage {
 	{ "the DAC's own stages", 0, "audio2_oversampling", 0 },
 	{ "live corrections", 'h', NULL, 0 },
 	{ "Audio 1's correction", 'a', "a1c_filter", 0 },
+	{ "Audio 1's linearity", 'l', "a1c_linear", 0 },
 	{ "the engine", 0, NULL, 0 },
 };
 
@@ -367,6 +369,8 @@ static void ch_pending(struct chain *w, long long now)
 			taken = w->have && w->st->factor == (uint32_t)v + 1;
 		if (taken && st == ST_A1C && w->alive)
 			taken = w->have && w->st->a1c == (uint32_t)v;
+		if (taken && st == ST_LIN && w->alive)
+			taken = w->have && w->st->lin_on == (uint32_t)v;
 		if (taken) {
 			w->pending[st] = 0;
 			w->dirty = 1;
@@ -545,6 +549,14 @@ static void ch_says(struct chain *w, int st, char *out, size_t size)
 			 known && w->have && (long)s->a1c != v ?
 				 ", Audio 1 not yet" :
 				 "");
+		break;
+	case ST_LIN:
+		if (known && w->have && (long)s->lin_on != v)
+			snprintf(out, size, "%s, Audio 1 not yet", item);
+		else if (w->have && s->lin_fits)
+			snprintf(out, size, "%s, %u refits", item, s->lin_fits);
+		else
+			snprintf(out, size, "%s, not yet measured", item);
 		break;
 	case ST_ENGINE:
 		if (!w->have)
@@ -895,6 +907,86 @@ static void ch_vis_a1c(struct chain *w, struct canvas *c, int bx, int by,
 	axes_key(c, &a, 2, on ? ch_rgb[1] : C_GRID, "and right");
 }
 
+// Audio 1's linearity: what the record path adds to each sample about the
+// centre, and what the stage leaves; and the gain the stage leaves by the
+// envelope in the bands where the music has put enough
+static void ch_vis_lin(struct chain *w, struct canvas *c, int bx, int by,
+		       int bw, int bh)
+{
+	const struct eqs_state *s = w->st;
+	struct axes a = { .xunit = "LSB", .yunit = "LSB" };
+	struct axes b = { .xunit = "LSB", .yunit = "dB", .logx = 1 };
+	static const int knot[] = { -128, -96, -64, -48, -32, -24, -16, -12, -8,
+				    -6,	  -4,  -2,  0,	 2,   4,   6,	8,   12,
+				    16,	  24,  32,  48,	 64,  96,  128 };
+	double x[25], path[25], left[2][25], ex[10], g[4][10];
+	int on = w->have ? (int)s->lin_on : 0, i, side, band, n[4] = { 0 };
+	int top = bh / 2;
+
+	for (i = 0; i < 25; i++) {
+		x[i] = knot[i];
+		path[i] = w->have ? s->lin_path[0][i + 4] : 0;
+		for (side = 0; side < 2; side++)
+			left[side][i] = w->have ? s->lin_left[side][i + 4] : 0;
+	}
+	a.x0 = -128;
+	a.x1 = 128;
+	a.y0 = -6;
+	a.y1 = 6;
+	axes_draw(c, &a, bx, by, bw, top - 4,
+		  "what the record path adds, about its centre");
+	axes_series(c, &a, x, path, 25, C_DIM);
+	axes_series(c, &a, x, left[0], 25, on ? ch_rgb[0] : C_GRID);
+	axes_series(c, &a, x, left[1], 25, on ? ch_rgb[1] : C_GRID);
+	axes_key(c, &a, 0, C_DIM, "the path, left");
+	axes_key(c, &a, 1, on ? ch_rgb[0] : C_GRID,
+		 on ? "left after the stage" : "the stage, off");
+	axes_key(c, &a, 2, on ? ch_rgb[1] : C_GRID, "and right");
+	// the gain left by envelope, each band with the frames to show
+	for (i = 0; i < 10; i++)
+		ex[i] = 4 << i;
+	for (band = 0; band < 4; band++)
+		for (i = 0; i < 10; i++) {
+			int at = band * 10 + i;
+
+			g[band][i] =
+				w->have && s->lin_n[0][at] >= 2000 &&
+						isfinite(s->lin_db[0][at]) ?
+					s->lin_db[0][at] :
+					NAN;
+			n[band] += isfinite(g[band][i]);
+		}
+	b.x0 = 4;
+	b.x1 = 2048;
+	b.y0 = -1;
+	b.y1 = 1;
+	axes_draw(c, &b, bx, by + top, bw, bh - top,
+		  "the gain left by envelope, left");
+	for (band = 0; band < 4; band++) {
+		static const uint32_t col[4] = { 0x6fb3ff, 0x41c7b9, 0xe8d04a,
+						 0xff7eb6 };
+		static const char *const name[4] = { "under 200 Hz",
+						     "200 to 800 Hz",
+						     "800 to 3200 Hz",
+						     "over 3200 Hz" };
+		int k, start = -1;
+
+		// the runs of bins that have it
+		for (k = 0; k <= 10; k++) {
+			if (k < 10 && isfinite(g[band][k])) {
+				if (start < 0)
+					start = k;
+				continue;
+			}
+			if (start >= 0 && k - start >= 2)
+				axes_series(c, &b, ex + start, g[band] + start,
+					    k - start, col[band]);
+			start = -1;
+		}
+		axes_key(c, &b, band, n[band] ? col[band] : C_GRID, name[band]);
+	}
+}
+
 // lines of text in a panel
 static void ch_vis_text(struct chain *w, struct canvas *c, int bx, int by,
 			int bw, int bh, int st)
@@ -980,6 +1072,9 @@ static void ch_vis(struct chain *w, struct canvas *c, int st, int bx, int by,
 		break;
 	case ST_A1C:
 		ch_vis_a1c(w, c, bx, by, bw, bh);
+		break;
+	case ST_LIN:
+		ch_vis_lin(w, c, bx, by, bw, bh);
 		break;
 	default:
 		ch_vis_text(w, c, bx, by, bw, bh, st);
