@@ -37,7 +37,7 @@ struct spectro {
 };
 
 // magma: black, purple, a red-orange, a pale yellow
-static void make_map(uint32_t *map)
+void spectro_map(uint32_t *map)
 {
 	static const int stops[5][3] = { { 0, 0, 4 },
 					 { 59, 15, 112 },
@@ -152,7 +152,7 @@ struct spectro *spectro_open(const char *dev, unsigned int rate,
 	s->db = calloc(n / 2, sizeof(*s->db));
 	if (!s->x || !s->z || !s->db)
 		goto bad;
-	make_map(s->map);
+	spectro_map(s->map);
 	if (wav ? load_wav(s, wav) : open_capture(s, dev, rate))
 		goto bad;
 	return s;

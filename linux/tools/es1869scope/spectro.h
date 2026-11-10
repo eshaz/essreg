@@ -22,6 +22,8 @@ struct spectro;
 struct spectro *spectro_open(const char *dev, unsigned int rate,
 			     const char *wav, unsigned int log2n, int mmx);
 void spectro_close(struct spectro *s);
+/* the colour map from black through purple to yellow, 256 steps */
+void spectro_map(uint32_t *map);
 
 /* the whole view again, then rows as blocks come */
 void spectro_frame(struct spectro *s, struct canvas *c);

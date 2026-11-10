@@ -896,7 +896,8 @@ class ShotTest(unittest.TestCase):
         src = [os.path.join(SCOPE, f) for f in
                ("es1869scope.c", "tie.c", "draw.c", "fb.c", "plot.c",
                 "fft.c", "spectro.c", "loop.c", "loopview.c", "eq.c",
-                "zstep.c", "say.c", "eqstate.c")]
+                "zstep.c", "say.c", "eqstate.c", "ctl.c", "chain.c",
+                os.path.join("..", "..", "test", "settab.c"))]
         subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall",
                                "-Wextra", "-Werror", "-o", cls.prog] + src +
                               ["-lasound", "-lz", "-lm", "-lpthread"])
@@ -1099,6 +1100,81 @@ class ShotTest(unittest.TestCase):
         # single tap a frame before it
         self.assertEqual(int(np.argmax(np.abs(np.array(s.ir[0])))), 32)
         self.assertEqual(int(np.argmax(np.abs(np.array(s.ir[1])))), 31)
+
+    def state(self, path):
+        """an engine's state as a viewer finds it: measuring a 44.1 kHz
+        stream at 2x, six blocks in, with a tone in both spectrograms"""
+        s = EqsState()
+        s.magic, s.version, s.size = 0x31534545, 1, ctypes.sizeof(s)
+        s.state, s.watched = 2, 1
+        s.stream_rate, s.factor, s.a1_rate = 44100, 2, 44100
+        s.treble, s.mode, s.a1c = 1, 2, 1
+        s.lagged, s.segments, s.blocks = 1, 120, 6
+        for k in range(4):
+            s.rms[k], s.peak[k] = -23.0, -6.0
+        for i in range(EQS_POINTS):
+            f = 20 * 1000 ** (i / (EQS_POINTS - 1))
+            s.hz[i] = f
+            for c in range(2):
+                s.mag[c][i] = -0.5 * (f / 20000) ** 2
+                s.coh[c][i] = 0.999
+        for c in range(2):
+            s.ir[c][32] = 1.0
+        for b in range(EQS_BANDS):
+            s.band_hz[b] = 250 * 80 ** (b / (EQS_BANDS - 1))
+            s.band_dev[b], s.band_drift[b] = 0.1, 0.05
+        for src in range(2):
+            s.row_hz[src] = 44100 if src == 0 else 22050
+            s.row_next[src] = 70
+            for r in range(EQS_ROWS):
+                for j in range(EQS_BINS):
+                    s.rows[src][r][j] = -50 if j == 20 else -110
+        s.a1taps[0] = s.a1taps[17] = 16384
+        for i in range(10):
+            s.zhist[0][11 + i] = 100 + i
+        s.hist_count = s.hist_next = 6
+        for i in range(6):
+            b = s.hist[i]
+            b.t, b.counted, b.trim = 60 * (i + 1), 1, 10 * i
+            b.chip, b.applied, b.resid = 0.49, 0.5, 0.01
+            b.corr20k = 0.05 * i
+            for k in range(EQS_BANDS):
+                b.dev[k] = 0.1
+        with open(path, "wb") as fh:
+            fh.write(bytes(s))
+
+    def test_the_viewer_draws_every_view_and_stage(self):
+        """-A: a state drawn as the console shows it, with no card: each
+        view, and the chain with each stage's picture"""
+        state = os.path.join(self.tmp, "viewer.state")
+        self.state(state)
+        runs = [("-v", str(v)) for v in range(1, 6)]
+        runs += [("-v", "5", "-S", str(k)) for k in range(10)]
+        for args in runs:
+            ppm = os.path.join(self.tmp, "viewer.ppm")
+            r = subprocess.run([self.prog, "-A", state, "-s", ppm] +
+                               list(args), capture_output=True, text=True)
+            if r.returncode == 2 and "no console font" in r.stderr:
+                self.skipTest("no console font on this machine")
+            self.assertEqual(r.returncode, 0, (args, r.stderr))
+            seen = self.colours(ppm)
+            # the left side's colour wherever a picture draws a series
+            if args in (("-v", "2"), ("-v", "3"), ("-v", "5", "-S", "0"),
+                        ("-v", "5", "-S", "1"), ("-v", "5", "-S", "3"),
+                        ("-v", "5", "-S", "4")):
+                self.assertIn(self.PAIR[0], seen, args)
+
+    def test_the_viewer_refuses_what_isnt_a_state(self):
+        bad = os.path.join(self.tmp, "bad.state")
+        with open(bad, "wb") as fh:
+            fh.write(b"\0" * 64)
+        r = subprocess.run([self.prog, "-A", bad, "-s",
+                            os.path.join(self.tmp, "bad.ppm")],
+                           capture_output=True, text=True)
+        if r.returncode == 2 and "no console font" in r.stderr:
+            self.skipTest("no console font on this machine")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("bad.state", r.stderr)
 
     def test_the_calibration_fits_taps_that_flatten_a_path(self):
         """-C on two files: a path that rolls off like the record path, -4

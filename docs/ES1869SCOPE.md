@@ -96,7 +96,7 @@ es1869scope [-l LOG] [-d FB] [-s FILE.ppm] [-W WIDTH] [-H HEIGHT]
             [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]
             [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL] [-T SECONDS]
             [-m MONITOR] [-L DBFS] [-G PCM,ADC] [-C] [-E] [-O LOG]
-            [-P STATE]
+            [-P STATE] [-A STATE] [-S STAGE]
 ```
 
 It takes a virtual terminal's framebuffer, `/dev/fb0` by default, gives the
@@ -134,6 +134,63 @@ A stream's restart, or a stall of its DAC, leaves a gap that the master's
 ticks don't count, so the lateness is taken against a line for each stretch
 between them. The line goes through the earliest interrupt of each second,
 since lateness only ever adds.
+
+## On the console beside es1869eq
+
+While es1869eq runs, `es1869scope` with no options attaches to it: it maps
+the state that the engine shares (below), asks it to watch every few
+seconds, and opens no audio device, since the service holds them. A member
+of the audio group can run it on any console; `-A STATE` attaches to another
+state. Its views:
+* **5, the chain** (the first): what the audio goes through, from Audio 2's
+  stream to the line out and back on Audio 1, a stage a row with what it
+  does now and the key that switches it. Beside the list, the stage that `j`
+  and `k` (or the arrows) choose shows what it does to the sound, with the
+  driver's own description of its setting under it.
+* **1, the clock:** the chip's rate on the steered clock, what the driver
+  applies and the residual, a block at a time, and how late each of Audio
+  2's newest interrupts came, from `/proc/asound/ES1869/es1869_irqs`.
+* **2, the spectrogram:** what the DAC took, at the DAC's own rate, over
+  what came back on Audio 1, a row ten times a second.
+* **3, the loop:** the response against 1 kHz, the phase past the delay,
+  what isn't the path, and the impulse response, once a second.
+* **4, over time:** each band's deviation a block at a time as colours, and
+  the correction's change at 20 kHz and the trim under it.
+
+The stages and what each picture shows:
+* **Audio 2's stream:** its rate, format and state; what plays and what
+  comes back, the newest spectrum of each.
+* **[r] rate correction** (Off, Trim, Clock): the clock as the clock view
+  has it.
+* **[d] rounding dither:** the floor under the music.
+* **[t] treble correction:** the DAC's droop at the rate in use, the
+  correction's live taps, and what comes out of both.
+* **[o] output rate** (1x, 2x, 3x): what the DAC took up to half its own
+  rate, where the images of the stream's top would lie, with the hold's
+  droop.
+* **[z] zero step:** the DAC's level against its code near 0, alone and with
+  the remap, over how often the music comes to each code.
+* **The DAC's own stages:** ESS's oversampling and filters, and the volumes,
+  shown only.
+* **[h] live corrections:** the loop's deviation at the start and in the
+  last block, and the correction and the trim over the blocks. `h` holds the
+  engine's refits and trim, or lets them go on.
+* **[a] Audio 1's correction:** the record path as calibrated, the
+  correction's taps, and their product.
+* **The engine:** its state, why it stands still if it does, and its run.
+
+A key switches its stage's control as the user, and the row reads `pending`
+until the control and the engine agree with it, or the bar under the views
+says it wasn't taken. The first switch of the sound holds the engine's
+refits and trim, so that only the switch changes what is heard during a
+comparison. 3x first asks the engine to rest Audio 1, since the DAC stalls
+while Audio 1 records. When the viewer quits, the switches go back to what
+they were when it attached, and the hold it made ends, unless `K` keeps
+them. `R` draws everything again, space holds the picture, and `q` quits.
+The panels are drawn again at most twice a second and the spectrogram a row
+at a time, so that the viewer stays light beside MPD and the engine. `-s`
+with `-A` draws one view of a state into a picture, `-v` choosing the view
+and `-S` the chain's stage, from 0.
 
 ## The spectrogram
 

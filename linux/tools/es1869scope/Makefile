@@ -25,7 +25,7 @@ es1869clock: es1869clock.o phase.o
 	$(CC) $(LDFLAGS) -o $@ $^ -lasound -lm
 
 es1869scope: es1869scope.o tie.o draw.o fb.o plot.o fft.o spectro.o loop.o \
-	     loopview.o eq.o zstep.o say.o eqstate.o
+	     loopview.o eq.o zstep.o say.o eqstate.o ctl.o chain.o settab.o
 	$(CC) $(LDFLAGS) -o $@ $^ -lasound -lz -lm -lpthread
 
 es1869clock.o: es1869clock.c phase.h
@@ -40,11 +40,17 @@ fft.o: fft.c fft.h
 loop.o: loop.c loop.h tie.h
 spectro.o: spectro.c spectro.h fft.h draw.h plot.h say.h
 loopview.o: loopview.c loopview.h loop.h draw.h plot.h tie.h eq.h zstep.h \
-	    say.h eqstate.h fft.h
+	    say.h eqstate.h fft.h ctl.h
 eq.o: eq.c eq.h
 zstep.o: zstep.c zstep.h
 say.o: say.c say.h draw.h plot.h
 eqstate.o: eqstate.c eqstate.h
+ctl.o: ctl.c ctl.h
+chain.o: chain.c chain.h ctl.h eq.h eqstate.h plot.h say.h spectro.h \
+	 ../../test/settab.h
+settab.o: ../../test/settab.c ../../test/settab.h ../../es1869/settings.def \
+	  ../../es1869/settings_kinds.h
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 install: all
 	$(INSTALL) -d $(DESTDIR)$(BINDIR)

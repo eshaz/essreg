@@ -65,6 +65,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "chain.h"
 #include "draw.h"
 #include "eqstate.h"
 #include "fb.h"
@@ -655,7 +656,8 @@ static void usage(void)
 		"                   [-v 1|2|3] [-c CAPTURE] [-r RATE] [-i FILE.wav]\n"
 		"                   [-x PLAYED.wav] [-p PLAY] [-a CAPTURE] [-k CTL]\n"
 		"                   [-T SECONDS] [-m MONITOR] [-L DBFS] [-G PCM,ADC]\n"
-		"                   [-C] [-E] [-O LOG] [-P STATE]\n");
+		"                   [-C] [-E] [-O LOG] [-P STATE] [-A STATE]\n"
+		"                   [-S STAGE]\n");
 }
 
 int main(int argc, char **argv)
@@ -673,7 +675,9 @@ int main(int argc, char **argv)
 	struct loopview *lv = NULL;
 	struct spectro *sp = NULL;
 	double secs = 12;
-	int view = 1;
+	int view = 1, view_set = 0, stage = 0;
+	const char *attach = NULL;
+	struct chain *ch = NULL;
 	static struct data d;
 	struct canvas c;
 	struct font font;
@@ -681,7 +685,8 @@ int main(int argc, char **argv)
 	int o, got, held = 0;
 
 	while ((o = getopt(argc, argv,
-			   "l:d:s:W:H:v:c:r:i:x:p:a:k:T:m:L:G:CEO:P:")) != -1) {
+			   "l:d:s:W:H:v:c:r:i:x:p:a:k:T:m:L:G:CEO:P:A:S:")) !=
+	       -1) {
 		switch (o) {
 		case 'l':
 			log = optarg;
@@ -700,8 +705,13 @@ int main(int argc, char **argv)
 			break;
 		case 'v':
 			view = atoi(optarg);
-			if (view < 1 || view > 3)
-				view = 1;
+			view_set = 1;
+			break;
+		case 'A':
+			attach = optarg;
+			break;
+		case 'S':
+			stage = atoi(optarg);
 			break;
 		case 'c':
 			cdev = optarg;
@@ -767,6 +777,13 @@ int main(int argc, char **argv)
 		say("no console font found");
 		return 2;
 	}
+	// with nothing asked of the devices, the screen attaches to es1869eq
+	// while it runs
+	if (!attach && !shot && !view_set && !lc.ref && !wav && !lc.monitor &&
+	    !lc.calibrate && !lc.equalize && eqs_alive(EQS_PATH))
+		attach = EQS_PATH;
+	if (!attach && (view < 1 || view > 3))
+		view = 1;
 	if (view == 3 && lc.ref)
 		lc.rec = wav;
 	// over time, beside the music: from the monitor, a block of -T seconds,
@@ -785,6 +802,24 @@ int main(int argc, char **argv)
 	if (follow(&d, log) < 0)
 		snprintf(d.missing, sizeof(d.missing), "%s: %s", log,
 			 strerror(errno));
+	if (shot && attach) {
+		// a picture of the view of a state, such as an engine left
+		if (canvas_init(&c, w, h))
+			return 2;
+		c.font = &font;
+		ch = chain_open(attach, lc.ctl, 0);
+		if (!ch)
+			return 2;
+		chain_view(ch, view_set ? view : CHAIN_VIEW);
+		chain_select(ch, stage);
+		chain_frame(ch, &c);
+		chain_close(ch);
+		if (canvas_ppm(&c, shot)) {
+			perror(shot);
+			return 2;
+		}
+		return 0;
+	}
 	if (shot) {
 		if (canvas_init(&c, w, h))
 			return 2;
@@ -856,6 +891,41 @@ int main(int argc, char **argv)
 		return 2;
 	}
 	c.font = &font;
+	if (attach) {
+		ch = chain_open(attach, lc.ctl, 1);
+		if (ch && view_set)
+			chain_view(ch, view);
+	}
+	while (ch && !stop) {
+		int k = fb_key(&fb), r;
+
+		// an arrow comes as ESC [ A or B
+		if (k == 27) {
+			int a = fb_key(&fb), b = fb_key(&fb);
+
+			k = a != '[' ? -1 :
+			    b == 'A' ? CHAIN_UP :
+			    b == 'B' ? CHAIN_DOWN :
+				       -1;
+		}
+		fb_poll_switch(&fb);
+		if (fb.redraw && fb.shown)
+			chain_frame(ch, &c);
+		r = chain_step(ch, &c, k);
+		if (r < 0)
+			break;
+		if (fb.shown && (r || fb.redraw))
+			fb_present(&fb, &c);
+		usleep(20000);
+	}
+	if (ch) {
+		chain_close(ch);
+		fb_close(&fb);
+		say_keep(0);
+		say_replay();
+		canvas_free(&c);
+		return 0;
+	}
 	while (!stop) {
 		int k = fb_key(&fb);
 
