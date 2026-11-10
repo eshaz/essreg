@@ -13,6 +13,15 @@
  * filter's taps come from a measurement of that path (es1869scope's loop view)
  * and differ between the channels.
  *
+ * The phase taps take back what the record path does to the phase past its
+ * delay, which on the Armada reaches 10 to 15 degrees at 20 kHz from the
+ * anti-alias filter. A symmetric FIR's response is real against its delay, so
+ * it can only take back the magnitude; an antisymmetric one's is imaginary,
+ * j times a sine series, and the two together make any response the taps can
+ * hold, as a complex number: S - jA, with S the symmetric taps' cosine series
+ * and A the phase taps' sine series. A channel whose phase taps are all 0
+ * skips them.
+ *
  * A pass copies its frames after the last raw ones, so that each output reads
  * the raw samples around it in one place, and moves the newest raw ones to the
  * front for the next pass. The two taps at the same distance share a multiply.
@@ -182,6 +191,7 @@ static s64 cl_frame(struct es1869_cf *cf, u32 c, s64 acc, const s16 *x)
 void es1869_cf_identity(struct es1869_cf *cf)
 {
 	memset(cf->taps, 0, sizeof(cf->taps));
+	memset(cf->ptaps, 0, sizeof(cf->ptaps));
 	cf->taps[0][0] = ES_CF_ONE;
 	cf->taps[1][0] = ES_CF_ONE;
 }
@@ -194,9 +204,12 @@ void es1869_cf_run(struct es1869_cf *cf, s16 *buf, u32 n, u32 channels)
 		u32 k = n < ES_CF_CHUNK ? n : ES_CF_CHUNK, i, c, m;
 
 		for (c = 0; c < channels; c++) {
-			const s16 *t = cf->taps[c];
+			const s16 *t = cf->taps[c], *pt = cf->ptaps[c];
 			s16 *w = cf->raw[c];
+			bool ph = false;
 
+			for (m = 0; m < ES_CF_HALF; m++)
+				ph |= pt[m] != 0;
 			for (i = 0; i < k; i++)
 				w[keep + i] = buf[i * channels + c];
 			for (i = 0; i < k; i++) {
@@ -208,6 +221,9 @@ void es1869_cf_run(struct es1869_cf *cf, s16 *buf, u32 n, u32 channels)
 
 				for (m = 1; m <= ES_CF_HALF; m++)
 					acc += (s64)t[m] * (x[-(s32)m] + x[m]);
+				for (m = 1; ph && m <= ES_CF_HALF; m++)
+					acc += (s64)pt[m - 1] *
+					       (x[-(s32)m] - x[m]);
 				if (cf->cl_on)
 					acc = cl_frame(cf, c, acc, x);
 				v = (acc + ES_CF_ONE / 2) >> 14;

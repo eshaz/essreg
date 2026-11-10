@@ -92,7 +92,7 @@ class EqsState(ctypes.Structure):
                 ("row_next", U32 * 2), ("row_hz", U32 * 2),
                 ("rows", ((ctypes.c_int8 * EQS_BINS) * EQS_ROWS) * 2),
                 ("taps", I32 * 48), ("taps0", I32 * 48),
-                ("a1taps", I32 * EQS_A1TAPS),
+                ("a1taps", I32 * EQS_A1TAPS), ("a1ptaps", I32 * 32),
                 ("zhist", (U32 * EQS_ZBINS) * 2),
                 ("hist_next", U32), ("hist_count", U32),
                 ("hist", EqsBlock * EQS_HIST),
@@ -584,7 +584,7 @@ class StateTest(unittest.TestCase):
     def test_the_layout_is_the_same_here_and_on_the_armada(self):
         """the engine's size, which a 32-bit build gives too"""
         path, s, _fd = self.create("layout.state")
-        self.assertEqual(ctypes.sizeof(EqsState), 34368)
+        self.assertEqual(ctypes.sizeof(EqsState), 34496)
         self.assertEqual(s.contents.size, ctypes.sizeof(EqsState))
         self.assertEqual(s.contents.magic, 0x31534545)
         self.assertEqual(s.contents.pid, os.getpid())
@@ -1144,6 +1144,8 @@ class ShotTest(unittest.TestCase):
                 for j in range(EQS_BINS):
                     s.rows[src][r][j] = -50 if j == 20 else -110
         s.a1taps[0] = s.a1taps[17] = 16384
+        for k in range(3):
+            s.a1ptaps[k] = s.a1ptaps[16 + k] = (900, -300, 80)[k]
         for i in range(10):
             s.zhist[0][11 + i] = 100 + i
         s.hist_count = s.hist_next = 6
@@ -1311,6 +1313,64 @@ class ShotTest(unittest.TestCase):
                                       for m in range(1, 17))
                 self.assertLess(abs(20 * np.log10(corr * path / path1k)),
                                 0.2, (side, hz))
+
+    def test_the_calibration_takes_back_the_phase_too(self):
+        """-C on two files through paths whose phase isn't linear, as the
+        record path's anti-alias filter: the symmetric taps and the phase
+        taps together leave the path flat within 0.2 dB and its phase past
+        the delay within 2.5 degrees from 500 Hz to 18 kHz, as near as 33
+        taps come, where the symmetric taps alone leave up to 24 degrees"""
+        rng = np.random.default_rng(15)
+        n = 44100 * 4
+        x = rng.uniform(-0.17, 0.17, (n, 2))
+        # 5 and 7.6 dB down at 20 kHz, 28 and -12 degrees past the delay
+        paths = ([0.06, 0.74, 0.16, 0.04], [0.2, 0.7, 0.1])
+        y = np.zeros((n + 300, 2))
+        for c, h in enumerate(paths):
+            y[300:, c] = -np.convolve(x[:, c], h)[:n]
+        y += rng.normal(0, 1e-4, y.shape)
+        ref = os.path.join(self.tmp, "calph-played.wav")
+        rec = os.path.join(self.tmp, "calph-back.wav")
+        self.wav(ref, x)
+        self.wav(rec, y)
+        r = subprocess.run([self.prog, "-l", os.devnull, "-C", "-x", ref,
+                            "-i", rec, "-s",
+                            os.path.join(self.tmp, "cph.ppm")],
+                           capture_output=True, text=True)
+        if r.returncode == 2 and "no console font" in r.stderr:
+            self.skipTest("no console font on this machine")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        taps, ptaps = {}, {}
+        for line in r.stdout.splitlines():
+            f = line.split()
+            if f and f[0] in ("taps", "ptaps"):
+                (taps if f[0] == "taps" else ptaps)[f[1]] = np.array(
+                    [int(v) for v in f[2:]]) / 16384
+        self.assertEqual(sorted(ptaps), ["L", "R"])
+        hz = np.arange(200, 20001, 100.0)
+        w = 2 * np.pi * hz / 44100
+        m = np.arange(1, 17)
+        for c, side in enumerate("LR"):
+            path = np.array([sum(v * np.exp(-1j * ww * k)
+                                 for k, v in enumerate(paths[c]))
+                             for ww in w])
+            S = taps[side][0] + 2 * np.cos(np.outer(w, m)) @ taps[side][1:]
+            A = 2 * np.sin(np.outer(w, m)) @ ptaps[side]
+            for corr, tol in ((S - 1j * A, 2.5), (S, None)):
+                total = corr * path
+                ph = np.unwrap(np.angle(total))
+                fit = (hz >= 200) & (hz <= 3000)
+                line = np.polyfit(hz[fit], ph[fit], 1)
+                resid = np.degrees(ph - np.polyval(line, hz))
+                band = (hz >= 500) & (hz <= 18000)
+                if tol is None:
+                    # the symmetric taps alone leave the path's phase
+                    self.assertGreater(np.abs(resid[band]).max(), 5, side)
+                    continue
+                mag = 20 * np.log10(np.abs(total) /
+                                    np.abs(total[np.argmin(abs(hz - 1000))]))
+                self.assertLess(np.abs(mag[band]).max(), 0.2, side)
+                self.assertLess(np.abs(resid[band]).max(), tol, side)
 
     def test_the_loop_view_says_when_there_is_no_loop(self):
         rng = np.random.default_rng(13)

@@ -874,29 +874,43 @@ static void ch_vis_a1c(struct chain *w, struct canvas *c, int bx, int by,
 		       int bw, int bh)
 {
 	struct axes a = { .xunit = "Hz", .yunit = "dB", .logx = 1 };
-	double f[80], g[2][80], path[80];
+	struct axes p = { .xunit = "Hz", .yunit = "deg", .logx = 1 };
+	double f[80], g[2][80], ph[2][80], path[80], pathph[80];
 	double rate = w->have && w->st->a1_rate ? w->st->a1_rate : 44100;
-	int on = w->have ? (int)w->st->a1c : 0, i, side, m;
+	int on = w->have ? (int)w->st->a1c : 0, i, side, m, top = bh * 3 / 5;
 
 	for (i = 0; i < 80; i++) {
 		f[i] = 100 * pow(20000 / 100.0, i / 79.0);
 		for (side = 0; side < 2; side++) {
 			const int32_t *t = w->have ? w->st->a1taps + side * 17 :
 						     NULL;
-			double sum = t ? t[0] : 16384;
+			const int32_t *pt =
+				w->have ? w->st->a1ptaps + side * 16 : NULL;
+			double sr = t ? t[0] : 16384, ai = 0;
+			double om = 2 * M_PI * f[i] / rate;
 
-			for (m = 1; t && m <= 16; m++)
-				sum += 2.0 * t[m] *
-				       cos(2 * M_PI * f[i] * m / rate);
-			g[side][i] = 20 * log10(fmax(fabs(sum / 16384), 1e-6));
+			// S - jA: the symmetric taps' cosines, the phase
+			// taps' sines
+			for (m = 1; t && m <= 16; m++) {
+				sr += 2.0 * t[m] * cos(om * m);
+				ai += 2.0 * pt[m - 1] * sin(om * m);
+			}
+			g[side][i] = 10 * log10(fmax((sr * sr + ai * ai) /
+							     (16384.0 * 16384),
+						     1e-12));
+			ph[side][i] = atan2(-ai, sr) * 180 / M_PI;
 		}
+		// the record path as calibrated: the left's inverse
 		path[i] = -g[0][i];
+		pathph[i] = -ph[0][i];
 	}
-	a.x0 = 100;
-	a.x1 = 20000;
+	a.x0 = p.x0 = 100;
+	a.x1 = p.x1 = 20000;
 	a.y0 = -8;
 	a.y1 = 8;
-	axes_draw(c, &a, bx, by, bw, bh,
+	p.y0 = -30;
+	p.y1 = 30;
+	axes_draw(c, &a, bx, by, bw, top - 4,
 		  "the record path, its correction, and both");
 	axes_series(c, &a, f, path, 80, C_DIM);
 	axes_series(c, &a, f, g[0], 80, on ? ch_rgb[0] : C_GRID);
@@ -905,6 +919,11 @@ static void ch_vis_a1c(struct chain *w, struct canvas *c, int bx, int by,
 	axes_key(c, &a, 1, on ? ch_rgb[0] : C_GRID,
 		 on ? "the correction, left" : "the correction, off");
 	axes_key(c, &a, 2, on ? ch_rgb[1] : C_GRID, "and right");
+	axes_draw(c, &p, bx, by + top, bw, bh - top,
+		  "their phase past the delay");
+	axes_series(c, &p, f, pathph, 80, C_DIM);
+	axes_series(c, &p, f, ph[0], 80, on ? ch_rgb[0] : C_GRID);
+	axes_series(c, &p, f, ph[1], 80, on ? ch_rgb[1] : C_GRID);
 }
 
 // Audio 1's linearity: what the record path adds to each sample about the

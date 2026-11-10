@@ -28,6 +28,7 @@
 #define EQS_ZBINS 33 /* the codes from -16 to 16 */
 #define EQS_SIDES 16 /* the DAC correction's taps each side, at a factor */
 #define EQS_A1TAPS 34 /* Audio 1's correction: 17 a side */
+#define EQS_A1PTAPS 32 /* and its phase taps: 16 a side */
 #define EQS_IR 65 /* the impulse response's taps, 32 each side of 0 */
 #define EQS_LVALS 33 /* Audio 1's linearity curve's knots, -512 to +512 */
 #define EQS_LPER 40 /* its gains and turns: 4 bands by 10 envelope bins */
@@ -94,7 +95,7 @@ struct eqs_state {
 	/* the DAC's correction now and at the start, at 1x, 2x and 3x, and
 	 * Audio 1's correction */
 	int32_t taps[3 * EQS_SIDES], taps0[3 * EQS_SIDES];
-	int32_t a1taps[EQS_A1TAPS];
+	int32_t a1taps[EQS_A1TAPS], a1ptaps[EQS_A1PTAPS];
 	/* how often the monitor's codes came to each value from -16 to 16 */
 	uint32_t zhist[2][EQS_ZBINS];
 	/* the blocks, the newest at hist_next - 1 */

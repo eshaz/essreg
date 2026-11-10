@@ -112,6 +112,7 @@
 #define LV_CF_ONE 16384
 #define LV_CAL_MAX 4.0 // the most it may lift, 12 dB
 #define LV_CAL_TOP 20000.0 // the top of the band it flattens, Hz
+#define LV_DAC_LAST 0.062 // the DAC's share of the last sample (treble.h)
 #define LV_CAL_AT 6
 
 static const double lv_cal_at[LV_CAL_AT] = { 1000,  5000,  10000,
@@ -305,7 +306,9 @@ struct loopview {
 	int have0;
 	FILE *eqlog;
 	double before[2][LV_CAL_AT]; // the record path before, dB against 1 kHz
+	double before_ph[2][LV_CAL_AT]; // and its phase past the delay, degrees
 	long taps[2][LV_CF_HALF + 1];
+	long ptaps[2][LV_CF_HALF]; // the correction's phase taps
 	double peak[2]; // the correction's most gain, dB
 };
 
@@ -1512,9 +1515,12 @@ static int lv_files(struct loopview *v)
 
 		lv_figures(v);
 		for (c = 0; c < 2; c++) {
-			for (i = 0; i < LV_CAL_AT; i++)
+			for (i = 0; i < LV_CAL_AT; i++) {
 				v->before[c][i] =
 					v->mag[c][lv_bin(v, lv_cal_at[i])];
+				v->before_ph[c][i] =
+					v->ph[c][lv_bin(v, lv_cal_at[i])];
+			}
 			if (lv_design(v, c))
 				return 0;
 		}
@@ -2051,93 +2057,168 @@ static void lv_figures(struct loopview *v)
 	lv_ir(v);
 }
 
-// the correction filter's response, from its taps, at f
-static double lv_cf_gain(const long *t, double f, unsigned int rate)
+// the correction filter's response against its delay, from its taps, at f:
+// S - jA, the symmetric taps' cosine series and the phase taps' sine series
+static double complex lv_cf_resp(const long *t, const long *pt, double f,
+				 unsigned int rate)
 {
-	double a = t[0];
+	double s = t[0], a = 0, w = 2 * M_PI * f / rate;
 	int m;
 
-	for (m = 1; m <= LV_CF_HALF; m++)
-		a += 2.0 * t[m] * cos(2 * M_PI * f * m / rate);
-	return a / LV_CF_ONE;
+	for (m = 1; m <= LV_CF_HALF; m++) {
+		s += 2.0 * t[m] * cos(w * m);
+		a += 2.0 * pt[m - 1] * sin(w * m);
+	}
+	return (s - I * a) / LV_CF_ONE;
 }
 
-// taps that take back channel c's measured response, against its gain at
-// 1 kHz, up to LV_CAL_TOP: the symmetric FIR of capfilt.c, fitted by least
-// squares to the inverse, held at the top's value above it with little
-// weight, and lifting by LV_CAL_MAX at most
-static int lv_design(struct loopview *v, int c)
+// the DAC's own phase past a delay, at its rate: the share of the last
+// sample it keeps (treble.h), which the treble correction takes back in
+// magnitude only
+static double lv_dac_phase(double f, double rate)
 {
-	enum { N = LV_CF_HALF + 1 };
-	double a[N][N + 1], x[N], ref = cabs(v->h[c][lv_bin(v, 1000)]);
-	double top = cabs(v->h[c][lv_bin(v, LV_CAL_TOP)]) / ref, hz;
-	unsigned int k, i, j, r;
+	double th = 2 * M_PI * f / rate;
 
-	if (!(ref > 0) || !(top > 0))
-		return -1;
-	memset(a, 0, sizeof(a));
-	hz = (double)v->rate / v->n;
-	for (k = 1; k < v->bins; k++) {
-		double f = k * hz, m = cabs(v->h[c][k]) / ref, t, w, b[N];
+	return atan2(-LV_DAC_LAST * sin(th), 1 + LV_DAC_LAST * cos(th));
+}
 
-		if (f < 20)
-			continue;
-		if (f <= LV_CAL_TOP) {
-			t = m > 0 ? 1 / m : LV_CAL_MAX;
-			w = 1;
-		} else {
-			t = 1 / top;
-			w = 0.02;
-		}
-		t = fmin(t, LV_CAL_MAX);
-		for (i = 0; i < N; i++)
-			b[i] = i ? 2 * cos(2 * M_PI * f * i / v->rate) : 1;
-		for (i = 0; i < N; i++) {
-			for (j = 0; j < N; j++)
-				a[i][j] += w * b[i] * b[j];
-			a[i][N] += w * b[i] * t;
-		}
-	}
-	// Gauss with the largest pivot of each column
-	for (i = 0; i < N; i++) {
+// a system of n normal equations, a[i][n] the right side, by Gauss with
+// the largest pivot of each column: 0, or -1
+static int lv_solve_n(double (*a)[LV_CF_HALF + 2], int n, double *x)
+{
+	int i, j, r, k;
+
+	for (i = 0; i < n; i++) {
 		double p;
 
 		r = i;
-		for (j = i + 1; j < N; j++)
+		for (j = i + 1; j < n; j++)
 			if (fabs(a[j][i]) > fabs(a[r][i]))
 				r = j;
 		if (fabs(a[r][i]) < 1e-12)
 			return -1;
-		for (j = 0; j <= N; j++) {
+		for (j = 0; j <= n; j++) {
 			p = a[i][j];
 			a[i][j] = a[r][j];
 			a[r][j] = p;
 		}
-		for (j = i + 1; j < N; j++) {
+		for (j = i + 1; j < n; j++) {
 			double q = a[j][i] / a[i][i];
 
-			for (r = i; r <= N; r++)
-				a[j][r] -= q * a[i][r];
+			for (k = i; k <= n; k++)
+				a[j][k] -= q * a[i][k];
 		}
 	}
-	for (i = N; i-- > 0;) {
-		double s = a[i][N];
+	for (i = n; i-- > 0;) {
+		double s = a[i][n];
 
-		for (j = i + 1; j < N; j++)
+		for (j = i + 1; j < n; j++)
 			s -= a[i][j] * x[j];
 		x[i] = s / a[i][i];
 	}
-	v->peak[c] = -1e9;
+	return 0;
+}
+
+// taps that take back channel c's measured response, magnitude and phase,
+// against its gain at 1 kHz and its delay, up to LV_CAL_TOP: the inverse as
+// a complex number, its real part by the symmetric taps' cosines and its
+// imaginary part by the phase taps' sines, each by least squares, held at
+// the top's value above it with little weight, and lifting by LV_CAL_MAX at
+// most. The phase is the response's past the line through it over the
+// delay's band, the DAC's own taken out first where the calibration played
+// it; under 2 kHz it fades out to 0 by 500 Hz, since 33 taps can't follow
+// the AC coupling's
+static int lv_design(struct loopview *v, int c)
+{
+	enum { N = LV_CF_HALF + 1, P = LV_CF_HALF };
+	double a[N][N + 1], b[P][N + 1], x[N], y[P];
+	double ref = cabs(v->h[c][lv_bin(v, 1000)]);
+	double top = cabs(v->h[c][lv_bin(v, LV_CAL_TOP)]) / ref, hz;
+	double dac = v->play ? 2.0 * v->rate : 0, slope = 0, sw = 0, swf = 0;
+	double swu = 0, swff = 0, swfu = 0, den, u = 0, prev = 0, turn;
+	unsigned int k, i, j, k0 = lv_bin(v, LV_FIT_LO),
+			      kh = lv_bin(v, LV_FIT_HI);
+
+	if (!(ref > 0) || !(top > 0))
+		return -1;
+	hz = (double)v->rate / v->n;
+	// the delay, as lv_figures() finds it, with the DAC's phase out
+	for (k = k0; k <= kh; k++) {
+		double f = k * hz,
+		       ph = carg(v->h[c][k]) - (dac ? lv_dac_phase(f, dac) : 0);
+		double co = v->coh[c][k], w;
+
+		u = k == k0 ? ph : u + lv_wrap(ph - prev);
+		prev = ph;
+		w = co / fmax(1 - co, 1e-6);
+		sw += w;
+		swf += w * f;
+		swu += w * u;
+		swff += w * f * f;
+		swfu += w * f * u;
+	}
+	den = sw * swff - swf * swf;
+	if (sw > 0 && den != 0)
+		slope = (sw * swfu - swf * swu) / den;
+	turn = v->invert[c] ? M_PI : 0;
+	memset(a, 0, sizeof(a));
+	memset(b, 0, sizeof(b));
+	for (k = 1; k < v->bins; k++) {
+		double f = k * hz, m = cabs(v->h[c][k]) / ref, w, fade, t, ph;
+		double bs[N], bp[P];
+		double complex target;
+
+		if (f < 20)
+			continue;
+		if (f <= LV_CAL_TOP) {
+			t = fmin(m > 0 ? 1 / m : LV_CAL_MAX, LV_CAL_MAX);
+			ph = lv_wrap(carg(v->h[c][k]) -
+				     (dac ? lv_dac_phase(f, dac) : 0) -
+				     slope * f - turn);
+			fade = f >= 2000 ? 1 :
+			       f <= 500	 ? 0 :
+					   log(f / 500) / log(4.0);
+			target = t * cexp(-I * ph * fade);
+			w = 1;
+		} else {
+			target = fmin(1 / top, LV_CAL_MAX);
+			w = 0.02;
+		}
+		for (i = 0; i < N; i++)
+			bs[i] = i ? 2 * cos(2 * M_PI * f * i / v->rate) : 1;
+		for (i = 0; i < P; i++)
+			bp[i] = 2 * sin(2 * M_PI * f * (i + 1) / v->rate);
+		for (i = 0; i < N; i++) {
+			for (j = 0; j < N; j++)
+				a[i][j] += w * bs[i] * bs[j];
+			a[i][N] += w * bs[i] * creal(target);
+		}
+		// S - jA = target: A's sines against minus its imaginary part
+		for (i = 0; i < P; i++) {
+			for (j = 0; j < P; j++)
+				b[i][j] += w * bp[i] * bp[j];
+			b[i][P] -= w * bp[i] * cimag(target);
+		}
+	}
+	if (lv_solve_n(a, N, x) || lv_solve_n(b, P, y))
+		return -1;
 	for (i = 0; i < N; i++) {
 		long q = lrint(x[i] * LV_CF_ONE);
 
 		v->taps[c][i] = q > 32767 ? 32767 : q < -32768 ? -32768 : q;
 	}
+	for (i = 0; i < P; i++) {
+		long q = lrint(y[i] * LV_CF_ONE);
+
+		v->ptaps[c][i] = q > 32767 ? 32767 : q < -32768 ? -32768 : q;
+	}
+	v->peak[c] = -1e9;
 	for (k = 0; k < v->bins; k++)
-		v->peak[c] = fmax(v->peak[c],
-				  20 * log10(fabs(lv_cf_gain(v->taps[c], k * hz,
-							     v->rate)) +
-					     1e-12));
+		v->peak[c] =
+			fmax(v->peak[c],
+			     20 * log10(cabs(lv_cf_resp(v->taps[c], v->ptaps[c],
+							k * hz, v->rate)) +
+					1e-12));
 	return 0;
 }
 
@@ -2145,22 +2226,30 @@ static int lv_design(struct loopview *v, int c)
 // and the loop started again to verify
 static int lv_calibrate(struct loopview *v)
 {
-	long all[2 * (LV_CF_HALF + 1)], on[2] = { 1, 1 };
+	long all[2 * (LV_CF_HALF + 1)], ph[2 * LV_CF_HALF], on[2] = { 1, 1 };
 	int c, i;
 
 	lv_figures(v);
 	for (c = 0; c < 2; c++) {
-		for (i = 0; i < LV_CAL_AT; i++)
+		for (i = 0; i < LV_CAL_AT; i++) {
 			v->before[c][i] = v->mag[c][lv_bin(v, lv_cal_at[i])];
+			v->before_ph[c][i] = v->ph[c][lv_bin(v, lv_cal_at[i])];
+		}
 		if (lv_design(v, c))
 			return -1;
 		for (i = 0; i <= LV_CF_HALF; i++)
 			all[c * (LV_CF_HALF + 1) + i] = v->taps[c][i];
+		for (i = 0; i < LV_CF_HALF; i++)
+			ph[c * LV_CF_HALF + i] = v->ptaps[c][i];
 	}
 	if (ctl_write_all(v->ctl, "Audio 1 Correction Capture Taps", all,
 			  2 * (LV_CF_HALF + 1)) ||
 	    ctl_write(v->ctl, "Audio 1 Correction Capture Switch", on, 2))
 		return -1;
+	if (ctl_write_all(v->ctl, "Audio 1 Correction Capture Phase Taps", ph,
+			  2 * LV_CF_HALF))
+		say("the driver has no phase taps: Audio 1's correction takes "
+		    "back the magnitude only");
 	return lv_start(v, LV_BOTH, 1);
 }
 
@@ -3637,6 +3726,11 @@ static void lv_publish(struct loopview *v, int force)
 				  EQS_A1TAPS))
 			for (k = 0; k < EQS_A1TAPS; k++)
 				s->a1taps[k] = (int32_t)a1[k];
+		if (!ctl_read_all(v->ctl,
+				  "Audio 1 Correction Capture Phase Taps", a1,
+				  EQS_A1PTAPS))
+			for (k = 0; k < EQS_A1PTAPS; k++)
+				s->a1ptaps[k] = (int32_t)a1[k];
 	}
 	s->lagged = v->lagged;
 	s->lag = (int32_t)v->lag;
@@ -3909,14 +4003,19 @@ void loopview_report(struct loopview *v, FILE *f)
 		fprintf(f, "taps %c", "LR"[c]);
 		for (i = 0; i <= LV_CF_HALF; i++)
 			fprintf(f, " %ld", v->taps[c][i]);
+		fprintf(f, "\nptaps %c", "LR"[c]);
+		for (i = 0; i < LV_CF_HALF; i++)
+			fprintf(f, " %ld", v->ptaps[c][i]);
 		fprintf(f, "\npeak %c %.2f\n", "LR"[c], v->peak[c]);
 		fprintf(f, "before %c", "LR"[c]);
 		for (i = 0; i < LV_CAL_AT; i++)
-			fprintf(f, " %g:%.2f", lv_cal_at[i], v->before[c][i]);
+			fprintf(f, " %g:%.2f/%+.1f", lv_cal_at[i],
+				v->before[c][i], v->before_ph[c][i]);
 		fprintf(f, "\nafter %c", "LR"[c]);
 		for (i = 0; i < LV_CAL_AT; i++)
-			fprintf(f, " %g:%.2f", lv_cal_at[i],
-				v->mag[c][lv_bin(v, lv_cal_at[i])]);
+			fprintf(f, " %g:%.2f/%+.1f", lv_cal_at[i],
+				v->mag[c][lv_bin(v, lv_cal_at[i])],
+				v->ph[c][lv_bin(v, lv_cal_at[i])]);
 		fprintf(f, "\n");
 	}
 }

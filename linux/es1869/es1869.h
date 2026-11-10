@@ -202,6 +202,7 @@ struct es1869 {
 	// the correction filter on Audio 1's recordings (a1filter.c)
 	struct es1869_cf a1c_cf;
 	s16 a1c_taps[2][ES_CF_HALF + 1]; // what the next recording takes
+	s16 a1c_ptaps[2][ES_CF_HALF]; // and its phase taps
 	bool a1c_new; // and the one recording now takes them at its next pass
 	struct work_struct a1c_work;
 	bool a1c_on; // this recording goes through it

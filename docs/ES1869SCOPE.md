@@ -346,25 +346,38 @@ What it measures and why:
   correction on. The DAC is then flat to 20 kHz within 0.02 dB, and at 2x
   the DAC's images lie far above the ADC's band. So the loop's response is
   the record path's own: 69h, the switched-capacitor filter (whose corner
-  ESS sets at 0.875 of half the rate, register A2h) and the ADC.
+  ESS sets at 0.875 of half the rate, register A2h) and the ADC. The treble
+  correction takes back the DAC's magnitude only, not the phase of the 0.062
+  of the last sample that it keeps, some 3.5 degrees at 20 kHz at 2x, so the
+  calibration takes that phase out of the loop's response by the DAC's model
+  before it fits.
 * **The settings:** the record mixer takes Audio 2 alone at the calibrated
   levels, with the master off, as in the loop view. Before the measurement
   the correction filter goes off.
 
 What it does then:
-1. After `-T` seconds (12 by default, 3 at boot) it fits each channel's 33
-   taps by weighted least squares to the inverse of the measured response
-   against 1 kHz. The fit runs up to 20 kHz, holds that value above, and
-   lifts 12 dB at most.
-2. It loads them into "Audio 1 Correction Capture Taps" and switches "Audio
-   1 Correction Capture Switch" on.
+1. After `-T` seconds (12 by default, 3 at boot) it fits each channel's
+   correction to the inverse of the measured response as a complex number:
+   its magnitude against 1 kHz, and its phase past the line that the loop's
+   delay draws through 200 Hz to 3 kHz. The symmetric taps' cosines take the
+   real part and the phase taps' sines the imaginary part, each by weighted
+   least squares. The fit runs up to 20 kHz, holds the magnitude above, and
+   lifts 12 dB at most; the phase fades out under 2 kHz to none at 500 Hz,
+   since 33 taps can't follow the AC coupling's there.
+2. It loads them into "Audio 1 Correction Capture Taps" and "Audio 1
+   Correction Capture Phase Taps" and switches "Audio 1 Correction Capture
+   Switch" on. A driver without the phase taps takes the magnitude only, and
+   the calibration says so.
 3. It measures the loop again for `-T` seconds, through the filter.
 4. It puts back every other control it set. The filter and its taps stay.
 
 With `-s` it writes the verification's picture, and the report gives the
-taps, each channel's largest gain, and the response before and after at 1,
-5, 10, 15, 18 and 20 kHz. From two files (`-x`, `-i`) it fits and shows the
-taps without loading them.
+taps and the phase taps, each channel's largest gain, and the response
+before and after at 1, 5, 10, 15, 18 and 20 kHz, in dB and in degrees past
+the delay. From two files (`-x`, `-i`) it fits and shows the taps without
+loading them. Through a path whose phase reaches 28 degrees at 20 kHz, as
+the record path's anti-alias filter makes, the phase taps leave 2 degrees up
+to 18 kHz where the symmetric taps alone leave 24.
 
 `linux/config/es1869cal.initd` is the OpenRC service that runs it at boot,
 after alsasound and before MPD, so that MPD finds Audio 2 free. It writes

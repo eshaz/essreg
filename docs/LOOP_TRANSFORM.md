@@ -348,6 +348,16 @@ the monitor reads `D R F = D`, the DAC itself, as long as the record path
 holds. The DAC's change since its first blocks is the measure of drift, and
 `C` takes it back.
 
+These are complex numbers, and they multiply as such. `C` is symmetric, so
+it takes back the DAC's magnitude only, and the phase of the 0.062 of the
+last sample that the DAC keeps stays in `Filt C D`: some 1 degree at 20 kHz
+at 1x and 3.5 at 2x. `R` turns the phase much further, its AC coupling 15
+degrees at 20 Hz and its anti-alias filter 10 to 15 at 20 kHz on the Armada.
+`F` takes back both its magnitude and its phase, with its phase taps, from
+the loop's response past its delay with the DAC model's phase taken out.
+Until `C` takes back the DAC's phase too, the loop against the monitor reads
+the DAC's magnitude and that phase.
+
 ## The differential logic
 
 Every correction -E makes answers a difference from where the system stood

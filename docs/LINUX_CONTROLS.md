@@ -407,15 +407,23 @@ Parameters only:
   break.
 * **Audio 1 Correction** (`Audio 1 Correction Capture Switch`, F4): 0 to 1,
   default 0. Audio 1's 16-bit recordings through a filter of 33 taps a
-  channel that takes back the record path's own response, with the taps of
-  "Audio 1 Correction Capture Taps" (es1869scope -v 3 -C measures and loads
-  them): the frames come 16 later, and the FM recording stays exact.
-  Parameter `a1c_filter`. It takes effect at the next prepare.
+  channel that takes back the record path's own response, its magnitude and
+  its phase, with the taps of "Audio 1 Correction Capture Taps" and "Phase
+  Taps" (es1869scope -v 3 -C measures and loads them): the frames come 16
+  later, and the FM recording stays exact. Parameter `a1c_filter`. It takes
+  effect at the next prepare.
 * **Audio 1 Correction Taps** (`Audio 1 Correction Capture Taps`): the
   correction filter's taps, 17 for each channel, the left's first, each the
   centre then outward, in units of 1/16384; the identity until a calibration
   (`es1869scope -C`) loads its own. A recording under way takes them at its
   next pass.
+* **Audio 1 Correction Phase Taps**
+  (`Audio 1 Correction Capture Phase Taps`): the correction's antisymmetric
+  taps, 16 for each channel, the left's first, outward from the centre, in
+  units of 1/16384: tap m adds that much of the sample m frames before the
+  centre and takes as much of the one m after, which turns the phase where
+  the symmetric taps can only scale. All 0 until a calibration loads its
+  own.
 * **Audio 1 Linearity** (`Audio 1 Linearity Capture Switch`, F4): 0 to 1,
   default 0. Audio 1's 16-bit recordings, after the correction filter,
   through a stage that takes back what the record path does to a sample's

@@ -834,12 +834,13 @@ config SND_ES1869_DEFAULT_A1C_FILTER
 	default 0
 	help
 	  Audio 1's 16-bit recordings through a filter of 33 taps a
-	  channel that takes back the record path's own response, with
-	  the taps of "Audio 1 Correction Capture Taps" (es1869scope -v
-	  3 -C measures and loads them): the frames come 16 later, and
-	  the FM recording stays exact. The ALSA control "Audio 1
-	  Correction Capture Switch". The module parameter a1c_filter
-	  sets it at load and at runtime, through
+	  channel that takes back the record path's own response, its
+	  magnitude and its phase, with the taps of "Audio 1 Correction
+	  Capture Taps" and "Phase Taps" (es1869scope -v 3 -C measures
+	  and loads them): the frames come 16 later, and the FM
+	  recording stays exact. The ALSA control "Audio 1 Correction
+	  Capture Switch". The module parameter a1c_filter sets it at
+	  load and at runtime, through
 	  /sys/module/snd_es1869/parameters/a1c_filter.
 
 config SND_ES1869_DEFAULT_A1C_LINEAR

@@ -23,8 +23,9 @@
  * from "Audio 1 Correction Capture Taps", 17 for each channel, the centre
  * first, in units of 1/16384, which a recording takes at its prepare with
  * a1c_filter, and a recording under way at its next pass, its history kept,
- * so that a correction can follow the path as it drifts. es1869scope -C
- * measures the loop, fits them and loads them.
+ * so that a correction can follow the path as it drifts, and its phase taps,
+ * 16 a channel, from "Audio 1 Correction Capture Phase Taps", the same way.
+ * es1869scope -C measures the loop, fits both and loads them.
  *
  * The linearity stage after the filter (capfilt.c) runs in the same pass,
  * with a1c_linear, and takes its tables the same way from "Audio 1 Linearity
@@ -66,9 +67,12 @@ static void a1c_work_fn(struct work_struct *work)
 	// taps or tables loaded while it records: from this pass on, the
 	// history kept
 	if (chip->a1c_new) {
-		if (chip->a1c_fir)
+		if (chip->a1c_fir) {
 			memcpy(chip->a1c_cf.taps, chip->a1c_taps,
 			       sizeof(chip->a1c_cf.taps));
+			memcpy(chip->a1c_cf.ptaps, chip->a1c_ptaps,
+			       sizeof(chip->a1c_cf.ptaps));
+		}
 		chip->a1c_new = false;
 	}
 	if (chip->a1c_cl_new) {
@@ -118,11 +122,13 @@ void es1869_a1c_prepare(struct es1869 *chip, struct snd_pcm_substream *ss)
 		       rt->channels <= 2;
 	chip->a1c_fir = fir;
 	chip->a1c_at = 0;
-	if (fir)
+	es1869_cf_identity(&chip->a1c_cf);
+	if (fir) {
 		memcpy(chip->a1c_cf.taps, chip->a1c_taps,
 		       sizeof(chip->a1c_cf.taps));
-	else
-		es1869_cf_identity(&chip->a1c_cf);
+		memcpy(chip->a1c_cf.ptaps, chip->a1c_ptaps,
+		       sizeof(chip->a1c_cf.ptaps));
+	}
 	chip->a1c_new = false;
 	chip->a1c_cf.cl_on = lin;
 	chip->a1c_cf.cl = chip->a1c_cl;
@@ -142,10 +148,23 @@ void es1869_a1c_sync(struct es1869 *chip)
 	cancel_work_sync(&chip->a1c_work);
 }
 
+// the correction's taps, each side's in a row: the symmetric ones, the centre
+// and outward (private_value 0), or the phase taps (1)
+static unsigned int taps_row(unsigned long phase)
+{
+	return phase ? ES_CF_HALF : ES_CF_HALF + 1;
+}
+
+static s16 *taps_at(struct es1869 *chip, unsigned long phase, unsigned int c,
+		    unsigned int i)
+{
+	return phase ? &chip->a1c_ptaps[c][i] : &chip->a1c_taps[c][i];
+}
+
 static int taps_info(struct snd_kcontrol *kc, struct snd_ctl_elem_info *ui)
 {
 	ui->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
-	ui->count = 2 * (ES_CF_HALF + 1);
+	ui->count = 2 * taps_row(kc->private_value);
 	ui->value.integer.min = -32768;
 	ui->value.integer.max = 32767;
 	ui->value.integer.step = 1;
@@ -155,14 +174,14 @@ static int taps_info(struct snd_kcontrol *kc, struct snd_ctl_elem_info *ui)
 static int taps_get(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 {
 	struct es1869 *chip = snd_kcontrol_chip(kc);
+	unsigned int row = taps_row(kc->private_value), c, i;
 	unsigned long flags;
-	unsigned int c, i;
 
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	for (c = 0; c < 2; c++)
-		for (i = 0; i <= ES_CF_HALF; i++)
-			uv->value.integer.value[c * (ES_CF_HALF + 1) + i] =
-				chip->a1c_taps[c][i];
+		for (i = 0; i < row; i++)
+			uv->value.integer.value[c * row + i] =
+				*taps_at(chip, kc->private_value, c, i);
 	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	return 0;
 }
@@ -170,23 +189,23 @@ static int taps_get(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 static int taps_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 {
 	struct es1869 *chip = snd_kcontrol_chip(kc);
+	unsigned int row = taps_row(kc->private_value), c, i;
 	unsigned long flags;
-	unsigned int c, i;
 	int changed = 0;
 
-	for (i = 0; i < 2 * (ES_CF_HALF + 1); i++)
+	for (i = 0; i < 2 * row; i++)
 		if (uv->value.integer.value[i] < -32768 ||
 		    uv->value.integer.value[i] > 32767)
 			return -EINVAL;
 	// under the lock the filter's work takes them by
 	spin_lock_irqsave(&chip->reg_lock, flags);
 	for (c = 0; c < 2; c++)
-		for (i = 0; i <= ES_CF_HALF; i++) {
-			s16 v = uv->value.integer.value[c * (ES_CF_HALF + 1) +
-							i];
+		for (i = 0; i < row; i++) {
+			s16 *at = taps_at(chip, kc->private_value, c, i);
+			s16 v = uv->value.integer.value[c * row + i];
 
-			changed |= chip->a1c_taps[c][i] != v;
-			chip->a1c_taps[c][i] = v;
+			changed |= *at != v;
+			*at = v;
 		}
 	if (changed)
 		chip->a1c_new = true;
@@ -267,12 +286,22 @@ static int cl_put(struct snd_kcontrol *kc, struct snd_ctl_elem_value *uv)
 
 int es1869_a1c_new(struct es1869 *chip)
 {
-	static const struct snd_kcontrol_new knew = {
-		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
-		.name = "Audio 1 Correction Capture Taps",
-		.info = taps_info,
-		.get = taps_get,
-		.put = taps_put,
+	static const struct snd_kcontrol_new knew[] = {
+		{
+			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+			.name = "Audio 1 Correction Capture Taps",
+			.info = taps_info,
+			.get = taps_get,
+			.put = taps_put,
+		},
+		{
+			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+			.name = "Audio 1 Correction Capture Phase Taps",
+			.info = taps_info,
+			.get = taps_get,
+			.put = taps_put,
+			.private_value = 1,
+		},
 	};
 	static const char *const cl_names[] = {
 		[CL_CURVE] = "Audio 1 Linearity Capture Curve",
@@ -292,10 +321,13 @@ int es1869_a1c_new(struct es1869 *chip)
 	// until a measurement loads its own: the filter and the stage change
 	// nothing
 	memset(chip->a1c_taps, 0, sizeof(chip->a1c_taps));
+	memset(chip->a1c_ptaps, 0, sizeof(chip->a1c_ptaps));
 	chip->a1c_taps[0][0] = ES_CF_ONE;
 	chip->a1c_taps[1][0] = ES_CF_ONE;
 	es1869_cl_identity(&chip->a1c_cl);
-	err = snd_ctl_add(chip->card, snd_ctl_new1(&knew, chip));
+	err = 0;
+	for (i = 0; !err && i < ARRAY_SIZE(knew); i++)
+		err = snd_ctl_add(chip->card, snd_ctl_new1(&knew[i], chip));
 	for (i = 0; !err && i < ARRAY_SIZE(cl_names); i++) {
 		cl.name = cl_names[i];
 		cl.private_value = i;

@@ -69,7 +69,15 @@ EXTRA = {
                   "each channel, the left's first, each the centre then "
                   "outward, in units of 1/16384; the identity until a "
                   "calibration (`es1869scope -C`) loads its own. A "
-                  "recording under way takes them at its next pass.\n",
+                  "recording under way takes them at its next pass.\n"
+                  "* **Audio 1 Correction Phase Taps** (`Audio 1 Correction "
+                  "Capture Phase Taps`): the correction's antisymmetric "
+                  "taps, 16 for each channel, the left's first, outward "
+                  "from the centre, in units of 1/16384: tap m adds that "
+                  "much of the sample m frames before the centre and takes "
+                  "as much of the one m after, which turns the phase where "
+                  "the symmetric taps can only scale. All 0 until a "
+                  "calibration loads its own.\n",
     "a1c_linear": "* **Audio 1 Linearity Tables** (`Audio 1 Linearity "
                   "Capture Curve`, `Gain` and `Turn`): the stage's tables, "
                   "the left's first. The curve: its centre, a recorded "

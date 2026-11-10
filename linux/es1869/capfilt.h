@@ -1,9 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * A filter on Audio 1's recordings, with no kernel API, so that it also builds
- * on the host: for each channel a linear-phase FIR of ES_CF_TAPS taps, run in
- * place over 16-bit frames that the DMA wrote, with the last raw frames kept
- * from one run to the next. A frame comes out ES_CF_HALF frames late.
+ * on the host: for each channel a FIR of ES_CF_TAPS taps, run in place over
+ * 16-bit frames that the DMA wrote, with the last raw frames kept from one run
+ * to the next. A frame comes out ES_CF_HALF frames late. Its taps are a
+ * symmetric part, the same both sides of the centre, whose response is real
+ * against the delay and takes back the record path's magnitude, and an
+ * antisymmetric part, the phase taps, opposite each side, whose response is
+ * imaginary and takes back its phase.
  *
  * After the FIR, the linearity stage may take back what the record path does
  * to a sample's size: a curve about each side's centre, then a gain and a turn
@@ -59,12 +63,16 @@ struct es1869_cf {
 	s64 cl_pow[2], cl_adv[2];
 	s32 cl_re[2], cl_im[2];
 	s64 cl_dc[2];
+	// each channel's phase taps, outward from the centre: tap m adds
+	// that much of the sample m frames before the centre and takes as
+	// much of the one m after
+	s16 ptaps[2][ES_CF_HALF];
 };
 
 /* silence behind the next frame, as at a stream's start, with the DC under
  * the stage's envelope from its curve's centres */
 void es1869_cf_reset(struct es1869_cf *cf);
-/* taps that change nothing but the delay */
+/* taps that change nothing but the delay, the phase taps none */
 void es1869_cf_identity(struct es1869_cf *cf);
 /* n frames of 1 or 2 channels, filtered in place; mono takes the left's taps */
 void es1869_cf_run(struct es1869_cf *cf, s16 *buf, u32 n, u32 channels);

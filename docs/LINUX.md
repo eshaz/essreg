@@ -928,10 +928,10 @@ saved state wins over a parameter. The defaults are the Kconfig options
   stages off, for 5 dB less headroom at the top.
 * `a1c_filter` ("Audio 1 Correction Capture Switch"): 0 to 1, default 0.
   Audio 1's 16-bit recordings through a filter of 33 taps a channel that
-  takes back the record path's own response, with the taps of "Audio 1
-  Correction Capture Taps" (es1869scope -v 3 -C measures and loads them):
-  the frames come 16 later, and the FM recording stays exact. It takes
-  effect at the next prepare.
+  takes back the record path's own response, its magnitude and its phase,
+  with the taps of "Audio 1 Correction Capture Taps" and "Phase Taps"
+  (es1869scope -v 3 -C measures and loads them): the frames come 16 later,
+  and the FM recording stays exact. It takes effect at the next prepare.
 * `a1c_linear` ("Audio 1 Linearity Capture Switch"): 0 to 1, default 0.
   Audio 1's 16-bit recordings, after the correction filter, through a stage
   that takes back what the record path does to a sample's size: a curve

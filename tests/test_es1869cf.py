@@ -52,7 +52,8 @@ class Cf(ctypes.Structure):
                 ("cl_adv", ctypes.c_int64 * 2),
                 ("cl_re", ctypes.c_int32 * 2),
                 ("cl_im", ctypes.c_int32 * 2),
-                ("cl_dc", ctypes.c_int64 * 2)]
+                ("cl_dc", ctypes.c_int64 * 2),
+                ("ptaps", (ctypes.c_int16 * HALF) * 2)]
 
 
 # the struct's size and a few places, from the C, against the mirror above
@@ -67,6 +68,7 @@ size_t cf_layout(int i)
     case 2: return offsetof(struct es1869_cf, cl);
     case 3: return offsetof(struct es1869_cf, cl_pow);
     case 4: return offsetof(struct es1869_cf, cl_im);
+    case 5: return offsetof(struct es1869_cf, ptaps);
     }
     return 0;
 }
@@ -91,8 +93,8 @@ class Lib:
             cls.lib = ctypes.CDLL(out)
             cls.lib.cf_layout.restype = ctypes.c_size_t
             want = (ctypes.sizeof(Cf), Cf.cl_on.offset, Cf.cl.offset,
-                    Cf.cl_pow.offset, Cf.cl_im.offset)
-            got = tuple(cls.lib.cf_layout(i) for i in range(5))
+                    Cf.cl_pow.offset, Cf.cl_im.offset, Cf.ptaps.offset)
+            got = tuple(cls.lib.cf_layout(i) for i in range(6))
             if got != want:
                 raise AssertionError("struct es1869_cf: C %s, mirror %s" %
                                      (got, want))
@@ -109,10 +111,14 @@ def tearDownModule():
         shutil.rmtree(Lib.tmp)
 
 
-def reference(x, taps):
+def reference(x, taps, ptaps=None):
     """the filter in numpy: frame i is the sum over the 33 raw frames up to
-    i, the centre 16 back, with silence before the first"""
+    i, the centre 16 back, with silence before the first; the phase taps
+    add the frames before the centre and take away those after it"""
     full = np.concatenate([taps[:0:-1], taps]).astype(np.int64)
+    if ptaps is not None:
+        p = np.asarray(ptaps, np.int64)
+        full = full + np.concatenate([p[::-1], [0], -p])
     pad = np.concatenate([np.zeros(TAPS - 1, np.int64), x.astype(np.int64)])
     acc = np.convolve(pad, full[::-1], "valid")[:len(x)]
     # the C rounds by adding half and shifting, which floors
@@ -137,10 +143,13 @@ def run(cf, frames, channels, sizes):
     return buf.reshape(n, channels)
 
 
-def set_taps(cf, left, right):
+def set_taps(cf, left, right, pleft=None, pright=None):
     for c, t in enumerate((left, right)):
         for i, v in enumerate(t):
             cf.taps[c][i] = int(v)
+    for c, t in enumerate((pleft, pright)):
+        for i, v in enumerate(t if t is not None else ()):
+            cf.ptaps[c][i] = int(v)
 
 
 class FilterTest(unittest.TestCase):
@@ -230,6 +239,65 @@ class FilterTest(unittest.TestCase):
         k = slice(10, n // 2 - 10)
         self.assertLess(np.max(np.abs(20 * np.log10(h[k] / want[k]))), 0.02)
         self.assertGreater(want[np.argmin(abs(f - 0.45))], 1.5)
+
+
+class PhaseTest(unittest.TestCase):
+    """the phase taps: the antisymmetric half of the correction"""
+
+    def fresh(self):
+        lib = Lib.get()
+        cf = Cf()
+        lib.es1869_cf_identity(ctypes.byref(cf))
+        lib.es1869_cf_reset(ctypes.byref(cf))
+        return cf
+
+    def test_phase_taps_match_numpy_whatever_the_passes(self):
+        rng = np.random.default_rng(31)
+        x = rng.integers(-20000, 20000, (6000, 2))
+        taps = np.round(rng.normal(0, 0.03, HALF + 1) * ONE)
+        taps[0] = 1.1 * ONE
+        pl = np.round(rng.normal(0, 0.05, HALF) * ONE)
+        pr = np.round(rng.normal(0, 0.05, HALF) * ONE)
+        for sizes in ((1, 2, 3), (256,), (700, 31)):
+            cf = self.fresh()
+            set_taps(cf, taps, taps, pl, pr)
+            y = run(cf, x, 2, sizes)
+            self.assertTrue((y[:, 0] == reference(x[:, 0], taps, pl)).all())
+            self.assertTrue((y[:, 1] == reference(x[:, 1], taps, pr)).all())
+
+    def test_the_response_is_s_minus_j_a(self):
+        """noise through symmetric and phase taps together: the response
+        against the delay is S - jA, the cosine series of the one and the
+        sine series of the other"""
+        rng = np.random.default_rng(32)
+        x = rng.integers(-8000, 8000, (1 << 16, 2))
+        taps = np.zeros(HALF + 1)
+        taps[0], taps[1], taps[2] = 1.2 * ONE, -0.12 * ONE, 0.02 * ONE
+        pt = np.zeros(HALF)
+        pt[0], pt[1], pt[2] = 0.15 * ONE, -0.05 * ONE, 0.01 * ONE
+        cf = self.fresh()
+        set_taps(cf, taps, taps, pt, pt)
+        y = run(cf, x, 2, (512,))
+        n = 4096
+        sxx = np.zeros(n // 2 + 1)
+        sxy = np.zeros(n // 2 + 1, complex)
+        for s in range(0, len(x) - n - HALF, n // 2):
+            w = np.hanning(n)
+            fx = np.fft.rfft(w * x[s:s + n, 0])
+            fy = np.fft.rfft(w * y[s + HALF:s + HALF + n, 0])
+            sxx += np.abs(fx) ** 2
+            sxy += fy * np.conj(fx)
+        h = sxy / sxx
+        om = 2 * np.pi * np.fft.rfftfreq(n)
+        m = np.arange(1, HALF + 1)
+        S = taps[0] / ONE + 2 * np.cos(np.outer(om, m)) @ (taps[1:] / ONE)
+        A = 2 * np.sin(np.outer(om, m)) @ (pt / ONE)
+        k = slice(10, n // 2 - 10)
+        err = np.abs(h[k] / (S - 1j * A)[k] - 1)
+        self.assertLess(err.max(), 0.003)
+        # and the phase taps turn it: 1 kHz to the top, by the sine series
+        self.assertGreater(np.degrees(np.abs(np.angle(S - 1j * A))[k]).max(),
+                           10)
 
 
 # the linearity stage in Python, integer for integer as capfilt.c has it
