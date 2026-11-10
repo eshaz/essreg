@@ -425,7 +425,9 @@ After each block:
   the path at five knots and what the stage left at most, LSB. Whether Audio
   1 takes the stage is `a1c_linear`'s; the tables are loaded either way, and
   while the stage is off -E runs it in software to measure what it would
-  leave.
+  leave. It takes one segment in 16, the middle half of it, some 70 ms of
+  the Armada's Celeron every 1.5 s, so a refit comes after about 2.5 minutes
+  of music.
 * **The DAC:** the loop's deviation against 1 kHz goes into 24 bands from
   250 Hz to 20 kHz, each band weighted by its coherence, since music may
   leave a band empty. The monitor's frames carry Audio 2's DAC correction,
