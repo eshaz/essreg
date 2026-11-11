@@ -16,6 +16,13 @@
  * vibrato measured 11 to 22 cents from run to run on the Armada, and only
  * its floor of 10 cents, against 0.2 without it, is checked.
  *
+ * The limits are those of ESS's bank and of every change of the rebuilt
+ * driver, so midi.esfm sets them whatever the machine keeps. The better
+ * square wave's bank differs in program 81 alone, which has the chip's
+ * vibrato on in operator 3 and other levels under the master volume: with
+ * it the Armada measured 5 to 7 cents of vibrato at modulation 0, and the
+ * master volume's step was -21 dB in place of -2.
+ *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
 
@@ -347,6 +354,16 @@ static int has_port(const char *name)
 	return found;
 }
 
+// the rebuilt driver's changes that GMCHECK.MID tries, each read when the
+// synth is first used
+static const char *const esfm_fixes[] = {
+	"ESFM Vibrato Switch",
+	"ESFM Tuning Switch",
+	"ESFM Reset Controllers Switch",
+	"ESFM Live Pan Switch",
+	"ESFM SysEx Switch",
+};
+
 // midi.esfm: GMCHECK.MID on the ESFM synth, every step on PCM 1
 enum et_result c_midi_esfm(struct et_ctx *c, const struct et_case *k)
 {
@@ -355,6 +372,7 @@ enum et_result c_midi_esfm(struct et_ctx *c, const struct et_case *k)
 	struct rec r;
 	double ref, f, x;
 	long sides = 1, first;
+	unsigned int fix;
 	int ch;
 
 	(void)k;
@@ -368,6 +386,10 @@ enum et_result c_midi_esfm(struct et_ctx *c, const struct et_case *k)
 		return ET_ERROR;
 	}
 	et_param_get(c, "fm_sides", &sides);
+	// ESS's bank, read at the synth's first use, and the changes on
+	et_ctl_set(c, "ESFM Better Square Switch", 0, 0, 0);
+	for (fix = 0; fix < sizeof(esfm_fixes) / sizeof(esfm_fixes[0]); fix++)
+		et_ctl_set(c, esfm_fixes[fix], 0, 1, 1);
 	et_ctl_set(c, "Video Playback Switch", 0, 0, 0);
 	et_mix_dig(c, 0);
 	snprintf(cmd, sizeof(cmd), "aplaymidi -p 'ES1869 ESFM synth' '%s'",
