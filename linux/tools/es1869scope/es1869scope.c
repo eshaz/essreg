@@ -49,14 +49,17 @@
  * at each block.
  *
  * Keys: q quits, 1, 2 and 3 choose the view, space holds the picture, r
- * redraws. -s draws once into a PPM file instead, at -W by -H (800 by 600),
- * for tests and for pictures of a run, after -T seconds (12) of a live loop,
- * whose figures then go to standard output, as they do for two files.
+ * redraws. They come from the terminal, and with none, as from a script or a
+ * service, the screen doesn't open, since nothing but a signal would end it.
+ * -s draws once into a PPM file instead, at -W by -H (800 by 600), for tests
+ * and for pictures of a run, after -T seconds (12) of a live loop, whose
+ * figures then go to standard output, as they do for two files.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <math.h>
 #include <signal.h>
 #include <stdio.h>
@@ -649,6 +652,17 @@ static void on_signal(int sig)
 	stop = 1;
 }
 
+// a terminal to read the keys from, as fb_open takes it
+static int have_tty(void)
+{
+	int fd = open("/dev/tty", O_RDWR | O_NONBLOCK);
+
+	if (fd < 0)
+		return 0;
+	close(fd);
+	return 1;
+}
+
 static void usage(void)
 {
 	fprintf(stderr,
@@ -876,6 +890,13 @@ int main(int argc, char **argv)
 			return 2;
 		}
 		return 0;
+	}
+	// the screen ends at its q: with no terminal to read that from, only
+	// a signal would end it
+	if (!have_tty()) {
+		say("no terminal to read the keys from, q among them: -s "
+		    "FILE.ppm runs without one");
+		return 2;
 	}
 	if (fb_open(&fb, dev)) {
 		say("%s: %s", dev, strerror(errno));

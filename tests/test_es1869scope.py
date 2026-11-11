@@ -1454,6 +1454,18 @@ class ShotTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn(self.SAY, self.colours(ppm))
 
+    def test_the_screen_needs_a_terminal(self):
+        """the screen ends at its q, which comes from the terminal: with
+        none, as in a script, it doesn't open, where a calibration once ran
+        on the console until a signal"""
+        r = subprocess.run([self.prog, "-l", os.devnull, "-C"],
+                           stdin=subprocess.DEVNULL, capture_output=True,
+                           text=True, timeout=30, start_new_session=True)
+        if r.returncode == 2 and "no console font" in r.stderr:
+            self.skipTest("no console font on this machine")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("-s FILE.ppm runs without one", r.stderr)
+
 
 class A1LinTest(unittest.TestCase):
     """a1lin.c: Audio 1's record path against what should have come back,

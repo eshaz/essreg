@@ -106,9 +106,12 @@ Ctrl-Z does nothing while the picture shows, since a stopped program would
 leave the terminal in graphics. Its font is the first console font it finds
 in `/usr/share/consolefonts`, `/usr/share/kbd/consolefonts` or
 `/lib/kbd/consolefonts`. `q` quits, space holds the picture and `r` redraws.
-`-s` draws the log once into a PPM picture, at `-W` by `-H`, 800 by 600 by
-default. `-T` counts on the screen as in a picture: `-C` fits its taps after
-`-T` seconds of the loop, and the blocks of `-E` last `-T` seconds.
+The keys come from the terminal, so with none, as in a script or a service,
+the screen doesn't open and says to give `-s`, since nothing but a signal
+would end it. `-s` draws the log once into a PPM picture, at `-W` by `-H`,
+800 by 600 by default. `-T` counts on the screen as in a picture: `-C` fits
+its taps after `-T` seconds of the loop, and the blocks of `-E` last `-T`
+seconds.
 
 What goes wrong, such as a device another program holds or a stream that
 stopped, is said across the bottom of the screen for 15 seconds, since text
