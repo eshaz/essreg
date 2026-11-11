@@ -942,7 +942,8 @@ class ShotTest(unittest.TestCase):
                ("es1869scope.c", "tie.c", "draw.c", "fb.c", "plot.c",
                 "fft.c", "spectro.c", "loop.c", "loopview.c", "eq.c",
                 "zstep.c", "say.c", "eqstate.c", "ctl.c", "chain.c",
-                "a1lin.c", os.path.join("..", "..", "es1869", "capfilt.c"),
+                "a1lin.c", "mixsave.c",
+                os.path.join("..", "..", "es1869", "capfilt.c"),
                 os.path.join("..", "..", "test", "settab.c"))]
         subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall",
                                "-I" + os.path.join(ROOT, "linux", "es1869"),
@@ -1698,6 +1699,245 @@ class A1LinTest(unittest.TestCase):
             if abs(v - self.DC) <= 256:
                 self.assertAlmostEqual(got, want, delta=0.25,
                                        msg=v - self.DC)
+
+
+MIXSHIM = r"""
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+#include "ctl.h"
+#include "mixsave.h"
+
+static struct {
+    char name[48];
+    long v[2];
+    unsigned int count;
+} tab[16];
+static int ntab;
+static char said[4096];
+
+static int find(const char *name)
+{
+    int i;
+
+    for (i = 0; i < ntab; i++)
+        if (!strcmp(tab[i].name, name))
+            return i;
+    return -1;
+}
+
+void fake_reset(void)
+{
+    ntab = 0;
+    said[0] = 0;
+}
+
+void fake_add(const char *name, unsigned int count, long a, long b)
+{
+    snprintf(tab[ntab].name, sizeof(tab[ntab].name), "%s", name);
+    tab[ntab].count = count;
+    tab[ntab].v[0] = a;
+    tab[ntab].v[1] = b;
+    ntab++;
+}
+
+long fake_get(const char *name, int k)
+{
+    return tab[find(name)].v[k];
+}
+
+const char *fake_said(void)
+{
+    return said;
+}
+
+size_t ms_size(void)
+{
+    return sizeof(struct mixsave);
+}
+
+int ctl_read(snd_ctl_t *h, const char *name, long *v, unsigned int *count)
+{
+    int i = find(name);
+
+    (void)h;
+    if (i < 0)
+        return -1;
+    v[0] = tab[i].v[0];
+    v[1] = tab[i].count > 1 ? tab[i].v[1] : tab[i].v[0];
+    *count = tab[i].count;
+    return 0;
+}
+
+int ctl_write(snd_ctl_t *h, const char *name, const long *v,
+          unsigned int count)
+{
+    int i = find(name);
+    unsigned int k;
+
+    (void)h;
+    if (i < 0 || !count)
+        return -1;
+    for (k = 0; k < tab[i].count; k++)
+        tab[i].v[k] = v[k < count ? k : count - 1];
+    return 0;
+}
+
+void say(const char *fmt, ...)
+{
+    size_t n = strlen(said);
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsnprintf(said + n, sizeof(said) - n - 1, fmt, ap);
+    va_end(ap);
+    strcat(said, "\n");
+}
+"""
+
+
+class MixSaveTest(unittest.TestCase):
+    """mixsave.c: what a run of the loop view set goes back at its end, as
+    long as the control holds the run's value; another program's change
+    stays, until the control holds the run's value again"""
+
+    RATE, TREBLE, VOL = b"Audio 2 Output Rate", \
+        b"Audio 2 Treble Correction Playback Switch", b"Capture Volume"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        shim = os.path.join(cls.tmp, "shim.c")
+        with open(shim, "w") as f:
+            f.write(MIXSHIM)
+        so = os.path.join(cls.tmp, "mixsave.so")
+        subprocess.check_call(["gcc", "-O2", "-std=gnu99", "-Wall", "-Wextra",
+                               "-Werror", "-fPIC", "-shared", "-I" + SCOPE,
+                               "-o", so, os.path.join(SCOPE, "mixsave.c"),
+                               shim])
+        lib = cls.lib = ctypes.CDLL(so)
+        lib.ms_size.restype = ctypes.c_size_t
+        lib.ms_init.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                ctypes.c_char_p]
+        lib.ms_set.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                               ctypes.c_long, ctypes.c_long]
+        for fn in (lib.ms_apply, lib.ms_check, lib.ms_restore):
+            fn.argtypes = [ctypes.c_void_p]
+        lib.fake_add.argtypes = [ctypes.c_char_p, ctypes.c_uint,
+                                 ctypes.c_long, ctypes.c_long]
+        lib.fake_get.restype = ctypes.c_long
+        lib.fake_get.argtypes = [ctypes.c_char_p, ctypes.c_int]
+        lib.fake_said.restype = ctypes.c_char_p
+        lib.ctl_write.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                  ctypes.POINTER(ctypes.c_long),
+                                  ctypes.c_uint]
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp)
+
+    def setUp(self):
+        self.journal = os.path.join(self.tmp, "es1869scope.0.mixer")
+        if os.path.exists(self.journal):
+            os.unlink(self.journal)
+        self.lib.fake_reset()
+        # the Armada's: 3x, the treble correction off, the ADC at 5 and 7
+        self.lib.fake_add(self.RATE, 1, 2, 2)
+        self.lib.fake_add(self.TREBLE, 1, 0, 0)
+        self.lib.fake_add(self.VOL, 2, 5, 7)
+        self.ms = self.run_()
+
+    def run_(self):
+        ms = ctypes.create_string_buffer(self.lib.ms_size())
+        self.lib.ms_init(ms, None, self.journal.encode())
+        return ms
+
+    def put(self, name, a, b=None):
+        # another program's write
+        v = (ctypes.c_long * 2)(a, a if b is None else b)
+        self.assertEqual(self.lib.ctl_write(None, name, v, 2), 0)
+
+    def get(self, name):
+        return (self.lib.fake_get(name, 0), self.lib.fake_get(name, 1))
+
+    def journaled(self):
+        if not os.path.exists(self.journal):
+            return None
+        with open(self.journal) as f:
+            return [line.split(None, 3)[3] for line in f.read().splitlines()]
+
+    def set_engines(self):
+        # es1869eq's: 2x, the treble correction on, the ADC at 3
+        for name, a, b in ((self.RATE, 1, 1), (self.TREBLE, 1, 1),
+                           (self.VOL, 3, 3)):
+            self.assertEqual(self.lib.ms_set(self.ms, name, a, b), 0)
+
+    def test_the_end_puts_back_what_the_run_set(self):
+        self.set_engines()
+        self.assertEqual(self.get(self.RATE)[0], 1)
+        self.assertEqual(self.get(self.VOL), (3, 3))
+        self.assertEqual(self.journaled(), [n.decode() for n in (
+            self.RATE, self.TREBLE, self.VOL)])
+        self.lib.ms_restore(self.ms)
+        self.assertEqual(self.get(self.RATE)[0], 2)
+        self.assertEqual(self.get(self.TREBLE)[0], 0)
+        self.assertEqual(self.get(self.VOL), (5, 7))
+        self.assertIsNone(self.journaled())
+
+    def test_another_programs_change_stays(self):
+        self.set_engines()
+        self.put(self.RATE, 0)
+        self.lib.ms_check(self.ms)
+        self.assertIn(b'"Audio 2 Output Rate" was changed by another '
+                      b'program', self.lib.fake_said())
+        self.assertNotIn(self.RATE.decode(), self.journaled())
+        self.lib.ms_restore(self.ms)
+        self.assertEqual(self.get(self.RATE)[0], 0)
+        self.assertEqual(self.get(self.TREBLE)[0], 0)
+        self.assertEqual(self.get(self.VOL), (5, 7))
+
+    def test_the_runs_value_put_back_is_the_runs_again(self):
+        # the Armada, 2026-11-11: a viewer switched the output rate and the
+        # treble under es1869eq and put back at its exit what it found,
+        # es1869eq's own values, which then stayed after es1869eq's stop
+        # and went into the saved state
+        self.set_engines()
+        self.put(self.RATE, 2)
+        self.put(self.TREBLE, 0)
+        self.lib.ms_check(self.ms)
+        self.assertEqual(self.journaled(), [self.VOL.decode()])
+        self.put(self.RATE, 1)
+        self.put(self.TREBLE, 1)
+        self.lib.ms_check(self.ms)
+        self.assertIn(b'"Audio 2 Output Rate" holds this run\'s value '
+                      b'again', self.lib.fake_said())
+        self.assertEqual(sorted(self.journaled()), sorted(
+            n.decode() for n in (self.RATE, self.TREBLE, self.VOL)))
+        self.lib.ms_restore(self.ms)
+        self.assertEqual(self.get(self.RATE)[0], 2)
+        self.assertEqual(self.get(self.TREBLE)[0], 0)
+
+    def test_the_end_looks_again(self):
+        # a change the run hadn't seen yet stays too
+        self.set_engines()
+        self.put(self.VOL, 9, 9)
+        self.lib.ms_restore(self.ms)
+        self.assertEqual(self.get(self.VOL), (9, 9))
+        self.assertEqual(self.get(self.RATE)[0], 2)
+
+    def test_the_next_run_puts_back_a_killed_ones(self):
+        self.set_engines()
+        self.put(self.RATE, 0)
+        self.lib.ms_check(self.ms)
+        # killed: no end, the journal stays, without the other's change
+        nxt = self.run_()
+        self.lib.ms_apply(nxt)
+        self.assertIn(b"put back the mixer an earlier run left",
+                      self.lib.fake_said())
+        self.assertEqual(self.get(self.RATE)[0], 0)
+        self.assertEqual(self.get(self.TREBLE)[0], 0)
+        self.assertEqual(self.get(self.VOL), (5, 7))
+        self.assertIsNone(self.journaled())
 
 
 if __name__ == "__main__":

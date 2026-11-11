@@ -235,10 +235,11 @@ While the view shows, the record mixer takes Audio 2 alone:
   records.
 
 Each control's old value goes to `/var/tmp/es1869scope.UID.mixer` before it
-changes. The view puts the controls back when it closes, also after a
-signal, and the next start puts back what a run that ended without doing so
-left in that file. The device that is busy, as Audio 2 is while MPD plays,
-stops the view before anything changes.
+changes (`mixsave.c`). The view puts back each control that still holds its
+value when it closes, also after a signal, and leaves one that another
+program changed meanwhile as they set it. The next start puts back what a
+run that ended without doing so left in that file. The device that is busy,
+as Audio 2 is while MPD plays, stops the view before anything changes.
 
 `-L` sets the noise's rms level, -12 dBFS by default. `-G PCM,ADC` sets the
 record mixer's two gains, "PCM Capture Volume" (69h) and "Capture Volume",
@@ -449,7 +450,12 @@ The music it measures can change under it, and it follows:
   since Audio 1 takes the switch at its next start.
 * **Another program's changes:** a control that es1869eq set and another
   program changed stays as that program set it, also after es1869eq stops,
-  and a DAC correction that another program loads becomes the refits' start.
+  until it holds es1869eq's value again. A viewer puts back at its exit what
+  it found at attach, es1869eq's own values, and es1869eq then takes those
+  controls back, so that its stop puts back what was there before it. On the
+  Armada, before es1869eq did so, its 2x and treble correction stayed after
+  a viewer's switches, and the next shutdown saved them in the ALSA state. A
+  DAC correction that another program loads becomes the refits' start.
 
 After each block:
 * **Audio 1's linearity:** with 400,000 frames a side behind it, the record

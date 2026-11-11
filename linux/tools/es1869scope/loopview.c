@@ -88,6 +88,7 @@
 #include "eq.h"
 #include "eqstate.h"
 #include "fft.h"
+#include "mixsave.h"
 #include "zstep.h"
 #include "plot.h"
 #include "say.h"
@@ -105,7 +106,6 @@
 #define LV_FIT_LO 200.0 // the band the delay is fitted over, Hz
 #define LV_FIT_HI 3000.0
 #define LV_IR 32 // impulse response taps each side of 0
-#define LV_SAVED 16
 #define LV_RESTARTS 20
 #define LV_REDRAW_NS 500000000LL
 #define LV_CF_HALF 16 // the correction filter's taps each side (capfilt.h)
@@ -164,13 +164,6 @@ enum { LL, RR, LR, RL, XX, PATHS };
 static const uint32_t lv_rgb[4] = { 0x5aa9ff, 0xffa64d, 0x41c7b9, 0xff7eb6 };
 static const char *const lv_name[4] = { "L", "R", "L from R", "R from L" };
 
-struct lv_saved {
-	char name[48];
-	unsigned int count;
-	long v[2]; // what it was before the run
-	long set[2]; // and what the run set it to
-};
-
 // the controls changed under the view, as its reader saw them go by
 #define LV_CH_OVER 1 // Audio 2's output rate
 #define LV_CH_A1C 2 // Audio 1's correction switched
@@ -216,10 +209,8 @@ struct loopview {
 	struct fft sfft; // a spectrogram row's
 	int16_t *sx, *sz, *sdb;
 	int have_sfft;
-	struct lv_saved saved[LV_SAVED];
-	int nsaved, treble, over;
-	char journal[64];
-	int journaled; // this run wrote the journal, and removes it
+	struct mixsave ms; // the controls the run set
+	int treble, over;
 	int16_t *xring, *yring; // stereo frames
 	uint64_t played, captured, next;
 	pthread_t wthread; // the noise's writer
@@ -335,53 +326,6 @@ static long long lv_now(void)
 
 // --- the mixer -----------------------------------------------------------------
 
-// what the run changed, before it changes anything more: a line a control
-static void journal_write(struct loopview *v)
-{
-	char tmp[80];
-	FILE *f;
-	int i;
-
-	snprintf(tmp, sizeof(tmp), "%s.new", v->journal);
-	f = fopen(tmp, "w");
-	if (!f)
-		return;
-	for (i = 0; i < v->nsaved; i++)
-		fprintf(f, "%u %ld %ld %s\n", v->saved[i].count,
-			v->saved[i].v[0], v->saved[i].v[1], v->saved[i].name);
-	if (fflush(f) || fsync(fileno(f))) {
-		fclose(f);
-		unlink(tmp);
-		return;
-	}
-	if (!fclose(f) && !rename(tmp, v->journal))
-		v->journaled = 1;
-}
-
-// what an earlier run left changed, put back
-static void journal_apply(snd_ctl_t *h, const char *path)
-{
-	FILE *f = fopen(path, "r");
-	char line[128];
-
-	if (!f)
-		return;
-	while (fgets(line, sizeof(line), f)) {
-		long val[2];
-		unsigned int count;
-		int at = 0;
-
-		line[strcspn(line, "\n")] = 0;
-		if (sscanf(line, "%u %ld %ld %n", &count, &val[0], &val[1],
-			   &at) >= 3 &&
-		    at)
-			ctl_write(h, line + at, val, count);
-	}
-	fclose(f);
-	unlink(path);
-	say("put back the mixer an earlier run left");
-}
-
 // a message into -E's log, a line of its own among the blocks
 static void lv_note(const char *msg, void *arg)
 {
@@ -394,47 +338,10 @@ static void lv_note(const char *msg, void *arg)
 	fflush(v->eqlog);
 }
 
-// a control set for the run, its old value saved first
+// a control set for the run, its old value saved first (mixsave.c)
 static int lv_set(struct loopview *v, const char *name, long a, long b)
 {
-	long old[2], val[2] = { a, b };
-	unsigned int count;
-	int i;
-
-	if (ctl_read(v->ctl, name, old, &count) < 0)
-		return -1;
-	for (i = 0; i < v->nsaved; i++)
-		if (!strcmp(v->saved[i].name, name))
-			break;
-	if (i == v->nsaved) {
-		struct lv_saved *s;
-
-		if (v->nsaved == LV_SAVED)
-			return -1;
-		s = &v->saved[v->nsaved++];
-		snprintf(s->name, sizeof(s->name), "%s", name);
-		s->count = count;
-		s->v[0] = old[0];
-		s->v[1] = count > 1 ? old[1] : old[0];
-		journal_write(v);
-	}
-	v->saved[i].set[0] = a;
-	v->saved[i].set[1] = b;
-	return ctl_write(v->ctl, name, val, 2);
-}
-
-static void lv_restore(struct loopview *v)
-{
-	int i;
-
-	for (i = v->nsaved - 1; i >= 0; i--)
-		ctl_write(v->ctl, v->saved[i].name, v->saved[i].v,
-			  v->saved[i].count);
-	v->nsaved = 0;
-	// only the journal this run wrote: another run's is its own
-	if (v->journaled)
-		unlink(v->journal);
-	v->journaled = 0;
+	return ms_set(&v->ms, name, a, b);
 }
 
 static void lv_settings(struct loopview *v)
@@ -1705,6 +1612,7 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 {
 	struct loopview *v = calloc(1, sizeof(*v));
 	unsigned int i, n = 1u << LV_LOG2N;
+	char path[64];
 
 	if (!v)
 		return NULL;
@@ -1790,13 +1698,14 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 	v->amp = pow(10, cfg->level / 20) * sqrt(3) * 32767;
 	if (v->amp > 32767)
 		v->amp = 32767;
-	snprintf(v->journal, sizeof(v->journal),
-		 "/var/tmp/es1869scope.%u.mixer", (unsigned int)getuid());
 	if (snd_ctl_open(&v->ctl, cfg->ctl, 0) < 0) {
 		say("%s: no mixer", cfg->ctl);
 		v->ctl = NULL;
 		goto bad;
 	}
+	snprintf(path, sizeof(path), "/var/tmp/es1869scope.%u.mixer",
+		 (unsigned int)getuid());
+	ms_init(&v->ms, v->ctl, path);
 	lv_card(v);
 	// beside the music, the controls' events, which the reader watches
 	if (cfg->monitor) {
@@ -1841,7 +1750,7 @@ struct loopview *loopview_open(const struct loopview_cfg *cfg)
 	}
 	// what an earlier run left in the mixer, only once this one holds the
 	// devices: no other run is then using them, the service among them
-	journal_apply(v->ctl, v->journal);
+	ms_apply(&v->ms);
 	i = (unsigned int)-lv_route(v);
 	if (i) {
 		if (i == 1)
@@ -1889,7 +1798,7 @@ void loopview_close(struct loopview *v)
 			say("the new taps didn't verify: Audio 1's correction "
 			    "is as it was");
 		}
-		lv_restore(v);
+		ms_restore(&v->ms);
 		snd_ctl_close(v->ctl);
 	}
 	if (v->eqlog) {
@@ -3953,14 +3862,12 @@ static void lv_publish(struct loopview *v, int force)
 // what the reader saw change: Audio 1 started again to take its correction
 // as switched, the DAC's correction that another program loaded taken as the
 // refits' start, and a control the run set that another program changed left
-// as they set it, out of the journal that the end of the run puts back
+// as they set it until it holds the run's value again (mixsave.c)
 static void lv_changes(struct loopview *v)
 {
 	unsigned int bits =
 		__atomic_exchange_n(&v->changed, 0, __ATOMIC_ACQ_REL);
-	long cur[2], all[3 * EQ_SIDES];
-	unsigned int n;
-	int i, k;
+	long all[3 * EQ_SIDES];
 
 	if (!bits)
 		return;
@@ -3981,22 +3888,7 @@ static void lv_changes(struct loopview *v)
 		say("the DAC's correction was loaded by another program: the "
 		    "refits start from it");
 	}
-	for (i = 0; i < v->nsaved; i++) {
-		struct lv_saved *sv = &v->saved[i];
-
-		if (ctl_read(v->ctl, sv->name, cur, &n) ||
-		    (cur[0] == sv->set[0] &&
-		     (sv->count < 2 || cur[1] == sv->set[1])))
-			continue;
-		say("\"%s\" was changed by another program: it stays as they "
-		    "set it",
-		    sv->name);
-		for (k = i; k + 1 < v->nsaved; k++)
-			v->saved[k] = v->saved[k + 1];
-		v->nsaved--;
-		i--;
-		journal_write(v);
-	}
+	ms_check(&v->ms);
 }
 
 int loopview_step(struct loopview *v, struct canvas *c)

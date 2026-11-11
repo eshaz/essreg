@@ -6,13 +6,13 @@
 # what came back on Audio 1 through the record mixer, in blocks of a minute.
 # The loop's deviation in bands, through the record path that es1869cal
 # calibrated at boot, becomes a trend predicted a block ahead, and Audio 2's
-# DAC correction, loaded live, takes back its drift from the first blocks.
-# The chip's rate on the steered clock, from the monitor's positions, gives
-# the driver's own clock error, whose trend a2_trim_ppb takes back. It sets
-# Audio 2 to 2x and its treble correction on, and puts back at its stop what
-# nobody changed meanwhile; at 3x, or at a rate Audio 1 can't record, Audio 1
-# rests. A break of the music only restarts the monitor, and after 10 s with
-# nothing playing Audio 1 rests until the music comes. The log is
+# DAC correction, loaded live, takes back its drift from the first blocks. The
+# chip's rate on the steered clock, from the monitor's positions, gives the
+# driver's own clock error, whose trend a2_trim_ppb takes back. It sets
+# Audio 2 to 2x and its treble correction on, and puts back at its stop each
+# control that holds its value then; at 3x, or at a rate Audio 1 can't record,
+# Audio 1 rests. A break of the music only restarts the monitor, and after
+# 10 s with nothing playing Audio 1 rests until the music comes. The log is
 # /var/log/es1869eq.log and the picture /var/lib/es1869/eq.ppm; what it says
 # on stderr, such as a stream it can't follow, goes to /var/log/es1869eq.err.
 #
