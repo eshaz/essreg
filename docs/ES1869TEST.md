@@ -227,23 +227,25 @@ against the stream, the filter's C code and the dig path.
 * `a1rec`: Audio 1's recordings: formats, rates, sides, pitch, and the
   frames at their start. `a1rec.dc` measures the ADC's offset from a source
   that nothing drives, which should stay under half a step of the offset
-  registers, and what a step of `Capture DC Offset` moves it by.
-  `a1rec.correct` (root) records four tones through the record mixer with
-  the correction filter (`a1c_filter`) off, then on with known taps, a lift
-  of the top on the left and -1 dB on the right. Audio 2 runs at 2x with its
-  treble correction, so that no image folds back and moves a tone. Each tone
-  has to change by the taps' own response within 0.15 dB. `a1rec.yield`
-  records through the filter at periods of 4096 frames, and no piece of its
-  work may hold the CPU over 1 ms, the longest piece the driver's /proc page
-  reports. A whole period at once took the Armada's Celeron about 5 ms, and
-  the VX Pocket's programmed I/O, starved that long, played a gap each
-  period: a recording of it came out 6 % long. `a1rec.restart` records a
-  tone eight times, each dropped, prepared and started again on its open
-  stream after 0.4 s, at once or 2, 10 or 50 ms later, and the tone's share
-  of the recording after the restart has to stay within 1 dB of its share
-  before. A recording begun again with its channel unmasked before the start
-  could come back a byte off, as noise, the tone's share 30 dB down:
-  es1869scope -C's second run did now and then.
+  registers, and what a step of `Capture DC Offset` moves it by. Its first
+  recording takes 5 s and counts the last second, since the input settles
+  slowly from a loud recording before it. `a1rec.correct` (root) records
+  four tones through the record mixer with the correction filter
+  (`a1c_filter`) off, then on with known taps, a lift of the top on the left
+  and -1 dB on the right. Audio 2 runs at 2x with its treble correction, so
+  that no image folds back and moves a tone. Each tone has to change by the
+  taps' own response within 0.15 dB. `a1rec.yield` records through the
+  filter at periods of 4096 frames, and no piece of its work may hold the
+  CPU over 1 ms, the longest piece the driver's /proc page reports. A whole
+  period at once took the Armada's Celeron about 5 ms, and the VX Pocket's
+  programmed I/O, starved that long, played a gap each period: a recording
+  of it came out 6 % long. `a1rec.restart` records a tone eight times, each
+  dropped, prepared and started again on its open stream after 0.4 s, at
+  once or 2, 10 or 50 ms later, and the tone's share of the recording after
+  the restart has to stay within 1 dB of its share before. A recording begun
+  again with its channel unmasked before the start could come back a byte
+  off, as noise, the tone's share 30 dB down: es1869scope -C's second run
+  did now and then.
 * `a1play`: Audio 1's playback through the cable: formats, rates and twenty
   starts, measured late in each tone, with THD+N over 600 Hz: the second
   card's clock wanders while it records, which leaves sidebands within 20 Hz

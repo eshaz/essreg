@@ -141,12 +141,12 @@ enum et_result c_a1rec_rate(struct et_ctx *c, const struct et_case *k)
 	return a1rec_run(c, &f, 0.2, 1.5, f.rate % 8000 ? 100 : 600);
 }
 
-// the mean of each side over a recording's last second, past the first
-// second, in which the ADC's input still settles
-static int rec_dc(struct et_ctx *c, double dc[2])
+// the mean of each side over the last second of a recording of secs
+// seconds, past those before it, in which the ADC's input settles
+static int rec_dc(struct et_ctx *c, double dc[2], unsigned int secs)
 {
 	static const struct et_fmt f = { ET_S16, 2, 44100 };
-	struct et_stream s = et_rec(ET_A1C, &f, 2 * f.rate, 0);
+	struct et_stream s = et_rec(ET_A1C, &f, secs * f.rate, 0);
 	unsigned int ch;
 	long i, n;
 
@@ -172,7 +172,10 @@ static int rec_dc(struct et_ctx *c, double dc[2])
 // at the lowest level, as ESSDC.EXE measures it. It doesn't depend on the
 // source or the level, so it arises after them. Over half a step of the
 // offset registers, "Capture DC Offset" has something to correct. A step of
-// that control moves it by 64 (DS p.71)
+// that control moves it by 64 (DS p.71). The input settles first from what
+// came before: after a1rec.start's tone on the left, in a full run on the
+// Armada, the left side read 19 low at 1.5 s and 3.4 low 2.4 s later, a
+// time constant of about 1.4 s, so the first recording takes 5 s
 enum et_result c_a1rec_dc(struct et_ctx *c, const struct et_case *k)
 {
 	double dc[2], moved[2];
@@ -183,12 +186,12 @@ enum et_result c_a1rec_dc(struct et_ctx *c, const struct et_case *k)
 	et_ctl_set_enum(c, "Capture Source", "Line");
 	et_ctl_set(c, "Capture Volume", 0, 0, 0);
 	et_ctl_set(c, "Capture DC Offset", 0, 0, 0);
-	if (rec_dc(c, dc))
+	if (rec_dc(c, dc, 5))
 		return ET_ERROR;
 	et_measure(c, "the ADC's offset, left", dc[0], "", -32, 32);
 	et_measure(c, "the ADC's offset, right", dc[1], "", -32, 32);
 	et_ctl_set(c, "Capture DC Offset", 0, 1, 1);
-	if (rec_dc(c, moved))
+	if (rec_dc(c, moved, 2))
 		return ET_ERROR;
 	et_measure(c, "a step of Capture DC Offset, left", moved[0] - dc[0], "",
 		   58, 70);
