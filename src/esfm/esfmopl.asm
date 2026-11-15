@@ -14,13 +14,19 @@
 ;    other's open gets MMSYSERR_ALLOCATED from ESS's code, as a second
 ;    client of device 0 does.  ESS's code opens and closes device 1 as it
 ;    does device 0, so FM comes from ES1869.VXD and the mixer hears of MIDI
-;    the same way.  After ESS's open the chip leaves native mode
-;    (opl_start), and before ESS's close chip_reset brings it back.
-; 3. While device 1 has the chip in OPL3 mode (DEV_OPL_READY), fm_write
-;    drops ESS's native register writes for that ES1869 (fix_fm_guard), so
-;    nothing of ESS's lands in the OPL3's registers.  chip_reset clears
-;    DEV_OPL_READY first (a power resume, the close), and device 1's next
-;    message sets the OPL3 up again.
+;    the same way.  After ESS's open the chip leaves native mode and is as
+;    an OPL3 after a reset (opl_claim), and before ESS's close every note is
+;    cut and chip_reset brings native mode back.
+; 3. The program that opened device 1 has the chip as a real OPL3: Windows
+;    owns FM while the device is open, so ES1869.VXD traps none of the FM
+;    ports for it (Audio_Base+0h-3h, 8h, 9h and 388h-38Bh), and its own
+;    reads and writes reach the chip.  The device writes nothing until a
+;    MIDI message comes; the first one sets the OPL3 up for General MIDI
+;    (opl_ensure, OPL_ENGINE).  While device 1 has the chip (OPL_HAS),
+;    fm_write drops ESS's native register writes for that ES1869
+;    (fix_fm_guard), so nothing of ESS's lands in the OPL3's registers.
+;    chip_reset clears DEV_OPL_READY first (a power resume, the close), and
+;    device 1's next message sets the OPL3 up again.
 ; 4. The voices play the bank as DMX does in Chocolate Doom, for which it
 ;    was made: a second voice with the instrument's fine tuning, the base
 ;    note offsets an octave below DMX's table, the fixed notes of the drums,
@@ -165,7 +171,7 @@ opl_ess:
         ret
 
 ; MODM_OPEN of device 1: ESS's open as device 0's (one client at a time,
-; FM from ES1869.VXD, MOM_OPEN), then the chip in OPL3 mode
+; FM from ES1869.VXD, MOM_OPEN), then the chip as an OPL3 after a reset
 opl_open:
         call    opl_ess
         or      ax,ax
@@ -176,7 +182,7 @@ opl_open:
         mov     di,[es:bx]
         mov     si,[di+CLIENT_DEV]
         mov     [si+DEV_OPL_CLIENT],di
-        call    opl_start
+        call    opl_claim
         pop     dx
         pop     ax
 .out:   ret
@@ -469,13 +475,67 @@ opl_sysex:
 ; the chip in OPL3 mode for device 1 if a chip_reset took it back (a power
 ; resume).  SI = dev
 opl_ensure:
-        test    byte [si+DEV_OPL_READY],1
+        test    byte [si+DEV_OPL_READY],OPL_ENGINE
         jnz     .out
         call    opl_start
 .out:   ret
 
-; the chip in OPL3 mode for device 1, and the device's voices and channels
-; as at the start.  SI = dev
+; device 1 opened: the chip out of native mode and as an OPL3 after a
+; reset, as ES1869.VXD leaves it for a program that takes FM with a port
+; access (o5:0BD0): OPL2 mode, both timers masked, every key off and every
+; operator silent.  From then on the chip is the program's, and the device
+; writes nothing to it until a MIDI message comes.  SI = dev
+opl_claim:
+        push    ax
+        push    bx
+        push    dx
+        mov     dx,[si+DEV_FM_PORT]
+        xor     al,al
+        out     dx,al                   ; native mode left
+        call    opl_wait
+        mov     bx,0x105
+        mov     al,1                    ; the second bank, for these writes
+        call    opl_out
+        mov     bx,0x004
+        mov     al,0x60                 ; both timers masked
+        call    opl_out
+        xor     al,al
+        mov     bx,0x104                ; two operators on every channel
+        call    opl_out
+        mov     bx,0x001
+        call    opl_out
+        mov     bx,0x008
+        call    opl_out
+        mov     bx,0x0BD                ; no rhythm, its keys off
+        call    opl_out
+        call    opl_voices_off
+        mov     bx,0x105                ; OPL2 mode
+        call    opl_out
+        mov     byte [si+DEV_OPL_READY],OPL_HAS
+        pop     dx
+        pop     bx
+        pop     ax
+        ret
+
+; every voice keyed off and silent at once, and the device's voices as at
+; the start.  SI = dev
+opl_voices_off:
+        push    cx
+        push    di
+        mov     cx,OPL_VOICES
+        lea     di,[si+DEV_OPL_VOICE]
+.voice: mov     byte [di+OV_FLAGS],0
+        mov     word [di+OV_AGE],0
+        mov     byte [di+OV_B0],0
+        call    opl_mute                ; keyed off and silent
+        add     di,OV_SIZE
+        loop    .voice
+        pop     di
+        pop     cx
+        ret
+
+; the chip in OPL3 mode for device 1's General MIDI, and the device's
+; voices and channels as at the start.  SI = dev
 opl_start:
         push    ax
         push    bx
@@ -504,14 +564,7 @@ opl_start:
         mov     bx,0x004
         mov     al,0x60                 ; both timers masked
         call    opl_out
-        mov     cx,OPL_VOICES
-        lea     di,[si+DEV_OPL_VOICE]
-.voice: mov     byte [di+OV_FLAGS],0
-        mov     word [di+OV_AGE],0
-        mov     byte [di+OV_B0],0
-        call    opl_mute                ; keyed off and silent
-        add     di,OV_SIZE
-        loop    .voice
+        call    opl_voices_off
         mov     cx,16
         lea     di,[si+DEV_OPL_CHAN]
 .chan:  call    opl_chan_init
@@ -523,7 +576,7 @@ opl_start:
         mov     [si+DEV_OPL_LSTAT],al
         mov     [si+DEV_OPL_LGOT],al
         mov     [si+DEV_OPL_LSYX],al
-        mov     byte [si+DEV_OPL_READY],1
+        mov     byte [si+DEV_OPL_READY],OPL_HAS | OPL_ENGINE
         pop     di
         pop     dx
         pop     cx
@@ -531,22 +584,26 @@ opl_start:
         pop     ax
         ret
 
-; device 1's close: its notes cut, then the chip back in native mode
-; (chip_reset).  SI = dev
+; device 1's close: every note cut, also those its program played itself,
+; then the chip back in native mode (chip_reset).  SI = dev
 opl_stop:
-        test    byte [si+DEV_OPL_READY],1
+        test    byte [si+DEV_OPL_READY],OPL_HAS
         jz      .out
         test    byte [si+DEV_FLAGS],4   ; suspended: FM isn't the driver's
         jnz     .clear
-        push    cx
-        push    di
-        mov     cx,OPL_VOICES
-        lea     di,[si+DEV_OPL_VOICE]
-.voice: call    opl_mute
-        add     di,OV_SIZE
-        loop    .voice
-        pop     di
-        pop     cx
+        push    ax
+        push    bx
+        mov     bx,0x105
+        mov     al,1                    ; the second bank reachable
+        call    opl_out
+        xor     al,al
+        mov     bx,0x104                ; a key for each channel
+        call    opl_out
+        mov     bx,0x0BD                ; no rhythm, its keys off
+        call    opl_out
+        call    opl_voices_off
+        pop     bx
+        pop     ax
         push    si
         push    cs
         call    chip_reset              ; clears DEV_OPL_READY first
@@ -555,8 +612,11 @@ opl_stop:
 .out:   ret
 
 ; all_notes_off of an ES1869 whose OPL3 device has the chip (a power
-; suspend, esfmfix.asm): every voice keyed off and every pedal up.  SI = dev
+; suspend, esfmfix.asm), and the resets: every voice keyed off, also those
+; its program keyed on itself, rhythm off, and every pedal up.  SI = dev
 opl_all_off:
+        push    ax
+        push    bx
         push    cx
         push    di
         mov     cx,16
@@ -567,12 +627,19 @@ opl_all_off:
         mov     cx,OPL_VOICES
         lea     di,[si+DEV_OPL_VOICE]
 .voice: test    byte [di+OV_FLAGS],OVF_ON
-        jz      .next
+        jz      .quiet
         call    opl_key_off
+        jmp     .next
+.quiet: call    opl_key_reg             ; the program's note, if any
 .next:  add     di,OV_SIZE
         loop    .voice
+        mov     bx,0x0BD
+        xor     al,al                   ; no rhythm, its keys off
+        call    opl_out
         pop     di
         pop     cx
+        pop     bx
+        pop     ax
         ret
 
 ; every voice off and every channel as at the start (MODM_RESET, the
@@ -1315,6 +1382,14 @@ opl_freq:
 
 ; voice DI keyed off: its release begins.  SI = dev; keeps all
 opl_key_off:
+        call    opl_key_reg
+        mov     byte [di+OV_FLAGS],0
+        call    opl_age
+        ret
+
+; voice DI's channel keyed off in the chip, with the device's table as it
+; is.  SI = dev; keeps all
+opl_key_reg:
         push    ax
         push    bx
         push    dx
@@ -1322,8 +1397,6 @@ opl_key_off:
         add     bx,0xB0
         mov     al,[di+OV_B0]
         call    opl_out
-        mov     byte [di+OV_FLAGS],0
-        call    opl_age
         pop     dx
         pop     bx
         pop     ax
@@ -1462,15 +1535,15 @@ opl_wait:
         ret
 
 ; fm_write's start (seg1:0013), in place of its sub sp,4: ESS's write of a
-; native register goes on, unless device 1 has that ES1869's chip in OPL3
-; mode; then fm_write returns at once.  BP = fm_write's frame, DS = DGROUP;
-; changes BX and CX
+; native register goes on, unless device 1 has that ES1869's chip; then
+; fm_write returns at once.  BP = fm_write's frame, DS = DGROUP; changes BX
+; and CX
 fix_fm_guard:
         pop     cx
         sub     sp,4
         push    cx
         mov     bx,[bp+0xA]             ; dev
-        test    byte [bx+DEV_OPL_READY],1
+        test    byte [bx+DEV_OPL_READY],OPL_HAS
         jnz     .drop
         ret
 .drop:  mov     sp,bp

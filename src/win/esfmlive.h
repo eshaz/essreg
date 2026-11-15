@@ -94,8 +94,8 @@ struct esfm_diag {
   u16 file_time;
   char file[128]; // Bank= from SYSTEM.INI
   u16 opts;       // fixed driver 4 and up: ESFM_OPT_*, the changes on
-  int opl3;       // fixed driver 5 and up: the OPL3 device (device 1) has
-                  // the chip in OPL3 mode
+  int opl3;       // fixed driver 5 and up: the OPL3 device (device 1) is
+                  // open, and the chip is its program's or in OPL3 mode
   char why[96];   // why nothing could be read
 };
 
@@ -124,8 +124,9 @@ struct esfm_diag {
 
 // read the driver's state, 0 on success
 // read_chip also reads the key-on registers, only while a program has the
-// device open so that Windows owns FM, and not while the OPL3 device has
-// the chip, whose OPL3 registers native mode's reads would write
+// device open so that Windows owns FM, and not while the OPL3 device is
+// open, whose program writes the chip itself and whose OPL3 registers
+// native mode's reads would write
 int esfm_diag_read(struct esfm_diag *d, int read_chip);
 
 // the state as text with lines ended by nl, rc is what esfm_diag_read

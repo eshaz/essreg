@@ -1550,6 +1550,12 @@ class SettingsTest(unittest.TestCase):
 
 # the OPL3 device (esfmopl.asm): device fields, esfmdev.inc
 DEV_OPL_CLIENT, DEV_OPL_READY = 0x438, 0x43A
+OPL_HAS, OPL_ENGINE = 1, 2      # DEV_OPL_READY: the chip, General MIDI's setup
+# an AdLib program's note on channel 0, OPL2 style: C0h without the OPL3's
+# output bits
+ADLIB_NOTE = ((0x20, 0x01), (0x23, 0x01), (0x40, 0x10), (0x43, 0x00),
+              (0x60, 0xF0), (0x63, 0xF0), (0x80, 0x77), (0x83, 0x77),
+              (0xA0, 0x98), (0xC0, 0x00), (0xB0, 0x31))
 DEV_OPL_CHAN, DEV_OPL_VOICE, OV_SIZE = 0x44F, 0x54F, 16
 GENMIDI = os.path.join(ROOT, "third_party", "genmidi", "GENMIDI.lmp")
 OPTAB = (0, 1, 2, 8, 9, 10, 16, 17, 18)
@@ -1642,6 +1648,15 @@ class Opl3Test(unittest.TestCase):
                 if (channel is None or t[v][1] == channel) and
                 (key is None or t[v][2] == key)]
 
+    def program(self, e, writes):
+        """the program that has the device open writes the chip itself, as
+        an OPL3 (register, value), bit 8 the second bank: Windows owns FM
+        then, and ES1869.VXD traps none of the FM ports for it"""
+        for reg, value in writes:
+            port = e.chip.base + (2 if reg & 0x100 else 0)
+            e.chip.out(port, reg & 0xFF, 0)
+            e.chip.out(port + 1, value, 0)
+
     def regs(self, e, v):
         """voice v's registers: the modulator's and the carrier's 20h,
         60h, 80h, E0h and 40h, and C0h"""
@@ -1682,13 +1697,23 @@ class Opl3Test(unittest.TestCase):
 
     def test_open_and_close(self):
         e = self.emu()
-        self.assertFalse(e.chip.native)                 # OPL3 mode
-        self.assertEqual((e.chip.opl[0x105], e.chip.opl[0x104],
-                          e.chip.opl[0x004]), (1, 0, 0x60))
+        # out of native mode, and as an OPL3 after a reset: OPL2 mode, the
+        # timers masked, no rhythm, every key off and every operator silent
+        self.assertFalse(e.chip.native)
+        self.assertEqual([e.chip.opl[r] for r in (0x105, 0x104, 0x004,
+                                                  0x0BD, 0x001, 0x008)],
+                         [0, 0, 0x60, 0, 0, 0])
         self.assertEqual(e.chip.opl_keyed(), [])
-        self.assertEqual(e.dev8(DEV_OPL_READY), 1)
+        for v in range(18):
+            mod, car, _c0 = self.regs(e, v)
+            self.assertEqual((mod[4], car[4]), (0x3F, 0x3F))
+        self.assertEqual(e.dev8(DEV_OPL_READY), OPL_HAS)
         self.assertEqual(e.dev16(DEV_OPL_CLIENT), e.client & 0xFFFF)
         self.assertEqual([c[0] for c in e.callbacks], [MOM_OPEN])
+        # the first MIDI message sets the OPL3 up for General MIDI
+        self.assertEqual(e.data(0x7F3C90), 0)
+        self.assertEqual(e.dev8(DEV_OPL_READY), OPL_HAS | OPL_ENGINE)
+        self.assertEqual(e.chip.opl[0x105], 1)
         self.assertEqual(e.close(), 0)
         self.assertTrue(e.chip.native)                  # ESS's chip_reset
         self.assertEqual((e.dev8(DEV_OPL_READY), e.dev16(DEV_OPL_CLIENT)),
@@ -1871,9 +1896,66 @@ class Opl3Test(unittest.TestCase):
         e.close()
         self.assertTrue(e.chip.native)
 
+    # -- a program that writes the chip itself -------------------------------
+
+    def test_direct_access(self):
+        """the program that opened the device writes the chip itself, as an
+        OPL3: its registers stay as it wrote them, the device writes nothing
+        until a MIDI message comes, and the close cuts its note"""
+        e = self.emu()
+        writes = e.chip.writes
+        self.program(e, ADLIB_NOTE)
+        self.assertEqual(e.chip.writes, writes + 2 * len(ADLIB_NOTE))
+        for reg, value in ADLIB_NOTE:
+            self.assertEqual(e.chip.opl[reg], value, hex(reg))
+        self.assertEqual(e.chip.opl_keyed(), [0])
+        self.assertEqual(e.chip.opl[0x105], 0)          # OPL2 mode still
+        # messages that aren't MIDI write nothing, and ESS's code neither
+        writes = e.chip.writes
+        self.assertEqual(e.devcaps(1)[0], 0)
+        e.call((esfmemu.SEG_PARA[1], 0x10), [e.dev, 0x240, 1])
+        self.assertEqual(e.chip.writes, writes)
+        self.assertEqual(e.chip.opl_keyed(), [0])
+        self.assertEqual(e.close(), 0)
+        self.assertEqual(e.chip.opl_keyed(), [])
+        self.assertEqual(e.chip.opl[0x43], 0x3F)
+        self.assertTrue(e.chip.native)                  # ESS's chip again
+        self.assertEqual(e.chip.opl_splits, [])
+
+    def test_direct_rhythm_and_suspend(self):
+        """a power suspend keys off the program's notes in both banks and
+        its rhythm, and writes nothing of ESS's"""
+        e = self.emu()
+        self.program(e, ADLIB_NOTE + ((0x105, 1), (0x1B0, 0x31),
+                                      (0xBD, 0x30)))
+        self.assertEqual(e.chip.opl_keyed(), [0, 9])
+        e.driverproc(DRV_POWER, PWR_SUSPENDREQUEST)
+        self.assertEqual(e.chip.opl_keyed(), [])
+        self.assertEqual(e.chip.opl[0xBD], 0)
+        self.assertFalse(e.chip.native)
+        self.assertEqual(e.driverproc(DRV_POWER, PWR_SUSPENDRESUME), 1)
+        self.assertEqual(e.close(), 0)
+        self.assertTrue(e.chip.native)
+
+    def test_midi_after_direct_access(self):
+        """a MIDI message after the program's own writes sets the OPL3 up
+        for General MIDI, which keys the program's note off and plays"""
+        e = self.emu()
+        self.program(e, ADLIB_NOTE)
+        self.assertEqual(e.data(0x7F3C90), 0)
+        self.assertEqual(e.chip.opl[0x105], 1)
+        self.check_note(e, 0, 60)
+        self.assertEqual(sorted(e.chip.opl_keyed()),
+                         sorted(self.keyed(e, 0, 60)))
+
     def test_ess_writes_dropped(self):
-        """fm_write writes nothing while device 1 has the chip"""
-        e = self.emu([0x7F3C90])
+        """fm_write writes nothing while device 1 has the chip, from its
+        open on"""
+        e = self.emu()
+        writes = e.chip.writes
+        e.call((esfmemu.SEG_PARA[1], 0x10), [e.dev, 0x240, 1])
+        self.assertEqual(e.chip.writes, writes)
+        self.assertEqual(e.data(0x7F3C90), 0)
         writes = e.chip.writes
         e.call((esfmemu.SEG_PARA[1], 0x10), [e.dev, 0x240, 1])
         self.assertEqual(e.chip.writes, writes)

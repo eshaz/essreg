@@ -175,19 +175,34 @@ static int prefer(int names, int set) {
 // panel, as opl3 says: logged, listed in the question, and with set
 // written. 1 if it changes
 static int midi_list(int set) {
-  static char text[200];
+  static char text[200], old[48];
   struct mr_entry e;
-  int r = mr_opl3(opl3, set, &e);
+  int stale, r = mr_opl3(opl3, set, &e, &stale);
 
+  old[0] = 0;
+  if (stale == 1)
+    strcpy(old, ", in place of an old copy");
+  else if (stale > 1)
+    _bprintf(old, sizeof(old), ", in place of %d old copies", stale);
   if (r == MR_ADD && !set) {
     _bprintf(text, sizeof(text),
              "The MIDI list of the Multimedia control panel gets %s.", e.name);
     plan_add(text);
     _bprintf(text, sizeof(text),
-             "The MIDI list gets the OPL3 device, %s, as %s with Port 1.",
-             e.name, e.key);
+             "The MIDI list gets the OPL3 device, %s, as %s with Port 1%s.",
+             e.name, e.key, old);
   } else if (r == MR_ADD) {
     _bprintf(text, sizeof(text), "The MIDI list has %s, as %s.", e.name, e.key);
+  } else if (r == MR_TIDY && !set) {
+    plan_add("Old copies of the OPL3 device's entry leave the MIDI list.");
+    _bprintf(text, sizeof(text),
+             "The MIDI list has the OPL3 device, %s, as %s%s.", e.name, e.key,
+             old[0] ? old : "");
+  } else if (r == MR_TIDY) {
+    _bprintf(text, sizeof(text),
+             "The old copies of %s are out of the MIDI "
+             "list.",
+             e.name);
   } else if (r == MR_REMOVE && !set) {
     _bprintf(text, sizeof(text),
              "The MIDI list of the Multimedia control panel loses %s.", e.name);
@@ -204,8 +219,8 @@ static int midi_list(int set) {
     return 0;
   } else if (r == MR_NO_ESFM) {
     _bprintf(text, sizeof(text),
-             "The MIDI list has no entry of ESFM.DRV, "
-             "so the OPL3 device gets none.");
+             "The MIDI list has no entry of ESFM.DRV for "
+             "the card, so the OPL3 device gets none.");
   } else if (opl3) {
     _bprintf(text, sizeof(text),
              "The MIDI list has the OPL3 device, %s, as %s.", e.name, e.key);
@@ -213,7 +228,7 @@ static int midi_list(int set) {
     return 0;
   }
   log_only(text);
-  return r == MR_ADD || r == MR_REMOVE;
+  return r == MR_ADD || r == MR_REMOVE || r == MR_TIDY;
 }
 
 static int box(const char *text, UINT flags) {

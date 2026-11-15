@@ -98,7 +98,7 @@ DEV_LONG_MSG    equ 0x434   ; dword: (seg1 modm_longdata, [bp-2], [bp-15h],
 
 ; ESFM_FIX: the OPL3 device, device 1 (esfmopl.asm)
 DEV_OPL_CLIENT  equ 0x438   ; word: its client, 0 while it's closed
-DEV_OPL_READY   equ 0x43A   ; byte: 1 while the chip is in OPL3 mode for it
+DEV_OPL_READY   equ 0x43A   ; byte: OPL_*, what device 1 has of the chip
 DEV_OPL_STATUS  equ 0x43B   ; byte: running status of its short messages
 DEV_OPL_CLOCK   equ 0x43C   ; word: the voices' ages
 DEV_OPL_LSTAT   equ 0x43E   ; byte: long messages: the status in force
@@ -145,3 +145,6 @@ OVF_ON          equ 1       ; keyed on
 OVF_HELD        equ 2       ; its note off waits for the pedal
 OVF_SECOND      equ 4       ; the second voice of its instrument
 OPL_VOICES      equ 18
+OPL_HAS         equ 1       ; DEV_OPL_READY: device 1 has the chip,
+                            ; out of native mode, from its open
+OPL_ENGINE      equ 2       ; its General MIDI set the chip up

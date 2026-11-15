@@ -329,13 +329,16 @@ tools/wineshot.sh run ess3d.exe /sim tray
     refuses it. A program waits for its buffers.
   * DOS calls ask for their errors back (INT 21h 716Ch and 6C00h with BX bit
     13), so that no critical error box appears at open.
-  * The OPL3 device (`esfmopl.asm`) has the chip in OPL3 mode while
-    `DEV_OPL_READY` is set: `fm_write` then drops ESS's writes
-    (`fix_fm_guard`), and `chip_reset` clears it first. Its entry in the
-    MIDI list of the Multimedia control panel is essinst's
-    (`src/win/midireg.c`), so a change to its name or device number goes
-    there too, and `Opl3Test` in `tests/test_esfmdrv.py` tests it on the
-    emulator's OPL3 mode.
+  * The OPL3 device (`esfmopl.asm`) has the chip from its open while
+    `OPL_HAS` is set in `DEV_OPL_READY`: it opens into an OPL3's reset state
+    (`opl_claim`), its program may write the chip itself, and its General
+    MIDI sets the chip up only at the first MIDI message (`OPL_ENGINE`).
+    `fm_write` drops ESS's writes meanwhile (`fix_fm_guard`), `chip_reset`
+    clears both flags first, and the close and a suspend key off every
+    channel and the rhythm, the program's notes too. Its entry in the MIDI
+    list of the Multimedia control panel is essinst's (`src/win/midireg.c`),
+    so a change to its name or device number goes there too, and `Opl3Test`
+    in `tests/test_esfmdrv.py` tests it on the emulator's OPL3 mode.
 * **The status block** (`esfmfixd.asm`, found by `ESFMFIX`) is read by
   essctl at fixed offsets (`src/win/esfmlive.c`). A change to its layout
   bumps `fix_version`, and the next version is 6.

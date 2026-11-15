@@ -528,9 +528,11 @@ one queues the messages instead, and it fixes more:
   ([docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv)).
 * It has a second MIDI device, *OPL3 FM Synthesis*, which plays General MIDI
   on the chip's OPL3 compatibility mode with Freedoom's instruments, the way
-  an OPL3 card plays Doom's music. One of the two devices is open at a time,
-  and essinst adds the new one to the MIDI tab of the Multimedia control
-  panel ([docs/ESFM_OPL3.md](docs/ESFM_OPL3.md)).
+  an OPL3 card plays Doom's music. The program that opens it also has the
+  chip as a real OPL3, and can program it through the FM ports itself. One
+  of the two devices is open at a time, and essinst adds the new one to the
+  MIDI tab of the Multimedia control panel
+  ([docs/ESFM_OPL3.md](docs/ESFM_OPL3.md)).
 
 [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md) has the details. Each change can be
 turned off with its own key under `[ESFM.DRV]` in `SYSTEM.INI`, which the

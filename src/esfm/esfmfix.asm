@@ -412,7 +412,7 @@ fix_all_off:
         mov     bp,sp
         push    si
         mov     si,[bp+6]
-        test    byte [si+DEV_OPL_READY],1
+        test    byte [si+DEV_OPL_READY],OPL_HAS
         jz      .ess
         call    fix_enter
         call    opl_all_off             ; esfmopl.asm

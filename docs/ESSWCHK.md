@@ -20,8 +20,8 @@ verdicts are [`src/wchk.c`](../src/wchk.c)'s.
   the rebuilt ones and their settings, `DmaCountTwice` and `TrueSides` from
   `SYSTEM.INI`, and the wave and MIDI devices. `env.midi` gives the MIDI
   list of the Multimedia control panel, an entry a line with its key, name,
-  `Driver`, `Port` and `Active`, where essinst adds the OPL3 device, and
-  `env.mapper` the MIDI mapper's `CurrentInstrument`
+  `Driver`, `Port`, `Active` and `DevNode`, where essinst adds the OPL3
+  device, and `env.mapper` the MIDI mapper's `CurrentInstrument`
   ([ESFM_OPL3.md](ESFM_OPL3.md#the-multimedia-control-panel)).
 * **vxd.count2** and **vxd.count1**: while each DAC plays silence, 100,000
   readings of its DMA count through VxD function 0004, which ES1869.DRV's

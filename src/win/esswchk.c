@@ -100,7 +100,7 @@
 #define POS_SECS 60       // a1.position's stream
 #define DRAIN_RUNS 3
 #define FM_NOTE_MS 600
-#define MIDI_LIST 8         // the MIDI list's entries in the report
+#define MIDI_LIST 24        // the MIDI list's entries in the report
 #define ESFM_MIDI "ESFM"    // ESFM.DRV's devices: ESS's
 #define OPL3_MIDI "OPL3 FM" // and the OPL3 device
 #define FM_RATE_SECS 30
@@ -449,7 +449,7 @@ static struct {
 // MIDI mapper's choice
 static void env_midi(void) {
   static struct mr_entry list[MIDI_LIST];
-  char map[MR_NAME], port[12], act[12];
+  char map[MR_NAME], port[12], act[12], node[12];
   int i, n = mr_list(list, MIDI_LIST);
 
   if (n < 0) {
@@ -461,13 +461,17 @@ static void env_midi(void) {
   for (i = 0; i < n; i++) {
     strcpy(port, "none");
     strcpy(act, "none");
+    strcpy(node, "none");
     if (list[i].port >= 0)
       sprintf(port, "%ld", list[i].port);
     if (list[i].active >= 0)
       sprintf(act, "%ld", list[i].active);
-    res("env.midi", WCHK_INFO, "%s: %s; Driver %s, Port %s, Active %s",
-        list[i].key, list[i].name[0] ? list[i].name : "no name",
-        list[i].driver[0] ? list[i].driver : "none", port, act);
+    if (list[i].has_devnode)
+      sprintf(node, "%08lX", list[i].devnode);
+    res("env.midi", WCHK_INFO,
+        "%s: %s; Driver %s, Port %s, Active %s, DevNode %s", list[i].key,
+        list[i].name[0] ? list[i].name : "no name",
+        list[i].driver[0] ? list[i].driver : "none", port, act, node);
   }
   mr_mapper(map);
   res("env.mapper", WCHK_INFO, "the MIDI mapper's CurrentInstrument: %s",

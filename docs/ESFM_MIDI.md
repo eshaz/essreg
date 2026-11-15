@@ -226,9 +226,9 @@ file when a program opens the device, if the file's date or time has changed
 
 [`src/esfm/esfmopl.asm`](../src/esfm/esfmopl.asm) gives the driver a second
 MIDI device, *OPL3 FM Synthesis*, which plays General MIDI on the chip's
-OPL3 compatibility mode with Freedoom's instruments. One of the two devices
-is open at a time, and its messages go through the same queue
-([ESFM_OPL3.md](ESFM_OPL3.md)).
+OPL3 compatibility mode with Freedoom's instruments, and whose program has
+the chip as a real OPL3. One of the two devices is open at a time, and its
+messages go through the same queue ([ESFM_OPL3.md](ESFM_OPL3.md)).
 
 Each change can be turned off in `SYSTEM.INI` with its own key under
 `[ESFM.DRV]`, which the driver reads at the first `DRV_ENABLE`

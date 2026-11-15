@@ -1,12 +1,16 @@
 # ESFM.DRV's OPL3 device
 
 `build/ESFM.DRV` has a second MIDI output device, *OPL3 FM Synthesis*, which
-plays General MIDI on the ES1869's OPL3 compatibility mode. ESS's own
-device, *ESFM Synthesis*, plays on the chip's ESFM native mode, with ESS's
-patch bank. The OPL3 device writes the chip's FM ports as a driver writes an
-OPL3, with the instruments of the Freedoom project, so a MIDI song sounds as
-it does on an OPL3 card, such as a Sound Blaster 16 with Doom's music
-driver.
+gives a program the ES1869's OPL3 compatibility mode. ESS's own device,
+*ESFM Synthesis*, plays on the chip's ESFM native mode, with ESS's patch
+bank. The OPL3 device does two things:
+* It plays General MIDI on the chip's OPL3 mode, as a driver writes an OPL3,
+  with the instruments of the Freedoom project, so a MIDI song sounds as it
+  does on an OPL3 card, such as a Sound Blaster 16 with Doom's music driver.
+* The program that opens it has the chip as a real OPL3: its own reads and
+  writes of the FM ports reach the chip, so it can program its instruments,
+  the rhythm and the timers itself
+  ([below](#a-program-that-writes-the-chip-itself)).
 
 The code is [`src/esfm/esfmopl.asm`](../src/esfm/esfmopl.asm), assembled
 into the fixed driver only. `Opl3Device=0` under `[ESFM.DRV]` in
@@ -36,27 +40,69 @@ same way, and the mixer's MIDI volume (`MODM_SETVOLUME`) works for both.
 ## How the device takes the chip
 
 When the OPL3 device opens, the chip leaves native mode, which a write to
-FM_Base+0 does, and the driver sets the OPL3 up:
-* register 105h to 1: OPL3 mode;
+FM_Base+0 does, and it is as an OPL3 after a reset, the way ES1869.VXD
+leaves it for a program that takes FM with a port access:
+* register 105h to 0: OPL2 mode, as an OPL3 starts;
 * 104h to 0: two operators on each of the 18 channels;
+* 01h and 08h to 0;
+* BDh to 0: no rhythm mode;
+* 04h to 60h: both timers masked;
+* every key off, and every operator at its lowest level.
+
+The device writes nothing more until a MIDI message comes. The first one
+sets the OPL3 up for General MIDI:
+* register 105h to 1: OPL3 mode, for the sides of each channel;
 * 01h to 20h: the waveforms on;
 * 08h to 40h: note select;
 * BDh to 0: no rhythm mode, and the shallow vibrato;
-* 04h to 60h: both timers masked.
+* 04h to 60h: both timers masked;
+* every key off, and every operator at its lowest level.
 
-Then each voice is keyed off at its lowest level. When the device closes,
-its voices are muted, and ESS's chip reset brings native mode back for
-device 0.
+When the device closes, every key is off, the rhythm's too, and every
+operator silent, also those that its program played itself. Then ESS's chip
+reset brings native mode back for device 0.
 
-While the OPL3 device has the chip, ESS's code writes nothing to it:
+While the OPL3 device is open, ESS's code writes nothing to the chip:
 `fm_write` drops ESS's register writes for that ES1869, so that a native
 write can't land in the OPL3's registers. A power suspend keys off every
-voice and lets the pedals up. After the resume, ESS's chip reset leaves the
-chip in native mode, and the device's next message sets the OPL3 up again.
+voice, the program's notes and the rhythm too, and lets the pedals up. After
+the resume, ESS's chip reset leaves the chip in native mode, and the
+device's next message sets the OPL3 up again. A program that writes the chip
+itself sets its instruments again then, as after any loss of power.
 
 essctl's *ESFM* page reads the driver's voices from the chip's native
-registers. While the OPL3 device is open, it says so instead, since the
-chip's native voices are idle then.
+registers. While the OPL3 device is open, it says so instead and reads
+nothing from the chip, since the chip's native voices are idle then and a
+read in native mode would change what the device's program wrote.
+
+## A program that writes the chip itself
+
+A program that has the OPL3 device open has the chip as a real OPL3, as
+software written for an AdLib, a Sound Blaster or an OPL3 card expects it:
+* Windows owns FM while the device is open, because ESS's open asks
+  ES1869.VXD for it. The VxD traps none of the FM ports for the owner, so a
+  Windows program's `in` and `out` instructions reach the chip directly:
+  Audio_Base+0h to +3h (both banks), +8h and +9h (the first bank), and the
+  AdLib ports 388h to 38Bh.
+* The program finds the chip as an OPL3 after a reset, in OPL2 mode, and
+  sets it up as it likes: the OPL3 mode, four-operator voices, rhythm, the
+  waveforms, its own instruments.
+* Its reads of the status port return the chip's status, so an AdLib or OPL3
+  detection with the timers works.
+* The device writes nothing of its own until a MIDI message comes, ESS's
+  code nothing at all, and essctl reads nothing from the chip. Device 0
+  stays closed to other programs, and a DOS box gets the VxD's virtual FM
+  chip meanwhile.
+
+The program can send MIDI to the device too, but the first message sets the
+chip up for General MIDI, which keys off what the program played and takes
+the voices for its notes.
+
+A program can also write the FM ports without opening a device. ES1869.VXD
+then gives Windows FM at its first access, in the same state. But a DOS
+program that wants FM takes it away again (`DosTakesFM`), and so does a
+program that opens ESS's device 0, whose open resets the chip to native
+mode. With the OPL3 device open, neither can.
 
 ## What it plays
 
@@ -109,49 +155,62 @@ one key for each device under:
 HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\MediaResources\midi
 ```
 
-A key is named after its driver and a number, such as `esfm.drv<0000>`. Its
+A key is named after its driver and the number of the card's install in the
+MEDIA class, such as `esfm.drv<0018>` for the card in
+`HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\Class\MEDIA\0018`. Its
 values name the driver (`Driver`), the device among the driver's devices
-(`Port`), the name that the list shows (`FriendlyName` and `Description`),
-whether the entry is in use (`Active`), and the card's device node and
-software key (`DevNode` and `SoftwareKey`). Windows makes the key of a
-driver's first device when it installs the driver from the INF's
-`Drivers\midi` lines, and ESS's INF knows one device of ESFM.DRV. A driver
-with a second device has a second key with `Port` 1, as the INF of
-Creative's AudioPCI writes for the two MIDI devices of `es1371.dll`.
+(`Port`), the names that the list shows (`FriendlyName`, such as *MIDI for
+Internal ESFM Synthesis*, and `Description`), whether the card is there
+(`Active`), and the card's device node and software key (`DevNode` and
+`SoftwareKey`). An earlier install of the card leaves its key behind with
+`Active` 0. Windows makes the key of a driver's first device when it
+installs the driver from the INF's `Drivers\midi` lines, and ESS's INF knows
+one device of ESFM.DRV. A driver with a second device has a second key with
+`Port` 1, as the INF of Creative's AudioPCI writes for the two MIDI devices
+of `es1371.dll`. The MIDI mapper keeps the device it plays on by the
+device's own name, such as *ESFM Synthesis (220)* (`CurrentInstrument` under
+`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Multimedia\MIDIMap`).
 
 So essinst ([src/win/midireg.c](../src/win/midireg.c)) copies the key of
-ESS's device, the entry of `esfm.drv` with `Port` 0 or none, to the next
-free number, normally `esfm.drv<0001>`:
+ESS's device on the card that is there, the entry of `esfm.drv` with `Port`
+0 or none and `Active` 1, to a number from 9001 up, which no install of a
+card takes, normally `esfm.drv<9001>`:
 * every value of ESS's entry, and its empty `Instruments` key;
 * `Port` 1, a DWORD, or of the type that ESS's entry keeps it in;
-* `FriendlyName` and `Description`: ESS's name with ESFM made OPL3 FM, so
-  *Internal ESFM Synthesis* becomes *Internal OPL3 FM Synthesis*.
+* `FriendlyName` and `Description`: ESS's names with ESFM made OPL3 FM, so
+  *MIDI for Internal ESFM Synthesis* becomes *MIDI for Internal OPL3 FM
+  Synthesis*.
 
 essinst adds the entry when the ESFM.DRV in place after its run is a rebuilt
-driver with the OPL3 device and `Opl3Device` isn't 0, and only when no entry
-of ESFM.DRV with a `Port` above 0 exists. It removes every such entry when
-ESS's driver comes back with `/restore`, or when `Opl3Device=0` turns the
-device off. Where the MIDI mapper's `CurrentInstrument`, for the current
-user or for new ones, names a removed entry by its key or by its name,
-essinst gives it ESS's device back in the same form. ESSINST.LOG has each
-step. A run with the drivers already in place only changes the list, and
-Windows doesn't restart.
+driver with the OPL3 device and `Opl3Device` isn't 0. An entry of ESFM.DRV
+with a `Port` above 0 that has the values of ESS's entry stays, and any
+other one goes: a copy of an earlier install's entry, as essinst made before
+it chose the active one, or a copy from before the card was installed again.
+essinst removes every such entry when ESS's driver comes back with
+`/restore`, or when `Opl3Device=0` turns the device off. Where the MIDI
+mapper's `CurrentInstrument`, for the current user or for new ones, names
+the OPL3 device by its own name, *OPL3 FM Synthesis (220)*, or a removed
+entry by its key or its name, essinst gives it ESS's device back in the same
+form. ESSINST.LOG has each step. A run with the drivers already in place
+only changes the list, and Windows doesn't restart.
 
-esswchk's report lists the MIDI list, an entry a line (`env.midi`), and the
-mapper's choice (`env.mapper`), so a run on the machine shows what Windows
-made of the entries. If the MIDI tab shows no *Internal OPL3 FM Synthesis*,
-those lines tell why.
+esswchk's report lists the MIDI list, an entry a line with its `DevNode`
+(`env.midi`), and the mapper's choice (`env.mapper`), so a run on the
+machine shows what Windows made of the entries. If the MIDI tab shows no
+*MIDI for Internal OPL3 FM Synthesis*, those lines tell why.
 
 ## Checks
 
 * `Opl3Test` in [tests/test_esfmdrv.py](../tests/test_esfmdrv.py) runs the
   driver in the emulator, whose chip has the OPL3 mode
   ([tests/esfmemu.py](../tests/esfmemu.py)): the two devices and their
-  names, one open at a time, the notes' registers against the bank, levels,
-  pan with and without `TrueSides`, the pedal, bend and its range, drums, 18
-  voices, running status, long messages, resets, messages from an interrupt,
-  a suspend and resume, and ESS's writes dropped while the device has the
-  chip.
+  names, one open at a time, the chip as an OPL3 after a reset at the open,
+  the notes' registers against the bank, levels, pan with and without
+  `TrueSides`, the pedal, bend and its range, drums, 18 voices, running
+  status, long messages, resets, messages from an interrupt, a suspend and
+  resume, and ESS's writes dropped while the device is open. A program that
+  writes the chip itself keeps every register as it wrote it, and the close
+  and a suspend key off its notes and its rhythm.
 * `test_essinst_midi_list` in [tests/test_wine.py](../tests/test_wine.py)
   runs essinst under Wine against a MIDI list as ESS's INF leaves it.
 * esswchk's `opl.pan0` and `opl.pan127` play a note on the OPL3 device

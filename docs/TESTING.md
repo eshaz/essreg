@@ -824,9 +824,9 @@ These steps need `build\ESFM.DRV` installed. See [ESFM_GM.md](ESFM_GM.md).
 ### G4. The OPL3 device
 
 See [ESFM_OPL3.md](ESFM_OPL3.md). With the drivers installed by essinst:
-1. The MIDI tab of the Multimedia control panel lists *Internal OPL3 FM
-   Synthesis*. Choose it, and play a MIDI file in Media Player. It sounds as
-   on an OPL3 card.
+1. The MIDI tab of the Multimedia control panel lists *MIDI for Internal
+   OPL3 FM Synthesis*. Choose it, and play a MIDI file in Media Player. It
+   sounds as on an OPL3 card.
 2. Choose ESS's device again. While a program plays on one device, the other
    can't be opened.
 
