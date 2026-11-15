@@ -76,6 +76,7 @@ OPT_RUNNING     equ 0x0100      ; RunningStatus
 OPT_SQUARE      equ 0x0200      ; BetterSquareWave: the built-in bank
 OPT_SIDES       equ 0x0400      ; TrueSides: left on the left output
 OPT_OPL3        equ 0x0800      ; Opl3Device: device 1 on OPL3 mode
+OPT_OPL3_DRV    equ 0x1000      ; Opl3Device=2: device 1 is ESFMOPL3.DRV's
 OPT_READ        equ 0x8000      ; SYSTEM.INI was read
 OPT_DEFAULT     equ 0x0FFF
 

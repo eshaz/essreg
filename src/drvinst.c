@@ -442,6 +442,147 @@ int di_rebuilt_after(const char *srcdir, const char *sysdir) {
   return di_rebuilt_has(1, srcdir, sysdir, 0);
 }
 
+// the size and CRC-32 of the file at path: 0, or -1 without it
+static int file_sum(const char *path, long *size, u32 *crc) {
+  FILE *fp = fopen(path, "rb");
+  unsigned n;
+  int bad;
+
+  *size = 0;
+  *crc = 0;
+  if (!fp)
+    return -1;
+  while ((n = (unsigned)fread(buf, 1, CHUNK, fp)) > 0) {
+    *crc = crc32(*crc, buf, n);
+    *size += n;
+  }
+  bad = ferror(fp);
+  fclose(fp);
+  return bad ? -1 : 0;
+}
+
+// from to to, whole or not at all, and read back as size and crc: 0 or -1
+static int copy_summed(const char *from, const char *to, long size, u32 crc) {
+  FILE *in, *out;
+  long got_size;
+  u32 got_crc;
+  unsigned n;
+  int ok = 1;
+
+  in = fopen(from, "rb");
+  if (!in)
+    return -1;
+  out = fopen(to, "wb");
+  if (!out) {
+    fclose(in);
+    return -1;
+  }
+  while ((n = (unsigned)fread(buf, 1, CHUNK, in)) > 0)
+    if (fwrite(buf, 1, n, out) != n)
+      ok = 0;
+  if (ferror(in))
+    ok = 0;
+  fclose(in);
+  if (fflush(out))
+    ok = 0;
+  commit_file(out);
+  if (fclose(out))
+    ok = 0;
+  if (ok)
+    ok = !file_sum(to, &got_size, &got_crc) && got_size == size &&
+         got_crc == crc;
+  if (!ok)
+    remove(to);
+  return ok ? 0 : -1;
+}
+
+int di_put_extra(const struct di_extra *x, const char *srcdir,
+                 const char *sysdir, int loaded, int stage,
+                 const struct di_ops *ops, char *why) {
+  char from[DI_PATH], dest[DI_PATH], tmp[DI_PATH], to[DI_PATH];
+  long size, have_size;
+  u32 crc, have_crc;
+
+  di_path(from, srcdir, x->name);
+  di_path(dest, sysdir, x->name);
+  if (file_sum(from, &size, &crc) || !size) {
+    sprintf(line, "%s isn't next to essinst, so nothing was changed.", x->name);
+    return fail(ops, why, line);
+  }
+  if (!file_sum(dest, &have_size, &have_crc) && have_size == size &&
+      have_crc == crc) {
+    sprintf(line, "%s: installed already.", x->name);
+    say(ops, line);
+    return 0;
+  }
+  if (!stage) {
+    sprintf(line, "%s: from %.*s%s.", x->name, DI_PATH, from,
+            loaded ? ", in place at the next start" : "");
+    say(ops, line);
+    return 1;
+  }
+  // as the .$$$ first, checked, then renamed: into place, or while Windows
+  // has the file loaded, to the .NEW that WININIT.INI moves at the start
+  di_path(tmp, sysdir, x->temp);
+  di_path(to, sysdir, loaded ? x->staged : x->name);
+  remove(tmp);
+  if (copy_summed(from, tmp, size, crc)) {
+    sprintf(line, "%.*s can't be written, so nothing was changed.", DI_PATH,
+            tmp);
+    return fail(ops, why, line);
+  }
+  remove(to);
+  if (rename(tmp, to)) {
+    remove(tmp);
+    sprintf(line, "%.*s can't be written, so nothing was changed.", DI_PATH,
+            to);
+    return fail(ops, why, line);
+  }
+  if (loaded && ops->rename_at_start(ops->ctx, dest, to)) {
+    remove(to);
+    return fail(ops, why,
+                "WININIT.INI in the Windows folder can't be written, so "
+                "nothing was changed.");
+  }
+  sprintf(line,
+          loaded ? "%s goes in place of %s at the next start."
+                 : "%s: copied into place%s.",
+          loaded ? x->staged : x->name, loaded ? x->name : "");
+  say(ops, line);
+  return 1;
+}
+
+int di_drop_extra(const struct di_extra *x, const char *sysdir, int loaded,
+                  int stage, const struct di_ops *ops, char *why) {
+  char path[DI_PATH];
+  FILE *fp;
+
+  di_path(path, sysdir, x->name);
+  fp = fopen(path, "rb");
+  if (!fp)
+    return 0;
+  fclose(fp);
+  if (!stage) {
+    sprintf(line, "%s: removed%s.", x->name,
+            loaded ? " at the next start" : "");
+    say(ops, line);
+    return 1;
+  }
+  if (!loaded && !remove(path)) {
+    sprintf(line, "%s is removed.", x->name);
+    say(ops, line);
+    return 1;
+  }
+  // Windows has it loaded: WININIT.INI's NUL= deletes it at the next start
+  if (ops->rename_at_start(ops->ctx, "NUL", path))
+    return fail(ops, why,
+                "WININIT.INI in the Windows folder can't be written, so "
+                "nothing was changed.");
+  sprintf(line, "%s goes at the next start.", x->name);
+  say(ops, line);
+  return 1;
+}
+
 // the device names of ESS's driver and of the rebuilt one: a prefix, then
 // Audio_Base in hex and ")"
 #define PFX_PLAY "ESS AudioDrive Playback ("

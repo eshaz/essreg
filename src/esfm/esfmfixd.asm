@@ -67,3 +67,8 @@ fix_gs_tail:    db 0x42, 0x12, 0x40, 0x00, 0x7F, 0x00, 0x41, 0xF7
 fix_xg_tail:    db 0x4C, 0x00, 0x00, 0x7E, 0x00, 0xF7
 
 fix_queue:      times QSIZE * QENTRY db 0
+
+; Opl3Device=2 (esfmopl.asm): whether the first count decided who serves
+; device 1, and the module that may
+fix_opl3_latched: db 0
+fix_opl3_mod:   db 'ESFMOPL3', 0

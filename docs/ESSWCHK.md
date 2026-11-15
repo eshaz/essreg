@@ -6,8 +6,10 @@ back. Started without options, after an OK, it runs all the checks of the
 machine ([ESSSB16.md](ESSSB16.md#checking-it-on-the-machine)): essinst puts
 the drivers of its folder in, Windows ends for `ESSCHECK.BAT` in DOS and
 comes back by itself, and ESSCHECK's batch in Windows' StartUp folder starts
-esswchk's checks, which delete the batch when they end. Those ask nothing
-and show no message box: problems go to `ESSWCHK.LOG`, next to it, and its
+esswchk's checks. The batch deletes itself as soon as esswchk is started,
+and esswchk deletes it too as its run starts, if it's still there, so the
+next start of Windows doesn't run the checks again. They ask nothing and
+show no message box: problems go to `ESSWCHK.LOG`, next to it, and its
 window shows each check and, at the end, *Done* with the report's name.
 
 ## What it checks
@@ -17,12 +19,21 @@ ESS's own drivers have), INFO (what was measured) or SKIP. The measures and
 verdicts are [`src/wchk.c`](../src/wchk.c)'s.
 
 * **env**: the VxD and its extension, whether ES1869.DRV and ESFM.DRV are
-  the rebuilt ones and their settings, `DmaCountTwice` and `TrueSides` from
-  `SYSTEM.INI`, and the wave and MIDI devices. `env.midi` gives the MIDI
-  list of the Multimedia control panel, an entry a line with its key, name,
-  `Driver`, `Port`, `Active` and `DevNode`, where essinst adds the OPL3
-  device, and `env.mapper` the MIDI mapper's `CurrentInstrument`
+  the rebuilt ones and their settings, `DmaCountTwice`, `TrueSides` and
+  `Opl3Device` from `SYSTEM.INI`, and the wave and MIDI devices. `env.once`
+  says what became of the StartUp batch. `env.midi` gives the MIDI list of
+  the Multimedia control panel, an entry a line with its key, name,
+  `Driver`, `Port`, `Active` and `DevNode`, `env.mapper` the MIDI mapper's
+  `CurrentInstrument`, and `env.card` the card's MIDI drivers, where essinst
+  adds ESFMOPL3.DRV, the OPL3 device's driver
   ([ESFM_OPL3.md](ESFM_OPL3.md#the-multimedia-control-panel)).
+* **opl.list**: with `Opl3Device=2`, which essinst writes with the driver,
+  ESFMOPL3.DRV's entry in the MIDI list as Windows keeps it after a start:
+  there, active on the card's devnode, the driver among the card's MIDI
+  drivers and loaded, and the OPL3 device once among the MIDI devices. The
+  first of those that isn't so is the FAIL's reason. SKIP with another
+  `Opl3Device`: the OPL3 device is then ESFM.DRV's device 1, without an
+  entry of its own.
 * **vxd.count2** and **vxd.count1**: while each DAC plays silence, 100,000
   readings of its DMA count through VxD function 0004, which ES1869.DRV's
   positions and DirectSound's come from. A reading taken while a byte came
@@ -57,6 +68,12 @@ verdicts are [`src/wchk.c`](../src/wchk.c)'s.
 * **fm.rate**: the FM recording device's blocks over 30 seconds, fitted to
   the clock: the music DAC's rate within 500 ppm of 49,819.5 Hz, which
   Linux's driver measured.
+* **opl.rate**: the same over 20 seconds while the OPL3 device has the chip
+  in its OPL3 mode, as INFO with how far it is from 49,819.5 Hz, the 23.814
+  MHz master over 478, and from 49,612.5 Hz, the master over 480. The
+  laptop's second run measured 49,605 Hz with `fm.rate`, in ESFM's native
+  mode, where Linux had measured 49,819.5 Hz, likely in the OPL3 mode, so
+  the two lines tell whether the modes run at different rates.
 * **sb.box**: `SB16BOX.BAT`, which esswchk writes next to itself, runs
   `sb16test /A` in a DOS box on the VxD's Sound Blaster 16, with `BLASTER`
   from the VxD's resources and `H` from `SoundBlaster16DMA`. esswchk closes

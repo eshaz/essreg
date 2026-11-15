@@ -884,10 +884,14 @@ its default and by what the key does at 1, and the sentence that begins
   *OPL3 FM Synthesis*, which plays General MIDI on the chip's OPL3
   compatibility mode with Freedoom's instruments. The program that opens it
   has the chip as a real OPL3, and writes and reads the FM ports itself. One
-  of the two devices is open at a time ([ESFM_OPL3.md](ESFM_OPL3.md)).
-  essinst adds it to the MIDI list of the Multimedia control panel. With 0,
-  the driver has ESS's one device, and essinst takes the entry out of the
-  list again.
+  of the two devices is open at a time ([ESFM_OPL3.md](ESFM_OPL3.md)). With
+  2, which essinst writes when it adds `ESFMOPL3.DRV` to the card's MIDI
+  drivers, the device is that driver's, which Windows lists in the
+  Multimedia control panel: ESFM.DRV counts only its own device and serves
+  the second to ESFMOPL3.DRV, if that is loaded when Windows first counts
+  ESFM.DRV's devices, and keeps both devices for the session if it isn't.
+  With 0, the driver has ESS's one device, and essinst takes ESFMOPL3.DRV
+  out again.
 
 With every key at 0, the driver writes to the chip's ports exactly as ESS's
 driver does, which `SettingsTest` in `tests/test_esfmdrv.py` checks by

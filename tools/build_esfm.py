@@ -7,7 +7,9 @@
 usage: build_esfm.py [--stock] [--verify] [--bank FILE] [-o OUTPUT]
 
   (default)  the ESS driver with the stuck-note fixes (ESFM_FIX=1),
-             to build/ESFM.DRV
+             to build/ESFM.DRV, and ESFMOPL3.DRV next to it, the OPL3
+             device's driver for the Multimedia control panel
+             (src/esfm/esfmopl3.asm)
   --stock    the original driver (ESFM_FIX=0), to out/ESFM.DRV
   --verify   with --stock, fail unless it's byte-identical to
              driver/ESFM.DRV
@@ -23,6 +25,7 @@ Needs NASM 2.14 or later and Python 3.
 import argparse
 import json
 import os
+import struct
 import subprocess
 import sys
 
@@ -83,6 +86,46 @@ def build(fix, output=None, workdir=None, bank=None, defines=None):
     return data
 
 
+def mz_stub():
+    """the DOS stub of ESFMOPL3.DRV: says what the file is, 128 bytes"""
+    # push cs, pop ds, mov dx,msg, mov ah,9, int 21h, mov ax,4C01h, int 21h
+    code = bytes([0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD, 0x21,
+                  0xB8, 0x01, 0x4C, 0xCD, 0x21])
+    body = code + b"This is a Windows MIDI driver.\r\n$"
+    size = 0x80
+    header = struct.pack("<2sHHHHHHHHHHHHH", b"MZ", size % 512,
+                         (size + 511) // 512, 0, 4, 0, 0xFFFF, 0, 0xB8, 0,
+                         0, 0, 0x40, 0)
+    header += b"\0" * (0x3C - len(header)) + struct.pack("<I", size)
+    return (header + body).ljust(size, b"\0")
+
+
+def build_opl3(output=None, workdir=None):
+    """ESFMOPL3.DRV, which passes its one device on to ESFM.DRV's device 1"""
+    workdir = workdir or os.path.join(ROOT, "out", "esfm")
+    os.makedirs(workdir, exist_ok=True)
+    binary = os.path.join(workdir, "esfmopl3.bin")
+    res = subprocess.run(["nasm", "-f", "bin", "-I", SRC + os.sep, "-o",
+                          binary, os.path.join(SRC, "esfmopl3.asm")],
+                         capture_output=True, text=True)
+    if res.returncode != 0:
+        sys.stderr.write(res.stderr)
+        raise SystemExit("build_esfm: nasm failed on esfmopl3.asm")
+    with open(os.path.join(SRC, "esfmopl3.json")) as f:
+        layout = json.load(f)
+    stub = os.path.join(workdir, "esfmopl3.stub")
+    with open(stub, "wb") as f:
+        f.write(mz_stub())
+    layout["stub"] = stub
+    with open(binary, "rb") as f:
+        data = nelink.link(f.read(), layout, SRC)
+    if output:
+        os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
+        with open(output, "wb") as f:
+            f.write(data)
+    return data
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--stock", action="store_true",
@@ -99,6 +142,14 @@ def main():
     except nelink.LinkError as e:
         raise SystemExit("build_esfm: link error: %s" % e)
     print("%s: %d bytes" % (os.path.relpath(out, ROOT), len(data)))
+    if not args.stock:
+        opl3 = os.path.join(os.path.dirname(os.path.abspath(out)),
+                            "ESFMOPL3.DRV")
+        try:
+            size = len(build_opl3(opl3))
+        except nelink.LinkError as e:
+            raise SystemExit("build_esfm: link error: %s" % e)
+        print("%s: %d bytes" % (os.path.relpath(opl3, ROOT), size))
     if args.verify:
         if not args.stock:
             raise SystemExit("build_esfm: --verify needs --stock")

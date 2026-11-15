@@ -101,6 +101,30 @@ int di_rebuilt_after(const char *srcdir, const char *sysdir);
 int di_rebuilt_has(int i, const char *srcdir, const char *sysdir,
                    const char *text);
 
+// a file of the rebuilt drivers that ESS's set doesn't have, which no
+// backup keeps: ESFMOPL3.DRV, the OPL3 device's driver of the Multimedia
+// control panel (src/esfm/esfmopl3.asm)
+struct di_extra {
+  const char *name;   // ESFMOPL3.DRV
+  const char *staged; // ESFMOPL3.NEW: moved into place at the next start
+  const char *temp;   // ESFMOPL3.$$$: a copy until it is checked
+};
+
+// the extra file x from srcdir into sysdir, as its .$$$ first, checked,
+// then renamed; while Windows has it loaded, as its .NEW that WININIT.INI
+// moves into place at the next start. With stage 0 it only checks and
+// logs. 1 if it is put there (or would be), 0 if sysdir has it already,
+// -1 when it changes nothing, with the reason in the log and in why
+int di_put_extra(const struct di_extra *x, const char *srcdir,
+                 const char *sysdir, int loaded, int stage,
+                 const struct di_ops *ops, char *why);
+
+// and taken out of sysdir: removed, or while loaded, at the next start
+// (NUL= in WININIT.INI). 1 if it goes (or would go), 0 if it isn't there,
+// -1 on failure
+int di_drop_extra(const struct di_extra *x, const char *sysdir, int loaded,
+                  int stage, const struct di_ops *ops, char *why);
+
 // Windows keeps its preferred playback and recording devices by name (the
 // Sound Mapper's Playback and Record values): the name that the device
 // called name has with the drivers that names (DI_NAME_*) describes. 1 with

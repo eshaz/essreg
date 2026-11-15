@@ -5,9 +5,10 @@
 ;
 ; [ESFM.DRV] turns each change to ESS's driver on or off, one key each
 ; (docs/DRIVER_CONFIG.md).  The keys are read once, at the first
-; DRV_ENABLE, with GetPrivateProfileInt: a key that isn't there keeps its
-; default.  Bank= isn't one of them: it names the bank file, and it's read
-; again at every MODM_OPEN (esfmfile.asm).
+; DRV_ENABLE or device count, with GetPrivateProfileInt: a key that isn't
+; there keeps its default.  Opl3Device=2 also sets OPT_OPL3_DRV: device 1
+; is ESFMOPL3.DRV's (esfmopl.asm).  Bank= isn't one of them: it names the
+; bank file, and it's read again at every MODM_OPEN (esfmfile.asm).
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
@@ -35,7 +36,13 @@ fix_read_settings:
         push    ds
         push    word fix_ini_file
         kernel  GetPrivateProfileInt
-        mov     cx,[si+2]
+        cmp     word [si],fix_key_opl3
+        jne     .bit
+        and     word [fix_opts],~OPT_OPL3_DRV
+        cmp     ax,2
+        jne     .bit
+        or      word [fix_opts],OPT_OPL3_DRV
+.bit:   mov     cx,[si+2]
         or      ax,ax
         jz      .off
         or      [fix_opts],cx

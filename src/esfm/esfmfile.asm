@@ -32,6 +32,7 @@ KERNEL          equ 1
 %define KERNEL_DOS3Call 102
 %define KERNEL_GlobalWire 111
 %define KERNEL_GlobalUnWire 112
+%define KERNEL_GetModuleHandle 47
 %define KERNEL_GetPrivateProfileInt 127
 %define KERNEL_GetPrivateProfileString 128
 %define KERNEL_GlobalPageLock 191

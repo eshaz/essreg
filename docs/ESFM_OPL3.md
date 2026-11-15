@@ -149,7 +149,7 @@ time, waits in the driver's queue as device 0's do (`QueueWhileBusy`).
 Windows 95 and 98 list the MIDI output devices in the MIDI tab of the
 Multimedia control panel, where the *Single instrument* setting chooses the
 device that the MIDI mapper plays on. The list comes from the registry, with
-one key for each device under:
+one key for each MIDI driver of a card under:
 
 ```
 HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\MediaResources\midi
@@ -158,46 +158,72 @@ HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\MediaResources\midi
 A key is named after its driver and the number of the card's install in the
 MEDIA class, such as `esfm.drv<0018>` for the card in
 `HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\Class\MEDIA\0018`. Its
-values name the driver (`Driver`), the device among the driver's devices
-(`Port`), the names that the list shows (`FriendlyName`, such as *MIDI for
-Internal ESFM Synthesis*, and `Description`), whether the card is there
-(`Active`), and the card's device node and software key (`DevNode` and
-`SoftwareKey`). An earlier install of the card leaves its key behind with
-`Active` 0. Windows makes the key of a driver's first device when it
-installs the driver from the INF's `Drivers\midi` lines, and ESS's INF knows
-one device of ESFM.DRV. A driver with a second device has a second key with
-`Port` 1, as the INF of Creative's AudioPCI writes for the two MIDI devices
-of `es1371.dll`. The MIDI mapper keeps the device it plays on by the
-device's own name, such as *ESFM Synthesis (220)* (`CurrentInstrument` under
+values name the driver (`Driver`), the names that the list shows
+(`FriendlyName`, such as *MIDI for Internal ESFM Synthesis*, and
+`Description`), whether the card is there (`Active`), and the card's device
+node and software key (`DevNode` and `SoftwareKey`). An earlier install of
+the card leaves its key behind with `Active` 0. The MIDI mapper keeps the
+device it plays on by the device's own name, such as *ESFM Synthesis (220)*
+(`CurrentInstrument` under
 `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Multimedia\MIDIMap`).
 
-So essinst ([src/win/midireg.c](../src/win/midireg.c)) copies the key of
-ESS's device on the card that is there, the entry of `esfm.drv` with `Port`
-0 or none and `Active` 1, to a number from 9001 up, which no install of a
-card takes, normally `esfm.drv<9001>`:
-* every value of ESS's entry, and its empty `Instruments` key;
-* `Port` 1, a DWORD, or of the type that ESS's entry keeps it in;
-* `FriendlyName` and `Description`: ESS's names with ESFM made OPL3 FM, so
-  *MIDI for Internal ESFM Synthesis* becomes *MIDI for Internal OPL3 FM
-  Synthesis*.
+The entries come from the card's MIDI drivers, the keys under the software
+key's `Drivers\midi`, which ESS's INF writes for `esfm.drv` and
+`essmpu.drv`, each with its `Driver` and `Description`. Windows loads those
+drivers for the card at every start, with the card's devnode in their
+messages, and keeps their entries active with the devnode of that start;
+ESS's VxD tells Windows' multimedia loader (MMDEVLDR) whether each of them
+is there by those names, `midi\esfm.drv` and `midi\essmpu.drv`. An entry
+that no driver of a card's key has goes inactive: on the laptop, a copy of
+ESS's entry with `Port` 1, which an earlier essinst made, had `Active` 0 and
+the devnode of the start before after every restart.
 
-essinst adds the entry when the ESFM.DRV in place after its run is a rebuilt
-driver with the OPL3 device and `Opl3Device` isn't 0. An entry of ESFM.DRV
-with a `Port` above 0 that has the values of ESS's entry stays, and any
-other one goes: a copy of an earlier install's entry, as essinst made before
-it chose the active one, or a copy from before the card was installed again.
-essinst removes every such entry when ESS's driver comes back with
-`/restore`, or when `Opl3Device=0` turns the device off. Where the MIDI
-mapper's `CurrentInstrument`, for the current user or for new ones, names
-the OPL3 device by its own name, *OPL3 FM Synthesis (220)*, or a removed
-entry by its key or its name, essinst gives it ESS's device back in the same
-form. ESSINST.LOG has each step. A run with the drivers already in place
-only changes the list, and Windows doesn't restart.
+So the OPL3 device has a MIDI driver of its own, `ESFMOPL3.DRV`
+([src/esfm/esfmopl3.asm](../src/esfm/esfmopl3.asm)), which essinst adds to
+the card's drivers as ESS's INF adds `essmpu.drv`:
+* `ESFMOPL3.DRV` goes in the `SYSTEM` folder.
+* The card's software key gets `Drivers\midi\esfmopl3.drv`, with ESS's
+  values for `esfm.drv`, `Driver` `esfmopl3.drv`, and `Description`
+  *Internal OPL3 FM Synthesis*: ESS's with ESFM made OPL3 FM.
+* The MIDI list gets `esfmopl3.drv<0018>`, a copy of ESS's entry with that
+  driver and those names (*MIDI for Internal OPL3 FM Synthesis*), its empty
+  `Instruments` key included. Windows takes it over at the next start.
+* `[ESFM.DRV]` of `SYSTEM.INI` gets `Opl3Device=2`.
+
+`ESFMOPL3.DRV` has one device, whose every message it passes on to
+ESFM.DRV's `modMessage` as device 1's, with the card's devnode as Windows
+gave it, and with `Opl3Device=2` ESFM.DRV counts only its own device, so
+that each program sees the OPL3 device once, as before, under the same name.
+The driver finds ESFM.DRV by name at the count, the caps and the open, and
+the messages that may come at interrupt time only follow that pointer, in
+fixed memory. The messages of the devnode's coming and going stay with it,
+since ESFM.DRV gets them itself. Without `Opl3Device=2`, it has no device.
+ESFM.DRV decides at its first count of the session: if `ESFMOPL3.DRV` isn't
+loaded then, ESFM.DRV keeps device 1 for the session and `ESFMOPL3.DRV`,
+which asks ESFM.DRV's count, has none. So whatever order Windows loads the
+two drivers in, the device is neither missing nor there twice, and esswchk's
+`opl.list` says when ESFM.DRV kept it.
+
+essinst adds all of that when the ESFM.DRV in place after its run is a
+rebuilt driver with the OPL3 device, `Opl3Device` isn't 0, the MIDI list has
+ESS's entry on the card that is there (`Active` 1), and the card's software
+key has ESS's `esfm.drv`; otherwise the device stays ESFM.DRV's device 1,
+without an entry. Entries and keys of `ESFMOPL3.DRV` for another install of
+the card go, as do the copies of ESS's entry with a `Port` above 0 from an
+earlier essinst. essinst takes everything out again, with `Opl3Device=1`,
+when ESS's driver comes back with `/restore`, and when `Opl3Device=0` turns
+the device off. Where the MIDI mapper's `CurrentInstrument`, for the current
+user or for new ones, names the OPL3 device by its own name, *OPL3 FM
+Synthesis (220)*, or a removed entry by its key or its name, essinst gives
+it ESS's device back in the same form. ESSINST.LOG has each step. A run with
+the drivers already in place only changes the list, which takes effect at
+the next start of Windows.
 
 esswchk's report lists the MIDI list, an entry a line with its `DevNode`
-(`env.midi`), and the mapper's choice (`env.mapper`), so a run on the
-machine shows what Windows made of the entries. If the MIDI tab shows no
-*MIDI for Internal OPL3 FM Synthesis*, those lines tell why.
+(`env.midi`), the mapper's choice (`env.mapper`) and the card's MIDI drivers
+(`env.card`), and `opl.list` checks after a start that Windows kept the
+entry: active on the card's devnode, `ESFMOPL3.DRV` loaded, and the OPL3
+device once among the MIDI devices.
 
 ## Checks
 
@@ -211,8 +237,13 @@ machine shows what Windows made of the entries. If the MIDI tab shows no
   resume, and ESS's writes dropped while the device is open. A program that
   writes the chip itself keeps every register as it wrote it, and the close
   and a suspend key off its notes and its rhythm.
+* `Opl3DriverTest` in [tests/test_esfmdrv.py](../tests/test_esfmdrv.py) runs
+  `ESFMOPL3.DRV` next to ESFM.DRV in the emulator: one device with
+  `Opl3Device=2` and none without, its caps and notes through ESFM.DRV's
+  device 1, the devnode's messages kept, and no import at interrupt time.
 * `test_essinst_midi_list` in [tests/test_wine.py](../tests/test_wine.py)
-  runs essinst under Wine against a MIDI list as ESS's INF leaves it.
+  runs essinst under Wine against a MIDI list and the card's drivers as
+  ESS's INF leaves them, and `test_esswchk_opl3_list` esswchk's `opl.list`.
 * esswchk's `opl.pan0` and `opl.pan127` play a note on the OPL3 device
   panned left, then right, and record it through the FM recording device
   ([ESSWCHK.md](ESSWCHK.md)).
@@ -229,9 +260,20 @@ machine shows what Windows made of the entries. If the MIDI tab shows no
 
 ## Sources
 
+* ESS's INF for Windows 95
+  ([driver/es1869f/WIN95DRV/OEMSETUP.INF](../driver/es1869f/WIN95DRV/OEMSETUP.INF)),
+  whose `Drivers\midi` lines name the card's MIDI drivers, and ESS's VxD,
+  which calls `MMDEVLDR_SetDevicePresence` with `midi\esfm.drv` and
+  `midi\essmpu.drv` (`src/vxd/pcod.asm`); the service's arguments are in
+  `MMDEVLDR.H` of the Windows 95 DDK.
+* A post to wine-devel on the registry of Windows' multimedia drivers, with
+  the `Drivers` keys of the MEDIA class and their `MediaResources` entries,
+  whose name may differ from the driver's file:
+  https://www.mail-archive.com/wine-devel@winehq.com/msg04730.html
 * The INF of Creative's AudioPCI for Windows NT 4.0, whose
   `MediaResources\MIDI\es1371.dll<0000>` and `<0001>` keys carry `Port` 0
-  and 1:
+  and 1, as NT 4.0 lists a driver's two devices; Windows 98 didn't keep such
+  a second entry on the laptop:
   https://contents.driverguide.com/content.php?id=771613&path=DRIVERS%2FAUDIO%2FSBPCI64D%2FAUDIOPCI.INF
 * MIDI Yoke, a Windows 95 and 98 driver with up to 16 MIDI ports, each in
   the Multimedia control panel: http://www.midiox.com/myoke.htm

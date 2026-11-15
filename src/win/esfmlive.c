@@ -579,6 +579,8 @@ static void settings_text(const struct esfm_diag *d, const char *nl, char *buf,
       strcat(line, off++ ? ", " : ", off: ");
       strcat(line, esfm_keys[i].key);
     }
+  if ((d->opts & ESFM_OPT_OPL3) && (d->opts & ESFM_OPT_OPL3_DRV))
+    strcat(line, ", the OPL3 device through ESFMOPL3.DRV");
   strcat(line,
          d->opts & ESFM_OPT_SQUARE ? ", the square-wave bank" : ", ESS's bank");
   strcat(line, nl);

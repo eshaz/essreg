@@ -17,8 +17,9 @@
  *              in the window
  *   /R         a recorded run: a level tone, a start marker, the sounds
  *              after their markers, an end marker
- *   /once=FILE delete FILE when the run ends, as ESSCHECK's StartUp batch
- *              wants, also when the run fails
+ *   /once=FILE delete FILE as the run starts, and again when it ends if it
+ *              is still there, as ESSCHECK's StartUp batch wants, so that
+ *              the next start of Windows doesn't run it again
  *   /out=FILE  the report, WCHECK.TXT in esswchk's directory if left out
  *   /log=FILE  the log, ESSWCHK.LOG
  *   /nobox     no DOS box: the report gives sb16test's command line
@@ -47,7 +48,9 @@
  * controllers' reset (CC121) before it closes it, and leaves the mixer to
  * the drivers. Before the DOS box it closes every device it opened. The
  * report lists the MIDI list of the Multimedia control panel, where essinst
- * adds the OPL3 device, and the MIDI mapper's choice.
+ * adds the OPL3 device's driver, ESFMOPL3.DRV, the card's MIDI drivers, and
+ * the MIDI mapper's choice, and checks that Windows kept the OPL3 device's
+ * entry (opl.list).
  *
  * The recorded run's markers are BADC at the start, CDAB at the end and #,
  * the sound's number in three digits, * before each sound, so that one
@@ -66,6 +69,7 @@
 
 #include <windows.h>
 
+#include <errno.h>
 #include <fcntl.h>
 #include <io.h>
 #include <math.h>
@@ -86,7 +90,7 @@
 #include "wchk.h"
 #include "winio.h"
 
-#define VERSION "1.1"
+#define VERSION "1.2"
 #define TITLE "ES1869 Windows checks"
 #define IDC_CHECK 101
 #define IDC_STEP 102
@@ -104,6 +108,7 @@
 #define ESFM_MIDI "ESFM"    // ESFM.DRV's devices: ESS's
 #define OPL3_MIDI "OPL3 FM" // and the OPL3 device
 #define FM_RATE_SECS 30
+#define OPL_RATE_SECS 20 // the music DAC's rate on the OPL3 mode
 #define FM_BUFS 12
 #define FM_FRAMES 4096 // 82 ms a block
 #define BOX_SECS 600   // sb16test in the DOS box at most
@@ -130,6 +135,7 @@ static HINSTANCE inst;
 static HWND dlg;
 static int stop_now, running;
 static char line[300];
+static char once_note[200]; // what became of /once's file (once_done)
 
 // --- the window, the log
 // ------------------------------------------------------
@@ -443,7 +449,78 @@ static struct {
   int sb16;        // its Sound Blaster 16 for DOS boxes is on
   int true_sides;  // ESFM.DRV plays a left channel on the left
   int dct, ts;     // DmaCountTwice and TrueSides in SYSTEM.INI
+  int esfm_fixed;  // ESFM.DRV is the fixed driver, its settings in:
+  unsigned esfm_opts;
 } drv;
+
+// ESFMOPL3.DRV's entry in the MIDI list of n entries, as Windows keeps it
+// after a start: among the card's MIDI drivers, active on the card's
+// devnode, the driver loaded, and its device once among the MIDI devices
+static void check_opl3_list(const struct mr_entry *list, int n) {
+  static char drivers[120], low[120];
+  struct mr_entry ess;
+  MIDIOUTCAPS mc;
+  char want[MR_KEY];
+  const char *p;
+  UINT i, devs;
+  int j, found = -1, same = 0, k;
+
+  if (GetPrivateProfileInt("ESFM.DRV", "Opl3Device", 1, "SYSTEM.INI") != 2) {
+    res("opl.list", WCHK_SKIP,
+        "Opl3Device isn't 2: the OPL3 device is ESFM.DRV's device 1, "
+        "without an entry of its own");
+    return;
+  }
+  if (mr_ess(&ess)) {
+    res("opl.list", WCHK_FAIL,
+        "the MIDI list has no active entry of "
+        "ESFM.DRV, the card's");
+    return;
+  }
+  k = mr_drivers(ess.soft, drivers, sizeof(drivers));
+  res("env.card", WCHK_INFO, "%s\\Drivers\\midi: %s", ess.soft,
+      k < 0 ? "can't be read"
+      : k   ? drivers
+            : "none");
+  strcpy(low, drivers);
+  strlwr(low);
+  p = strchr(ess.key, '<');
+  _bprintf(want, sizeof(want), "%s%s", MR_OPL3_DRIVER, p ? p : "");
+  for (j = 0; j < n; j++)
+    if (!lstrcmpi(list[j].key, want))
+      found = j;
+  for (i = 0, devs = midiOutGetNumDevs(); i < devs; i++)
+    if (!midiOutGetDevCaps(i, &mc, sizeof(mc)) &&
+        !strncmp(mc.szPname, OPL3_MIDI, strlen(OPL3_MIDI)))
+      same++;
+  if (found < 0)
+    res("opl.list", WCHK_FAIL, "%s isn't in the MIDI list", want);
+  else if (list[found].active != 1)
+    res("opl.list", WCHK_FAIL,
+        "%s is inactive (Active %ld): Windows didn't take it over at the "
+        "start",
+        want, list[found].active);
+  else if (!list[found].has_devnode || list[found].devnode != ess.devnode)
+    res("opl.list", WCHK_FAIL, "%s has DevNode %08lX, the card's is %08lX",
+        want, list[found].devnode, ess.devnode);
+  else if (!strstr(low, MR_OPL3_DRIVER))
+    res("opl.list", WCHK_FAIL, "the card's MIDI drivers have no %s",
+        MR_OPL3_DRIVER);
+  else if (!GetModuleHandle("ESFMOPL3"))
+    res("opl.list", WCHK_FAIL, "ESFMOPL3.DRV isn't loaded");
+  else if (drv.esfm_fixed && !(drv.esfm_opts & ESFM_OPT_OPL3_DRV))
+    res("opl.list", WCHK_FAIL,
+        "ESFM.DRV serves the OPL3 device itself: ESFMOPL3.DRV wasn't "
+        "loaded when Windows first counted ESFM.DRV's devices");
+  else if (same != 1)
+    res("opl.list", WCHK_FAIL, "%d MIDI devices are called %s Synthesis", same,
+        OPL3_MIDI);
+  else
+    res("opl.list", WCHK_PASS,
+        "%s, %s, active on the card's devnode %08lX; ESFMOPL3.DRV loaded, "
+        "its device once among the MIDI devices",
+        want, list[found].name, ess.devnode);
+}
 
 // the MIDI list of the Multimedia control panel, an entry a line, and the
 // MIDI mapper's choice
@@ -476,6 +553,7 @@ static void env_midi(void) {
   mr_mapper(map);
   res("env.mapper", WCHK_INFO, "the MIDI mapper's CurrentInstrument: %s",
       map[0] ? map : "none");
+  check_opl3_list(list, n);
 }
 
 static void check_env(void) {
@@ -524,6 +602,8 @@ static void check_env(void) {
     r = esfm_diag_read(&d, 0);
     drv.true_sides =
         r == 0 && d.fixed && d.version >= 4 && (d.opts & ESFM_OPT_SIDES) != 0;
+    drv.esfm_fixed = r == 0 && d.fixed;
+    drv.esfm_opts = drv.esfm_fixed ? d.opts : 0;
     if (r == 0 && d.fixed)
       res("env.esfm", WCHK_INFO,
           "ESFM.DRV fixed, version %u, settings %04Xh: TrueSides %s", d.version,
@@ -535,10 +615,12 @@ static void check_env(void) {
   drv.count_fixed = drv.vxd_ext >= 0x0126 && drv.dct;
   res("env.ini", WCHK_INFO,
       "SYSTEM.INI: [ES1869.VXD] DmaCountTwice=%d, SoundBlaster16DMA=%d; "
-      "[ESFM.DRV] TrueSides=%d",
+      "[ESFM.DRV] TrueSides=%d, Opl3Device=%d",
       drv.dct,
       GetPrivateProfileInt("ES1869.VXD", "SoundBlaster16DMA", 5, "SYSTEM.INI"),
-      drv.ts);
+      drv.ts, GetPrivateProfileInt("ESFM.DRV", "Opl3Device", 1, "SYSTEM.INI"));
+  if (opt.once[0])
+    res("env.once", WCHK_INFO, "the StartUp batch, %s", once_note);
   if (opt.sim)
     return;
   k = sprintf(text, "out:");
@@ -1044,6 +1126,55 @@ static void check_fm_rate(void) {
   res("fm.rate", r, "%s", text);
 }
 
+// the music DAC's rate while the OPL3 device has the chip in its OPL3 mode,
+// by the clock: the data, next to fm.rate's in ESFM's native mode, of
+// whether the two modes run at the master clock over 478 and over 480
+static void check_opl3_rate(void) {
+  struct wchk_fit fit;
+  char text[WCHK_TEXT];
+  u32 t0, secs = opt.sim ? 3 : OPL_RATE_SECS;
+  double hz;
+  int err;
+
+  show(IDC_STEP, "the music DAC's rate on the OPL3 mode, by the clock");
+  err = fm_start();
+  if (err) {
+    fm_stop();
+    res("opl.rate", WCHK_SKIP, "no %s device", FM_DEV);
+    return;
+  }
+  err = midi_open(1);
+  if (err) {
+    fm_stop();
+    res("opl.rate", WCHK_SKIP, "no %s MIDI device, or it is busy", OPL3_MIDI);
+    return;
+  }
+  // the open put the chip in OPL3 mode: its blocks from here on
+  t0 = timeGetTime();
+  while (timeGetTime() - t0 < 300 && !stop_now) {
+    fm_take(NULL, NULL, 0, t0);
+    pump();
+  }
+  memset(&fit, 0, sizeof(fit));
+  t0 = timeGetTime();
+  while (timeGetTime() - t0 < secs * 1000UL) {
+    fm_take(NULL, &fit, 0, t0);
+    if (pump())
+      break;
+  }
+  midi_close();
+  fm_stop();
+  if (stop_now)
+    return;
+  hz = wchk_fit_slope(&fit);
+  sprintf(text,
+          "%.2f Hz over %lu s on the OPL3 mode: %+.0f ppm from 49819.5 Hz, "
+          "the master / 478, and %+.0f ppm from 49612.5 Hz, the master / 480",
+          hz, (unsigned long)secs, hz ? (hz / 49819.5 - 1) * 1e6 : 0,
+          hz ? (hz / 49612.5 - 1) * 1e6 : 0);
+  res("opl.rate", hz ? WCHK_INFO : WCHK_FAIL, "%s", text);
+}
+
 // --- a recorded run
 // --------------------------------------------------------------
 
@@ -1406,6 +1537,8 @@ static void run_all(void) {
     check_fm_pan(127, 1);
   if (!stop_now)
     check_fm_rate();
+  if (!stop_now)
+    check_opl3_rate();
   if (!stop_now && opt.record)
     check_sounds();
   if (!stop_now)
@@ -1504,16 +1637,27 @@ static int parse(LPSTR p) {
   }
 }
 
-// the StartUp batch gone, whatever the run did
+// the StartUp batch gone, whatever the run does: as the run starts, so
+// that a run that doesn't end doesn't come again at the next start of
+// Windows, and at its end if it's still there. A file gone already (the
+// batch deletes itself) is no failure; once_note says what became of it
 static void once_done(void) {
   char path[144];
 
   if (!opt.once[0])
     return;
   full_path(opt.once, path, sizeof(path));
+  if (access(path, 0)) {
+    if (!once_note[0])
+      _bprintf(once_note, sizeof(once_note), "%.140s: gone already", path);
+    return;
+  }
   if (remove(path)) {
-    _bprintf(line, sizeof(line), "%.140s couldn't be deleted", path);
-    log_line(line);
+    _bprintf(once_note, sizeof(once_note),
+             "%.140s couldn't be deleted (errno %d)", path, errno);
+    log_line(once_note);
+  } else {
+    _bprintf(once_note, sizeof(once_note), "%.140s: deleted", path);
   }
 }
 
@@ -1633,6 +1777,8 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev, LPSTR cmdline, int show_) {
     once_done();
     return 2;
   }
+  // the StartUp batch goes before anything else can stop the run
+  once_done();
   if (err < 0 && !opt.sim)
     log_line("No ES1869 answers: the checks of the devices go on");
   _bprintf(text, sizeof(text), "esswchk %s started:%s%s%s", VERSION,

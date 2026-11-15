@@ -813,9 +813,11 @@ earlier essinst installed the drivers, run the new one once: it puts the new
 are left to do, it does that without a restart.
 
 The rebuilt `ESFM.DRV` has a second MIDI device, the OPL3 device, which
-ESS's setup doesn't know. essinst adds it to the MIDI list of the Multimedia
-control panel, as a copy of the entry of ESS's device, and `/restore` takes
-it out again
+ESS's setup doesn't know, and Windows lists a card's MIDI drivers, not their
+devices. So essinst copies `ESFMOPL3.DRV`, the OPL3 device's own driver,
+next to the others and adds it to the card's MIDI drivers, and the
+Multimedia control panel lists *MIDI for Internal OPL3 FM Synthesis* once
+Windows restarts. `/restore` takes it out again
 ([docs/ESFM_OPL3.md](docs/ESFM_OPL3.md#the-multimedia-control-panel)).
 
 These switches change what it does:
@@ -849,8 +851,8 @@ and changes nothing if it is another one.
 
 Copy these files to `C:\ESSREG` on the Windows 98 machine, from a floppy, a
 CD or a network share:
-* `build\essinst.exe`, `build\ES1869.VXD`, `build\ES1869.DRV` and
-  `build\ESFM.DRV`
+* `build\essinst.exe`, `build\ES1869.VXD`, `build\ES1869.DRV`,
+  `build\ESFM.DRV` and `build\ESFMOPL3.DRV`
 * `build\essctl.exe`
 * `build\GMCHECK.MID`
 * `esfm_patch_banks\bnk_com.bin` and `esfm_patch_banks\bnk_NT4.bin`
@@ -863,7 +865,9 @@ names.
 1. Run `C:\ESSREG\essinst.exe`. It lists the three drivers as ESS's, each
    kept as an `.ORG` file. Press OK, and Windows restarts.
 2. Open Control Panel > *Multimedia* > *MIDI*. *Single instrument* should be
-   *ESFM Synthesis*, followed by the FM port.
+   *ESFM Synthesis*, followed by the FM port, and its list should have the
+   OPL3 device too, by the same kind of name with *OPL3 FM* in place of
+   *ESFM*.
 3. Start `C:\ESSREG\essctl.exe` and open the *ESFM patch bank* page. It
    should say `Fixed driver`.
 

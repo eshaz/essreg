@@ -21,9 +21,14 @@
  * user and for new ones.
  *
  * The rebuilt ESFM.DRV has a second MIDI device, the OPL3 device, which
- * ESS's INF doesn't know, so essinst adds its entry to the MIDI list of
- * the Multimedia control panel (src/win/midireg.c), and removes it when
- * ESS's driver comes back or Opl3Device=0 turns the device off.
+ * ESS's INF doesn't know. Windows lists a card's MIDI drivers, not their
+ * devices, so essinst copies ESFMOPL3.DRV, the OPL3 device's own driver,
+ * into the SYSTEM folder, adds it to the card's MIDI drivers with its
+ * entry in the MIDI list of the Multimedia control panel
+ * (src/win/midireg.c), and sets Opl3Device=2 in [ESFM.DRV] of SYSTEM.INI,
+ * so that ESFM.DRV leaves the device to it from the next start. It takes
+ * all of that back, with Opl3Device=1, when ESS's driver comes back, and
+ * when Opl3Device=0 turns the device off.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -65,6 +70,11 @@ static char ini[DI_PATH]; // WININIT.INI
 static char plan[TEXT];   // what the check found, for the question
 static int collect, quiet;
 static int opl3; // the OPL3 device is in the MIDI list after the install
+static char srcdir[DI_PATH], sysdir[DI_PATH];
+
+// the OPL3 device's driver for the Multimedia control panel
+static const struct di_extra opl3_drv = {"ESFMOPL3.DRV", "ESFMOPL3.NEW",
+                                         "ESFMOPL3.$$$"};
 
 // a line for the log
 static void log_only(const char *text) {
@@ -171,36 +181,82 @@ static int prefer(int names, int set) {
   return n;
 }
 
-// the OPL3 device's entry in the MIDI list of the Multimedia control
-// panel, as opl3 says: logged, listed in the question, and with set
-// written. 1 if it changes
-static int midi_list(int set) {
+// ESFMOPL3.DRV in the SYSTEM folder while the card has it among its
+// drivers (put), and out of it otherwise: logged, listed in the question,
+// and with set put there or taken out. 1 if it changes, 0 if not, -1 if it
+// can't, with the reason in why
+static int opl3_file(int put, int set, char *why) {
+  int loaded = GetModuleHandle("ESFMOPL3") != 0, r;
+
+  r = put ? di_put_extra(&opl3_drv, srcdir, sysdir, loaded, set, &ops, why)
+          : di_drop_extra(&opl3_drv, sysdir, loaded, set, &ops, why);
+  if (r > 0 && !set)
+    plan_add(put ? "ESFMOPL3.DRV, the OPL3 device's driver, goes in the "
+                   "SYSTEM folder."
+                 : "ESFMOPL3.DRV leaves the SYSTEM folder.");
+  return r;
+}
+
+// [ESFM.DRV] Opl3Device=2 in SYSTEM.INI while the card has ESFMOPL3.DRV
+// among its drivers (on), 1 in its place when the driver goes; 0, the
+// device off, stays. With set written. 1 if it changes
+static int opl3_key(int on, int set) {
+  static char text[120];
+  int now = GetPrivateProfileInt("ESFM.DRV", "Opl3Device", 1, "SYSTEM.INI");
+  int want = on ? 2 : now == 2 ? 1 : now;
+
+  if (want == now)
+    return 0;
+  _bprintf(text, sizeof(text), "SYSTEM.INI: [ESFM.DRV] Opl3Device=%d%s.", want,
+           set ? "" : " from the next start");
+  if (set && !WritePrivateProfileString("ESFM.DRV", "Opl3Device",
+                                        want == 2 ? "2" : "1", "SYSTEM.INI"))
+    _bprintf(text, sizeof(text),
+             "SYSTEM.INI can't be written: Opl3Device "
+             "stays %d.",
+             now);
+  log_only(text);
+  return 1;
+}
+
+// ESFMOPL3.DRV among the card's MIDI drivers, and its entry in the MIDI
+// list of the Multimedia control panel, as opl3 says: logged, listed in the
+// question, and with set written. 1 if it changes; in *has whether the
+// card has the driver after it
+static int midi_list(int set, int *has) {
   static char text[200], old[48];
   struct mr_entry e;
   int stale, r = mr_opl3(opl3, set, &e, &stale);
 
+  *has = opl3 && (r == MR_KEEP || r == MR_ADD || r == MR_TIDY);
   old[0] = 0;
   if (stale == 1)
-    strcpy(old, ", in place of an old copy");
+    strcpy(old, ", in place of an old entry");
   else if (stale > 1)
-    _bprintf(old, sizeof(old), ", in place of %d old copies", stale);
+    _bprintf(old, sizeof(old), ", in place of %d old entries", stale);
   if (r == MR_ADD && !set) {
     _bprintf(text, sizeof(text),
-             "The MIDI list of the Multimedia control panel gets %s.", e.name);
+             "The MIDI list of the Multimedia control panel gets %s at the "
+             "next start.",
+             e.name);
     plan_add(text);
     _bprintf(text, sizeof(text),
-             "The MIDI list gets the OPL3 device, %s, as %s with Port 1%s.",
+             "The card gets ESFMOPL3.DRV among its MIDI drivers, and the MIDI "
+             "list %s, as %s%s.",
              e.name, e.key, old);
   } else if (r == MR_ADD) {
-    _bprintf(text, sizeof(text), "The MIDI list has %s, as %s.", e.name, e.key);
+    _bprintf(text, sizeof(text),
+             "The card has ESFMOPL3.DRV among its MIDI drivers, and the MIDI "
+             "list %s, as %s.",
+             e.name, e.key);
   } else if (r == MR_TIDY && !set) {
-    plan_add("Old copies of the OPL3 device's entry leave the MIDI list.");
+    plan_add("Old entries of the OPL3 device leave the MIDI list.");
     _bprintf(text, sizeof(text),
              "The MIDI list has the OPL3 device, %s, as %s%s.", e.name, e.key,
              old[0] ? old : "");
   } else if (r == MR_TIDY) {
     _bprintf(text, sizeof(text),
-             "The old copies of %s are out of the MIDI "
+             "The old entries of %s are out of the MIDI "
              "list.",
              e.name);
   } else if (r == MR_REMOVE && !set) {
@@ -213,14 +269,15 @@ static int midi_list(int set) {
     _bprintf(text, sizeof(text), "%s (%s) is out of the MIDI list.", e.name,
              e.key);
   } else if (r == MR_FAIL) {
+    *has = 0;
     _bprintf(text, sizeof(text), "The OPL3 device's entry %s can't be %s.",
              e.key, opl3 ? "added to the MIDI list" : "removed");
   } else if (set) {
     return 0;
   } else if (r == MR_NO_ESFM) {
     _bprintf(text, sizeof(text),
-             "The MIDI list has no entry of ESFM.DRV for "
-             "the card, so the OPL3 device gets none.");
+             "The MIDI list has no entry of ESFM.DRV for the card, so the "
+             "OPL3 device stays ESFM.DRV's device 1, without an entry.");
   } else if (opl3) {
     _bprintf(text, sizeof(text),
              "The MIDI list has the OPL3 device, %s, as %s.", e.name, e.key);
@@ -229,6 +286,22 @@ static int midi_list(int set) {
   }
   log_only(text);
   return r == MR_ADD || r == MR_REMOVE || r == MR_TIDY;
+}
+
+// the OPL3 device's driver, its place among the card's drivers and in the
+// MIDI list, and Opl3Device, with put as the check found it: the file
+// before the list names it, and without the file the device stays
+// ESFM.DRV's device 1
+static void opl3_apply(int put) {
+  static char why[DI_WHY];
+  int has;
+
+  if (put && opl3_file(1, 1, why) < 0)
+    opl3 = 0;
+  midi_list(1, &has);
+  if (!has)
+    opl3_file(0, 1, why);
+  opl3_key(has, 1);
 }
 
 static int box(const char *text, UINT flags) {
@@ -250,7 +323,7 @@ static int failed(const char *why) {
 int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   static char src[DI_PATH], sys[DI_PATH], win[DI_PATH], path[DI_PATH];
   static char why[DI_WHY], text[TEXT], args[128];
-  int restore = 0, restart = 1, n, m, o, names = DI_NAMES_ESS;
+  int restore = 0, restart = 1, n, m, o, f, k, has = 0, names = DI_NAMES_ESS;
   char *p;
 
   (void)prev;
@@ -270,6 +343,8 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     *p = 0;
   GetSystemDirectory(sys, sizeof(sys));
   GetWindowsDirectory(win, sizeof(win));
+  strcpy(srcdir, src);
+  strcpy(sysdir, sys);
   di_path(ini, win, "WININIT.INI");
   di_path(path, win, "ESSINST.LOG");
   log_file = fopen(path, "w");
@@ -294,16 +369,27 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   // the OPL3 device of the rebuilt ESFM.DRV, on by default (esfmini.asm)
   opl3 = di_rebuilt_has(2, restore ? 0 : src, sys, "Opl3Device") &&
          GetPrivateProfileInt("ESFM.DRV", "Opl3Device", 1, "SYSTEM.INI");
+  // and its driver for the Multimedia control panel, from essinst's folder:
+  // without it, the device stays ESFM.DRV's device 1, without an entry
+  di_path(path, src, opl3_drv.name);
+  if (opl3 && access(path, 0)) {
+    log_line(0, "ESFMOPL3.DRV isn't next to essinst: the OPL3 device stays "
+                "ESFM.DRV's device 1, without an entry in the MIDI list.");
+    opl3 = 0;
+  }
 
   // what there is to do
   collect = 1;
   n = restore ? di_restore(sys, 0, &ops, why)
               : di_install(src, sys, 0, &ops, why);
   m = n >= 0 ? prefer(names, 0) : 0;
-  o = n >= 0 ? midi_list(0) : 0;
+  o = n >= 0 ? midi_list(0, &has) : 0;
+  f = n >= 0 ? opl3_file(has, 0, why) : 0;
+  k = n >= 0 && f >= 0 ? opl3_key(has, 0) : 0;
   collect = 0;
-  if (n < 0)
+  if (n < 0 || f < 0)
     return failed(why);
+  o = o || f || k;
   if (!n && !m && !o) {
     box(restore ? "ESS's drivers are in place already."
                 : "The rebuilt drivers are installed already.",
@@ -315,8 +401,11 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     // aren't as they make them
     _bprintf(text, sizeof(text),
              "essinst brings Windows' devices in line with the drivers in "
-             "place:\n\n%s\nWindows doesn't restart.",
-             plan);
+             "place:\n\n%s\n%s",
+             plan,
+             o ? "The MIDI list's change takes effect when Windows starts "
+                 "again."
+               : "Windows doesn't restart.");
     if (box(text, MB_OKCANCEL | MB_ICONQUESTION) != IDOK) {
       log_line(0, "Cancelled: nothing was changed.");
       return 0;
@@ -326,8 +415,8 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
       prefer(names, 1);
     }
     if (o) {
-      log_line(0, "The MIDI list:");
-      midi_list(1);
+      log_line(0, "The OPL3 device's driver and the MIDI list:");
+      opl3_apply(has);
     }
     box("Windows' devices are in line with the drivers.",
         MB_OK | MB_ICONINFORMATION);
@@ -351,9 +440,9 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
               : di_install(src, sys, 1, &ops, why);
   if (n < 0)
     return failed(why);
-  WritePrivateProfileString(0, 0, 0, ini);
   prefer(names, 1);
-  midi_list(1);
+  opl3_apply(has);
+  WritePrivateProfileString(0, 0, 0, ini);
   if (!restart) {
     log_line(0, "Done: the drivers go in place at the next restart.");
     box("The drivers are ready. Windows puts them in place when it "

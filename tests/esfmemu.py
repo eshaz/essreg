@@ -97,7 +97,15 @@ STUB_ARGS = {
     ("KERNEL", 353): 10,    # lstrcpyn(lpDst, lpSrc, iMaxLength)
     ("MMSYSTEM", 31): 22,   # DriverCallback
     ("MMSYSTEM", 216): 12,  # midiOutMessage(h, msg, dw1, dw2)
+    ("KERNEL", 47): 4,      # GetModuleHandle(lpModuleName)
+    ("KERNEL", 50): 6,      # GetProcAddress(hModule, lpProcName)
+    ("USER", 255): 16,      # DefDriverProc(id, hDriver, msg, lp1, lp2)
 }
+
+# ESFMOPL3.DRV (load_opl3): its segments, and the two modules' handles
+OPL3_PARA = {1: 0x6000, 2: 0x6800}
+ESFM_HMOD = 0x0E5F
+OPL3_HMOD = 0x0E67
 
 
 class EmuError(Exception):
@@ -296,6 +304,12 @@ class ESFMEmu:
         self.int24 = []          # opens that would show a critical error
         self.reads = 0           # INT 21h 3Fh calls
         self._lock_seen = False
+        # ESFMOPL3.DRV, after load_opl3: whether it finds ESFM.DRV, the
+        # module names it looked up, and the messages DefDriverProc got
+        self.opl3_ne = None
+        self.esfm_loaded = True
+        self.module_lookups = []
+        self.defdriverprocs = []
 
     # --- memory -----------------------------------------------------------
 
@@ -329,17 +343,18 @@ class ESFMEmu:
         self.stub_at[key] = off
         return off
 
-    def _target(self, rtype, rflags, target):
+    def _target(self, rtype, rflags, target, ne=None, paras=SEG_PARA):
+        ne = ne or self.ne
         a, b = target
         kind = rflags & 3
         if kind == 0:
             seg = a & 0xFF
             if seg == 0xFF:
-                seg, off, _f = self.ne.entries[b]
-                return SEG_PARA[seg], off
-            return SEG_PARA[seg], b
+                seg, off, _f = ne.entries[b]
+                return paras[seg], off
+            return paras[seg], b
         if kind == 1:
-            mod = self.ne.modules[a - 1]
+            mod = ne.modules[a - 1]
             if (mod, b) == ("KERNEL", 178):     # __WINFLAGS
                 return None, 0x0025
             key = (mod, b)
@@ -349,11 +364,12 @@ class ESFMEmu:
             return STUB_PARA, off
         raise EmuError("unsupported relocation %r" % ((rtype, rflags, target),))
 
-    def _relocate(self):
-        for s in self.ne.segments:
-            base = SEG_PARA[s.index] * 16
+    def _relocate(self, ne=None, paras=SEG_PARA):
+        ne = ne or self.ne
+        for s in ne.segments:
+            base = paras[s.index] * 16
             for rtype, rflags, off, target in s.relocs:
-                seg, toff = self._target(rtype, rflags, target)
+                seg, toff = self._target(rtype, rflags, target, ne, paras)
                 pos, sites = off, []
                 if rflags & 4:
                     sites = [off]
@@ -856,6 +872,21 @@ class ESFMEmu:
                 if not inj.started and inj.in_callback == msg:
                     inject_after = inj
                     break
+        elif key == ("KERNEL", 47):         # GetModuleHandle(name)
+            name = self.rdstr(arg(0, 4))
+            self.module_lookups.append(name)
+            if name.upper() == "ESFM" and self.esfm_loaded:
+                ax = ESFM_HMOD
+            elif name.upper() == "ESFMOPL3" and self.opl3_ne is not None:
+                ax = OPL3_HMOD
+        elif key == ("KERNEL", 50):         # GetProcAddress(hModule, name)
+            name, hmod = arg(0, 4), arg(4)
+            name = self.rdstr(name) if name >> 16 else "#%d" % name
+            if hmod == ESFM_HMOD and name.upper() in ("MODMESSAGE", "#3"):
+                dx, ax = self.modmsg_addr
+        elif key == ("USER", 255):          # DefDriverProc
+            self.defdriverprocs.append(arg(8))      # uMsg
+            ax = 0
         elif key == ("MMSYSTEM", 216):      # midiOutMessage
             # DRVM_ENABLE asks MMDEVLDR (message 804h) for the device ID of
             # the VxD that owns the devnode
@@ -979,6 +1010,64 @@ class ESFMEmu:
         return self.call((SEG_PARA[seg], off), [
             0, 1, 1, msg, lp1 >> 16, lp1 & 0xFFFF, lp2 >> 16, lp2 & 0xFFFF],
             injects)
+
+    # --- ESFMOPL3.DRV, the OPL3 device's driver -----------------------------
+
+    def load_opl3(self, drv):
+        """Load ESFMOPL3.DRV next to ESFM.DRV; its imports are stubs, and
+        its GetProcAddress finds ESFM.DRV's modMessage."""
+        self.opl3_ne = ne = NEFile(drv)
+        for s in ne.segments:
+            self.uc.mem_write(OPL3_PARA[s.index] * 16,
+                              ne.segment_data(s.index))
+        self._relocate(ne, OPL3_PARA)
+
+    def opl3_entry(self, ordinal):
+        seg, off, _f = self.opl3_ne.entries[ordinal]
+        return OPL3_PARA[seg], off
+
+    def opl3_driverproc(self, msg, lp1=0, lp2=0):
+        """ESFMOPL3.DRV's DriverProc(dwDriverID, hDriver, msg, lp1, lp2)"""
+        return self.call(self.opl3_entry(2), [
+            0, 1, 1, msg, lp1 >> 16, lp1 & 0xFFFF, lp2 >> 16, lp2 & 0xFFFF])
+
+    def opl3_modmessage(self, msg, dw1=0, dw2=0, user=0, device=0):
+        """ESFMOPL3.DRV's modMessage: DX:AX"""
+        return self.call(self.opl3_entry(3), [
+            device, msg, user >> 16, user & 0xFFFF, dw1 >> 16, dw1 & 0xFFFF,
+            dw2 >> 16, dw2 & 0xFFFF])
+
+    def opl3_open(self, device=0):
+        """MODM_OPEN of ESFMOPL3.DRV's device, the devnode enabled: its
+        result; the client kept on success"""
+        desc = struct.pack("<HIIHI", 0x1111, 0x22223333, 0x44445555, 0,
+                           DEVNODE)
+        self.wr(STUB_PARA, CLIENT_OFF, desc)
+        self.wr(STUB_PARA, CLIENT_OFF + 0x40, b"\0" * 4)
+        r = self.opl3_modmessage(MODM_OPEN, (STUB_PARA << 16) | CLIENT_OFF,
+                                 0x00030000, (STUB_PARA << 16) |
+                                 (CLIENT_OFF + 0x40), device) & 0xFFFF
+        if r == 0:
+            self.client = struct.unpack(
+                "<I", self.rd(STUB_PARA, CLIENT_OFF + 0x40, 4))[0]
+            self.device = 1
+        return r
+
+    def opl3_data(self, msg):
+        return self.opl3_modmessage(MODM_DATA, msg, 0, self.client) & 0xFFFF
+
+    def opl3_close(self):
+        return self.opl3_modmessage(MODM_CLOSE, 0, 0, self.client) & 0xFFFF
+
+    def opl3_devcaps(self, device=0, size=0x32):
+        """MODM_GETDEVCAPS of ESFMOPL3.DRV's device: (result, caps)"""
+        caps = CLIENT_OFF + 0x100
+        self.wr(STUB_PARA, caps, b"\xEE" * 0x40)
+        self.wr(STUB_PARA, CLIENT_OFF + 0x80,
+                struct.pack("<IHH", size, caps, STUB_PARA))
+        r = self.opl3_modmessage(2, (STUB_PARA << 16) | (CLIENT_OFF + 0x80),
+                                 DEVNODE, device=device) & 0xFFFF
+        return r, self.rd(STUB_PARA, caps, 0x32)
 
     # --- state ------------------------------------------------------------
 

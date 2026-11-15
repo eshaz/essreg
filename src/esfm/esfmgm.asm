@@ -640,7 +640,10 @@ fix_calc_pitch:
 fix_process:
         push    bp
         mov     bp,sp
-        test    word [fix_opts],OPT_OPL3
+        cmp     word [bp+0x12],MODM_GETNUMDEVS
+        jne     .opl                    ; the count comes at task time,
+        call    fix_read_settings       ; maybe before DRV_ENABLE
+.opl:   test    word [fix_opts],OPT_OPL3
         jz      .gm
         call    opl_route               ; device 1, esfmopl.asm
         jnc     .gm

@@ -34,6 +34,10 @@ ports as ESS's.
 Opl3Test: device 1, which plays General MIDI on the chip's OPL3
 compatibility mode with Freedoom's GENMIDI instruments
 (src/esfm/esfmopl.asm), against the bank and the OPL3's pitch.
+
+Opl3DriverTest: ESFMOPL3.DRV, the OPL3 device as a MIDI driver of its own
+for the Multimedia control panel, loaded in the emulator next to ESFM.DRV
+(src/esfm/esfmopl3.asm).
 """
 
 import math
@@ -74,6 +78,7 @@ def builds():
         tmp = tempfile.mkdtemp(prefix="esfmdrv")
         _builds["stock"] = build_esfm.build(False, workdir=tmp)
         _builds["fixed"] = build_esfm.build(True, workdir=tmp)
+        _builds["opl3"] = build_esfm.build_opl3(workdir=tmp)
     return _builds
 
 
@@ -93,6 +98,23 @@ class RebuildTest(unittest.TestCase):
             self.assertEqual(f.read(), self.fixed,
                              "build/ESFM.DRV is out of date: run "
                              "tools/build_esfm.py")
+
+    def test_opl3_driver_is_current(self):
+        with open(os.path.join(ROOT, "build", "ESFMOPL3.DRV"), "rb") as f:
+            self.assertEqual(f.read(), builds()["opl3"],
+                             "build/ESFMOPL3.DRV is out of date: run "
+                             "tools/build_esfm.py")
+
+    def test_opl3_driver(self):
+        ne = NEFile(builds()["opl3"])
+        self.assertEqual(ne.module_name, "ESFMOPL3")
+        self.assertEqual(ne.modules, ["KERNEL", "USER"])
+        # WEP, DriverProc and modMessage, all in the one fixed code segment
+        self.assertEqual(sorted(ne.entries), [1, 2, 3])
+        self.assertEqual({seg for seg, _o, _f in ne.entries.values()}, {1})
+        code, data = ne.segments
+        self.assertFalse(code.flags & 0x0011)          # code, fixed
+        self.assertEqual(data.flags & 0x0011, 0x0001)  # data, fixed
 
     def test_fixed_driver(self):
         ne, orig = NEFile(self.fixed), NEFile(self.orig)
@@ -1306,6 +1328,7 @@ SETTINGS = ["QueueWhileBusy", "SilenceOnClose", "PedalRelease", "Vibrato",
             "RunningStatus", "BetterSquareWave", "TrueSides", "Opl3Device"]
 OPT = {k: 1 << i for i, k in enumerate(SETTINGS)}
 OPT_DEFAULT, OPT_READ = 0x0FFF, 0x8000
+OPT_OPL3_DRV = 0x1000           # Opl3Device=2: device 1 is ESFMOPL3.DRV's
 GM_ON = bytes([0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7])
 
 
@@ -1344,6 +1367,8 @@ class SettingsTest(unittest.TestCase):
                 with self.subTest(key=key, value=value):
                     e = self.started(ini={key: value}, open_it=False)
                     want = OPT_DEFAULT & ~OPT[key] | (OPT[key] if on else 0)
+                    if key == "Opl3Device" and value == "2":
+                        want |= OPT_OPL3_DRV
                     self.assertEqual(e.fix_state()["opts"], want | OPT_READ)
 
     def test_read_once(self):
@@ -1611,11 +1636,14 @@ class Opl3Test(unittest.TestCase):
         cls.single = [p for p in range(128) if cls.bank[p]["flags"] == 0]
         cls.double = [p for p in range(128) if cls.bank[p]["flags"] == 4]
 
-    def enabled(self, which="fixed", ini=None):
-        """the driver after DRV_ENABLE and the devnode's arrival"""
+    def enabled(self, which="fixed", ini=None, opl3=False):
+        """the driver after DRV_ENABLE and the devnode's arrival, and with
+        opl3 ESFMOPL3.DRV loaded next to it"""
         e = ESFMEmu(builds()[which])
         for key, value in (ini or {}).items():
             e.ini[("esfm.drv", key.lower())] = value
+        if opl3:
+            e.load_opl3(builds()["opl3"])
         self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
         for msg in (DRVM_INIT, DRVM_ENABLE):
             self.assertEqual(e.modmessage(msg, 0, esfmemu.DEVNODE, user=0,
@@ -1675,6 +1703,35 @@ class Opl3Test(unittest.TestCase):
         self.assertEqual(self.enabled(ini={"Opl3Device": "0"}).getnumdevs(),
                          1)
         self.assertEqual(self.enabled("stock").getnumdevs(), 1)
+        # Opl3Device=2 with ESFMOPL3.DRV loaded: it counts device 1, which
+        # answers here
+        e = self.enabled(ini={"Opl3Device": "2"}, opl3=True)
+        self.assertEqual(e.getnumdevs(), 1)
+        r, caps = e.devcaps(1)
+        self.assertEqual((r, caps[6:38].split(b"\0")[0]),
+                         (0, b"OPL3 FM Synthesis (388)"))
+        self.assertEqual(e.try_open(1), 0)
+        self.assertEqual(e.data(0x7F3C90), 0)
+        self.assertTrue(e.chip.opl_keyed())
+        # without it at the first count, device 1 stays this driver's for
+        # the session, so that it is never missing
+        e = self.enabled(ini={"Opl3Device": "2"})
+        self.assertEqual(e.getnumdevs(), 2)
+        self.assertEqual(e.fix_state()["opts"] & OPT_OPL3_DRV, 0)
+        e.load_opl3(builds()["opl3"])
+        self.assertEqual(e.getnumdevs(), 2)
+
+    def test_count_reads_the_settings(self):
+        # MMSYSTEM may count the devices before DRV_ENABLE
+        e = ESFMEmu(builds()["fixed"])
+        e.ini[("esfm.drv", "opl3device")] = "2"
+        e.load_opl3(builds()["opl3"])
+        for msg in (DRVM_INIT, DRVM_ENABLE):
+            self.assertEqual(e.modmessage(msg, 0, esfmemu.DEVNODE, user=0,
+                                          device=0), 0)
+        self.assertEqual(e.getnumdevs(), 1)
+        self.assertEqual(e.fix_state()["opts"],
+                         OPT_DEFAULT | OPT_OPL3_DRV | OPT_READ)
 
     def test_caps(self):
         e = self.enabled()
@@ -1979,6 +2036,138 @@ class Opl3Test(unittest.TestCase):
             "db", ",").replace("\n", ",").split(",") if x.strip() and
             not x.strip().startswith(";")]
         self.assertEqual(got[:128], [att(x) for x in range(128)])
+
+
+DRV_LOAD, DRV_OPEN, DRV_CLOSE, DRV_FREE = 1, 3, 4, 6
+DRV_CONFIGURE, DRV_QUERYCONFIGURE, DRV_INSTALL, DRV_REMOVE = 7, 8, 9, 10
+MODM_GETNUMDEVS = 1
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs the unicorn module")
+class Opl3DriverTest(unittest.TestCase):
+    """ESFMOPL3.DRV in front of ESFM.DRV's device 1: one device, whose
+    messages go on to ESFM.DRV's modMessage as device 1's"""
+
+    def pair(self, value="2", which="fixed", esfm=True):
+        """both drivers loaded and enabled, with Opl3Device=value (None:
+        no key), and ESFM.DRV found by name if esfm"""
+        e = ESFMEmu(builds()[which])
+        if value is not None:
+            e.ini[("esfm.drv", "opl3device")] = value
+        e.load_opl3(builds()["opl3"])
+        e.esfm_loaded = esfm
+        self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
+        for msg in (DRV_LOAD, DRV_ENABLE, DRV_OPEN):
+            self.assertEqual(e.opl3_driverproc(msg), 1)
+        # the devnode arrives: MMSYSTEM tells both drivers
+        for msg in (DRVM_INIT, DRVM_ENABLE):
+            self.assertEqual(e.modmessage(msg, 0, esfmemu.DEVNODE, user=0,
+                                          device=0), 0)
+            self.assertEqual(e.opl3_modmessage(msg, 0, esfmemu.DEVNODE), 0)
+        e.dev = e.r16(4, 0x3C)
+        return e
+
+    def count(self, e, devnode=esfmemu.DEVNODE):
+        return e.opl3_modmessage(MODM_GETNUMDEVS, devnode)
+
+    def test_counts(self):
+        # a program sees the OPL3 device once, ESFM.DRV's or this driver's
+        for value, esfm, mine in (("2", 1, 1), ("1", 2, 0), (None, 2, 0),
+                                  ("0", 1, 0)):
+            with self.subTest(value=value):
+                e = self.pair(value)
+                self.assertEqual((e.getnumdevs(), self.count(e)),
+                                 (esfm, mine))
+        # another card's devnode, which ESFM.DRV doesn't have: none
+        self.assertEqual(self.count(self.pair(), 0x5555), 0)
+        # ESFM.DRV not loaded yet: the count all the same, and the open
+        # finds no driver
+        e = self.pair(esfm=False)
+        self.assertEqual(self.count(e), 1)
+        self.assertEqual(e.opl3_open(), 6)              # NODRIVER
+        self.assertEqual(e.opl3_modmessage(MODM_DATA, 0x7F3C90), 6)
+
+    def test_caps_and_play(self):
+        e = self.pair()
+        r, caps = e.opl3_devcaps()
+        self.assertEqual((r, caps[6:38].split(b"\0")[0]),
+                         (0, b"OPL3 FM Synthesis (388)"))
+        self.assertEqual(e.opl3_devcaps(device=1)[0], 2)   # BADDEVICEID
+        self.assertEqual(e.opl3_open(), 0)
+        self.assertEqual(e.dev8(DEV_OPL_READY), OPL_HAS)
+        self.assertEqual(e.dev16(DEV_OPL_CLIENT), e.client & 0xFFFF)
+        self.assertEqual(e.opl3_data(0x7F3C90), 0)
+        self.assertEqual(e.dev8(DEV_OPL_READY), OPL_HAS | OPL_ENGINE)
+        self.assertTrue(e.chip.opl_keyed())
+        self.assertEqual(e.try_open(0), 4)              # ALLOCATED
+        self.assertEqual(e.opl3_close(), 0)
+        self.assertTrue(e.chip.native)
+        self.assertEqual(e.chip.opl_keyed(), [])
+        self.assertEqual([c[0] for c in e.callbacks], [MOM_OPEN, MOM_CLOSE])
+        # ESFM.DRV was looked up once, at the caps
+        self.assertEqual(e.module_lookups, ["ESFM"])
+
+    def test_loaded_after_the_count(self):
+        # Windows counted ESFM.DRV's devices before it loaded this driver:
+        # ESFM.DRV keeps device 1 and this driver has none, so a program
+        # sees the OPL3 device once
+        e = ESFMEmu(builds()["fixed"])
+        e.ini[("esfm.drv", "opl3device")] = "2"
+        self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
+        for msg in (DRVM_INIT, DRVM_ENABLE):
+            self.assertEqual(e.modmessage(msg, 0, esfmemu.DEVNODE, user=0,
+                                          device=0), 0)
+        self.assertEqual(e.getnumdevs(), 2)
+        e.load_opl3(builds()["opl3"])
+        for msg in (DRV_LOAD, DRV_ENABLE, DRV_OPEN):
+            self.assertEqual(e.opl3_driverproc(msg), 1)
+        self.assertEqual(self.count(e), 0)
+        self.assertEqual(e.getnumdevs(), 2)
+        self.assertEqual(e.fix_state()["opts"] & OPT_OPL3_DRV, 0)
+        # and the other way round: this driver's count is ESFM.DRV's first
+        e = self.pair()
+        self.assertEqual((self.count(e), e.getnumdevs()), (1, 1))
+
+    def test_devnode_news_stay_here(self):
+        # ESFM.DRV hears of its devnode itself: this driver's DRVM_DISABLE
+        # and DRVM_EXIT don't reach it, and other messages aren't passed on
+        e = self.pair()
+        lookups = len(e.module_lookups)
+        for msg in (0x66, 0x65):
+            self.assertEqual(e.opl3_modmessage(msg, 0, esfmemu.DEVNODE), 0)
+        self.assertEqual(e.opl3_modmessage(0x4000, 0, 0), 8)  # NOTSUPPORTED
+        self.assertEqual(len(e.module_lookups), lookups)
+        self.assertEqual(e.opl3_open(), 0)
+        self.assertEqual(e.opl3_data(0x7F3C90), 0)
+        self.assertTrue(e.chip.opl_keyed())
+
+    def test_no_import_at_interrupt_time(self):
+        # the data only follows the pointer that the open found
+        e = self.pair()
+        self.assertEqual(e.opl3_open(), 0)
+        calls = len(e.calls)
+        for m in (0x7F3C90, 0x003C80, 0x7F4090):
+            self.assertEqual(e.opl3_data(m), 0)
+        self.assertEqual(e.calls[calls:], [])
+
+    def test_ess_driver(self):
+        # ESS's ESFM.DRV has no device 1, and refuses its open
+        e = self.pair(which="stock")
+        self.assertEqual(e.opl3_open(), 2)              # BADDEVICEID
+
+    def test_driverproc(self):
+        e = self.pair()
+        for msg, want in ((DRV_CLOSE, 1), (DRV_DISABLE, 1), (DRV_FREE, 1),
+                          (DRV_QUERYCONFIGURE, 0), (DRV_INSTALL, 1),
+                          (DRV_REMOVE, 1), (DRV_POWER, 1)):
+            self.assertEqual(e.opl3_driverproc(msg), want, msg)
+        self.assertEqual(e.defdriverprocs, [])
+        e.opl3_driverproc(DRV_CONFIGURE)
+        e.opl3_driverproc(0x4000)
+        self.assertEqual(e.defdriverprocs, [DRV_CONFIGURE, 0x4000])
+        # the setting, read once
+        self.assertEqual(len([r for r in e.int_reads
+                              if r[2] == "Opl3Device"]), 2)
 
 
 if __name__ == "__main__":

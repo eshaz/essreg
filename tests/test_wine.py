@@ -660,6 +660,13 @@ class WineTest(unittest.TestCase):
         for c in ("fm.pan0", "opl.pan0"):
             self.assertRegex(res[c][0][1], r"^left -12\.\d, right -120", c)
         self.assertIn("49819.", res["fm.rate"][0][1])
+        self.assertEqual(res["opl.rate"][0][0], "INFO")
+        m = re.match(r"(\d+\.\d+) Hz over 3 s on the OPL3 mode: [+-]\d+ ppm "
+                     r"from 49819\.5 Hz, the master / 478", res["opl.rate"][0][1])
+        self.assertTrue(m, res["opl.rate"][0][1])
+        self.assertLess(abs(float(m.group(1)) / 49819.5 - 1), 500e-6)
+        self.assertIn("StartUp batch", res["env.once"][0][1])
+        self.assertIn("ONCE.BAT: deleted", res["env.once"][0][1])
         self.assertEqual(res["sb.box"][0][0], "SKIP")
         self.assertIn("pass=9 fail=0 known=0", text)
         self.assertIn("ES1869.VXD with the extension 1.26",
@@ -688,6 +695,7 @@ class WineTest(unittest.TestCase):
         for c in ("opl.pan0", "opl.pan127"):
             self.assertEqual(res[c], [("SKIP", "no OPL3 FM MIDI device: "
                                        "ESS's ESFM.DRV, or Opl3Device=0")])
+        self.assertEqual(res["opl.rate"][0][0], "SKIP")
         self.assertIn("failed: a1.position a1.drain", text)
         self.assertIn("exit 4", log)
 
@@ -838,6 +846,43 @@ class WineTest(unittest.TestCase):
         self.assertEqual(res["env.mapper"], [
             ("INFO", "the MIDI mapper's CurrentInstrument: ESFM Synthesis "
              "(220)")])
+        self.assertEqual(res["opl.list"][0][0], "SKIP")
+
+    def test_esswchk_opl3_list(self):
+        """Opl3Device=2: the report lists the card's MIDI drivers, and
+        opl.list says what Windows made of ESFMOPL3.DRV's entry"""
+        self.keep_system_ini()
+        self.addCleanup(self.reg, "delete", self.MEDIA, "/f")
+        self.midi_entries()
+        self.card_keys("0018")
+        self.set_opl3_device("2")
+        res, _text, _log = self.wchk("W10", "/auto", "/q")
+        self.assertEqual(res["env.card"], [(
+            "INFO", "System\\CurrentControlSet\\Services\\Class\\MEDIA\\"
+            "0018\\Drivers\\midi: esfm.drv, essmpu.drv")])
+        self.assertEqual(res["opl.list"], [
+            ("FAIL", "esfmopl3.drv<0018> isn't in the MIDI list")])
+        # essinst's entry as Windows left it after a start, inactive: the
+        # copy of ESS's entry did so on the laptop
+        ess, _keys = self.reg_values(self.MEDIA + r"\esfm.drv<0018>")
+        self.midi_entry("esfmopl3.drv<0018>", [
+            (n, t, d.replace(" ", "") if n == "DevNode" else d)
+            for n, (t, d) in dict(ess, Driver=("REG_SZ", "esfmopl3.drv"),
+                                  Active=("REG_SZ", "0")).items()])
+        key = self.CLASS + r"\0018\Drivers\midi\esfmopl3.drv"
+        self.reg("add", key, "/v", "Driver", "/d", "esfmopl3.drv", "/f")
+        res, _text, _log = self.wchk("W11", "/auto", "/q")
+        self.assertEqual(res["opl.list"], [
+            ("FAIL", "esfmopl3.drv<0018> is inactive (Active 0): Windows "
+             "didn't take it over at the start")])
+        # active on the card's devnode: only the driver, which Wine doesn't
+        # load, is missing
+        self.reg("add", self.MEDIA + r"\esfmopl3.drv<0018>", "/v", "Active",
+                 "/d", "1", "/f")
+        res, _text, _log = self.wchk("W12", "/auto", "/q")
+        self.assertEqual(res["opl.list"], [
+            ("FAIL", "ESFMOPL3.DRV isn't loaded")])
+        self.assertIn("esfmopl3.drv", res["env.card"][0][1])
 
     def test_esswchk_ended_by_force(self):
         """a run ended by force leaves its report as NAME.$$$, with the
@@ -894,6 +939,13 @@ class WineTest(unittest.TestCase):
                     os.remove(found)
             shutil.copy(os.path.join(ROOT, "driver", name),
                         os.path.join(system, name))
+        # and the OPL3 device's driver, which ESS's set doesn't have
+        shutil.copy(os.path.join(ROOT, "build", "ESFMOPL3.DRV"),
+                    self.path(os.path.join("INST", "ESFMOPL3.DRV")))
+        for left in ("ESFMOPL3.DRV", "ESFMOPL3.NEW", "ESFMOPL3.$$$"):
+            found = self.find(system, left)
+            if found:
+                os.remove(found)
         for left in ("WININIT.INI", "ESSINST.LOG"):
             found = self.find(self.windows(), left)
             if found:
@@ -1085,95 +1137,181 @@ class WineTest(unittest.TestCase):
                 return parts[2].strip()
         return None
 
+    CLASS = r"HKLM\System\CurrentControlSet\Services\Class\MEDIA"
+    CARD_DRIVERS = (("esfm.drv", "Internal ESFM Synthesis"),
+                    ("essmpu.drv", "External MIDI Port"))
+
+    def card_keys(self, *nos):
+        """the MIDI drivers of the card's installs (Class\\MEDIA\\nnnn) as
+        ESS's INF writes them"""
+        for no in nos:
+            self.addCleanup(self.reg, "delete", self.CLASS + "\\" + no, "/f")
+            for drv, desc in self.CARD_DRIVERS:
+                key = r"%s\%s\Drivers\midi\%s" % (self.CLASS, no, drv)
+                self.reg("add", key, "/v", "Description", "/d", desc, "/f")
+                self.reg("add", key, "/v", "Driver", "/d", drv, "/f")
+
+    def card_driver(self, no, drv="esfmopl3.drv"):
+        """the values of the card's MIDI driver drv in install no, or None"""
+        key = r"%s\%s\Drivers\midi\%s" % (self.CLASS, no, drv)
+        got = self.reg_values(key)
+        return got and got[0]
+
+    def opl3_device(self):
+        """Opl3Device in [ESFM.DRV] of SYSTEM.INI, or None"""
+        text = read(self.system_ini()).decode("latin-1").replace("\r", "")
+        section = None
+        for row in text.splitlines():
+            row = row.strip()
+            if row.startswith("["):
+                section = row.lower()
+            elif section == "[esfm.drv]" and row.lower().startswith(
+                    "opl3device="):
+                return row.split("=", 1)[1].strip()
+        return None
+
+    def set_opl3_device(self, value):
+        """Opl3Device=value in [ESFM.DRV] of SYSTEM.INI, in place of the one
+        there: a second section would go unread"""
+        text = read(self.system_ini())
+        new, n = re.subn(rb"(?im)^opl3device=.*$",
+                         b"Opl3Device=" + value.encode(), text)
+        if not n:
+            new = text + b"\r\n[ESFM.DRV]\r\nOpl3Device=" + value.encode() + \
+                b"\r\n"
+        with open(self.system_ini(), "wb") as f:
+            f.write(new)
+
+    def keep_system_ini(self):
+        saved = read(self.system_ini())
+
+        def back():
+            with open(self.system_ini(), "wb") as f:
+                f.write(saved)
+        self.addCleanup(back)
+
     def test_essinst_midi_list(self):
-        # the OPL3 device gets a copy of the entry of ESS's device on the
-        # card, in place of an earlier essinst's copy of an old install's,
-        # and loses it again
+        # the OPL3 device's driver among the card's MIDI drivers, with its
+        # entry in the MIDI list, in place of an earlier essinst's copy of
+        # ESS's entry; and out again
         self.essinst_setup()
+        self.keep_system_ini()
         self.addCleanup(self.reg, "delete", self.MEDIA, "/f")
         for root in ("HKCU", r"HKU\.DEFAULT"):
             self.addCleanup(self.reg, "delete", root + "\\" + self.MIDIMAP,
                             "/f")
         self.midi_entries()
-        old, _keys = self.reg_values(self.MEDIA + r"\esfm.drv<0001>")
-        self.midi_entry("esfm.drv<0002>", [(n, t, d if n != "DevNode" else
-                                            d.replace(" ", ""))
-                                           for n, (t, d) in old.items()] +
-                        [("Port", "REG_DWORD", "1")])
+        self.card_keys("0001", "0018")
         ess, _keys = self.reg_values(self.MEDIA + r"\esfm.drv<0018>")
+        self.midi_entry("esfm.drv<9001>", [(n, t, d if n != "DevNode" else
+                                            d.replace(" ", ""))
+                                           for n, (t, d) in ess.items()] +
+                        [("Port", "REG_DWORD", "1")])
+        system = self.windows("system")
         self.wine("INST\\essinst.exe", "/y", "/norestart")
         log = self.essinst_log()
-        self.assertIn("The MIDI list gets the OPL3 device, MIDI for Internal "
-                      "OPL3 FM Synthesis, as esfm.drv<9001> with Port 1, in "
-                      "place of an old copy.", log)
-        self.assertIn("The MIDI list has MIDI for Internal OPL3 FM Synthesis, "
-                      "as esfm.drv<9001>.", log)
-        self.assertIsNone(self.reg_values(self.MEDIA + r"\esfm.drv<0002>"))
-        opl, keys = self.reg_values(self.MEDIA + r"\esfm.drv<9001>")
-        name = ("REG_SZ", "MIDI for Internal OPL3 FM Synthesis")
-        self.assertEqual(opl, dict(ess, FriendlyName=name,
-                                   Description=("REG_SZ", "Internal OPL3 FM "
-                                                "Synthesis"),
-                                   Port=("REG_DWORD", "0x1")))
+        self.assertIn("The card gets ESFMOPL3.DRV among its MIDI drivers, and "
+                      "the MIDI list MIDI for Internal OPL3 FM Synthesis, as "
+                      "esfmopl3.drv<0018>, in place of an old entry.", log)
+        self.assertIn("ESFMOPL3.DRV: copied into place.", log)
+        self.assertIn("SYSTEM.INI: [ESFM.DRV] Opl3Device=2.", log)
+        self.assertIsNone(self.reg_values(self.MEDIA + r"\esfm.drv<9001>"))
+        opl, keys = self.reg_values(self.MEDIA + r"\esfmopl3.drv<0018>")
+        self.assertEqual(opl, dict(
+            ess, Driver=("REG_SZ", "esfmopl3.drv"),
+            FriendlyName=("REG_SZ", "MIDI for Internal OPL3 FM Synthesis"),
+            Description=("REG_SZ", "Internal OPL3 FM Synthesis")))
         self.assertEqual([k.rsplit("\\", 1)[1] for k in keys],
                          ["Instruments"])
+        self.assertEqual(self.card_driver("0018"), {
+            "Description": ("REG_SZ", "Internal OPL3 FM Synthesis"),
+            "Driver": ("REG_SZ", "esfmopl3.drv")})
+        self.assertIsNone(self.card_driver("0001"))
+        self.assertEqual(read(self.find(system, "ESFMOPL3.DRV")),
+                         read(os.path.join(ROOT, "build", "ESFMOPL3.DRV")))
+        self.assertEqual(self.opl3_device(), "2")
         self.assertEqual(len(self.wininit()), 3)
         self.restart()
 
         # in place: nothing to do
         self.wine("INST\\essinst.exe", "/y", "/norestart")
         log = self.essinst_log()
-        self.assertEqual(log.count("installed already."), 3)
+        self.assertEqual(log.count("installed already."), 4)
         self.assertIn("The MIDI list has the OPL3 device, MIDI for Internal "
-                      "OPL3 FM Synthesis, as esfm.drv<9001>.", log)
+                      "OPL3 FM Synthesis, as esfmopl3.drv<0018>.", log)
 
-        # an old copy again: it goes, and the entry stays
-        self.midi_entry("esfm.drv<0002>", [("Driver", "REG_SZ", "esfm.drv"),
-                                           ("Active", "REG_SZ", "0"),
-                                           ("Port", "REG_DWORD", "1")])
+        # another install's driver and entry: they go, the card's stay
+        self.midi_entry("esfmopl3.drv<0001>", [
+            ("Driver", "REG_SZ", "esfmopl3.drv"), ("Active", "REG_SZ", "0"),
+            ("SoftwareKey", "REG_SZ",
+             r"System\CurrentControlSet\Services\Class\MEDIA\0001")])
+        key = self.CLASS + r"\0001\Drivers\midi\esfmopl3.drv"
+        self.reg("add", key, "/v", "Driver", "/d", "esfmopl3.drv", "/f")
         self.wine("INST\\essinst.exe", "/y", "/norestart")
         log = self.essinst_log()
-        self.assertIn("The MIDI list:\n", log.replace("\r", ""))
-        self.assertIn("The old copies of MIDI for Internal OPL3 FM Synthesis "
+        self.assertIn("The old entries of MIDI for Internal OPL3 FM Synthesis "
                       "are out of the MIDI list.", log)
-        self.assertIsNone(self.reg_values(self.MEDIA + r"\esfm.drv<0002>"))
-        self.assertIsNotNone(self.reg_values(self.MEDIA + r"\esfm.drv<9001>"))
+        self.assertIsNone(self.reg_values(self.MEDIA +
+                                          r"\esfmopl3.drv<0001>"))
+        self.assertIsNone(self.card_driver("0001"))
+        self.assertIsNotNone(self.card_driver("0018"))
+        self.assertIsNotNone(self.reg_values(self.MEDIA +
+                                             r"\esfmopl3.drv<0018>"))
         self.assertEqual(self.wininit(), {})
 
-        # Opl3Device=0: the entry goes, and Windows doesn't restart
-        ini = self.system_ini()
-        saved = read(ini)
-        try:
-            with open(ini, "ab") as f:
-                f.write(b"\r\n[ESFM.DRV]\r\nOpl3Device=0\r\n")
-            self.wine("INST\\essinst.exe", "/y", "/norestart")
-        finally:
-            with open(ini, "wb") as f:
-                f.write(saved)
-        log = self.essinst_log()
-        self.assertIn("MIDI for Internal OPL3 FM Synthesis (esfm.drv<9001>) "
-                      "is out of the MIDI list.", log)
-        self.assertIsNone(self.reg_values(self.MEDIA + r"\esfm.drv<9001>"))
-        self.assertEqual(self.wininit(), {})
-
-        # back, and the mapper on it, by the device's name as Windows 98
-        # keeps it and by its key: /restore gives the mapper ESS's device,
-        # the same way
+        # Opl3Device=0: the driver, its entry and its file go, and the key
+        # stays 0
+        self.set_opl3_device("0")
         self.wine("INST\\essinst.exe", "/y", "/norestart")
-        self.assertIsNotNone(self.reg_values(self.MEDIA + r"\esfm.drv<9001>"))
+        log = self.essinst_log()
+        self.assertIn("MIDI for Internal OPL3 FM Synthesis "
+                      "(esfmopl3.drv<0018>) is out of the MIDI list.", log)
+        self.assertIsNone(self.reg_values(self.MEDIA +
+                                          r"\esfmopl3.drv<0018>"))
+        self.assertIsNone(self.card_driver("0018"))
+        self.assertIsNone(self.find(system, "ESFMOPL3.DRV"))
+        self.assertEqual(self.opl3_device(), "0")
+        self.assertEqual(self.wininit(), {})
+
+        # back on, and the mapper on it, by the device's name as Windows 98
+        # keeps it and by its key: /restore gives the mapper ESS's device,
+        # the same way, and Opl3Device=1
+        self.set_opl3_device("1")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        self.assertIsNotNone(self.card_driver("0018"))
+        self.assertEqual(self.opl3_device(), "2")
         self.reg("add", "HKCU\\" + self.MIDIMAP, "/v", "CurrentInstrument",
                  "/d", "OPL3 FM Synthesis (220)", "/f")
         self.reg("add", r"HKU\.DEFAULT" + "\\" + self.MIDIMAP, "/v",
-                 "CurrentInstrument", "/d", "esfm.drv<9001>", "/f")
+                 "CurrentInstrument", "/d", "esfmopl3.drv<0018>", "/f")
         self.wine("INST\\essinst.exe", "/y", "/restore", "/norestart")
         log = self.essinst_log()
         self.assertIn("The MIDI list loses the OPL3 device, MIDI for Internal "
-                      "OPL3 FM Synthesis (esfm.drv<9001>).", log)
-        self.assertIsNone(self.reg_values(self.MEDIA + r"\esfm.drv<9001>"))
+                      "OPL3 FM Synthesis (esfmopl3.drv<0018>).", log)
+        self.assertIsNone(self.reg_values(self.MEDIA +
+                                          r"\esfmopl3.drv<0018>"))
+        self.assertIsNone(self.card_driver("0018"))
+        self.assertIsNone(self.find(system, "ESFMOPL3.DRV"))
+        self.assertEqual(self.opl3_device(), "1")
         for key in ("esfm.drv<0001>", "esfm.drv<0018>", "essmpu.drv<0018>"):
             self.assertIsNotNone(self.reg_values(self.MEDIA + "\\" + key))
         self.assertEqual(self.mapper("HKCU"), "ESFM Synthesis (220)")
         self.assertEqual(self.mapper(r"HKU\.DEFAULT"), "esfm.drv<0018>")
+
+    def test_essinst_no_card_driver(self):
+        # no driver of the card's install: the OPL3 device stays ESFM.DRV's
+        # device 1, and nothing goes in
+        self.essinst_setup()
+        self.keep_system_ini()
+        self.addCleanup(self.reg, "delete", self.MEDIA, "/f")
+        self.midi_entries()
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        log = self.essinst_log()
+        self.assertIn("so the OPL3 device stays ESFM.DRV's device 1", log)
+        self.assertIsNone(self.reg_values(self.MEDIA +
+                                          r"\esfmopl3.drv<0018>"))
+        self.assertIsNone(self.find(self.windows("system"), "ESFMOPL3.DRV"))
+        self.assertIsNone(self.opl3_device())
 
     def test_essinst_other_driver(self):
         # another ESFM.DRV in place: nothing is written at all

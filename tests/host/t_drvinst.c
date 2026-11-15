@@ -450,6 +450,69 @@ static void test_rebuilt_has(void) {
   CHECK(di_rebuilt_has(2, src, sys, "Opl3Device"));
 }
 
+static void test_extra(void) {
+  static const struct di_extra x = {"ESFMOPL3.DRV", "ESFMOPL3.NEW",
+                                    "ESFMOPL3.$$$"};
+  char a[DI_PATH], b[DI_PATH], c[DI_PATH], why[DI_WHY];
+
+  // the OPL3 device's driver: copied in when Windows doesn't have it
+  // loaded, and checked first, to nothing more once it's there
+  setup();
+  ref(a, "build", x.name);
+  in_dir(b, src, x.name);
+  copy(a, b);
+  in_dir(c, sys, x.name);
+  remove(c);
+  CHECK_EQ(di_put_extra(&x, src, sys, 0, 0, &ops, why), 1);
+  CHECK(!exists(c));
+  CHECK_EQ(di_put_extra(&x, src, sys, 0, 1, &ops, why), 1);
+  CHECK(same_file(a, c));
+  CHECK_EQ(entries, 0);
+  in_dir(b, sys, x.temp);
+  CHECK(!exists(b));
+  CHECK_EQ(di_put_extra(&x, src, sys, 0, 0, &ops, why), 0);
+  CHECK_EQ(di_put_extra(&x, src, sys, 1, 1, &ops, why), 0);
+  // another one there while Windows has it loaded: the .NEW, which
+  // WININIT.INI moves into place at the start
+  save(c, (const unsigned char *)"MZ an older one", 15);
+  CHECK_EQ(di_put_extra(&x, src, sys, 1, 1, &ops, why), 1);
+  in_dir(b, sys, x.staged);
+  CHECK(same_file(a, b));
+  CHECK(!same_file(a, c));
+  CHECK_EQ(entries, 1);
+  CHECK(!strcmp(dests[0], c));
+  CHECK(!strcmp(froms[0], b));
+  restart();
+  CHECK(same_file(a, c));
+  // WININIT.INI can't be written: no .NEW is left
+  save(c, (const unsigned char *)"MZ an older one", 15);
+  fail_at = calls + 1;
+  CHECK_EQ(di_put_extra(&x, src, sys, 1, 1, &ops, why), -1);
+  CHECK(!exists(b));
+  fail_at = 0;
+  // not next to essinst: nothing changes
+  in_dir(b, src, x.name);
+  remove(b);
+  CHECK_EQ(di_put_extra(&x, src, sys, 0, 1, &ops, why), -1);
+  CHECK(strstr(why, "isn't next to essinst") != 0);
+
+  // and taken out: removed, or while loaded, at the next start (NUL=)
+  CHECK_EQ(di_drop_extra(&x, sys, 0, 0, &ops, why), 1);
+  CHECK(exists(c));
+  CHECK_EQ(di_drop_extra(&x, sys, 0, 1, &ops, why), 1);
+  CHECK(!exists(c));
+  CHECK_EQ(di_drop_extra(&x, sys, 0, 1, &ops, why), 0);
+  save(c, (const unsigned char *)"MZ", 2);
+  entries = 0;
+  CHECK_EQ(di_drop_extra(&x, sys, 1, 1, &ops, why), 1);
+  CHECK(exists(c));
+  CHECK_EQ(entries, 1);
+  CHECK(!strcmp(dests[0], "NUL"));
+  CHECK(!strcmp(froms[0], c));
+  entries = 0;
+  remove(c);
+}
+
 int main(int argc, char **argv) {
   if (argc < 3) {
     printf("usage: t_drvinst ROOT WORKDIR\n");
@@ -469,6 +532,7 @@ int main(int argc, char **argv) {
   test_device_names();
   test_rebuilt_after();
   test_rebuilt_has();
+  test_extra();
   CHECK(logged > 0);
   return CHECK_DONE("t_drvinst");
 }

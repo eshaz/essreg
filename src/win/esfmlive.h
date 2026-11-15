@@ -113,6 +113,7 @@ struct esfm_diag {
 #define ESFM_OPT_SQUARE 0x0200   // BetterSquareWave: the built-in bank
 #define ESFM_OPT_SIDES 0x0400    // TrueSides: left on the left output
 #define ESFM_OPT_OPL3 0x0800     // Opl3Device: device 1 on OPL3 mode
+#define ESFM_OPT_OPL3_DRV 0x1000 // Opl3Device=2: device 1 is ESFMOPL3.DRV's
 #define ESFM_OPT_READ 0x8000     // read from SYSTEM.INI (at DRV_ENABLE)
 
 // file_state: what the last MODM_OPEN found

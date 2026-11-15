@@ -27,7 +27,16 @@
 ;    (fix_fm_guard), so nothing of ESS's lands in the OPL3's registers.
 ;    chip_reset clears DEV_OPL_READY first (a power resume, the close), and
 ;    device 1's next message sets the OPL3 up again.
-; 4. The voices play the bank as DMX does in Chocolate Doom, for which it
+; 4. With Opl3Device=2, which essinst writes when it makes ESFMOPL3.DRV
+;    one of the card's MIDI drivers, the count is ESS's alone: device 1 is
+;    ESFMOPL3.DRV's, which passes every message of its one device on to
+;    this modMessage as device 1's (src/esfm/esfmopl3.asm), so that
+;    Windows lists the device in the Multimedia control panel as a driver
+;    of the card.  Device 1 answers here as it does with Opl3Device=1.
+;    That holds if ESFMOPL3.DRV is loaded at the first count; if it isn't,
+;    this driver counts device 1 itself for the session (opl_drv_latch),
+;    and ESFMOPL3.DRV, which asks this count, has none.
+; 5. The voices play the bank as DMX does in Chocolate Doom, for which it
 ;    was made: a second voice with the instrument's fine tuning, the base
 ;    note offsets an octave below DMX's table, the fixed notes of the drums,
 ;    the carrier's level from the volume and the modulator's from the
@@ -91,7 +100,10 @@ opl_route:
         clc
         ret
 .numdevs:
-        call    opl_ess                 ; 1 with an ES1869 makes 2
+        call    opl_drv_latch
+        call    opl_ess                 ; 1 with an ES1869 makes 2, but
+        test    word [fix_opts],OPT_OPL3_DRV    ; ESFMOPL3.DRV counts
+        jnz     .done                   ; device 1 itself
         cmp     ax,1
         jne     .done
         or      dx,dx
@@ -129,6 +141,25 @@ opl_route:
         pop     si
         stc
         ret
+
+; Opl3Device=2, at the first count: device 1 is ESFMOPL3.DRV's if that
+; driver is loaded, and this driver's for the rest of the session if it
+; isn't, so that the device is neither missing nor counted twice whatever
+; order Windows loads the two drivers in.  The count comes at task time.
+; DS = DGROUP, keeps SI and DI
+opl_drv_latch:
+        cmp     byte [fix_opl3_latched],0
+        jne     .out
+        mov     byte [fix_opl3_latched],1
+        test    word [fix_opts],OPT_OPL3_DRV
+        jz      .out
+        push    ds
+        push    word fix_opl3_mod
+        kernel  GetModuleHandle
+        or      ax,ax
+        jnz     .out
+        and     word [fix_opts],~OPT_OPL3_DRV
+.out:   ret
 
 ; CF set if this call is a message of device 1's client (close, data, long
 ; data, reset): SI = dev, DI = the client

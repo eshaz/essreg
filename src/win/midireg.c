@@ -28,11 +28,12 @@
 #define KEY_MIDI "System\\CurrentControlSet\\Control\\MediaResources\\midi"
 #define KEY_MAP                                                                \
   "Software\\Microsoft\\Windows\\CurrentVersion\\Multimedia\\MIDIMap"
+#define KEY_CLASS "System\\CurrentControlSet\\Services\\Class\\"
+#define KEY_DRV "\\Drivers\\midi"
 #define OPL3_NAME "Internal OPL3 FM Synthesis"
 #define OPL3_DEV "OPL3 FM Synthesis (" // the devices' names (szPname)
 #define ESFM_DEV "ESFM Synthesis ("
-#define FIRST_NO 9001 // the OPL3 entry's number, past any card's
-#define GONE 8        // the OPL3 device's entries removed at once
+#define GONE 8 // the OPL3 device's entries removed at once
 
 typedef LONG(FAR PASCAL *REGENUMKEY)(DWORD, DWORD, LPSTR, DWORD);
 typedef LONG(FAR PASCAL *REGOPENKEY)(DWORD, LPCSTR, DWORD FAR *);
@@ -144,6 +145,36 @@ static int get_entry(DWORD top, const char *name, struct mr_entry *e) {
   return 0;
 }
 
+// the card's software key of the entry e, under HKLM, into e->soft: its
+// SoftwareKey where that names a key of the MEDIA class, else the MEDIA key
+// of the number in the entry's name, esfm.drv<0018>
+static void soft_key(DWORD top, struct mr_entry *e) {
+  static char sk[96];
+  const char *p;
+  DWORD key;
+  unsigned n;
+
+  e->soft[0] = 0;
+  sk[0] = 0;
+  if (!reg.open(top, e->key, &key)) {
+    get_text(key, "SoftwareKey", sk, sizeof(sk));
+    reg.close(key);
+  }
+  for (p = sk; *p && strnicmp(p, "MEDIA\\", 6); p++)
+    ;
+  if (*p && strlen(KEY_CLASS) + strlen(p) < MR_SOFT) {
+    strcpy(e->soft, KEY_CLASS);
+    strcat(e->soft, p);
+    return;
+  }
+  p = strchr(e->key, '<');
+  n = p ? (unsigned)strcspn(p + 1, ">") : 0;
+  if (n && n < 9 && p[1 + n] == '>' && strlen(KEY_CLASS) + 6 + n < MR_SOFT) {
+    strcpy(e->soft, KEY_CLASS "MEDIA\\");
+    strncat(e->soft, p + 1, n);
+  }
+}
+
 int mr_list(struct mr_entry *list, int max) {
   char name[64];
   DWORD top, i;
@@ -152,8 +183,10 @@ int mr_list(struct mr_entry *list, int max) {
   if (reg_init() || reg.open(HKLM, KEY_MIDI, &top))
     return -1;
   for (i = 0; n < max && !reg.enum_key(top, i, name, sizeof(name)); i++)
-    if (!get_entry(top, name, &list[n]))
+    if (!get_entry(top, name, &list[n])) {
+      soft_key(top, &list[n]);
       n++;
+    }
   reg.close(top);
   return n;
 }
@@ -168,6 +201,58 @@ void mr_mapper(char *out) {
   }
 }
 
+// ESS's device's entry on the card that is there: Driver esfm.drv, Port 0
+// or none, Active 1. 0, or -1 without one
+static int find_ess(DWORD top, struct mr_entry *e) {
+  char name[64];
+  DWORD i;
+
+  for (i = 0; !reg.enum_key(top, i, name, sizeof(name)); i++)
+    if (!get_entry(top, name, e) && !lstrcmpi(e->driver, "esfm.drv") &&
+        e->port <= 0 && e->active == 1) {
+      soft_key(top, e);
+      return 0;
+    }
+  memset(e, 0, sizeof(*e));
+  return -1;
+}
+
+int mr_ess(struct mr_entry *e) {
+  DWORD top;
+  int r;
+
+  memset(e, 0, sizeof(*e));
+  if (reg_init() || reg.open(HKLM, KEY_MIDI, &top))
+    return -1;
+  r = find_ess(top, e);
+  reg.close(top);
+  return r;
+}
+
+int mr_drivers(const char *soft, char *out, unsigned size) {
+  static char path[MR_SOFT + 16];
+  char name[32];
+  DWORD key, i;
+  int n = 0;
+
+  out[0] = 0;
+  if (reg_init() || !soft[0])
+    return -1;
+  strcpy(path, soft);
+  strcat(path, KEY_DRV);
+  if (reg.open(HKLM, path, &key))
+    return -1;
+  for (i = 0; !reg.enum_key(key, i, name, sizeof(name)); i++) {
+    if (strlen(out) + strlen(name) + 3 >= size)
+      break;
+    if (n++)
+      strcat(out, ", ");
+    strcat(out, name);
+  }
+  reg.close(key);
+  return n;
+}
+
 // the OPL3 device's name from ESS's device's: ESFM becomes OPL3 FM
 static void opl3_name(const char *ess, char *out) {
   const char *p = strstr(ess, "ESFM");
@@ -179,41 +264,6 @@ static void opl3_name(const char *ess, char *out) {
   memcpy(out, ess, (unsigned)(p - ess));
   strcpy(out + (p - ess), "OPL3 FM");
   strcat(out, p + 4);
-}
-
-// 1 if the entry called opl has every value of the entry called ess, as it
-// is there, but for the names and Port
-static int same_values(DWORD top, const char *ess, const char *opl) {
-  static char vname[64];
-  static BYTE data[256], have[256];
-  DWORD src, dst, i, nlen, size, type, htype, hsize;
-  LONG r;
-  int same = 1;
-
-  if (reg.open(top, ess, &src))
-    return 0;
-  if (reg.open(top, opl, &dst)) {
-    reg.close(src);
-    return 0;
-  }
-  for (i = 0; same && i < 64; i++) {
-    nlen = sizeof(vname);
-    size = sizeof(data);
-    r = reg.enum_value(src, i, vname, &nlen, 0, &type, data, &size);
-    if (r == MORE_DATA)
-      continue;
-    if (r)
-      break;
-    if (!lstrcmpi(vname, "Port") || !lstrcmpi(vname, "FriendlyName") ||
-        !lstrcmpi(vname, "Description"))
-      continue;
-    hsize = sizeof(have);
-    same = !reg.query(dst, vname, 0, &htype, have, &hsize) && htype == type &&
-           hsize == size && !memcmp(have, data, (unsigned)size);
-  }
-  reg.close(dst);
-  reg.close(src);
-  return same;
 }
 
 // the key called name under parent, with its keys: 0 or -1
@@ -230,22 +280,16 @@ static int del_tree(DWORD parent, const char *name, int depth) {
   return reg.del(parent, name) ? -1 : 0;
 }
 
-// ESS's entry (called from) copied to e's key, with Port 1, and its names
-// with ESFM made OPL3 FM (e's name where it has none): 0, or -1 with
-// nothing left of it
-static int copy_entry(DWORD top, const char *from, const struct mr_entry *e) {
+// the values of the key src into the key dst: the names (Description and
+// FriendlyName) with ESFM made OPL3 FM, Driver as driver, and without a
+// Port. 0, or -1 if one of them can't be written
+static int copy_values(DWORD src, DWORD dst, const char *driver) {
   static char vname[64], name[MR_NAME];
   static BYTE data[256];
-  DWORD src, dst, sub, i, nlen, size, type, ptype = REG_DW, one = 1;
+  DWORD i, nlen, size, type;
   LONG r;
-  int err = 0, names = 0;
+  int err = 0;
 
-  if (reg.open(top, from, &src))
-    return -1;
-  if (reg.create(top, e->key, &dst)) {
-    reg.close(src);
-    return -1;
-  }
   for (i = 0; i < 64; i++) {
     nlen = sizeof(vname);
     size = sizeof(data);
@@ -254,15 +298,12 @@ static int copy_entry(DWORD top, const char *from, const struct mr_entry *e) {
       continue;
     if (r)
       break;
-    if (!lstrcmpi(vname, "Port")) {
-      ptype = type;
+    if (!lstrcmpi(vname, "Port") || !lstrcmpi(vname, "Driver"))
       continue;
-    }
     if (type == REG_SZ &&
         (!lstrcmpi(vname, "FriendlyName") || !lstrcmpi(vname, "Description"))) {
       data[sizeof(data) - 1] = 0;
       opl3_name((char *)data, name);
-      names++;
       if (reg.set(dst, vname, 0, REG_SZ, (const BYTE FAR *)name,
                   strlen(name) + 1))
         err = -1;
@@ -271,20 +312,34 @@ static int copy_entry(DWORD top, const char *from, const struct mr_entry *e) {
     if (reg.set(dst, vname, 0, type, data, size))
       err = -1;
   }
-  if (!names && (reg.set(dst, "FriendlyName", 0, REG_SZ,
-                         (const BYTE FAR *)e->name, strlen(e->name) + 1) ||
-                 reg.set(dst, "Description", 0, REG_SZ,
-                         (const BYTE FAR *)e->name, strlen(e->name) + 1)))
+  if (reg.set(dst, "Driver", 0, REG_SZ, (const BYTE FAR *)driver,
+              strlen(driver) + 1))
     err = -1;
-  // Port as ESS's entry keeps it, a DWORD where it has none
-  if (ptype == REG_SZ)
-    r = reg.set(dst, "Port", 0, REG_SZ, (const BYTE FAR *)"1", 2);
-  else
-    r = reg.set(dst, "Port", 0, ptype == REG_BIN ? REG_BIN : REG_DW,
-                (const BYTE FAR *)&one, 4);
-  if (r)
+  return err;
+}
+
+// a key of HKLM made from the key from, under the name to (the parent
+// there already): copy_values, with the name where from has none, and its
+// empty Instruments key if from has one. 0, or -1 with nothing left of it
+static int make_key(DWORD fromtop, const char *from, DWORD totop,
+                    const char *to, const char *name) {
+  DWORD src, dst, sub;
+  BYTE b[4];
+  DWORD type, size = sizeof(b);
+  int err;
+
+  if (reg.open(fromtop, from, &src))
+    return -1;
+  if (reg.create(totop, to, &dst)) {
+    reg.close(src);
+    return -1;
+  }
+  err = copy_values(src, dst, MR_OPL3_DRIVER);
+  if (reg.query(dst, "Description", 0, &type, b, &size) == 2L &&
+      reg.set(dst, "Description", 0, REG_SZ, (const BYTE FAR *)name,
+              strlen(name) + 1))
     err = -1;
-  // ESS's entry's Instruments key, empty: a synthesizer has no instruments
+  // a synthesizer has no instruments
   if (!reg.open(src, "Instruments", &sub)) {
     reg.close(sub);
     if (reg.create(dst, "Instruments", &sub))
@@ -298,8 +353,61 @@ static int copy_entry(DWORD top, const char *from, const struct mr_entry *e) {
   reg.close(dst);
   reg.close(src);
   if (err)
-    del_tree(top, e->key, 0);
+    del_tree(totop, to, 0);
   return err;
+}
+
+// 1 if the card's software key soft has ESFMOPL3.DRV among its MIDI
+// drivers, which= 1 for ESFM.DRV's key instead
+static int has_driver(const char *soft, int which) {
+  static char path[MR_SOFT + 32];
+  char drv[16];
+  DWORD key;
+
+  if (!soft[0])
+    return 0;
+  strcpy(path, soft);
+  strcat(path, KEY_DRV "\\");
+  strcat(path, which ? "esfm.drv" : MR_OPL3_DRIVER);
+  if (reg.open(HKLM, path, &key))
+    return 0;
+  get_text(key, "Driver", drv, sizeof(drv));
+  reg.close(key);
+  return which || !lstrcmpi(drv, MR_OPL3_DRIVER);
+}
+
+// ESFMOPL3.DRV out of the MIDI drivers of the card's software key soft: 0
+// if it isn't there or is gone, -1 if it stays
+static int drop_driver(const char *soft) {
+  static char path[MR_SOFT + 16];
+  DWORD key;
+  int r;
+
+  if (!soft[0])
+    return 0;
+  strcpy(path, soft);
+  strcat(path, KEY_DRV);
+  if (reg.open(HKLM, path, &key))
+    return 0;
+  r = 0;
+  if (has_driver(soft, 0))
+    r = del_tree(key, MR_OPL3_DRIVER, 0);
+  if (reg.flush)
+    reg.flush(key);
+  reg.close(key);
+  return r;
+}
+
+// ESFMOPL3.DRV among the MIDI drivers of the card's software key soft,
+// made from ESS's key for ESFM.DRV: 0 or -1
+static int add_driver(const char *soft) {
+  static char from[MR_SOFT + 32], to[MR_SOFT + 32];
+
+  strcpy(from, soft);
+  strcat(from, KEY_DRV "\\esfm.drv");
+  strcpy(to, soft);
+  strcat(to, KEY_DRV "\\" MR_OPL3_DRIVER);
+  return make_key(HKLM, from, HKLM, to, OPL3_NAME);
 }
 
 // the MIDI mapper's CurrentInstrument where it names a removed entry, by
@@ -343,89 +451,103 @@ static void mapper_back(char gone[][MR_KEY], int n, const struct mr_entry *opl3,
 }
 
 int mr_opl3(int on, int set, struct mr_entry *e, int *stale) {
-  static char gone[GONE][MR_KEY];
+  static char gone[GONE][MR_KEY], soft[GONE][MR_SOFT];
+  static char want[MR_KEY], name[64];
   struct mr_entry cur, ess;
-  char name[64], *p;
-  DWORD top, key, i;
-  int n = 0, have_ess = 0, keep = -1, err = 0, j;
+  DWORD top, i;
+  int n = 0, have_ess, keep = -1, have_drv, err = 0, j;
+  char *p;
 
   memset(e, 0, sizeof(*e));
-  memset(&ess, 0, sizeof(ess));
   *stale = 0;
   if (reg_init() || reg.open(HKLM, KEY_MIDI, &top))
     return on ? MR_NO_ESFM : MR_KEEP;
-  for (i = 0; !reg.enum_key(top, i, name, sizeof(name)); i++) {
-    if (get_entry(top, name, &cur) || lstrcmpi(cur.driver, "esfm.drv"))
-      continue;
-    if (cur.port <= 0) {
-      // ESS's device: Port 0, or none; the card's, not an earlier one's
-      if (cur.active == 1 && !have_ess) {
-        ess = cur;
-        have_ess = 1;
-      }
-      continue;
-    }
-    if (n < GONE) {
-      if (!n)
-        *e = cur;
-      strcpy(gone[n++], cur.key);
-    }
+  have_ess = !find_ess(top, &ess) && has_driver(ess.soft, 1);
+  // the entry the card's ESFMOPL3.DRV has: esfmopl3.drv<0018>
+  want[0] = 0;
+  p = have_ess ? strchr(ess.key, '<') : 0;
+  if (p && strlen(MR_OPL3_DRIVER) + strlen(p) < sizeof(want)) {
+    strcpy(want, MR_OPL3_DRIVER);
+    strcat(want, p);
   }
-  if (on && !have_ess) {
+  if (on && !want[0]) {
     reg.close(top);
     return MR_NO_ESFM;
   }
-  // an entry that is ESS's but for its names and Port stays
-  for (j = 0; on && keep < 0 && j < n; j++)
-    if (same_values(top, ess.key, gone[j]))
-      keep = j;
-  if (on && keep >= 0) {
-    get_entry(top, gone[keep], e);
-    *stale = n - 1;
-    for (j = 0; set && j < n; j++)
-      if (j != keep && del_tree(top, gone[j], 0))
-        err = -1;
-    reg.close(top);
-    return err ? MR_FAIL : n > 1 ? MR_TIDY : MR_KEEP;
+  // the OPL3 device's entries: ESFMOPL3.DRV's, and an earlier essinst's
+  // copies of ESS's entry with a Port above 0
+  for (i = 0; !reg.enum_key(top, i, name, sizeof(name)); i++) {
+    if (get_entry(top, name, &cur) ||
+        (lstrcmpi(cur.driver, MR_OPL3_DRIVER) &&
+         (lstrcmpi(cur.driver, "esfm.drv") || cur.port <= 0)))
+      continue;
+    soft_key(top, &cur);
+    if (on && keep < 0 && !lstrcmpi(cur.key, want) &&
+        !lstrcmpi(cur.driver, MR_OPL3_DRIVER)) {
+      keep = 1;
+      *e = cur;
+      continue;
+    }
+    if (n < GONE) {
+      if (!n && !on)
+        *e = cur;
+      strcpy(gone[n], cur.key);
+      // a copy of ESS's entry has no driver of its own to remove
+      strcpy(soft[n], lstrcmpi(cur.driver, MR_OPL3_DRIVER) ? "" : cur.soft);
+      n++;
+    }
   }
-  if (!on && !n) {
+  have_drv = have_ess && has_driver(ess.soft, 0);
+  *stale = n;
+  if (on && keep > 0 && have_drv && !n) {
     reg.close(top);
     return MR_KEEP;
   }
-  // the others go: an earlier card's copy, or the device is off
-  *stale = n;
+  if (!on && !n && !have_drv) {
+    reg.close(top);
+    return MR_KEEP;
+  }
+  // what goes: the stale entries and their drivers, or all of it
   for (j = 0; set && j < n; j++)
-    if (del_tree(top, gone[j], 0))
+    if (del_tree(top, gone[j], 0) || drop_driver(soft[j]))
       err = -1;
-  if (set && reg.flush)
-    reg.flush(top);
   if (!on) {
+    if (set && have_drv && drop_driver(ess.soft))
+      err = -1;
+    if (!n) {
+      strcpy(e->key, want);
+      opl3_name(ess.name, e->name);
+    }
+    if (set && reg.flush)
+      reg.flush(top);
     if (set && have_ess)
       mapper_back(gone, n, e, &ess);
     reg.close(top);
     return err ? MR_FAIL : MR_REMOVE;
   }
-  // ESS's key's driver part, and a number that no card's install takes
-  strcpy(e->key, ess.key);
-  p = strchr(e->key, '<');
-  if (!p || p - e->key > MR_KEY - 7) {
-    strcpy(e->key, "esfm.drv");
-    p = e->key + strlen(e->key);
+  if (keep > 0 && have_drv) {
+    if (set && reg.flush)
+      reg.flush(top);
+    reg.close(top);
+    return err ? MR_FAIL : MR_TIDY;
   }
-  for (j = FIRST_NO; j < 10000; j++) {
-    sprintf(p, "<%04d>", j);
-    if (reg.open(top, e->key, &key))
-      break;
-    reg.close(key);
+  // the card's ESFMOPL3.DRV and its entry, as ESS's
+  if (keep < 0) {
+    strcpy(e->key, want);
+    strcpy(e->driver, MR_OPL3_DRIVER);
+    opl3_name(ess.name, e->name);
+    e->port = -1;
+    e->active = ess.active;
+    e->devnode = ess.devnode;
+    e->has_devnode = ess.has_devnode;
+    strcpy(e->soft, ess.soft);
   }
-  strcpy(e->driver, "esfm.drv");
-  opl3_name(ess.name, e->name);
-  e->port = 1;
-  e->active = ess.active;
-  e->devnode = ess.devnode;
-  e->has_devnode = ess.has_devnode;
-  if (set && !err)
-    err = copy_entry(top, ess.key, e);
+  if (set && !err && !have_drv && add_driver(ess.soft))
+    err = -1;
+  if (set && !err && keep < 0 && make_key(top, ess.key, top, want, e->name))
+    err = -1;
+  if (set && reg.flush)
+    reg.flush(top);
   reg.close(top);
   return err ? MR_FAIL : MR_ADD;
 }

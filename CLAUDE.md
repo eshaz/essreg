@@ -37,9 +37,9 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   card in Windows 98, which ESSCHECK starts through the StartUp folder;
   without options it runs the whole check from Windows, essinst and then
   ExitWindowsExec into `ESSCHECK.BAT /W`. `midireg.c` is the MIDI list of
-  the Multimedia control panel, where essinst adds ESFM.DRV's OPL3 device
-  and esswchk reads it. `wheel.c` gives the sliders of essctl and ess3d the
-  mouse wheel.
+  the Multimedia control panel and the card's MIDI drivers, where essinst
+  adds ESFMOPL3.DRV, the OPL3 device's driver, and esswchk reads them.
+  `wheel.c` gives the sliders of essctl and ess3d the mouse wheel.
 * `src/vxd/` holds `ES1869.VXD` as NASM source, made by `tools/vxd2asm.py`.
   `essext.asm` adds the register API, the DOS box improvements (the virtual
   FM chip, Windows' mixer around a DOS program, the DACs' modes for it, and
@@ -49,7 +49,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm`
   and `esfmgm.asm` hold the fixes and General MIDI, `esfmopl.asm` the OPL3
   device (device 1: General MIDI on the chip's OPL3 mode), and `esfmini.asm`
-  their SYSTEM.INI switches, all assembled with `ESFM_FIX=1`.
+  their SYSTEM.INI switches, all assembled with `ESFM_FIX=1`. `esfmopl3.asm`
+  is `ESFMOPL3.DRV`, a MIDI driver of its own whose one device is ESFM.DRV's
+  device 1, so that Windows lists the OPL3 device in the Multimedia control
+  panel, linked by `tools/build_esfm.py` with `esfmopl3.json`.
 * `src/es1869/` holds `ES1869.DRV` (wave, mixer and aux) as NASM source,
   made by `tools/ne2asm.py` with `names.txt`. The changes are assembled with
   `ES1869_FIX=1`: `a2mode.asm` (the Audio 2 mode), `a1wave.asm` and
@@ -307,10 +310,11 @@ tools/wineshot.sh run ess3d.exe /sim tray
   PCI bridge (`esp_hal.bridge`). It is built in the medium model, with its
   own objects of the shared modules (`essprobe.mk1`).
 * **Committed binaries.** After changing their sources, rebuild
-  `build/ESFM.DRV`, `build/ES1869.VXD`, `build/ES1869.DRV` or
-  `build/esssb16.com`, and copy the changed programs from `out/ow2/` to
-  `build/`, `essprobe.exe` and `esswchk.exe` among them.
-  `test_build_is_current` checks `ESFM.DRV` and `ES1869.DRV`.
+  `build/ESFM.DRV` (with `build/ESFMOPL3.DRV`), `build/ES1869.VXD`,
+  `build/ES1869.DRV` or `build/esssb16.com`, and copy the changed programs
+  from `out/ow2/` to `build/`, `essprobe.exe` and `esswchk.exe` among them.
+  `test_build_is_current` checks `ESFM.DRV` and `ES1869.DRV`, and
+  `test_opl3_driver_is_current` `ESFMOPL3.DRV`.
 * **ESFM_FIX code:**
   * A label at a relocation site is a `..@` name, so that it doesn't end
     NASM's local label scope.
@@ -335,10 +339,21 @@ tools/wineshot.sh run ess3d.exe /sim tray
     MIDI sets the chip up only at the first MIDI message (`OPL_ENGINE`).
     `fm_write` drops ESS's writes meanwhile (`fix_fm_guard`), `chip_reset`
     clears both flags first, and the close and a suspend key off every
-    channel and the rhythm, the program's notes too. Its entry in the MIDI
-    list of the Multimedia control panel is essinst's (`src/win/midireg.c`),
-    so a change to its name or device number goes there too, and `Opl3Test`
-    in `tests/test_esfmdrv.py` tests it on the emulator's OPL3 mode.
+    channel and the rhythm, the program's notes too. `Opl3Test` in
+    `tests/test_esfmdrv.py` tests it on the emulator's OPL3 mode.
+  * Windows 95 and 98 list a card's MIDI drivers, not their devices, so the
+    OPL3 device reaches the MIDI list of the Multimedia control panel
+    through `ESFMOPL3.DRV` (`esfmopl3.asm`), which essinst adds to the
+    card's MIDI drivers (`src/win/midireg.c`) with `Opl3Device=2`. With 2,
+    ESFM.DRV counts only device 0 if ESFMOPL3.DRV is loaded at its first
+    count, and keeps device 1 for the session if it isn't (`opl_drv_latch`),
+    and ESFMOPL3.DRV, whose count is 1 only when ESFM.DRV's is 1, passes
+    every message of its one device on to ESFM.DRV's modMessage as device
+    1's; it answers the devnode's messages (`DRVM_*`) itself, and looks
+    ESFM.DRV up at task time only. So the device is never missing nor there
+    twice. A change to device 1's number or name goes into both drivers,
+    `midireg.c` and esswchk's `opl.list`, and `Opl3DriverTest` runs the two
+    drivers together in the emulator.
 * **The status block** (`esfmfixd.asm`, found by `ESFMFIX`) is read by
   essctl at fixed offsets (`src/win/esfmlive.c`). A change to its layout
   bumps `fix_version`, and the next version is 6.
