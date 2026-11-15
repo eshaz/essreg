@@ -23,7 +23,8 @@ The Python tests, in `tests/test_*.py`, cover the following:
   driver and tests the fixed driver against them
   ([ESFM_MIDI.md](ESFM_MIDI.md)).
 * The fixed driver's bank file is tested in the same emulator, which
-  simulates `SYSTEM.INI`, files with their dates, and the global heap.
+  simulates `SYSTEM.INI`, files with their dates, and the global heap, and
+  so is its OPL3 device (`Opl3Test`), on the chip's OPL3 mode.
 * `test_vxdext` runs the register API of the rebuilt VxD in a CPU emulator
   against a simulated ES1869, including the API's refusals and checks. It
   also checks that the extended VxD keeps ESS's code where it was, byte for
@@ -819,6 +820,15 @@ These steps need `build\ESFM.DRV` installed. See [ESFM_GM.md](ESFM_GM.md).
    the chord doesn't get quieter, and the last C4 stays sharp to the end.
 3. Play GM MIDI files and games. They sound as before, with vibrato where
    the music uses the modulation wheel or channel pressure.
+
+### G4. The OPL3 device
+
+See [ESFM_OPL3.md](ESFM_OPL3.md). With the drivers installed by essinst:
+1. The MIDI tab of the Multimedia control panel lists *Internal OPL3 FM
+   Synthesis*. Choose it, and play a MIDI file in Media Player. It sounds as
+   on an OPL3 card.
+2. Choose ESS's device again. While a program plays on one device, the other
+   can't be opened.
 
 ### H. ess3d
 

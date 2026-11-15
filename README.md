@@ -526,6 +526,11 @@ one queues the messages instead, and it fixes more:
   reads the file when a program opens the MIDI device, if the file's date or
   time has changed
   ([docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv)).
+* It has a second MIDI device, *OPL3 FM Synthesis*, which plays General MIDI
+  on the chip's OPL3 compatibility mode with Freedoom's instruments, the way
+  an OPL3 card plays Doom's music. One of the two devices is open at a time,
+  and essinst adds the new one to the MIDI tab of the Multimedia control
+  panel ([docs/ESFM_OPL3.md](docs/ESFM_OPL3.md)).
 
 [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md) has the details. Each change can be
 turned off with its own key under `[ESFM.DRV]` in `SYSTEM.INI`, which the
@@ -729,15 +734,15 @@ clocks, the FM's sides and rate, and the ADC's top rate.
 
 Checks in Windows 98 that the fixes of the rebuilt drivers work on the card:
 the VxD's reads of a moving DMA count, the Audio 1 device's positions and
-the way it gives its last buffer back, the FM's sides and rate through the
-FM recording device, and `sb16test` in a DOS box, on the Sound Blaster 16
-that the VxD gives DOS programs. It writes `WCHECK.TXT`, to send back.
-Started without options, it runs all the checks of the machine after an OK:
-it installs the drivers of its folder, Windows ends for `ESSCHECK.BAT` in
-DOS and comes back by itself, and it runs its own checks then.
-`esswchk /auto` runs only those. `/R` plays sounds after DTMF markers, for a
-recorder, and [`tools/wchkrec.py`](tools/wchkrec.py) analyzes the recording;
-[docs/ESSWCHK.md](docs/ESSWCHK.md) has the details.
+the way it gives its last buffer back, the FM's sides on both MIDI devices
+and its rate through the FM recording device, and `sb16test` in a DOS box,
+on the Sound Blaster 16 that the VxD gives DOS programs. It writes
+`WCHECK.TXT`, to send back. Started without options, it runs all the checks
+of the machine after an OK: it installs the drivers of its folder, Windows
+ends for `ESSCHECK.BAT` in DOS and comes back by itself, and it runs its own
+checks then. `esswchk /auto` runs only those. `/R` plays sounds after DTMF
+markers, for a recorder, and [`tools/wchkrec.py`](tools/wchkrec.py) analyzes
+the recording; [docs/ESSWCHK.md](docs/ESSWCHK.md) has the details.
 
 ## [`esfmpat.exe`](build)
 * Utility to write custom patch banks to the Windows ESFM VxD driver.
@@ -804,6 +809,12 @@ Windows still finds them, and `/restore` gives them ESS's names back. If an
 earlier essinst installed the drivers, run the new one once: it puts the new
 `ES1869.DRV` in place and renames the preferred devices. When only the names
 are left to do, it does that without a restart.
+
+The rebuilt `ESFM.DRV` has a second MIDI device, the OPL3 device, which
+ESS's setup doesn't know. essinst adds it to the MIDI list of the Multimedia
+control panel, as a copy of the entry of ESS's device, and `/restore` takes
+it out again
+([docs/ESFM_OPL3.md](docs/ESFM_OPL3.md#the-multimedia-control-panel)).
 
 These switches change what it does:
 * `/restore` puts ESS's drivers back from the `.ORG` copies in the same way.
@@ -961,6 +972,8 @@ copy C:\WINDOWS\SYSTEM\ESFM.ORG C:\WINDOWS\SYSTEM\ESFM.DRV
   driver stack, and the fixed `ESFM.DRV`.
 * [docs/ESFM_GM.md](docs/ESFM_GM.md): what General MIDI asks for, and what
   the fixed `ESFM.DRV` adds.
+* [docs/ESFM_OPL3.md](docs/ESFM_OPL3.md): the fixed `ESFM.DRV`'s OPL3
+  device, its instruments, and its entry in the Multimedia control panel.
 * [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md): where skipped samples
   come from, the Audio 2 DAC's oversampling and filter, and what to try on
   the card.

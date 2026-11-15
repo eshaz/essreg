@@ -3,8 +3,8 @@
 #
 # Notes:
 #
-# It uses WIN_CFLAGS and the w_ objects of essctl.mk1, so the Makefile
-# includes it after essctl.mk1.
+# It uses WIN_CFLAGS and the w_ objects of essctl.mk1, and w_midireg.obj
+# of essinst.mk1, so the Makefile includes it after those.
 #
 # (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 #
@@ -27,8 +27,8 @@ w_esswck.obj : src\win\esswchk.c .AUTODEPEND
 esswchk.res : src\win\esswchk.rc src\win\essctl.ico
  *wrc -q -r -bt=windows -i="$(%watcom)/h;$(%watcom)/h/win;src\win" src\win\esswchk.rc -fo=esswchk.res
 
-esswchk.exe : w_esswck.obj w_wchk.obj w_tears.obj w_sbtsnd.obj w_winio.obj w_esfmlive.obj w_esfmbank.obj w_wavelive.obj w_wavestat.obj w_esshw.obj w_esscat.obj w_essio.obj w_simhw.obj w_vxdapi.obj w_vxdcall.obj esswchk.res nestamp.exe .AUTODEPEND
- @%write esswchk.lk1 FIL w_esswck.obj,w_wchk.obj,w_tears.obj,w_sbtsnd.obj,w_winio.obj,w_esfmlive.obj,w_esfmbank.obj,w_wavelive.obj
+esswchk.exe : w_esswck.obj w_wchk.obj w_tears.obj w_sbtsnd.obj w_winio.obj w_esfmlive.obj w_esfmbank.obj w_wavelive.obj w_wavestat.obj w_esshw.obj w_esscat.obj w_essio.obj w_simhw.obj w_vxdapi.obj w_vxdcall.obj w_midireg.obj esswchk.res nestamp.exe .AUTODEPEND
+ @%write esswchk.lk1 FIL w_esswck.obj,w_wchk.obj,w_tears.obj,w_sbtsnd.obj,w_winio.obj,w_esfmlive.obj,w_esfmbank.obj,w_wavelive.obj,w_midireg.obj
  @%append esswchk.lk1 FIL w_wavestat.obj,w_esshw.obj,w_esscat.obj,w_essio.obj,w_simhw.obj,w_vxdapi.obj,w_vxdcall.obj
  @%append esswchk.lk1 LIBR toolhelp.lib,mmsystem.lib
  @%append esswchk.lk1 SEGMENT CLASS 'CODE' MOVEABLE DISCARDABLE

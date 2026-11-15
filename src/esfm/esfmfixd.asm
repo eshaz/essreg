@@ -5,8 +5,9 @@
 ; Licensed under GPL Version 3.0
 
 fix_sig:        db 'ESFMFIX', 0
-fix_version:    dw 4            ; 2: the bank file, 4: fix_opts.  3 was
-                                ; an earlier build's pedal times
+fix_version:    dw 5            ; 2: the bank file, 4: fix_opts, 5: the
+                                ; OPL3 device's DEV_OPL_READY.  3 was an
+                                ; earlier build's pedal times
 fix_lock:       dw 0            ; nonzero while a call holds the driver
 q_head:         dw 0            ; next entry to handle
 q_tail:         dw 0            ; next free entry
@@ -44,6 +45,7 @@ fix_settings:
         dw fix_key_running, OPT_RUNNING
         dw fix_key_square, OPT_SQUARE
         dw fix_key_sides, OPT_SIDES
+        dw fix_key_opl3, OPT_OPL3
         dw 0
 fix_key_queue:   db 'QueueWhileBusy', 0
 fix_key_silence: db 'SilenceOnClose', 0
@@ -56,6 +58,7 @@ fix_key_sysex:   db 'SysEx', 0
 fix_key_running: db 'RunningStatus', 0
 fix_key_square:  db 'BetterSquareWave', 0
 fix_key_sides:   db 'TrueSides', 0
+fix_key_opl3:    db 'Opl3Device', 0
 fix_ini_sect:   db 'ESFM.DRV', 0
 fix_ini_key:    db 'Bank', 0
 fix_ini_file:   db 'SYSTEM.INI', 0

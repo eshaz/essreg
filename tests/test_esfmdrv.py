@@ -30,8 +30,13 @@ SettingsTest: SYSTEM.INI [ESFM.DRV] turns each change off, read once at the
 first DRV_ENABLE (src/esfm/esfmini.asm). Each key at 0 does what ESS's
 driver does, and with all of them at 0 the fixed build writes the same
 ports as ESS's.
+
+Opl3Test: device 1, which plays General MIDI on the chip's OPL3
+compatibility mode with Freedoom's GENMIDI instruments
+(src/esfm/esfmopl.asm), against the bank and the OPL3's pitch.
 """
 
+import math
 import os
 import struct
 import sys
@@ -589,8 +594,9 @@ class SustainTest(unittest.TestCase):
                                   for v in emu.keyed_voices() if v < 16}, {0})
 
     def test_status_block_version(self):
-        # 3 was an earlier build's pedal times, 4 added the settings
-        self.assertEqual(self.emu("fixed").fix_state()["version"], 4)
+        # 3 was an earlier build's pedal times, 4 added the settings, 5
+        # the OPL3 device
+        self.assertEqual(self.emu("fixed").fix_state()["version"], 5)
 
 
 # General MIDI (esfmgm.asm): device fields, esfmdev.inc
@@ -1297,9 +1303,9 @@ class BankFileTest(unittest.TestCase):
 # SYSTEM.INI [ESFM.DRV] keys, in the order of their fix_opts bits
 SETTINGS = ["QueueWhileBusy", "SilenceOnClose", "PedalRelease", "Vibrato",
             "Tuning", "ResetControllers", "LivePan", "SysEx",
-            "RunningStatus", "BetterSquareWave", "TrueSides"]
+            "RunningStatus", "BetterSquareWave", "TrueSides", "Opl3Device"]
 OPT = {k: 1 << i for i, k in enumerate(SETTINGS)}
-OPT_DEFAULT, OPT_READ = 0x07FF, 0x8000
+OPT_DEFAULT, OPT_READ = 0x0FFF, 0x8000
 GM_ON = bytes([0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7])
 
 
@@ -1540,6 +1546,357 @@ class SettingsTest(unittest.TestCase):
         # and the defaults differ
         self.assertNotEqual(song(self.started(ini={"BetterSquareWave": "0"})),
                             stock)
+
+
+# the OPL3 device (esfmopl.asm): device fields, esfmdev.inc
+DEV_OPL_CLIENT, DEV_OPL_READY = 0x438, 0x43A
+DEV_OPL_CHAN, DEV_OPL_VOICE, OV_SIZE = 0x44F, 0x54F, 16
+GENMIDI = os.path.join(ROOT, "third_party", "genmidi", "GENMIDI.lmp")
+OPTAB = (0, 1, 2, 8, 9, 10, 16, 17, 18)
+FM_HZ = 49819.5                 # the chip's FM rate (Linux's measure)
+MOM_OPEN = 0x3C7
+DRVM_INIT, DRVM_ENABLE = 0x64, 0x67
+
+
+def genmidi():
+    """Freedoom's GENMIDI: 175 instruments, each {flags, fine, fixed,
+    voices: [{mod, fb, car, offset}] * 2}"""
+    with open(GENMIDI, "rb") as f:
+        d = f.read()
+    out = []
+    for i in range(175):
+        r = d[8 + 36 * i:8 + 36 * (i + 1)]
+        flags, fine, fixed = struct.unpack_from("<HBB", r)
+        voices = [{"mod": r[o:o + 6], "fb": r[o + 6], "car": r[o + 7:o + 13],
+                   "offset": struct.unpack_from("<h", r, o + 14)[0]}
+                  for o in (4, 20)]
+        out.append({"flags": flags, "fine": fine, "fixed": fixed,
+                    "voices": voices})
+    return out
+
+
+def att(x):
+    """the driver's attenuation for a velocity or controller: 40 log10 in
+    0.75 dB steps"""
+    if x == 0:
+        return 63
+    return min(63, round(-40 * math.log10(x / 127) / 0.75))
+
+
+def opl_hz(chip, v):
+    """the frequency OPL3 voice v (bank * 9 + channel) plays"""
+    b, c = 0x100 * (v // 9), v % 9
+    f = chip.opl[b + 0xA0 + c] | (chip.opl[b + 0xB0 + c] & 3) << 8
+    return f * FM_HZ / 2 ** (20 - ((chip.opl[b + 0xB0 + c] >> 2) & 7))
+
+
+def cents(hz, note):
+    return 1200 * math.log2(hz / (440 * 2 ** ((note - 69) / 12)))
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs the unicorn module")
+class Opl3Test(unittest.TestCase):
+    """Device 1, General MIDI on the chip's OPL3 compatibility mode with
+    Freedoom's GENMIDI instruments (src/esfm/esfmopl.asm)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.bank = genmidi()
+        cls.single = [p for p in range(128) if cls.bank[p]["flags"] == 0]
+        cls.double = [p for p in range(128) if cls.bank[p]["flags"] == 4]
+
+    def enabled(self, which="fixed", ini=None):
+        """the driver after DRV_ENABLE and the devnode's arrival"""
+        e = ESFMEmu(builds()[which])
+        for key, value in (ini or {}).items():
+            e.ini[("esfm.drv", key.lower())] = value
+        self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
+        for msg in (DRVM_INIT, DRVM_ENABLE):
+            self.assertEqual(e.modmessage(msg, 0, esfmemu.DEVNODE, user=0,
+                                          device=0), 0)
+        e.dev = e.r16(4, 0x3C)
+        return e
+
+    def emu(self, msgs=(), ini=None):
+        """device 1 open, and msgs sent"""
+        e = self.enabled(ini=ini)
+        self.assertEqual(e.try_open(1), 0)
+        for m in msgs:
+            self.assertEqual(e.data(m), 0)
+        return e
+
+    def table(self, e):
+        """the device's voices: (flags, channel, key, instrument voice)"""
+        out = []
+        for v in range(18):
+            b = DEV_OPL_VOICE + OV_SIZE * v
+            out.append((e.dev8(b), e.dev8(b + 1), e.dev8(b + 2),
+                        e.dev16(b + 4)))
+        return out
+
+    def keyed(self, e, channel=None, key=None):
+        """OPL3 voices keyed on in the chip, for channel and key in the
+        driver's table"""
+        t = self.table(e)
+        return [v for v in e.chip.opl_keyed()
+                if (channel is None or t[v][1] == channel) and
+                (key is None or t[v][2] == key)]
+
+    def regs(self, e, v):
+        """voice v's registers: the modulator's and the carrier's 20h,
+        60h, 80h, E0h and 40h, and C0h"""
+        b, c = 0x100 * (v // 9), v % 9
+        op = OPTAB[c]
+        one = [e.chip.opl[b + r + op] for r in (0x20, 0x60, 0x80, 0xE0,
+                                                0x40)]
+        two = [e.chip.opl[b + r + op + 3] for r in (0x20, 0x60, 0x80,
+                                                    0xE0, 0x40)]
+        return one, two, e.chip.opl[b + 0xC0 + c]
+
+    # -- the devices -------------------------------------------------------
+
+    def test_two_devices(self):
+        self.assertEqual(self.enabled().getnumdevs(), 2)
+        self.assertEqual(self.enabled(ini={"Opl3Device": "0"}).getnumdevs(),
+                         1)
+        self.assertEqual(self.enabled("stock").getnumdevs(), 1)
+
+    def test_caps(self):
+        e = self.enabled()
+        r, caps = e.devcaps(1)
+        self.assertEqual(r, 0)
+        self.assertEqual(caps[6:38].split(b"\0")[0], b"OPL3 FM Synthesis (388)")
+        tech, voices, notes, mask = struct.unpack_from("<4H", caps, 38)
+        self.assertEqual((tech, voices, notes, mask), (4, 18, 18, 0xFFFF))
+        r, caps0 = e.devcaps(0)
+        self.assertEqual(caps0[6:38].split(b"\0")[0], b"ESFM Synthesis (388)")
+        self.assertEqual(caps0[:6] + caps0[38:], caps[:6] + caps[38:])
+        # a short structure takes what fits, and nothing past it
+        r, caps = e.devcaps(1, size=11)
+        self.assertEqual((r, caps[6:11], caps[11:12]), (0, b"OPL3 ", b"\xEE"))
+        r, caps = e.devcaps(1, size=4)
+        self.assertEqual((r, caps[4:8]), (0, b"\xEE" * 4))
+        e = self.enabled(ini={"Opl3Device": "0"})
+        self.assertEqual(e.devcaps(1)[0], 2)            # BADDEVICEID
+        self.assertEqual(e.try_open(1), 2)
+
+    def test_open_and_close(self):
+        e = self.emu()
+        self.assertFalse(e.chip.native)                 # OPL3 mode
+        self.assertEqual((e.chip.opl[0x105], e.chip.opl[0x104],
+                          e.chip.opl[0x004]), (1, 0, 0x60))
+        self.assertEqual(e.chip.opl_keyed(), [])
+        self.assertEqual(e.dev8(DEV_OPL_READY), 1)
+        self.assertEqual(e.dev16(DEV_OPL_CLIENT), e.client & 0xFFFF)
+        self.assertEqual([c[0] for c in e.callbacks], [MOM_OPEN])
+        self.assertEqual(e.close(), 0)
+        self.assertTrue(e.chip.native)                  # ESS's chip_reset
+        self.assertEqual((e.dev8(DEV_OPL_READY), e.dev16(DEV_OPL_CLIENT)),
+                         (0, 0))
+        self.assertEqual([c[0] for c in e.callbacks], [MOM_OPEN, MOM_CLOSE])
+        self.assertEqual(e.chip.opl_splits, [])
+
+    def test_one_device_at_a_time(self):
+        e = self.emu()
+        self.assertEqual(e.try_open(0), 4)              # MMSYSERR_ALLOCATED
+        self.assertEqual(e.close(), 0)
+        self.assertEqual(e.try_open(0), 0)
+        self.assertEqual(e.try_open(1), 4)
+        self.assertTrue(e.chip.native)
+
+    def test_device_0_after_device_1(self):
+        """ESFM native mode plays as before once device 1 closed"""
+        def play(e):
+            for m in (0x05C0, 0x7F3C90, 0x7F4090):
+                self.assertEqual(e.data(m), 0)
+            return e.keyed_voices(), [e.op_regs(v) for v in range(18)]
+        e = self.emu([0x7F3C90])
+        e.close()
+        e.try_open(0)
+        fresh = self.enabled()
+        fresh.try_open(0)
+        self.assertEqual(play(e), play(fresh))
+
+    # -- notes ---------------------------------------------------------------
+
+    def check_note(self, e, program, key, vel=127, vol=100, pan=0x30):
+        ins = self.bank[program]
+        voices = self.keyed(e, 0, key)
+        self.assertEqual(len(voices), 2 if ins["flags"] & 4 else 1)
+        for v in voices:
+            sub = self.table(e)[v][3] & 1
+            gv = ins["voices"][sub]
+            mod, car, c0 = self.regs(e, v)
+            a = min(63, att(vel) + att(vol) + att(127))
+            self.assertEqual(mod[:4], list(gv["mod"][:4]))
+            self.assertEqual(car[:4], list(gv["car"][:4]))
+            self.assertEqual(car[4], gv["car"][4] & 0xC0 | a)
+            mod_tl = gv["mod"][5]
+            if gv["fb"] & 1 and mod_tl != 0x3F:
+                mod_tl = max(mod_tl, a)
+            self.assertEqual(mod[4], gv["mod"][4] & 0xC0 | mod_tl)
+            self.assertEqual(c0, gv["fb"] & 0x0F | pan)
+            note = key + gv["offset"] + 12
+            while note < 12:
+                note += 12
+            while note > 107:
+                note -= 12
+            want = note + ((ins["fine"] // 2 - 64) / 32 if sub else 0)
+            self.assertLess(abs(cents(opl_hz(e.chip, v), want)), 4)
+        return voices
+
+    def test_note_on(self):
+        for program in (self.single[0], self.double[0], 0, 40, 73):
+            with self.subTest(program=program):
+                e = self.emu([program << 8 | 0xC0, 0x7F3C90])
+                self.check_note(e, program, 60)
+                e = self.emu([program << 8 | 0xC0, 0x404590])
+                self.check_note(e, program, 69, vel=0x40)
+
+    def test_volume_and_expression(self):
+        p = self.single[0]
+        e = self.emu([p << 8 | 0xC0, 0x7F3C90, cc(0, 7, 64)])
+        self.check_note(e, p, 60, vol=64)
+        e.data(cc(0, 11, 32))
+        v = self.keyed(e, 0, 60)[0]
+        car = self.regs(e, v)[1]
+        self.assertEqual(car[4] & 0x3F, min(63, att(127) + att(64) + att(32)))
+
+    def test_pan(self):
+        p = self.single[0]
+        for value, sides in ((0, 0x20), (47, 0x20), (48, 0x30), (80, 0x30),
+                             (81, 0x10), (127, 0x10)):
+            with self.subTest(value=value):
+                e = self.emu([p << 8 | 0xC0, cc(0, 10, value), 0x7F3C90])
+                self.check_note(e, p, 60, pan=sides)
+        # ESS's sides with TrueSides=0, as on an OPL3; and sounding notes move
+        e = self.emu([p << 8 | 0xC0, 0x7F3C90, cc(0, 10, 0)],
+                     ini={"TrueSides": "0"})
+        self.check_note(e, p, 60, pan=0x10)
+
+    def test_note_off_and_pedal(self):
+        e = self.emu([0x7F3C90, 0x003C80])
+        self.assertEqual(self.keyed(e), [])
+        e = self.emu([SUSTAIN_ON, 0x7F3C90, 0x003C80])
+        self.assertTrue(self.keyed(e, 0, 60))
+        e.data(0x0040B0)
+        self.assertEqual(self.keyed(e), [])
+
+    def test_bend(self):
+        p = self.single[0]
+        off = self.bank[p]["voices"][0]["offset"] + 12
+        e = self.emu([p << 8 | 0xC0, 0x7F3C90, 0x7F7FE0])
+        v = self.keyed(e)[0]
+        self.assertLess(abs(cents(opl_hz(e.chip, v),
+                                  60 + off + 2 * 8191 / 8192)), 4)
+        for m in rpn(0, 0, 12):
+            e.data(m)
+        self.assertLess(abs(cents(opl_hz(e.chip, v),
+                                  60 + off + 12 * 8191 / 8192)), 4)
+        e.data(0x0000E0)
+        self.assertLess(abs(cents(opl_hz(e.chip, v), 60 + off - 12)), 4)
+
+    def test_drums(self):
+        e = self.emu([0x7F2499])                        # 36 on channel 10
+        voices = self.keyed(e, 9, 36)
+        ins = self.bank[128 + 36 - 35]
+        self.assertTrue(ins["flags"] & 1)               # a fixed pitch
+        self.assertEqual(len(voices), 2 if ins["flags"] & 4 else 1)
+        self.assertEqual(self.table(e)[voices[0]][3] >> 1, 129)
+        self.assertLess(abs(cents(opl_hz(e.chip, voices[0]),
+                                  ins["fixed"] + 12)), 4)
+        e = self.emu([0x7F2299, 0x7F5299])              # 34 and 82: none
+        self.assertEqual(self.keyed(e), [])
+
+    def test_eighteen_voices(self):
+        p = self.single[0]
+        e = self.emu([p << 8 | 0xC0] +
+                     [0x7F0090 | (40 + k) << 8 for k in range(20)])
+        keys = sorted(self.table(e)[v][2] for v in self.keyed(e))
+        self.assertEqual(keys, list(range(42, 60)))     # the oldest went
+
+    def test_running_status(self):
+        e = self.emu([0x7F3C90, 0x7F40, 0xF8, 0x7F43])
+        self.assertEqual(sorted({self.table(e)[v][2] for v in self.keyed(e)}),
+                         [60, 64, 67])
+
+    def test_long_messages(self):
+        e = self.emu([0x0028C1])                        # channel 2: 40
+        r, flags = e.longdata(bytes([0x90, 0x3C, 0x7F, 0x40, 0x7F]))
+        self.assertEqual((r, flags & MHDR_DONE), (0, MHDR_DONE))
+        self.assertEqual(e.callbacks[-1][0], MOM_DONE)
+        self.assertEqual(len({self.table(e)[v][2] for v in self.keyed(e)}),
+                         2)
+        # a GM reset split between buffers sets the channels back
+        e.longdata(bytes([0xF0, 0x7E, 0x7F, 0x09]))
+        self.assertTrue(self.keyed(e))
+        e.longdata(bytes([0x01, 0xF7]))
+        self.assertEqual(self.keyed(e), [])
+        self.assertEqual(e.dev8(DEV_OPL_CHAN + 16), 0)  # channel 2's program
+        r, flags = e.longdata(bytes([0x91, 0x3C, 0x7F]))
+        self.assertEqual(r, 0)
+
+    def test_message_from_an_interrupt(self):
+        """a note off from an interrupt in the middle of a note on waits in
+        the queue, comes back as device 0's and goes to device 1"""
+        p = self.single[0]
+        e = self.emu([p << 8 | 0xC0, 0x7F3C90])
+        inj = Inject(MODM_DATA, dw1=0x003C80, after_writes=e.chip.writes + 5)
+        self.assertEqual(e.data(0x7F4090, injects=[inj]), 0)
+        self.assertEqual(inj.result, 0)
+        self.assertEqual(sorted(self.table(e)[v][2] for v in self.keyed(e)),
+                         [64])
+        self.assertEqual(e.chip.opl_splits, [])
+        self.assertEqual(e.fix_state()["lock"], 0)
+
+    def test_reset(self):
+        e = self.emu([SUSTAIN_ON, 0x7F3C90, 0x7F4091])
+        self.assertEqual(e.reset(), 0)
+        self.assertEqual(self.keyed(e), [])
+        self.assertEqual(e.dev8(DEV_OPL_CHAN + 4), 0)  # the pedal up
+
+    def test_suspend_and_resume(self):
+        e = self.emu([SUSTAIN_ON, 0x7F3C90, 0x003C80])
+        e.driverproc(DRV_POWER, PWR_SUSPENDREQUEST)
+        self.assertEqual(self.keyed(e), [])
+        self.assertFalse(e.chip.native)                 # nothing of ESS's
+        writes = e.chip.writes
+        self.assertEqual(e.data(0x7F3C90), 3)           # not enabled
+        self.assertEqual(e.chip.writes, writes)
+        self.assertEqual(e.driverproc(DRV_POWER, PWR_SUSPENDRESUME), 1)
+        self.assertTrue(e.chip.native)                  # ESS's chip_reset
+        self.assertEqual(e.data(0x7F3C90), 0)           # OPL3 mode again
+        self.assertFalse(e.chip.native)
+        self.assertTrue(self.keyed(e, 0, 60))
+        e.close()
+        self.assertTrue(e.chip.native)
+
+    def test_ess_writes_dropped(self):
+        """fm_write writes nothing while device 1 has the chip"""
+        e = self.emu([0x7F3C90])
+        writes = e.chip.writes
+        e.call((esfmemu.SEG_PARA[1], 0x10), [e.dev, 0x240, 1])
+        self.assertEqual(e.chip.writes, writes)
+        e.close()
+        writes = e.chip.writes
+        e.call((esfmemu.SEG_PARA[1], 0x10), [e.dev, 0x240, 1])
+        self.assertEqual(e.chip.writes, writes + 3)
+        self.assertEqual(e.chip.regs[0x240], 1)
+
+    def test_tables(self):
+        """the F-number table is the formula's at 49,819.5 Hz"""
+        with open(os.path.join(ROOT, "src", "esfm", "esfmopl.asm")) as f:
+            src = f.read()
+        line = src[src.index("opl_fnum:"):].split("\n")[0]
+        got = [int(x) for x in line.split("dw")[1].split(",")]
+        want = [round(440 * 2 ** ((19 + i - 69) / 12) * 2 ** 20 / FM_HZ)
+                for i in range(13)]
+        self.assertEqual(got, want)
+        body = src[src.index("opl_att:"):src.index("opl_name:")]
+        got = [int(x) for x in body.replace("opl_att:", "").replace(
+            "db", ",").replace("\n", ",").split(",") if x.strip() and
+            not x.strip().startswith(";")]
+        self.assertEqual(got[:128], [att(x) for x in range(128)])
 
 
 if __name__ == "__main__":

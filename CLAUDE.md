@@ -36,8 +36,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   drivers and restarts Windows. `esswchk.c` checks the drivers' fixes on the
   card in Windows 98, which ESSCHECK starts through the StartUp folder;
   without options it runs the whole check from Windows, essinst and then
-  ExitWindowsExec into `ESSCHECK.BAT /W`. `wheel.c` gives the sliders of
-  essctl and ess3d the mouse wheel.
+  ExitWindowsExec into `ESSCHECK.BAT /W`. `midireg.c` is the MIDI list of
+  the Multimedia control panel, where essinst adds ESFM.DRV's OPL3 device
+  and esswchk reads it. `wheel.c` gives the sliders of essctl and ess3d the
+  mouse wheel.
 * `src/vxd/` holds `ES1869.VXD` as NASM source, made by `tools/vxd2asm.py`.
   `essext.asm` adds the register API, the DOS box improvements (the virtual
   FM chip, Windows' mixer around a DOS program, the DACs' modes for it, and
@@ -45,8 +47,9 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   a 16-bit DMA channel and the DRQ latch, and `essext.inc` has its layout.
 * `src/esfm/` holds `ESFM.DRV` as NASM source, made by `tools/ne2asm.py`.
   `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm`
-  and `esfmgm.asm` hold the fixes and General MIDI, and `esfmini.asm` their
-  SYSTEM.INI switches, all assembled with `ESFM_FIX=1`.
+  and `esfmgm.asm` hold the fixes and General MIDI, `esfmopl.asm` the OPL3
+  device (device 1: General MIDI on the chip's OPL3 mode), and `esfmini.asm`
+  their SYSTEM.INI switches, all assembled with `ESFM_FIX=1`.
 * `src/es1869/` holds `ES1869.DRV` (wave, mixer and aux) as NASM source,
   made by `tools/ne2asm.py` with `names.txt`. The changes are assembled with
   `ES1869_FIX=1`: `a2mode.asm` (the Audio 2 mode), `a1wave.asm` and
@@ -64,7 +67,8 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   holds `HDPMI32i.EXE` as HX released it but for the fix of
   `tools/hdpmifix.py` (its emulation of STI before IRETD), for esssb16's
   protected-mode games, with its origin, the fix and the hashes in its
-  README.
+  README. `third_party/genmidi/` holds Freedoom's `GENMIDI.lmp`, the OPL3
+  device's instruments, with its origin, hashes and license in its README.
 * `src/esssb16.asm` is `esssb16.com`, the DOS TSR that answers games as a
   Sound Blaster 16 and plays their sound on Audio 1, through the port traps
   of EMM386, QPI (QEMM, JEMM with QPIEMU) and HDPMI32i. It is the VxD's
@@ -96,8 +100,8 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   the reference alike.
 * `docs/` holds [TESTING.md](docs/TESTING.md),
   [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md),
-  [ESFM_BANK.md](docs/ESFM_BANK.md), [VXD_API.md](docs/VXD_API.md),
-  [VXD_INTERNALS.md](docs/VXD_INTERNALS.md),
+  [ESFM_OPL3.md](docs/ESFM_OPL3.md), [ESFM_BANK.md](docs/ESFM_BANK.md),
+  [VXD_API.md](docs/VXD_API.md), [VXD_INTERNALS.md](docs/VXD_INTERNALS.md),
   [SPATIALIZER.md](docs/SPATIALIZER.md),
   [DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md),
   [AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md), [AUDIO1.md](docs/AUDIO1.md),
@@ -325,9 +329,16 @@ tools/wineshot.sh run ess3d.exe /sim tray
     refuses it. A program waits for its buffers.
   * DOS calls ask for their errors back (INT 21h 716Ch and 6C00h with BX bit
     13), so that no critical error box appears at open.
+  * The OPL3 device (`esfmopl.asm`) has the chip in OPL3 mode while
+    `DEV_OPL_READY` is set: `fm_write` then drops ESS's writes
+    (`fix_fm_guard`), and `chip_reset` clears it first. Its entry in the
+    MIDI list of the Multimedia control panel is essinst's
+    (`src/win/midireg.c`), so a change to its name or device number goes
+    there too, and `Opl3Test` in `tests/test_esfmdrv.py` tests it on the
+    emulator's OPL3 mode.
 * **The status block** (`esfmfixd.asm`, found by `ESFMFIX`) is read by
   essctl at fixed offsets (`src/win/esfmlive.c`). A change to its layout
-  bumps `fix_version`, and the next version is 5.
+  bumps `fix_version`, and the next version is 6.
 * **ES1869.DRV's status** (`es_status` in `src/es1869/fixdata.asm`, found by
   `ESDRVFIX`, the player's block and the FM recording device's) is read by
   essctl (`src/wavestat.c` and `src/win/wavelive.c`). A change to its layout

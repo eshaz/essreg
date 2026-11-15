@@ -9,7 +9,11 @@
 fm_write:
         push bp                                         ; 0010
         mov_ bp,sp                                      ; 0011
+%if ESFM_FIX
+        call fix_fm_guard       ; the same 3 bytes: nothing while the OPL3
+%else                           ; device has the chip (esfmopl.asm)
         sub sp,byte +0x4                                ; 0013
+%endif
         push si                                         ; 0016
         mov si,[fm_delay]                               ; 0017
         mov bx,[bp+0xa]                                 ; 001B
@@ -79,7 +83,7 @@ chip_reset:
         push di                                         ; 009D
         push si                                         ; 009E
 %if ESFM_FIX
-        call fix_enter
+        call fix_reset_enter    ; esfmopl.asm
 %endif
         mov di,[bp+0x6]                                 ; 009F
         xor_ ax,ax                                      ; 00A2
@@ -3814,6 +3818,7 @@ R1_1ECB: dw 0xFFFF, 0x0000                              ; 1ECB KERNEL.LocalSize
 %include "esfmini.asm"
 %include "esfmped.asm"
 %include "esfmgm.asm"
+%include "esfmopl.asm"
 %endif
 
 seg1_data_end:

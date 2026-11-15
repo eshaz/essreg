@@ -409,6 +409,47 @@ static void test_rebuilt_after(void) {
   CHECK(di_rebuilt_after(0, sys));
 }
 
+static void test_rebuilt_has(void) {
+  char a[DI_PATH], b[DI_PATH], why[DI_WHY];
+  static unsigned char data[0x20000];
+  long n;
+  unsigned char *p;
+
+  // the rebuilt ESFM.DRV has the OPL3 device, and ESS's doesn't: an install
+  // puts it in place, a restore takes it back
+  setup();
+  CHECK(di_rebuilt_has(2, src, sys, "Opl3Device"));
+  CHECK(di_rebuilt_has(2, src, sys, 0));
+  CHECK(!di_rebuilt_has(2, src, sys, "No such text"));
+  CHECK(!di_rebuilt_has(2, 0, sys, "Opl3Device"));
+  CHECK(!di_rebuilt_has(2, src, sys, "a text longer than 24 bytes"));
+  CHECK_EQ(di_install(src, sys, 1, &ops, why), 3);
+  restart();
+  in_dir(a, src, "ESFM.DRV");
+  remove(a);
+  CHECK(di_rebuilt_has(2, src, sys, "Opl3Device"));
+  CHECK(!di_rebuilt_has(2, 0, sys, "Opl3Device"));
+  // an earlier rebuilt driver, without the device, in place
+  in_dir(a, sys, "ESFM.DRV");
+  n = load(a, data, sizeof(data));
+  CHECK(n > 0);
+  for (p = data; p + 10 <= data + n; p++)
+    if (!memcmp(p, "Opl3Device", 10))
+      memcpy(p, "Opl9Device", 10);
+  save(a, data, n);
+  CHECK(di_rebuilt_has(2, src, sys, 0));
+  CHECK(!di_rebuilt_has(2, src, sys, "Opl3Device"));
+  // the text across the scan's chunks of 4096 bytes
+  memcpy(data + 4090, "Opl3Device", 10);
+  save(a, data, n);
+  CHECK(di_rebuilt_has(2, src, sys, "Opl3Device"));
+  // the one next to essinst counts
+  ref(b, "build", "ESFM.DRV");
+  in_dir(a, src, "ESFM.DRV");
+  copy(b, a);
+  CHECK(di_rebuilt_has(2, src, sys, "Opl3Device"));
+}
+
 int main(int argc, char **argv) {
   if (argc < 3) {
     printf("usage: t_drvinst ROOT WORKDIR\n");
@@ -427,6 +468,7 @@ int main(int argc, char **argv) {
   test_vxd_kept_by_hand();
   test_device_names();
   test_rebuilt_after();
+  test_rebuilt_has();
   CHECK(logged > 0);
   return CHECK_DONE("t_drvinst");
 }

@@ -18,7 +18,11 @@ verdicts are [`src/wchk.c`](../src/wchk.c)'s.
 
 * **env**: the VxD and its extension, whether ES1869.DRV and ESFM.DRV are
   the rebuilt ones and their settings, `DmaCountTwice` and `TrueSides` from
-  `SYSTEM.INI`, and the wave and MIDI devices.
+  `SYSTEM.INI`, and the wave and MIDI devices. `env.midi` gives the MIDI
+  list of the Multimedia control panel, an entry a line with its key, name,
+  `Driver`, `Port` and `Active`, where essinst adds the OPL3 device, and
+  `env.mapper` the MIDI mapper's `CurrentInstrument`
+  ([ESFM_OPL3.md](ESFM_OPL3.md#the-multimedia-control-panel)).
 * **vxd.count2** and **vxd.count1**: while each DAC plays silence, 100,000
   readings of its DMA count through VxD function 0004, which ES1869.DRV's
   positions and DirectSound's come from. A reading taken while a byte came
@@ -46,6 +50,10 @@ verdicts are [`src/wchk.c`](../src/wchk.c)'s.
   right, recorded through the FM recording device. With ESFM.DRV's
   `TrueSides`, the note sounds on its side; ESS's driver plays it on the
   other side, which is KNOWN.
+* **opl.pan0** and **opl.pan127**: the same on ESFM.DRV's OPL3 device
+  ([ESFM_OPL3.md](ESFM_OPL3.md)), which plays the note on the chip's OPL3
+  mode, with the same verdicts. SKIP when ESFM.DRV has no OPL3 device: ESS's
+  driver, or `Opl3Device=0`.
 * **fm.rate**: the FM recording device's blocks over 30 seconds, fitted to
   the clock: the music DAC's rate within 500 ppm of 49,819.5 Hz, which
   Linux's driver measured.

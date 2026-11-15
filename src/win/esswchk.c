@@ -1,10 +1,10 @@
 /*
  * esswchk checks in Windows 98 that the drivers' fixes work on the card:
  * the VxD's reads of a moving DMA count, the Audio 1 player's positions and
- * its drain, the FM's sides and rate through the FM recording device, and
- * sb16test in a DOS box on the VxD's Sound Blaster 16. A recorded run adds
- * sounds after DTMF markers, which tools/wchkrec.py measures in the
- * recording of the line out.
+ * its drain, the FM's sides on the ESFM and OPL3 MIDI devices and its rate
+ * through the FM recording device, and sb16test in a DOS box on the VxD's
+ * Sound Blaster 16. A recorded run adds sounds after DTMF markers, which
+ * tools/wchkrec.py measures in the recording of the line out.
  *
  * Usage:
  *   `esswchk [options]`
@@ -43,9 +43,11 @@
  * ExitWindowsExec runs ESSCHECK.BAT through COMSPEC with /W and esswchk's
  * folder, so that the batch finds the programs there and leaves Windows'
  * start to WIN.COM. esswchk changes no setting: it opens the
- * devices as any program does, sends the ESFM device program 0 and its
+ * devices as any program does, sends each FM device program 0 and its
  * controllers' reset (CC121) before it closes it, and leaves the mixer to
- * the drivers. Before the DOS box it closes every device it opened.
+ * the drivers. Before the DOS box it closes every device it opened. The
+ * report lists the MIDI list of the Multimedia control panel, where essinst
+ * adds the OPL3 device, and the MIDI mapper's choice.
  *
  * The recorded run's markers are BADC at the start, CDAB at the end and #,
  * the sound's number in three digits, * before each sound, so that one
@@ -77,13 +79,14 @@
 
 #include "esfmlive.h"
 #include "esshw.h"
+#include "midireg.h"
 #include "sbtsound.h"
 #include "vxdapi.h"
 #include "wavestat.h"
 #include "wchk.h"
 #include "winio.h"
 
-#define VERSION "1.0"
+#define VERSION "1.1"
 #define TITLE "ES1869 Windows checks"
 #define IDC_CHECK 101
 #define IDC_STEP 102
@@ -97,6 +100,9 @@
 #define POS_SECS 60       // a1.position's stream
 #define DRAIN_RUNS 3
 #define FM_NOTE_MS 600
+#define MIDI_LIST 8         // the MIDI list's entries in the report
+#define ESFM_MIDI "ESFM"    // ESFM.DRV's devices: ESS's
+#define OPL3_MIDI "OPL3 FM" // and the OPL3 device
 #define FM_RATE_SECS 30
 #define FM_BUFS 12
 #define FM_FRAMES 4096 // 82 ms a block
@@ -395,13 +401,14 @@ static int find_in(const char *name) {
   return -1;
 }
 
-static int find_esfm(void) {
+// the MIDI output device whose name holds part, or -1
+static int find_midi(const char *part) {
   MIDIOUTCAPS caps;
   UINT i, n = midiOutGetNumDevs();
 
   for (i = 0; i < n; i++)
     if (!midiOutGetDevCaps(i, &caps, sizeof(caps)) &&
-        strstr(caps.szPname, "ESFM"))
+        strstr(caps.szPname, part))
       return (int)i;
   return -1;
 }
@@ -437,6 +444,35 @@ static struct {
   int true_sides;  // ESFM.DRV plays a left channel on the left
   int dct, ts;     // DmaCountTwice and TrueSides in SYSTEM.INI
 } drv;
+
+// the MIDI list of the Multimedia control panel, an entry a line, and the
+// MIDI mapper's choice
+static void env_midi(void) {
+  static struct mr_entry list[MIDI_LIST];
+  char map[MR_NAME], port[12], act[12];
+  int i, n = mr_list(list, MIDI_LIST);
+
+  if (n < 0) {
+    res("env.midi", WCHK_INFO, "no MIDI list in the registry");
+    return;
+  }
+  if (!n)
+    res("env.midi", WCHK_INFO, "the MIDI list is empty");
+  for (i = 0; i < n; i++) {
+    strcpy(port, "none");
+    strcpy(act, "none");
+    if (list[i].port >= 0)
+      sprintf(port, "%ld", list[i].port);
+    if (list[i].active >= 0)
+      sprintf(act, "%ld", list[i].active);
+    res("env.midi", WCHK_INFO, "%s: %s; Driver %s, Port %s, Active %s",
+        list[i].key, list[i].name[0] ? list[i].name : "no name",
+        list[i].driver[0] ? list[i].driver : "none", port, act);
+  }
+  mr_mapper(map);
+  res("env.mapper", WCHK_INFO, "the MIDI mapper's CurrentInstrument: %s",
+      map[0] ? map : "none");
+}
 
 static void check_env(void) {
   struct wavestat ws;
@@ -515,6 +551,7 @@ static void check_env(void) {
     if (!midiOutGetDevCaps(i, &mc, sizeof(mc)) && k < 160)
       k += sprintf(text + k, " %u %.31s;", i, mc.szPname);
   res("env.in", WCHK_INFO, "%s", text);
+  env_midi();
 }
 
 // --- a device that plays silence while a check runs
@@ -881,15 +918,17 @@ static void fm_take(struct wchk_sides *sides, struct wchk_fit *fit, char side,
 
 static HMIDIOUT midi;
 
-static int midi_open(void) {
+// the ESFM device, or with opl3 the OPL3 device, opened: 0, an
+// MMSYSERR, or -1 without the device
+static int midi_open(int opl3) {
   int dev;
 
   if (opt.sim)
-    return 0;
-  dev = find_esfm();
+    return opl3 && opt.old ? -1 : 0;
+  dev = find_midi(opl3 ? OPL3_MIDI : ESFM_MIDI);
   if (dev < 0)
     return -1;
-  return midiOutOpen(&midi, dev, 0, 0, CALLBACK_NULL) ? -1 : 0;
+  return (int)midiOutOpen(&midi, dev, 0, 0, CALLBACK_NULL);
 }
 
 static void midi_msg(BYTE status, BYTE d1, BYTE d2) {
@@ -926,14 +965,20 @@ static int fm_note(BYTE pan, u32 ms, struct wchk_sides *sides, u32 t0) {
   return 1;
 }
 
-static void check_fm_pan(BYTE pan) {
+// a note panned to pan on the ESFM device, or with opl3 on the OPL3
+// device, recorded digitally: on the side it was sent to?
+static void check_fm_pan(BYTE pan, int opl3) {
+  static const char *const ids[2][2] = {{"fm.pan0", "fm.pan127"},
+                                        {"opl.pan0", "opl.pan127"}};
   struct wchk_sides sides;
   char text[WCHK_TEXT];
-  const char *id = pan ? "fm.pan127" : "fm.pan0";
+  const char *id = ids[opl3 != 0][pan != 0];
+  const char *what = opl3 ? OPL3_MIDI : ESFM_MIDI;
   u32 t0;
   int err, r;
 
-  show(IDC_STEP, "the FM's sides, recorded digitally");
+  show(IDC_STEP, opl3 ? "the OPL3 device's sides, recorded digitally"
+                      : "the FM's sides, recorded digitally");
   memset(&sides, 0, sizeof(sides));
   err = fm_start();
   if (err) {
@@ -944,9 +989,14 @@ static void check_fm_pan(BYTE pan) {
       res(id, WCHK_FAIL, "the FM recording failed (MMSYSERR %d)", err);
     return;
   }
-  if (midi_open()) {
+  err = midi_open(opl3);
+  if (err) {
     fm_stop();
-    res(id, WCHK_SKIP, "no ESFM MIDI device free");
+    if (err < 0)
+      res(id, WCHK_SKIP, "no %s MIDI device%s", what,
+          opl3 ? ": ESS's ESFM.DRV, or Opl3Device=0" : "");
+    else
+      res(id, WCHK_SKIP, "the %s MIDI device is busy (MMSYSERR %d)", what, err);
     return;
   }
   t0 = timeGetTime();
@@ -1165,7 +1215,7 @@ static void rec_fm(BYTE pan) {
   u32 parts[2], tm;
 
   tm = sound_marker(syms);
-  if (midi_open()) {
+  if (midi_open(0)) {
     res(id, WCHK_SKIP, "no ESFM MIDI device free");
     return;
   }
@@ -1342,10 +1392,14 @@ static void run_all(void) {
     check_drain();
   if (!stop_now) {
     section("fm", "the FM, recorded digitally");
-    check_fm_pan(0);
+    check_fm_pan(0, 0);
   }
   if (!stop_now)
-    check_fm_pan(127);
+    check_fm_pan(127, 0);
+  if (!stop_now)
+    check_fm_pan(0, 1);
+  if (!stop_now)
+    check_fm_pan(127, 1);
   if (!stop_now)
     check_fm_rate();
   if (!stop_now && opt.record)

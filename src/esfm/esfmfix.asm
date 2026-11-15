@@ -407,6 +407,21 @@ fix_unlock:
 ; all_notes_off(dev), far: key off every voice and lift every sustain
 ; pedal (close, power suspend); SilenceOnClose=0: ESS's code
 fix_all_off:
+        ; the OPL3 device has the chip: its notes off in OPL3 mode
+        push    bp
+        mov     bp,sp
+        push    si
+        mov     si,[bp+6]
+        test    byte [si+DEV_OPL_READY],1
+        jz      .ess
+        call    fix_enter
+        call    opl_all_off             ; esfmopl.asm
+        call    fix_unlock
+        pop     si
+        pop     bp
+        retf    2
+.ess:   pop     si
+        pop     bp
         test    word [fix_opts],OPT_SILENCE
         jz      ..@fix_ess_all_off
         push    bp

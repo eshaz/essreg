@@ -640,7 +640,13 @@ fix_calc_pitch:
 fix_process:
         push    bp
         mov     bp,sp
-        test    word [fix_opts],OPT_SYSEX
+        test    word [fix_opts],OPT_OPL3
+        jz      .gm
+        call    opl_route               ; device 1, esfmopl.asm
+        jnc     .gm
+        pop     bp
+        retf    0x10
+.gm:    test    word [fix_opts],OPT_SYSEX
         jz      .orig
         cmp     word [bp+0x12],MODM_LONGDATA
         jne     .orig

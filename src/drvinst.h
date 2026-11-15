@@ -94,6 +94,13 @@ int di_restore(const char *sysdir, int stage, const struct di_ops *ops,
 // by DAC, once the install from srcdir (or the restore, srcdir 0) is done
 int di_rebuilt_after(const char *srcdir, const char *sysdir);
 
+// 1 if driver i of di_files in sysdir is a rebuilt driver that holds text
+// (at most 24 bytes, or 0 for any), once the install from srcdir (or the
+// restore, srcdir 0) is done: the rebuilt ESFM.DRV with the OPL3 device
+// holds its SYSTEM.INI key, Opl3Device
+int di_rebuilt_has(int i, const char *srcdir, const char *sysdir,
+                   const char *text);
+
 // Windows keeps its preferred playback and recording devices by name (the
 // Sound Mapper's Playback and Record values): the name that the device
 // called name has with the drivers that names (DI_NAME_*) describes. 1 with

@@ -10,7 +10,9 @@ calls into the new code, which are under `%if ESFM_FIX` in
 `SYSTEM.INI`, and ESS's code then handles it as before. The keys are
 `Vibrato`, `Tuning`, `ResetControllers`, `LivePan`, `SysEx`, `RunningStatus`
 and `TrueSides` under `[ESFM.DRV]`
-([DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv)).
+([DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv)). The fixed driver's second
+device, which plays General MIDI on the chip's OPL3 mode, has a page of its
+own ([ESFM_OPL3.md](ESFM_OPL3.md)).
 
 ## At a glance
 

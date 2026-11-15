@@ -75,8 +75,9 @@ OPT_SYSEX       equ 0x0080      ; SysEx
 OPT_RUNNING     equ 0x0100      ; RunningStatus
 OPT_SQUARE      equ 0x0200      ; BetterSquareWave: the built-in bank
 OPT_SIDES       equ 0x0400      ; TrueSides: left on the left output
+OPT_OPL3        equ 0x0800      ; Opl3Device: device 1 on OPL3 mode
 OPT_READ        equ 0x8000      ; SYSTEM.INI was read
-OPT_DEFAULT     equ 0x07FF
+OPT_DEFAULT     equ 0x0FFF
 
 ; ESFM_FIX: General MIDI state (esfmgm.asm), after ESS's fields.  The fixed
 ; driver allocates DEV_FIX_SIZE bytes for each device
@@ -94,4 +95,53 @@ DEV_LONG_IDX    equ 0x432   ; byte: the long-message parser at the end of
 DEV_LONG_LEFT   equ 0x433   ; byte: the last buffer, to go on in the next
 DEV_LONG_MSG    equ 0x434   ; dword: (seg1 modm_longdata, [bp-2], [bp-15h],
                             ; [bp-14h])
-DEV_FIX_SIZE    equ 0x438
+
+; ESFM_FIX: the OPL3 device, device 1 (esfmopl.asm)
+DEV_OPL_CLIENT  equ 0x438   ; word: its client, 0 while it's closed
+DEV_OPL_READY   equ 0x43A   ; byte: 1 while the chip is in OPL3 mode for it
+DEV_OPL_STATUS  equ 0x43B   ; byte: running status of its short messages
+DEV_OPL_CLOCK   equ 0x43C   ; word: the voices' ages
+DEV_OPL_LSTAT   equ 0x43E   ; byte: long messages: the status in force
+DEV_OPL_LNEED   equ 0x43F   ; byte: its data bytes, 1 or 2
+DEV_OPL_LGOT    equ 0x440   ; byte: the data bytes it has
+DEV_OPL_LD1     equ 0x441   ; byte: its first data byte
+DEV_OPL_LSYX    equ 0x442   ; byte: bytes of the SysEx so far, 0 = none
+DEV_OPL_SYX     equ 0x443   ; OPL_SYX bytes: its start
+OPL_SYX         equ 12
+DEV_OPL_CHAN    equ 0x44F   ; 16 channels of OCH_SIZE bytes
+DEV_OPL_VOICE   equ 0x54F   ; 18 voices of OV_SIZE bytes
+DEV_FIX_SIZE    equ 0x66F
+
+; a channel of the OPL3 device
+OCH_PROG        equ 0       ; its program
+OCH_VOL         equ 1       ; controller 7
+OCH_EXPR        equ 2       ; controller 11
+OCH_PAN         equ 3       ; register C0h bits 5:4 for its pan
+OCH_PEDAL       equ 4       ; 1 while the sustain pedal is down
+OCH_MOD         equ 5       ; controller 1
+OCH_BEND        equ 6       ; word: pitch bend, 2000h in the middle
+OCH_RANGE       equ 8       ; word: bend range, 1/256 semitones
+OCH_RPN         equ 10      ; word: the RPN selected, MSB * 256 + LSB
+OCH_SEMI        equ 12      ; byte: bend range semitones (RPN 0)
+OCH_CENT        equ 13      ; byte: and cents
+OCH_SIZE        equ 16
+
+; a voice of the OPL3 device, a 2-operator channel of the OPL3
+OV_FLAGS        equ 0       ; OVF_*
+OV_CHAN         equ 1       ; its MIDI channel
+OV_KEY          equ 2       ; the key of its note on
+OV_VEL          equ 3       ; and the velocity
+OV_INSTR        equ 4       ; word: instrument * 2 + its voice, whose
+                            ; registers it has, FFFFh none
+OV_AGE          equ 6       ; word: DEV_OPL_CLOCK at its last key on or off
+OV_PITCH        equ 8       ; word: its pitch without the bend, 1/256
+                            ; semitones of MIDI notes
+OV_B0           equ 10      ; byte: register B0h without the key on
+OV_TL           equ 11      ; byte: the carrier's attenuation written
+OV_C0           equ 12      ; byte: register C0h written
+OV_VIB          equ 13      ; byte: 40h while registers 20h have vibrato
+OV_SIZE         equ 16
+OVF_ON          equ 1       ; keyed on
+OVF_HELD        equ 2       ; its note off waits for the pedal
+OVF_SECOND      equ 4       ; the second voice of its instrument
+OPL_VOICES      equ 18

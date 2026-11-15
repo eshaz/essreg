@@ -92,6 +92,9 @@ STUB_ARGS = {
     ("KERNEL", 191): 2,     # GlobalPageLock(sel)
     ("KERNEL", 192): 2,     # GlobalPageUnlock(sel)
     ("USER", 471): 8,       # lstrcmpi(s1, s2)
+    ("USER", 176): 10,      # LoadString(hInst, id, lpBuffer, nBufferMax)
+    ("USER", 420): 0,       # wsprintf(lpOut, lpFmt, ...), cdecl
+    ("KERNEL", 353): 10,    # lstrcpyn(lpDst, lpSrc, iMaxLength)
     ("MMSYSTEM", 31): 22,   # DriverCallback
     ("MMSYSTEM", 216): 12,  # midiOutMessage(h, msg, dw1, dw2)
 }
@@ -102,22 +105,37 @@ class EmuError(Exception):
 
 
 class FMChip:
-    """ESFM in native mode: FM_Base+2/+3 select a register, +1 writes it."""
+    """The ESFM. In native mode FM_Base+2/+3 select a register and +1 writes
+    it, and a write at +0 leaves it; in OPL3 compatibility mode, as on an
+    OPL3, +0 and +2 select a register of the first or second bank and +1 or
+    +3 writes the one selected, and 105h bit 7 enters native mode (as
+    vxdemu's FakeFM has it). The native registers are regs, the OPL3's opl
+    (bank * 100h + register)."""
 
     def __init__(self, base=FM_PORT):
         self.base = base
         self.regs = bytearray(0x800)
+        self.opl = bytearray(0x200)
+        self.native = True
+        self.latch = 0          # OPL3 mode's register
         self.addr = 0
         self.events = []        # (depth, port offset, value)
         self.splits = []        # (register written, intended register)
         self.pending = {}       # depth -> address bytes set by that writer
+        self.opl_pending = {}   # depth -> the OPL3 register that writer set
+        self.opl_splits = []    # (register written, intended register)
         self.writes = 0
 
     def out(self, port, value, depth):
         off = port - self.base
         self.events.append((depth, off, value))
         self.writes += 1
-        if off == 2:
+        if not self.native:
+            self._opl(off, value, depth)
+        elif off == 0:
+            self.native = False
+            self.latch = value
+        elif off == 2:
             self.addr = (self.addr & 0xFF00) | value
             self._track(depth, "low", value)
         elif off == 3:
@@ -133,6 +151,26 @@ class FMChip:
         for d, w in self.pending.items():
             if d != depth and off in (2, 3):
                 w["clobbered"] = True
+
+    def _opl(self, off, value, depth):
+        if off in (0, 2):
+            self.latch = value | (0x100 if off == 2 else 0)
+            self.opl_pending[depth] = self.latch
+            for d in self.opl_pending:
+                if d != depth:
+                    self.opl_pending[d] = None      # clobbered
+            return
+        want = self.opl_pending.pop(depth, self.latch)
+        if want is not None and want != self.latch:
+            self.opl_splits.append((self.latch, want))
+        self.opl[self.latch] = value
+        if self.latch == 0x105 and value & 0x80:
+            self.native = True
+
+    def opl_keyed(self):
+        """OPL3 channels keyed on, as voices 0-17 (bank * 9 + channel)."""
+        return [b * 9 + c for b in range(2) for c in range(9)
+                if self.opl[b * 0x100 + 0xB0 + c] & 0x20]
 
     def _track(self, depth, part, value):
         w = self.pending.setdefault(depth, {"low": None, "high": None,
@@ -227,6 +265,7 @@ class ESFMEmu:
         self.w16(4, 0x14, BANK_PARA)
         self.client = None
         self.dev = None
+        self.device = 0          # the device ID the program opened
         self._pending_marker = []
         self.calls = []          # imports called, in order
         # global heap: paragraph of each block -> bytes
@@ -527,7 +566,8 @@ class ESFMEmu:
         self.uc.reg_write(UC_X86_REG_EFLAGS, flags & ~IF_FLAG)
         user = inj.user if inj.user is not None else (self.client or 0)
         code = bytearray(b"\x60\x1E\x06")             # pusha, push ds, es
-        for w in (0, inj.msg, user >> 16, user & 0xFFFF, inj.dw1 >> 16,
+        for w in (self.device, inj.msg, user >> 16, user & 0xFFFF,
+                  inj.dw1 >> 16,
                   inj.dw1 & 0xFFFF, inj.dw2 >> 16, inj.dw2 & 0xFFFF):
             code += b"\x68" + struct.pack("<H", w & 0xFFFF)
         code += b"\x9A" + struct.pack("<HH", self.modmsg_addr[1],
@@ -742,6 +782,37 @@ class ESFMEmu:
             src, dst = arg(0, 4), arg(4, 4)
             self.wrstr(dst, self.rdstr(src))
             ax, dx = dst & 0xFFFF, dst >> 16
+        elif key == ("USER", 176):          # LoadString from RT_STRING
+            rid, buf, size = arg(6), arg(2, 4), arg(0)
+            block = self.ne.resource_data(6, rid // 16 + 1) or b""
+            pos, text = 0, b""
+            for _i in range(rid % 16 + 1):
+                n = block[pos] if pos < len(block) else 0
+                text = block[pos + 1:pos + 1 + n]
+                pos += 1 + n
+            text = text[:max(0, size - 1)]
+            self.wr(buf >> 16, buf & 0xFFFF, text + b"\0")
+            ax = len(text)
+        elif key == ("USER", 420):          # wsprintf: %X, %x, %d, %u
+            out, fmt = arg(0, 4), self.rdstr(arg(4, 4))
+            text, at, i = "", 8, 0
+            while i < len(fmt):
+                if fmt[i] == "%" and i + 1 < len(fmt) and fmt[i + 1] in "Xxdu":
+                    v = arg(at)
+                    at += 2
+                    if fmt[i + 1] == "d" and v & 0x8000:
+                        v -= 0x10000
+                    text += ("%" + fmt[i + 1]) % v
+                    i += 2
+                else:
+                    text += fmt[i]
+                    i += 1
+            self.wrstr(out, text)
+            ax = len(text)
+        elif key == ("KERNEL", 353):        # lstrcpyn(dst, src, max)
+            n, src, dst = arg(0), arg(2, 4), arg(6, 4)
+            self.wrstr(dst, self.rdstr(src)[:max(0, n - 1)])
+            ax, dx = dst & 0xFFFF, dst >> 16
         elif key == ("USER", 471):          # lstrcmpi(s1, s2)
             a, b = self.rdstr(arg(4, 4)).lower(), self.rdstr(arg(0, 4)).lower()
             ax = (a > b) - (a < b)
@@ -804,22 +875,44 @@ class ESFMEmu:
 
     # --- driver interface -------------------------------------------------
 
-    def modmessage(self, msg, dw1=0, dw2=0, user=None, injects=()):
+    def modmessage(self, msg, dw1=0, dw2=0, user=None, injects=(),
+                   device=None):
         user = user if user is not None else (self.client or 0)
+        device = self.device if device is None else device
         return self.call(self.modmsg_addr,
-                         [0, msg, user >> 16, user & 0xFFFF,
+                         [device, msg, user >> 16, user & 0xFFFF,
                           dw1 >> 16, dw1 & 0xFFFF, dw2 >> 16, dw2 & 0xFFFF],
                          injects) & 0xFFFF
 
-    def open(self, callback=True, injects=()):
+    def getnumdevs(self):
+        """MODM_GETNUMDEVS for the devnode"""
+        return self.modmessage(1, DEVNODE, 0, user=0, device=0)
+
+    def devcaps(self, device, size=0x32):
+        """MODM_GETDEVCAPS of device through an MDEVICECAPSEX of size
+        bytes: (result, the caps as written, 50 bytes)"""
+        caps = CLIENT_OFF + 0x100
+        self.wr(STUB_PARA, caps, b"\xEE" * 0x40)
+        self.wr(STUB_PARA, CLIENT_OFF + 0x80,
+                struct.pack("<IHH", size, caps, STUB_PARA))
+        r = self.modmessage(2, (STUB_PARA << 16) | (CLIENT_OFF + 0x80),
+                            DEVNODE, user=0, device=device)
+        return r, self.rd(STUB_PARA, caps, 0x32)
+
+    def open(self, callback=True, injects=(), device=0, enable=True):
         """Send DRVM_INIT and DRVM_ENABLE (a devnode arrives), then
-        MODM_OPEN with a callback function."""
+        MODM_OPEN of device with a callback function."""
+        if not enable:
+            return self._open(callback, injects, device)
         if self.modmessage(0x64, 0, DEVNODE, user=0) != 0:
             raise EmuError("DRVM_INIT failed")
         r = self.modmessage(0x67, 0, DEVNODE, user=0)
         if r != 0:
             raise EmuError("DRVM_ENABLE failed: %#x" % r)
         self.dev = self.r16(4, 0x3C)
+        return self._open(callback, injects, device)
+
+    def _open(self, callback, injects, device):
         # MIDIOPENDESC: hMidi, dwCallback, dwInstance, ..., dnDevNode at +0Ch
         desc = struct.pack("<HIIHI", 0x1111, 0x22223333, 0x44445555, 0,
                            DEVNODE)
@@ -827,13 +920,22 @@ class ESFMEmu:
         self.wr(STUB_PARA, CLIENT_OFF + 0x40, b"\0" * 4)
         flags = 0x00030000 if callback else 0
         r = self.call(self.modmsg_addr, [
-            0, MODM_OPEN, STUB_PARA, CLIENT_OFF + 0x40, STUB_PARA,
+            device, MODM_OPEN, STUB_PARA, CLIENT_OFF + 0x40, STUB_PARA,
             CLIENT_OFF, flags >> 16, flags & 0xFFFF], injects) & 0xFFFF
         if r != 0:
             raise EmuError("MODM_OPEN failed: %#x" % r)
         self.client = struct.unpack(
             "<I", self.rd(STUB_PARA, CLIENT_OFF + 0x40, 4))[0]
+        self.device = device
         return r
+
+    def try_open(self, device):
+        """MODM_OPEN of device with the devnode enabled already: its
+        result, the client kept only on success"""
+        try:
+            return self._open(True, (), device)
+        except EmuError as e:
+            return int(str(e).split()[-1], 16)
 
     def data(self, msg, injects=()):
         return self.modmessage(MODM_DATA, msg, 0, injects=injects)

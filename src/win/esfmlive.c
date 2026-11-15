@@ -69,6 +69,7 @@
 #define DEV_VOICES 0x070
 #define DEV_FLAGS 0x30E
 #define DEV_SIZE 0x311
+#define DEV_OPL_READY 0x43A // fixed driver 5: the OPL3 device has the chip
 #define VOICE_SIZE 0x21
 #define FM_KEYON 0x240 // key-on registers, 0x250-0x253 for voices 16, 17
 
@@ -432,6 +433,7 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
   u32 clock;
   const u8 __far *fix;
   u32 dgsize;
+  u8 opl = 0;
 
   memset(d, 0, sizeof(*d));
   if (open_live(&lv, d->why) != 0)
@@ -446,6 +448,8 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
   // copy with interrupts off, MIDI callbacks change it at interrupt time
   _disable();
   _fmemcpy(dev, lv.dg + devoff, DEV_SIZE);
+  if (devoff + (u32)DEV_OPL_READY < dgsize)
+    opl = lv.dg[devoff + DEV_OPL_READY];
   _enable();
   fix = find_fix(&lv);
   if (fix) {
@@ -472,6 +476,8 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
   }
   if (fix && d->version >= 4)
     d->opts = fix_opts(&lv);
+  // version 5: the OPL3 device (src/esfm/esfmopl.asm)
+  d->opl3 = fix && d->version >= 5 && (opl & 1);
   close_live(&lv);
 
   d->device = 1;
@@ -488,7 +494,7 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
     d->v[i].chip = 0xFF;
   }
   if (read_chip && d->open && *(u16 *)(dev + DEV_ACTIVE) && !d->suspended &&
-      d->fm_port) {
+      !d->opl3 && d->fm_port) {
     for (i = 0; i < 16; i++)
       d->v[i].chip = fm_read(d->fm_port, FM_KEYON + i) & 1;
     d->v[16].chip = (fm_read(d->fm_port, FM_KEYON + 16) |
@@ -552,6 +558,7 @@ static const struct {
     {ESFM_OPT_TUNING, "Tuning"},         {ESFM_OPT_CC121, "ResetControllers"},
     {ESFM_OPT_LIVE_PAN, "LivePan"},      {ESFM_OPT_SYSEX, "SysEx"},
     {ESFM_OPT_RUNNING, "RunningStatus"}, {ESFM_OPT_SIDES, "TrueSides"},
+    {ESFM_OPT_OPL3, "Opl3Device"},
 };
 
 static void settings_text(const struct esfm_diag *d, const char *nl, char *buf,
@@ -594,8 +601,10 @@ void esfm_diag_text(const struct esfm_diag *d, int rc, const char *nl,
     return;
   }
   sprintf(line, "%s%s%s",
-          d->open ? "A program has the MIDI device open"
-                  : "The MIDI device is closed",
+          d->opl3   ? "A program has the OPL3 device open: the chip is in "
+                      "OPL3 mode and these voices are idle"
+          : d->open ? "A program has the MIDI device open"
+                    : "The MIDI device is closed",
           d->suspended ? " (suspended)" : "", nl);
   strncat(buf, line, size - strlen(buf) - 1);
   if (d->fixed)

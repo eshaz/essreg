@@ -394,23 +394,52 @@ int di_install(const char *srcdir, const char *sysdir, int stage,
   return n;
 }
 
-int di_rebuilt_after(const char *srcdir, const char *sysdir) {
-  struct di_info have, other;
-  char path[DI_PATH];
+// 1 if the file at path holds text (at most TAIL bytes)
+static int file_has(const char *path, const char *text) {
+  unsigned tlen = (unsigned)strlen(text), keep = 0, have, n, j;
+  FILE *fp;
+  int found = 0;
 
-  di_path(path, sysdir, di_files[1].name);
-  di_scan(path, 1, &have);
+  if (tlen > TAIL || (fp = fopen(path, "rb")) == 0)
+    return 0;
+  while (!found && (n = (unsigned)fread(buf + keep, 1, CHUNK, fp)) > 0) {
+    have = keep + n;
+    for (j = 0; !found && j + tlen <= have; j++)
+      found = buf[j] == (u8)text[0] && !memcmp(buf + j, text, tlen);
+    keep = have < TAIL ? have : TAIL;
+    memmove(buf, buf + have - keep, keep);
+  }
+  fclose(fp);
+  return found;
+}
+
+int di_rebuilt_has(int i, const char *srcdir, const char *sysdir,
+                   const char *text) {
+  struct di_info have, other;
+  char path[DI_PATH], from[DI_PATH];
+  int rebuilt;
+
+  di_path(path, sysdir, di_files[i].name);
+  di_scan(path, i, &have);
   if (srcdir) {
     // di_install puts a rebuilt driver there, or leaves the one there
-    di_path(path, srcdir, di_files[1].name);
-    di_scan(path, 1, &other);
-    return other.kind == DI_REBUILT ||
-           (other.kind == DI_MISSING && have.kind == DI_REBUILT);
+    di_path(from, srcdir, di_files[i].name);
+    di_scan(from, i, &other);
+    if (other.kind == DI_REBUILT)
+      strcpy(path, from);
+    rebuilt = other.kind == DI_REBUILT ||
+              (other.kind == DI_MISSING && have.kind == DI_REBUILT);
+  } else {
+    // di_restore takes a rebuilt driver back if ESS's is kept
+    di_path(from, sysdir, di_files[i].backup);
+    di_scan(from, i, &other);
+    rebuilt = have.kind == DI_REBUILT && !ess(&other);
   }
-  // di_restore takes a rebuilt driver back if ESS's is kept
-  di_path(path, sysdir, di_files[1].backup);
-  di_scan(path, 1, &other);
-  return have.kind == DI_REBUILT && !ess(&other);
+  return rebuilt && (!text || file_has(path, text));
+}
+
+int di_rebuilt_after(const char *srcdir, const char *sysdir) {
+  return di_rebuilt_has(1, srcdir, sysdir, 0);
 }
 
 // the device names of ESS's driver and of the rebuilt one: a prefix, then

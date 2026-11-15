@@ -48,13 +48,15 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   judges sb16test's report by its summary, and waits for it idle, on a
   timer; /R gives each sound's line with its marker, which
   tools/wchkrec.py passes in a recording made to the report; a bad
-  option, no card, /once= and a run ended by force, which leaves the
-  report's .$$$
+  option, no card (with the MIDI list's lines), /once= and a run ended by
+  force, which leaves the report's .$$$
 - essinst: with ESS's drivers in the Windows SYSTEM folder, /y
   /norestart keeps them as .ORG files, stages the rebuilt ones as .NEW
   files and lists them in WININIT.INI; a restart carried out by hand puts
   them in place, and /restore stages ESS's again. Another driver in place
-  changes nothing
+  changes nothing. The OPL3 device gets a copy of ESS's entry in the MIDI
+  list, and loses it with Opl3Device=0 or /restore, which gives the MIDI
+  mapper ESS's device back
 
 Win16 wants 8.3 path names, so the work directory is reached through a
 short symbolic link in /tmp.
@@ -626,7 +628,7 @@ class WineTest(unittest.TestCase):
     # --- esswchk ---------------------------------------------------------
 
     WCHK = ("vxd.count2", "vxd.count1", "a1.position", "a1.drain",
-            "fm.pan0", "fm.pan127", "fm.rate")
+            "fm.pan0", "fm.pan127", "opl.pan0", "opl.pan127", "fm.rate")
 
     def wchk(self, name, *args):
         """esswchk with args, its report NAME.TXT and log NAME.LOG: the
@@ -655,15 +657,16 @@ class WineTest(unittest.TestCase):
         self.assertIn("the count up to 8191, 32 wraps", res["vxd.count2"][0][1])
         self.assertIn("the last header back 531, 532, 533 ms",
                       res["a1.drain"][0][1])
-        self.assertRegex(res["fm.pan0"][0][1], r"^left -12\.\d, right -120")
+        for c in ("fm.pan0", "opl.pan0"):
+            self.assertRegex(res[c][0][1], r"^left -12\.\d, right -120", c)
         self.assertIn("49819.", res["fm.rate"][0][1])
         self.assertEqual(res["sb.box"][0][0], "SKIP")
-        self.assertIn("pass=7 fail=0 known=0", text)
+        self.assertIn("pass=9 fail=0 known=0", text)
         self.assertIn("ES1869.VXD with the extension 1.26",
                       res["env.vxd"][0][1])
         self.assertFalse(os.path.exists(self.path("ONCE.BAT")))
         self.assertFalse(os.path.exists(self.path("W1.$$$")))
-        self.assertIn("esswchk done: pass=7 fail=0", log)
+        self.assertIn("esswchk done: pass=9 fail=0", log)
         self.assertIn("exit 0", log)
 
     def test_esswchk_old(self):
@@ -682,6 +685,9 @@ class WineTest(unittest.TestCase):
         for c in ("fm.pan0", "fm.pan127"):
             self.assertEqual(res[c][0][0], "KNOWN", c)
             self.assertIn("TrueSides off; on the other side", res[c][0][1])
+        for c in ("opl.pan0", "opl.pan127"):
+            self.assertEqual(res[c], [("SKIP", "no OPL3 FM MIDI device: "
+                                       "ESS's ESFM.DRV, or Opl3Device=0")])
         self.assertIn("failed: a1.position a1.drain", text)
         self.assertIn("exit 4", log)
 
@@ -752,7 +758,7 @@ class WineTest(unittest.TestCase):
                       r"(.*)\\ESSCHECK\.BAT /W (.*?)\r?\n", log)
         self.assertTrue(m, log)
         self.assertEqual(m.group(1), m.group(2))
-        self.assertNotIn("esswchk 1.0 started", log)
+        self.assertNotIn("esswchk 1.1 started", log)
         self.wine("esswchk.exe", "/go", "/sim", "/log=W13.LOG")
         log = read(self.path("W13.LOG")).decode("latin-1")
         self.assertIn("The whole run needs ", log)
@@ -809,13 +815,26 @@ class WineTest(unittest.TestCase):
 
     def test_esswchk_no_card(self):
         """without the card or its drivers every check is skipped, and the
-        report says why"""
+        report says why; it lists the MIDI list of the Multimedia control
+        panel, an entry a line, and the MIDI mapper's choice"""
+        self.addCleanup(self.reg, "delete", self.MEDIA, "/f")
+        self.addCleanup(self.reg, "delete", "HKCU\\" + self.MIDIMAP, "/f")
+        self.midi_entries()
+        self.reg("add", "HKCU\\" + self.MIDIMAP, "/v", "CurrentInstrument",
+                 "/d", "esfm.drv<0000>", "/f")
         res, text, log = self.wchk("W8", "/auto", "/q")
         self.assertIn("no ES1869.VXD answers", res["env.vxd"][0][1])
         for c in self.WCHK + ("sb.box",):
             self.assertEqual(res[c][0][0], "SKIP", c)
         self.assertIn("pass=0 fail=0 known=0", text)
         self.assertIn("No ES1869 answers", log)
+        self.assertEqual(sorted(d for _r, d in res["env.midi"]), [
+            "esfm.drv<0000>: Internal ESFM Synthesis; Driver esfm.drv, Port "
+            "none, Active 1",
+            "essmpu.drv<0000>: External MIDI Port; Driver essmpu.drv, Port "
+            "none, Active none"])
+        self.assertEqual(res["env.mapper"], [
+            ("INFO", "the MIDI mapper's CurrentInstrument: esfm.drv<0000>")])
 
     def test_esswchk_ended_by_force(self):
         """a run ended by force leaves its report as NAME.$$$, with the
@@ -1006,6 +1025,126 @@ class WineTest(unittest.TestCase):
                              "ESS AudioDrive Playback (220)")
             self.assertEqual(self.preferred(root, "Record"),
                              "ESS AudioDrive Record (220)")
+
+    MEDIA = r"HKLM\System\CurrentControlSet\Control\MediaResources\midi"
+    MIDIMAP = r"Software\Microsoft\Windows\CurrentVersion\Multimedia\MIDIMap"
+
+    def midi_entries(self):
+        """the MIDI list as ESS's INF leaves it: ESS's ESFM device, with an
+        empty Instruments key, and its MIDI port"""
+        ess = self.MEDIA + r"\esfm.drv<0000>"
+        for name, kind, data in (
+                ("Active", "REG_SZ", "1"),
+                ("Description", "REG_SZ", "Internal ESFM Synthesis"),
+                ("FriendlyName", "REG_SZ", "Internal ESFM Synthesis"),
+                ("Driver", "REG_SZ", "esfm.drv"),
+                ("DevNode", "REG_BINARY", "0C1D0000"),
+                ("SoftwareKey", "REG_SZ",
+                 r"System\CurrentControlSet\Services\Class\MEDIA\0000")):
+            self.reg("add", ess, "/v", name, "/t", kind, "/d", data, "/f")
+        self.reg("add", ess + r"\Instruments", "/f")
+        mpu = self.MEDIA + r"\essmpu.drv<0000>"
+        self.reg("add", mpu, "/v", "Driver", "/d", "essmpu.drv", "/f")
+        self.reg("add", mpu, "/v", "Description", "/d", "External MIDI Port",
+                 "/f")
+
+    def reg_values(self, key):
+        """key's values, {name: (type, data)}, and its keys, or None"""
+        out = self.reg("query", key, "/s")
+        if "\nHKEY_" not in "\n" + out.lstrip():
+            return None
+        values, keys = {}, []
+        for row in out.splitlines():
+            if row.upper().startswith("HKEY_"):
+                keys.append(row.strip())
+                continue
+            parts = row.split(None, 2)
+            if len(keys) == 1 and len(parts) >= 2 and \
+                    parts[1].startswith("REG_"):
+                values[parts[0]] = (parts[1], parts[2].strip()
+                                    if len(parts) == 3 else "")
+        return values, keys[1:]
+
+    def mapper(self, root):
+        out = self.reg("query", root + "\\" + self.MIDIMAP, "/v",
+                       "CurrentInstrument")
+        for row in out.splitlines():
+            parts = row.split(None, 2)
+            if len(parts) == 3 and parts[0] == "CurrentInstrument":
+                return parts[2].strip()
+        return None
+
+    def test_essinst_midi_list(self):
+        # the OPL3 device gets a copy of ESS's device's entry in the MIDI
+        # list of the Multimedia control panel, and loses it again
+        self.essinst_setup()
+        self.addCleanup(self.reg, "delete", self.MEDIA, "/f")
+        for root in ("HKCU", r"HKU\.DEFAULT"):
+            self.addCleanup(self.reg, "delete", root + "\\" + self.MIDIMAP,
+                            "/f")
+        self.midi_entries()
+        ess, _keys = self.reg_values(self.MEDIA + r"\esfm.drv<0000>")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        log = self.essinst_log()
+        self.assertIn("The MIDI list gets the OPL3 device, Internal OPL3 FM "
+                      "Synthesis, as esfm.drv<0001> with Port 1.", log)
+        self.assertIn("The MIDI list has Internal OPL3 FM Synthesis, as "
+                      "esfm.drv<0001>.", log)
+        opl, keys = self.reg_values(self.MEDIA + r"\esfm.drv<0001>")
+        name = ("REG_SZ", "Internal OPL3 FM Synthesis")
+        self.assertEqual(opl, dict(ess, FriendlyName=name, Description=name,
+                                   Port=("REG_DWORD", "0x1")))
+        self.assertEqual([k.rsplit("\\", 1)[1] for k in keys],
+                         ["Instruments"])
+        self.assertEqual(len(self.wininit()), 3)
+        self.restart()
+
+        # in place: nothing to do
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        log = self.essinst_log()
+        self.assertEqual(log.count("installed already."), 3)
+        self.assertIn("The MIDI list has the OPL3 device, Internal OPL3 FM "
+                      "Synthesis, as esfm.drv<0001>.", log)
+
+        # Opl3Device=0: the entry goes, and Windows doesn't restart
+        ini = self.system_ini()
+        saved = read(ini)
+        try:
+            with open(ini, "ab") as f:
+                f.write(b"\r\n[ESFM.DRV]\r\nOpl3Device=0\r\n")
+            self.wine("INST\\essinst.exe", "/y", "/norestart")
+        finally:
+            with open(ini, "wb") as f:
+                f.write(saved)
+        log = self.essinst_log()
+        self.assertIn("The MIDI list:\n", log.replace("\r", ""))
+        self.assertIn("Internal OPL3 FM Synthesis (esfm.drv<0001>) is out of "
+                      "the MIDI list.", log)
+        self.assertIsNone(self.reg_values(self.MEDIA + r"\esfm.drv<0001>"))
+        self.assertEqual(self.wininit(), {})
+
+        # back, and the mapper on it, by its key and by its name: /restore
+        # gives the mapper ESS's device, the same way
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        self.assertIsNotNone(self.reg_values(self.MEDIA + r"\esfm.drv<0001>"))
+        self.reg("add", "HKCU\\" + self.MIDIMAP, "/v", "CurrentInstrument",
+                 "/d", "esfm.drv<0001>", "/f")
+        self.reg("add", r"HKU\.DEFAULT" + "\\" + self.MIDIMAP, "/v",
+                 "CurrentInstrument", "/d", "Internal OPL3 FM Synthesis",
+                 "/f")
+        self.wine("INST\\essinst.exe", "/y", "/restore", "/norestart")
+        log = self.essinst_log()
+        self.assertIn("The MIDI list loses the OPL3 device, Internal OPL3 FM "
+                      "Synthesis (esfm.drv<0001>).", log)
+        self.assertIn("Internal OPL3 FM Synthesis (esfm.drv<0001>) is out of "
+                      "the MIDI list.", log)
+        self.assertIsNone(self.reg_values(self.MEDIA + r"\esfm.drv<0001>"))
+        self.assertIsNotNone(self.reg_values(self.MEDIA + r"\esfm.drv<0000>"))
+        self.assertIsNotNone(
+            self.reg_values(self.MEDIA + r"\essmpu.drv<0000>"))
+        self.assertEqual(self.mapper("HKCU"), "esfm.drv<0000>")
+        self.assertEqual(self.mapper(r"HKU\.DEFAULT"),
+                         "Internal ESFM Synthesis")
 
     def test_essinst_other_driver(self):
         # another ESFM.DRV in place: nothing is written at all
