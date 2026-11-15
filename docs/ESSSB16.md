@@ -291,8 +291,10 @@ writes `ESSWCHK.BAT` into Windows' StartUp folder
 (`C:\WINDOWS\STARTM~1\PROGRAMS\STARTUP`). `esssb16` may stay, since it is
 idle while Windows runs. Once Windows is back, the batch runs
 `esswchk /auto /R`, which checks the drivers' fixes in Windows by itself,
-about 10 minutes, writes `RESULTS\WCHECK.TXT` and deletes the batch
-([ESSWCHK.md](ESSWCHK.md)). It does so also when the DOS part stopped early.
+about 10 minutes, and writes `RESULTS\WCHECK.TXT`
+([ESSWCHK.md](ESSWCHK.md)). The batch deletes itself as soon as esswchk is
+started, so the next start of Windows doesn't run the checks again. It runs
+also when the DOS part stopped early.
 
 `C:\ESS\ESSCHECK` runs the same at the DOS prompt, without Windows, as step
 5 above says but without `esssb16`'s line, with the drivers as they are, and

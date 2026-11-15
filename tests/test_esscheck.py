@@ -427,7 +427,10 @@ class FlowTest(unittest.TestCase):
             "@ECHO OFF",
             "SET W=/once=" + STARTUP + "\\ESSWCHK.BAT",
             "C:\\ESS\\ESSWCHK.EXE /auto /R /out=C:\\ESS\\RESULTS\\WCHECK.TXT "
-            "%W%"])
+            "%W%",
+            # the batch deletes itself once esswchk is started, so that the
+            # next start of Windows doesn't run it again
+            "DEL " + STARTUP + "\\ESSWCHK.BAT"])
         self.assertIn("Once its window says Done, stop the recorder, and "
                       "send the folder", c.out)
         self.assertEqual(c.cwd, "C:\\ESS")

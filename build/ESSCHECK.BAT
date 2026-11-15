@@ -10,7 +10,8 @@ REM cable, and measures what the drivers' fixes rest on and the Windows
 REM player's dual start, before esssb16 is in; then esssb16 loads, and
 REM sb16test checks it with the game's 16-bit DMA as BLASTER has it and on
 REM 5. Last, a batch in Windows' StartUp folder runs esswchk, which checks
-REM the drivers' fixes in Windows by itself and deletes the batch. The run
+REM the drivers' fixes in Windows by itself, and deletes itself as soon as
+REM esswchk is started, so it runs once: the next start doesn't. The run
 REM plays its sounds for a recorder on the line out. Everything goes to
 REM RESULTS, to send back with the recording; the run before's is kept as
 REM RESULTS.OLD.
@@ -236,6 +237,7 @@ REM the StartUp batch: its own name in W, which keeps the lines short
 ECHO @ECHO OFF > %SU%\ESSWCHK.BAT
 ECHO SET W=/once=%SU%\ESSWCHK.BAT >> %SU%\ESSWCHK.BAT
 ECHO %ESSDIR%\ESSWCHK.EXE /auto %RC% /out=%R%\WCHECK.TXT %%W%% >> %SU%\ESSWCHK.BAT
+ECHO DEL %SU%\ESSWCHK.BAT >> %SU%\ESSWCHK.BAT
 IF "%HD%"=="1" %ESSDIR%\HDPMI32I -u
 ECHO windows part: started >> %L%
 ECHO    Windows starts now, and esswchk runs its checks, about 10 minutes.
