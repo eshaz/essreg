@@ -133,6 +133,15 @@ class BatchChecks:
                 body = re.sub(r"\s>>?\s*%[A-Z]+%\\?[\w.]*$", "", c)
                 self.assertIsNone(re.search(r"[<>|]", body), c)
 
+    def test_remarks(self):
+        """a remark has no redirection or pipe: COMMAND.COM takes them
+        apart on a REM line too, and an e-mail address in angle brackets
+        printed "Syntax error" at every run"""
+        text = lines(self.bat).decode("ascii")
+        for s in text.split("\r\n"):
+            if s.strip().upper().startswith("REM"):
+                self.assertIsNone(re.search(r"[<>|]", s), s)
+
 
 class BatchTest(BatchChecks, unittest.TestCase):
     bat = BAT

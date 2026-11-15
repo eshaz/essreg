@@ -29,7 +29,7 @@ REM            [Absolute Pinball's folder]]
 REM Without the folders, the usual ones are looked in. Windows starts at the
 REM end.
 REM
-REM (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+REM (c) 2026 Ethan Halsall, ethan.s.halsall@gmail.com
 REM
 REM Licensed under GPL Version 3.0
 
