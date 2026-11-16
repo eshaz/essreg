@@ -20,6 +20,7 @@ FN(c_probe_params)
 FN(c_params_rw)
 FN(c_params_bad)
 FN(c_dig_fmt)
+FN(c_dig_typef)
 FN(c_dig_start)
 FN(c_dig_pause)
 FN(c_dig_access)
@@ -151,6 +152,8 @@ const struct et_case et_cases[] = {
 	CASE("dig.fmt.u8m", N, c_dig_fmt, 3, "the same, 8-bit unsigned mono")
 	CASE("dig.fmt.s8", N, c_dig_fmt, 4, "the same, 8-bit signed stereo")
 	CASE("dig.fmt.u16", N, c_dig_fmt, 5, "the same, 16-bit unsigned stereo")
+	CASE("dig.typef", ET_OPTIN | ET_ROOT | N, c_dig_typef, 0,
+	     "every frame recorded under the PIIX4's Type F on Audio 1's channel")
 	CASE("dig.start", Q | N, c_dig_start, 0,
 	     "twenty starts of Audio 2, none losing or adding a frame")
 	CASE("dig.pause", Q | N, c_dig_pause, 0,

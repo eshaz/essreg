@@ -123,6 +123,7 @@ struct es1869_stream {
 	u16 corner; // the filter's corner, in thousandths of half the rate
 	u8 a8; // A8h's bits beside its monitor (3) and channels (1:0)
 	bool adc; // a recording: the codec turned to the ADC at prepare
+	bool type_f; // the PIIX4's Type F on the channel: a recording single
 };
 
 // a copy of an application's buffer that the DMA reads, for es1869_fill_plan;

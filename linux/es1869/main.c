@@ -299,11 +299,13 @@ void es1869_irq_sources_locked(struct es1869 *chip)
 // An Intel PIIX4 runs up to two DMA channels with Type F timing and its DMA
 // line buffer (MBDMA, ISA bridge 76h and 77h: bit 7 on, bits 2:0 the
 // channel). The Armada 1500c's BIOS sets it for both of the ES1869's: its
-// playback works, but the first byte a recording moves hangs the machine.
-// Unless piix4_type_f keeps it, Audio 1's channel takes ISA timing, also
-// after each resume, when the BIOS has set it again. A load after an earlier
-// one finds bit 7 already off, so the register is taken by its channel
-// alone once none has both; the BIOS's Type F is then unknown and stays off
+// playback works, but a recording's first demand burst hung the machine,
+// where single transfers record cleanly, so a recording under it takes
+// single ones (es1869_a1_prepare). Unless piix4_type_f keeps it, Audio 1's
+// channel takes ISA timing, also after each resume, when the BIOS has set it
+// again. A load after an earlier one finds bit 7 already off, so the
+// register is taken by its channel alone once none has both; the BIOS's
+// Type F is then unknown and stays off
 static void es1869_type_f_find(struct es1869 *chip)
 {
 	struct pci_dev *isa;
@@ -343,6 +345,17 @@ void es1869_type_f_locked(struct es1869 *chip)
 	if (!es1869_val(ES_S_piix4_type_f))
 		v &= ~0x80;
 	pci_write_config_byte(chip->isa_bridge, chip->type_f_reg, v);
+}
+
+// Type F on Audio 1's channel as the bridge has it now, whoever set it
+bool es1869_type_f_on(struct es1869 *chip)
+{
+	u8 v;
+
+	if (!chip->isa_bridge)
+		return false;
+	pci_read_config_byte(chip->isa_bridge, chip->type_f_reg, &v);
+	return v & 0x80;
 }
 
 static void es1869_irq_sources(struct es1869 *chip)
@@ -700,7 +713,7 @@ static int es1869_probe(struct snd_card *card, int dev)
 			 !(chip->type_f_bios & 0x80) ?
 				 "off since an earlier load" :
 			 es1869_val(ES_S_piix4_type_f) ?
-				 "kept (piix4_type_f=1)" :
+				 "kept (piix4_type_f=1): recordings single" :
 				 "off: recording hangs with it");
 	}
 

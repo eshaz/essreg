@@ -716,6 +716,16 @@ static void fill(struct et_stream *r, struct et_stream *s, int n)
 
 		memmove(r->data, (char *)r->data + 1, nb - 1);
 	}
+	// the PIIX4's Type F on Audio 1's channel with the recording in demand
+	// bursts, which hung the Armada at the first byte: here the recording
+	// stops after its first frame
+	if ((sim.faults & SIM_TYPEF_DEMAND) && param("piix4_type_f") &&
+	    !param("dma_single") && (r->role == ET_A1C || r->role == ET_FMC) &&
+	    r->frames > 1) {
+		unsigned long b = et_fmt_bytes(&r->fmt);
+
+		memset((char *)r->data + b, 0, (r->frames - 1) * b);
+	}
 	// and a recording begun again on its open stream, from there on
 	if ((sim.faults & SIM_A1_RESTART_OFF) && r->role == ET_A1C &&
 	    (r->flags & ET_RESTART) && r->pause_at > 0) {
@@ -1361,13 +1371,16 @@ static int sim_proc(void *ctx, char *buf, int len)
 	// the cost as a stream of 10 s at 21.5 interrupts a second leaves it
 	return snprintf(
 		buf, len,
-		"ES1869 (simulated)\nAudio 1: free; Audio 2: free; power: %s\n"
+		"ES1869 (simulated)\nType F on Audio 1's channel: %s\n"
+		"Audio 1: free; Audio 2: free; power: %s\n"
 		"interrupts: Audio 1 0, Audio 2 0, buttons 0, MPU-401 0, none 0\n"
 		"Audio 2 ring: late refills 0, largest 1024 bytes, longest 20000 cycles\n"
 		"cost: interrupts %lu, 20000 cycles each; ring ticks %lu, 4000 cycles each; 8237 readings 0\n"
 		"clock: the master %+d ppb of 23814000 Hz on the raw clock, 257 samples in the line, 300 in all, from Audio 2\n"
 		"clock: the steered clock %+d ppb of the raw one, 300 samples\n"
 		"Audio 1 correction: off, linearity off; 0 frames filtered, the longest piece %ld us\n",
+		// the Armada's bridge, whose BIOS left Type F on
+		param("piix4_type_f") ? "on, recordings single" : "off",
 		!param("pwr_save") ? "up" :
 		param("pwr_full")  ? "fully down" :
 				     "partly down",

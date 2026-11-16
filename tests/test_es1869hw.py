@@ -73,7 +73,7 @@ class Stream(ctypes.Structure):
                 ("period", u32), ("ch", u8), ("dma_phys", u32),
                 ("dma_bytes", u32), ("single", ctypes.c_bool),
                 ("burst", u8), ("corner", u16), ("a8", u8),
-                ("adc", ctypes.c_bool)]
+                ("adc", ctypes.c_bool), ("type_f", ctypes.c_bool)]
 
 
 class Ident(ctypes.Structure):
@@ -982,6 +982,28 @@ class BringUpTest(unittest.TestCase):
         d.frozen = 1000
         self.assertEqual(d.dsp_cmd(b"\xC6", 1), -16)      # EBUSY
         self.assertEqual(d.errors, [])
+
+    def test_type_f_records_in_single_transfers(self):
+        """under the PIIX4's Type F a recording takes single transfers,
+        8237 and B9h alike, since a demand burst's first byte hung the
+        Armada; playback keeps its bursts"""
+        for capture, b9, mode in ((True, 0x00, 0x54), (False, 0x02, 0x18)):
+            d = Driver()
+            d.reset()
+            s = stream(793800, 18, period=1024, size=4096, a8=0xF4)
+            s.type_f = True
+            self.assertEqual(d.a1_prepare(ctypes.byref(s), capture, False),
+                             0)
+            self.assertEqual(d.chip.ctrl[0xB9], b9, capture)
+            self.assertEqual(d.chip.dmac.ch[1].mode, mode | 1, capture)
+
+    def test_recording_without_type_f_keeps_demand(self):
+        d = Driver()
+        d.reset()
+        s = stream(793800, 18, period=1024, size=4096, a8=0xF4)
+        self.assertEqual(d.a1_prepare(ctypes.byref(s), True, False), 0)
+        self.assertEqual(d.chip.ctrl[0xB9], 0x02)
+        self.assertEqual(d.chip.dmac.ch[1].mode, 0x14 | 1)
 
     def test_recording_takes_b7h_twice(self):
         """Table 17's first write initializes the DAC and prevents pops"""

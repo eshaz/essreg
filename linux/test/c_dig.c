@@ -27,6 +27,7 @@
 
 #include "an.h"
 #include "cases.h"
+#include "hal.h"
 
 static int idle(const short *r)
 {
@@ -233,6 +234,35 @@ enum et_result c_dig_fmt(struct et_ctx *c, const struct et_case *k)
 
 	return dig_run(c, &fmts[k->arg], 49716, 0, 0, 0, k->arg + 1, NULL,
 		       NULL, 0, 0);
+}
+
+// dig.typef: a second of the pattern with the PIIX4's Type F on Audio 1's
+// channel, which records the dig path, the output muted: every frame as
+// without it. A recording's demand bursts under Type F hung the Armada at
+// the first byte, so the driver records in single transfers there; with no
+// PIIX4 that names the channel, or Type F off since an earlier load, it
+// stays off and the case skips
+enum et_result c_dig_typef(struct et_ctx *c, const struct et_case *k)
+{
+	static const struct et_fmt f = { ET_S16, 2, 44100 };
+	static char proc[16384];
+
+	(void)k;
+	if (et_param_set(c, "piix4_type_f", 1)) {
+		et_fail(c, "piix4_type_f didn't take 1");
+		return ET_ERROR;
+	}
+	if (c->hal->proc(c->hal->ctx, proc, sizeof(proc)) < 0) {
+		et_fail(c, "no proc file");
+		return ET_ERROR;
+	}
+	if (!strstr(proc, "Type F on Audio 1's channel: on")) {
+		et_note(c,
+			"Type F stayed off: no PIIX4 names the channel, or an earlier load turned it off");
+		return ET_SKIP;
+	}
+	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
+	return dig_run(c, &f, 49716, 0, 0, 0, 7, NULL, NULL, 0, 0);
 }
 
 // dig.start: twenty short starts, none losing or adding a frame

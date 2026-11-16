@@ -642,9 +642,9 @@ config SND_ES1869_DEFAULT_PIIX4_TYPE_F
 	default 0
 	help
 	  1 keeps an Intel PIIX4's Type F DMA timing on Audio 1's
-	  channel as the BIOS set it; 0 turns it off, since with it a
-	  recording's first transfer hung the Armada. The module
-	  parameter piix4_type_f sets it at load and at runtime, through
+	  channel as the BIOS set it, recording in single transfers
+	  under it; 0 turns it off. The module parameter piix4_type_f
+	  sets it at load and at runtime, through
 	  /sys/module/snd_es1869/parameters/piix4_type_f.
 
 config SND_ES1869_DEFAULT_DRQ_LATCH

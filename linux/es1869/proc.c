@@ -26,6 +26,10 @@ static void es1869_proc_read(struct snd_info_entry *entry,
 	snd_iprintf(buf, "IRQ %d, Audio 1 on DMA %d, Audio 2 on DMA %d%s\n",
 		    chip->irq, chip->dma1, chip->dma2,
 		    chip->mirror.spread ? " (bytes spread over words)" : "");
+	snd_iprintf(buf, "Type F on Audio 1's channel: %s\n",
+		    !chip->isa_bridge	   ? "no PIIX4 names it" :
+		    es1869_type_f_on(chip) ? "on, recordings single" :
+					     "off");
 	snd_iprintf(buf, "DSP %02X %02X, mixer %02X %02X%s\n",
 		    chip->ident.dsp[0], chip->ident.dsp[1],
 		    chip->ident.mixer[0], chip->ident.mixer[1],

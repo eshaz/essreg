@@ -259,6 +259,7 @@ struct es1869 {
 extern const char *const es1869_owner_names[];
 void es1869_irq_sources_locked(struct es1869 *chip);
 void es1869_type_f_locked(struct es1869 *chip);
+bool es1869_type_f_on(struct es1869 *chip);
 
 // a stream's silence filler, as snd_pcm_ops.fill_silence
 typedef int (*es1869_silence_fn)(struct snd_pcm_substream *ss, int channel,

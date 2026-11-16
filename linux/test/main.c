@@ -14,9 +14,10 @@
  * that a cut-off run left, checks that snd-es1869 drives the card, that
  * MPD isn't playing, that nothing holds the card's PCM devices, and that
  * no recording would hang the machine: an Intel PIIX4 with Type F timing on
- * the card's capture channel, which snd-es1869 turns off at load and
- * snd-es18xx doesn't. Every control and parameter it changes goes to the
- * journal first, and the end of each case, or a signal, puts them back.
+ * the card's capture channel, which snd-es1869 turns off at load, or records
+ * under in single transfers, and snd-es18xx doesn't. Every control and
+ * parameter it changes goes to the journal first, and the end of each case,
+ * or a signal, puts them back.
  * Each case gets the driver's new kernel log lines, and an error among
  * them, or a warning of a fault anywhere, fails it.
  *
@@ -220,6 +221,17 @@ static int take_lock(void)
 	if (lock_fd < 0)
 		return 0;
 	return flock(lock_fd, LOCK_EX | LOCK_NB) == 0;
+}
+
+// a driver that records in single transfers under Type F, which don't hang
+// the machine, says so in its proc file
+static int records_single(const struct et_hal *hal)
+{
+	static char proc[16384];
+
+	return hal->proc(hal->ctx, proc, sizeof(proc)) > 0 &&
+	       strstr(proc,
+		      "Type F on Audio 1's channel: on, recordings single");
 }
 
 static int mpd_playing(void)
@@ -553,10 +565,13 @@ int main(int argc, char **argv)
 			return 3;
 		}
 		r = hal->type_f(hal->ctx);
+		if (r == 1 && !c.stock && records_single(hal))
+			r = 0;
 		if (r == 1 || (r < 0 && c.stock)) {
 			fprintf(stderr,
-				r == 1 ? "es1869test: the PIIX4 runs the card's capture channel with Type F timing, and the first byte recorded would hang the machine: load snd-es1869 with piix4_type_f=0 once since boot\n" :
-					 "es1869test: can't read the PIIX4's Type F timing without root, and snd-es18xx leaves it on\n");
+				r == 1 ?
+					"es1869test: the PIIX4 runs the card's capture channel with Type F timing, and the driver's first byte recorded would hang the machine: load snd-es1869, which records in single transfers under it, or with piix4_type_f=0 once since boot\n" :
+					"es1869test: can't read the PIIX4's Type F timing without root, and snd-es18xx leaves it on\n");
 			return r == 1 ? 9 : 4;
 		}
 		if (pcm_holders(card_number()))

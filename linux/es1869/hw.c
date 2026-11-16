@@ -410,6 +410,13 @@ int es1869_a1_prepare(struct es1869_hw *hw, const struct es1869_stream *s,
 {
 	u8 regs[12][2];
 	unsigned int i, n = 0;
+	// under the PIIX4's Type F a recording takes single transfers: a
+	// demand burst's first byte hung the Armada, likely since Type F drops
+	// the bridge's 8-SYSCLK delay of each request (PIIX4 data sheet, 8.4.5)
+	// and the burst then runs a transfer past the chip's request, which a
+	// recording can't answer; single ones record cleanly, and playback
+	// keeps its bursts
+	bool single = s->single || (capture && s->type_f);
 	bool new_mode;
 	u8 a1, b7, mode;
 	u32 rate;
@@ -450,7 +457,7 @@ int es1869_a1_prepare(struct es1869_hw *hw, const struct es1869_stream *s,
 	// B9h: demand transfers of 2 bytes, as ESS's drivers use them; 11b
 	// runs the DMA at twice the rate (a1.b9_3)
 	regs[n][0] = 0xB9;
-	regs[n++][1] = s->single ? 0 : min_t(u8, s->burst, 2);
+	regs[n++][1] = single ? 0 : min_t(u8, s->burst, 2);
 	regs[n][0] = 0xA1;
 	regs[n++][1] = a1;
 	regs[n][0] = 0xA2;
@@ -490,7 +497,7 @@ int es1869_a1_prepare(struct es1869_hw *hw, const struct es1869_stream *s,
 	if (err)
 		return err;
 	mode = capture ? ES_DMA_REC : ES_DMA_PLAY;
-	if (s->single)
+	if (single)
 		mode |= ES_DMA_SINGLE;
 	hw->io->dma_program(hw->io->ctx, s->ch, s->dma_phys, s->dma_bytes,
 			    mode);

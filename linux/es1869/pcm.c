@@ -474,6 +474,7 @@ static int a1_prepare(struct snd_pcm_substream *substream)
 		.dma_phys = runtime->dma_addr,
 		.dma_bytes = snd_pcm_lib_buffer_bytes(substream),
 		.single = es1869_val(ES_S_dma_single),
+		.type_f = es1869_type_f_on(chip),
 		.burst = es1869_val(ES_S_a1_burst),
 		.corner = es1869_val(ES_S_filter_corner),
 		.a8 = es1869_val(capture ? ES_S_a8_rec_bits : ES_S_a8_play_bits),
