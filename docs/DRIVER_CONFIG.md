@@ -863,7 +863,7 @@ its default and by what the key does at 1, and the sentence that begins
   off every voice and lets every sustain pedal up. With 0, notes that the
   pedal holds keep sounding.
 * **PedalRelease** (default 1). A program change lets the channel's sustain
-  pedal up. With 0, the pedal stays down.
+  pedal up, on both devices. With 0, the pedal stays down.
 * **Vibrato** (default 1). Modulation (controller 1) and channel pressure
   turn on the chip's vibrato. With 0, both are ignored.
 * **Tuning** (default 1). The driver handles RPN 0 with cents, RPN 1 (fine

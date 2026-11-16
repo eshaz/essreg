@@ -135,6 +135,13 @@ The device handles:
   real-time bytes;
 * long messages: a GM, GM2, GS or XG reset sets every channel back.
 
+A program change lets the channel's sustain pedal up, as on the ESFM device,
+with `PedalRelease` ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv)). A
+pedal that is still down when a channel gets another instrument is left over
+from an earlier part of the song, and an FM note that the pedal holds
+doesn't fade, so without this it would sound until the song ends. With
+`PedalRelease=0` the pedal stays down, as the MIDI specification has it.
+
 Pan has three positions, as on an OPL3: left from 0 to 47, both from 48 to
 80, and right from 81 to 127. The chip plays an OPL3's left (bit 4 of
 register C0h) on its right output, so with `TrueSides`, the default, the

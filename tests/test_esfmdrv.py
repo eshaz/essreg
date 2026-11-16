@@ -1864,6 +1864,31 @@ class Opl3Test(unittest.TestCase):
         e.data(0x0040B0)
         self.assertEqual(self.keyed(e), [])
 
+    def test_program_change_lets_the_pedal_up(self):
+        # a pedal left down from an earlier part: the next program change
+        # lets it up, and the notes it held end, as on device 0
+        # (PedalRelease); keys still down keep sounding
+        p = self.single[0]
+        e = self.emu([SUSTAIN_ON, 0x7F3C90, 0x003C80, 0x7F4090,
+                      cc(1, 64, 127), 0x7F3C91, 0x003C81])
+        self.assertTrue(self.keyed(e, 0, 60))
+        e.data(p << 8 | 0xC0)
+        self.assertEqual(self.keyed(e, 0, 60), [])
+        self.assertTrue(self.keyed(e, 0, 64))           # its key is down
+        self.assertTrue(self.keyed(e, 1, 60))           # another channel's
+        self.assertEqual(e.dev8(DEV_OPL_CHAN + 4), 0)   # the pedal up
+        e.data(0x7F4290)                                # a new note
+        e.data(0x004280)
+        self.assertEqual(self.keyed(e, 0, 0x42), [])    # not held
+        # without a pedal, a program change keeps every note
+        e = self.emu([0x7F3C90, p << 8 | 0xC0])
+        self.assertTrue(self.keyed(e, 0, 60))
+        # PedalRelease=0: the pedal stays down, as on an OPL3 card
+        e = self.emu([SUSTAIN_ON, 0x7F3C90, 0x003C80, p << 8 | 0xC0],
+                     ini={"PedalRelease": "0"})
+        self.assertTrue(self.keyed(e, 0, 60))
+        self.assertEqual(e.dev8(DEV_OPL_CHAN + 4), 1)
+
     def test_bend(self):
         p = self.single[0]
         off = self.bank[p]["voices"][0]["offset"] + 12

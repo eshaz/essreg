@@ -48,7 +48,10 @@
 ;    49,819.5 Hz, and TrueSides puts left on the left output, as for device
 ;    0.  Controllers 1, 6/38 with RPN 0, 7, 10, 11, 64, 120, 121 and 123 to
 ;    127, programs, pitch bend and running status play; a GM, GS or XG reset
-;    in a long message sets every channel back.
+;    in a long message sets every channel back.  A program change lets the
+;    channel's sustain pedal up, as device 0's does (PedalRelease), since a
+;    pedal still down at a new instrument is left over from the part
+;    before, and FM's sustained notes don't fade.
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
@@ -801,6 +804,13 @@ opl_message:
 .prog:  mov     al,dl
         call    opl_chrec
         mov     [bx+OCH_PROG],dh
+        test    word [fix_opts],OPT_PEDAL       ; PedalRelease: the pedal
+        jz      .out                    ; goes up, as device 0's does
+        cmp     byte [bx+OCH_PEDAL],0   ; (esfmped.asm)
+        je      .out
+        mov     byte [bx+OCH_PEDAL],0
+        mov     al,1                    ; the held notes end
+        call    opl_chan_off
         jmp     .out
 .bend:  mov     al,cl                   ; 14 bits, data 1 the low 7
         xor     ah,ah
