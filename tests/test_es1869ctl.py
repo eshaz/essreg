@@ -158,9 +158,9 @@ class Es1869ctlTest(unittest.TestCase):
         self.assertEqual(self.read_param("capture_source"), "5")
 
     def test_type_f_stays_out_of_reach(self):
-        res = self.run_tool("--set", "piix4_type_f=1")
+        res = self.run_tool("--set", "piix4_type_f=0")
         self.assertEqual(res.returncode, 1)
-        self.assertEqual(self.read_param("piix4_type_f"), "0")
+        self.assertEqual(self.read_param("piix4_type_f"), "1")
 
     def test_a_setting_the_driver_lacks(self):
         os.remove(os.path.join(self.params, "beep_follow"))

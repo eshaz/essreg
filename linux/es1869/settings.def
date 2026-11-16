@@ -224,9 +224,9 @@ ES1869_SET(a2_burst, A2_BURST, S_ENUM, B_NONE, 0, 0, 0, 0, 3, 2,
 	   T_NONE, F_CTL | F_PARAM | F_NEXT, 0, "Audio 2 DMA Burst",
 	   "Single|Demand 2|Demand 4|Demand 8",
 	   "Audio 2's transfers (78h bits 7:6); ESS's demand 4")
-ES1869_SET(piix4_type_f, PIIX4_TYPE_F, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
+ES1869_SET(piix4_type_f, PIIX4_TYPE_F, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
 	   T_NONE, F_PARAM | F_INIT | F_HOOK | F_IDLE_A1, 0, "", "",
-	   "1 keeps an Intel PIIX4's Type F DMA timing on Audio 1's channel as the BIOS set it, recording in single transfers under it; 0 turns it off")
+	   "1 turns on an Intel PIIX4's Type F DMA timing for Audio 1's channel where the bridge names it, recording in single transfers under it; 0, and the driver's removal, turn it off")
 ES1869_SET(drq_latch, DRQ_LATCH, S_BOOL, B_PNPC, 0x25, 7, 1, 0, 1, 1,
 	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "DRQ Latch Switch", "",
 	   "each DRQ held until its DACK (card register 25h bit 7)")

@@ -15,12 +15,12 @@ are in `linux/test/`, under the GPL version 3 or later.
 * No recording that would hang the machine. On an Intel PIIX4 with Type F
   timing on the card's capture channel (ISA bridge registers 76h and 77h),
   as the Armada's BIOS sets it, the first demand burst recorded hangs the
-  machine. snd-es1869 turns that timing off at load, or with
-  `piix4_type_f=1` records in single transfers under it and says so in its
-  proc file; snd-es18xx does neither. So the suite reads the bridge first
-  and stops with exit code 9 while Type F is on, unless the driver's proc
-  file says it records in single transfers. A run with `--stock` therefore
-  needs snd-es1869 loaded once since the boot, and root to read the bridge.
+  machine. snd-es1869 records in single transfers under it and says so in
+  its proc file, and turns it off with `piix4_type_f=0` and at its removal;
+  snd-es18xx does neither. So the suite reads the bridge first and stops
+  with exit code 9 while Type F is on, unless the driver's proc file says it
+  records in single transfers. A run with `--stock` therefore needs
+  snd-es1869 loaded and removed since the boot, and root to read the bridge.
 * For the cases that listen to the output, a second sound card that records,
   and a cable from the ES1869's output to its input. The suite finds the
   first other card with a capture device, or takes `--rec2 DEVICE`. A cable
@@ -168,12 +168,12 @@ against the stream, the filter's C code and the dig path.
   interrupts reads the pointer: a driver that took a step of over half the
   buffer for a step back lost a buffer there, with no xrun. `dig.runout`
   stops writing, with no stop threshold and the core's silence behind the
-  DMA: only idle frames after the pattern. `dig.typef` (opt-in, root) turns
-  on the PIIX4's Type F timing for Audio 1's channel, which records the dig
-  path, with `piix4_type_f=1`, mutes the master, and checks every frame of a
-  second of the pattern: the driver records in single transfers there, since
-  a demand burst under Type F hung the Armada. Without a PIIX4 that names
-  the channel, or with Type F off since an earlier load, it skips.
+  DMA: only idle frames after the pattern. `dig.typef` (opt-in, root) sets
+  `piix4_type_f=1`, the PIIX4's Type F timing for Audio 1's channel, which
+  records the dig path, mutes the master, and checks every frame of a second
+  of the pattern: the driver records in single transfers there, since a
+  demand burst under Type F hung the Armada. Without a PIIX4 that names the
+  channel, it skips.
 * `dig.trim`: a tone of 997 Hz through the rate correction with
   `a2_trim_ppb` at 1000 ppm, read back as the DMA took it, one frame for
   one: the pitch has moved by the step within 0.1 ppm, with THD+N under -75

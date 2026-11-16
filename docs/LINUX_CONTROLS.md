@@ -343,10 +343,10 @@ Parameters only:
 
 Parameters only:
 
-* `piix4_type_f`: 0 to 1, default 0. 1 keeps an Intel PIIX4's Type F DMA
-  timing on Audio 1's channel as the BIOS set it, recording in single
-  transfers under it; 0 turns it off. A write fails with EBUSY while Audio 1
-  is open.
+* `piix4_type_f`: 0 to 1, default 1. 1 turns on an Intel PIIX4's Type F DMA
+  timing for Audio 1's channel where the bridge names it, recording in
+  single transfers under it; 0, and the driver's removal, turn it off. A
+  write fails with EBUSY while Audio 1 is open.
 * `a1_settle_us`: 20 to 2000, default 32. Audio 1's start held masked at
   least this long (us).
 * `a1_settle_frames`: 0 to 16, default 2. And at least this many sample

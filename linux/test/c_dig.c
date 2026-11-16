@@ -240,8 +240,7 @@ enum et_result c_dig_fmt(struct et_ctx *c, const struct et_case *k)
 // channel, which records the dig path, the output muted: every frame as
 // without it. A recording's demand bursts under Type F hung the Armada at
 // the first byte, so the driver records in single transfers there; with no
-// PIIX4 that names the channel, or Type F off since an earlier load, it
-// stays off and the case skips
+// PIIX4 that names the channel, it stays off and the case skips
 enum et_result c_dig_typef(struct et_ctx *c, const struct et_case *k)
 {
 	static const struct et_fmt f = { ET_S16, 2, 44100 };
@@ -257,8 +256,7 @@ enum et_result c_dig_typef(struct et_ctx *c, const struct et_case *k)
 		return ET_ERROR;
 	}
 	if (!strstr(proc, "Type F on Audio 1's channel: on")) {
-		et_note(c,
-			"Type F stayed off: no PIIX4 names the channel, or an earlier load turned it off");
+		et_note(c, "Type F stayed off: no PIIX4 names the channel");
 		return ET_SKIP;
 	}
 	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);

@@ -639,12 +639,13 @@ config SND_ES1869_DEFAULT_A2_BURST
 config SND_ES1869_DEFAULT_PIIX4_TYPE_F
 	int "piix4_type_f"
 	range 0 1
-	default 0
+	default 1
 	help
-	  1 keeps an Intel PIIX4's Type F DMA timing on Audio 1's
-	  channel as the BIOS set it, recording in single transfers
-	  under it; 0 turns it off. The module parameter piix4_type_f
-	  sets it at load and at runtime, through
+	  1 turns on an Intel PIIX4's Type F DMA timing for Audio 1's
+	  channel where the bridge names it, recording in single
+	  transfers under it; 0, and the driver's removal, turn it off.
+	  The module parameter piix4_type_f sets it at load and at
+	  runtime, through
 	  /sys/module/snd_es1869/parameters/piix4_type_f.
 
 config SND_ES1869_DEFAULT_DRQ_LATCH

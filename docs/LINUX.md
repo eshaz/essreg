@@ -90,12 +90,11 @@ it sets to 8Dh and 89h). Playback works with it, but a recording in demand
 transfers hung the machine at its first byte, with no message, until a power
 cycle, and one in single transfers ran cleanly.
 
-The driver therefore turns Type F off for Audio 1's channel when it loads,
-and says so in the kernel log. It stays off until the next boot, also after
-the driver is removed, since that is the safe setting for whichever driver
-uses the chip next. `piix4_type_f=1` keeps the BIOS's setting, and a
-recording then takes single transfers, as /proc/asound/card0/es1869 says.
-Audio 2's channel keeps Type F, because Audio 2 only plays.
+So the driver keeps Type F on for Audio 1's channel, and a recording takes
+single transfers under it, as the kernel log and /proc/asound/card0/es1869
+say. `piix4_type_f=0` turns it off, and so does the driver's removal, since
+the next driver may record in demand transfers, as snd-es18xx does. Audio
+2's channel keeps Type F, because Audio 2 only plays.
 
 The BIOS sets both registers where it builds the ES1869's PnP node: at every
 POST, and whenever the PnP BIOS is asked for the boot configuration, which
@@ -872,10 +871,10 @@ saved state wins over a parameter. The defaults are the Kconfig options
 * `a2_burst` ("Audio 2 DMA Burst"): 0 Single, 1 Demand 2, 2 Demand 4, 3
   Demand 8, default Demand 4. Audio 2's transfers (78h bits 7:6); ESS's
   demand 4. It takes effect at the next prepare.
-* `piix4_type_f`: 0 to 1, default 0. 1 keeps an Intel PIIX4's Type F DMA
-  timing on Audio 1's channel as the BIOS set it, recording in single
-  transfers under it; 0 turns it off. A write fails with EBUSY while Audio 1
-  is open.
+* `piix4_type_f`: 0 to 1, default 1. 1 turns on an Intel PIIX4's Type F DMA
+  timing for Audio 1's channel where the bridge names it, recording in
+  single transfers under it; 0, and the driver's removal, turn it off. A
+  write fails with EBUSY while Audio 1 is open.
 * `drq_latch` ("DRQ Latch Switch"): 0 to 1, default 1. Each DRQ held until
   its DACK (card register 25h bit 7).
 * `a1_settle_us`: 20 to 2000, default 32. Audio 1's start held masked at
