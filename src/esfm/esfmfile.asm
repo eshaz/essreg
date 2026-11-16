@@ -15,6 +15,13 @@
 ; The status is in DGROUP after the ESFMFIX counters (esfmfixd.asm), for
 ; essctl.
 ;
+; Opl3Bank= does the same for the OPL3 device (esfmopl.asm): a GENMIDI
+; lump in DMX's format, "#OPL_II#" and 175 instruments, read at device 1's
+; MODM_OPEN if its name, date or time changed, plays in place of
+; Freedoom's lump built into the driver.  Its block stays page-locked while
+; it plays, since the device reads it at interrupt time, through GS
+; (fix_opl3_sel and fix_opl3_off).
+;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
 ; Licensed under GPL Version 3.0
@@ -77,13 +84,23 @@ BS_NOMEM        equ 4           ; no memory for it
 ; DRV_ENABLE (DriverProc calls this instead of bank_load): SYSTEM.INI's
 ; settings the first time (esfmini.asm), the built-in bank, and forget the
 ; file that was read, so the next MODM_OPEN reads it again
-; DX:AX from bank_load
+; DX:AX from bank_load.  DRV_CONFIGURE and DRV_QUERYCONFIGURE come here
+; too, to the patch banks' box (esfmcfg.asm)
 fix_drv_enable:
+        cmp     word [bp+0xE],DRV_CONFIGURE     ; DriverProc's message
+        jae     fix_config
         call    fix_read_settings
         callf   bank_load, ..@FIX_S1A, 0xFFFF
         mov     word [fix_bsrc],0
         mov     word [fix_bstate],BS_NONE
         mov     byte [fix_bkey],0
+        push    ax
+        push    dx
+        call    fix_opl3_builtin        ; Freedoom's, and Opl3Bank= is read
+        pop     dx                      ; again at the next open
+        pop     ax
+        mov     word [fix_ostate],BS_NONE
+        mov     byte [fix_okey],0
         ; BetterSquareWave=0: ESS's bank (resource 1235) instead of the one
         ; bank_load put in (1234)
         test    word [fix_opts],OPT_SQUARE
@@ -136,6 +153,7 @@ fix_bank_check:
         mov     word [fix_blen],0
         jmp     .done
 .file:
+        mov     si,fix_bpath
         call    fix_open
         jnc     .opened
         mov     word [fix_bstate],BS_MISSING
@@ -149,6 +167,8 @@ fix_bank_check:
         mov     [bp-8],dx
         mov     [bp-10],cx
         ; the file read last time, not written since: nothing to do
+        mov     si,fix_bpath
+        mov     di,fix_bkey
         call    fix_same_file
         jne     .changed
         cmp     dx,[fix_bdate]
@@ -252,15 +272,14 @@ fix_bank_check:
         pop     si
         ret
 
-; ZF set if Bank= (fix_bpath) names the file read last time (fix_bkey)
+; ZF set if the path at SI (Bank=, fix_bpath) names the file read last
+; time (DI, fix_bkey)
 fix_same_file:
         push    si
         push    di
         push    es
         push    ds
         pop     es
-        mov     si,fix_bpath
-        mov     di,fix_bkey
         cmp     byte [di],0
         je      .differ
 .next:
@@ -278,7 +297,7 @@ fix_same_file:
         pop     si
         ret
 
-; open the file named in fix_bpath to read it: AX = handle, or CF
+; open the file named at SI (fix_bpath) to read it: AX = handle, or CF
 fix_open:
         push    si
         push    di
@@ -288,7 +307,6 @@ fix_open:
                                         ; returned: no "not ready" box
         xor     cx,cx
         mov     dx,0x0001               ; open, fail if missing
-        mov     si,fix_bpath
         xor     di,di
         stc
         kernel  DOS3Call
@@ -306,7 +324,6 @@ fix_open:
         mov     bx,0x2040
         xor     cx,cx
         mov     dx,0x0001
-        mov     si,fix_bpath
         kernel  DOS3Call
 .out:
         pop     di
@@ -611,6 +628,219 @@ fix_builtin:
         pop     di
         pop     si
         pop     bp
+        ret
+
+; MODM_OPEN of device 1, before ESS's code: the OPL3 device's bank file,
+; Opl3Bank=, read if its name, date or time changed, as fix_bank_check
+; reads Bank=.  Without the key, Freedoom's lump built into the driver
+; plays.  Nothing is checked while a program has a device open, as that
+; open is refused
+fix_opl3_check:
+        test    word [fix_opts],OPT_OPL3
+        jz      .busy
+        cmp     word [fix_polling],0    ; a file call of another check yielded
+        jne     .busy
+        call    fix_any_open
+        jnz     .busy
+        mov     word [fix_polling],1
+        push    bp
+        mov     bp,sp
+        push    si
+        push    di
+        sub     sp,6                    ; [bp-6] file, [bp-8] date,
+                                        ; [bp-10] time
+        inc     word [fix_ochecks]
+        push    ds
+        push    word fix_ini_sect
+        push    ds
+        push    word fix_ini_okey
+        push    ds
+        push    word fix_nul
+        push    ds
+        push    word fix_opath
+        push    word FIX_PATH
+        push    ds
+        push    word fix_ini_file
+        kernel  GetPrivateProfileString
+        or      ax,ax
+        jnz     .file
+        ; no Opl3Bank=: Freedoom's lump
+        mov     word [fix_ostate],BS_NONE
+        mov     byte [fix_okey],0
+        call    fix_opl3_builtin
+        jmp     .done
+.file:
+        mov     si,fix_opath
+        call    fix_open
+        jnc     .opened
+        mov     word [fix_ostate],BS_MISSING
+        jmp     .done
+.opened:
+        mov     [bp-6],ax
+        mov     bx,ax
+        mov     ax,0x5700               ; date and time of the last write
+        kernel  DOS3Call                ; CX = time, DX = date
+        jc      .ioerr
+        mov     [bp-8],dx
+        mov     [bp-10],cx
+        mov     si,fix_opath
+        mov     di,fix_okey
+        call    fix_same_file
+        jne     .changed
+        cmp     dx,[fix_odate]
+        jne     .changed
+        cmp     cx,[fix_otime]
+        jne     .changed
+        mov     ax,[fix_okstate]
+        mov     [fix_ostate],ax
+        jmp     .close
+.changed:
+        mov     bx,[bp-6]
+        call    fix_read                ; SI = block, CX = bytes
+        jnc     .read
+        mov     [fix_ostate],ax
+        jmp     .close
+.read:
+        mov     es,si
+        call    fix_genmidi
+        jc      .bad
+        mov     bx,si
+        call    fix_opl3_install
+        jc      .nomem
+        inc     word [fix_oloads]
+        mov     ax,BS_LOADED
+        call    .remember
+        jmp     .close
+.nomem:
+        mov     word [fix_ostate],BS_NOMEM
+        jmp     .free
+.bad:
+        ; remembered too, so it isn't read again until it changes
+        mov     ax,BS_BAD
+        call    .remember
+.free:
+        push    ds                      ; no segment register may hold it
+        pop     es
+        push    si
+        kernel  GlobalFree
+        jmp     .close
+.ioerr:
+        mov     word [fix_ostate],BS_MISSING
+.close:
+        mov     ah,0x3E
+        mov     bx,[bp-6]
+        kernel  DOS3Call
+.done:
+        lea     sp,[bp-4]
+        pop     di
+        pop     si
+        pop     bp
+        mov     word [fix_polling],0
+        push    ds
+        pop     es
+.busy:
+        ret
+
+; AX = what the file turned out to be, kept with its name, date and time
+.remember:
+        mov     [fix_ostate],ax
+        mov     [fix_okstate],ax
+        mov     ax,[bp-8]
+        mov     [fix_odate],ax
+        mov     ax,[bp-10]
+        mov     [fix_otime],ax
+        push    si
+        push    di
+        push    es
+        push    ds
+        pop     es
+        mov     si,fix_opath
+        mov     di,fix_okey
+        mov     cx,FIX_PATH
+        cld
+        rep     movsb
+        pop     es
+        pop     di
+        pop     si
+        ret
+
+; CF clear if ES:0, CX bytes, is a GENMIDI lump: "#OPL_II#" and the 175
+; instruments after it (the names after them may be missing)
+fix_genmidi:
+        cmp     cx,8 + GENMIDI_N * GI_SIZE
+        jb      .bad
+        cmp     word [es:0],'#O'
+        jne     .bad
+        cmp     word [es:2],'PL'
+        jne     .bad
+        cmp     word [es:4],'_I'
+        jne     .bad
+        cmp     word [es:6],'I#'
+        jne     .bad
+        clc
+        ret
+.bad:   stc
+        ret
+
+; the GENMIDI lump in block BX plays on the OPL3 device: page-locked, as
+; the device reads it at interrupt time, and the block of the file before
+; it freed.  Device 1 isn't open.  CF if it can't be page-locked
+fix_opl3_install:
+        push    si
+        mov     si,bx
+        push    si
+        kernel  GlobalWire
+        push    si
+        kernel  GlobalPageLock
+        or      ax,ax
+        jnz     .swap
+        push    si
+        kernel  GlobalUnWire
+        stc
+        jmp     .out
+.swap:  mov     ax,si
+        mov     bx,8                    ; the instruments, after the header
+        call    fix_opl3_use
+        mov     word [fix_osrc],1
+        clc
+.out:   pop     si
+        ret
+
+; Freedoom's lump built into the driver plays on the OPL3 device again, and
+; the block of a file is freed
+fix_opl3_builtin:
+        mov     ax,cs
+        mov     bx,opl_bank
+        call    fix_opl3_use
+        mov     word [fix_osrc],0
+        ret
+
+; the OPL3 device's instruments at AX:BX, in block AX if it isn't CS; the
+; block that played before freed
+fix_opl3_use:
+        push    si
+        mov     si,[fix_opl3_blk]
+        mov     [fix_opl3_sel],ax
+        mov     [fix_opl3_off],bx
+        xor     dx,dx
+        mov     bx,cs
+        cmp     ax,bx
+        je      .blk
+        mov     dx,ax
+.blk:   mov     [fix_opl3_blk],dx
+        or      si,si
+        jz      .out
+        cmp     si,dx
+        je      .out
+        push    si
+        kernel  GlobalPageUnlock
+        push    si
+        kernel  GlobalUnWire
+        push    ds                      ; no segment register may hold it
+        pop     es
+        push    si
+        kernel  GlobalFree
+.out:   pop     si
         ret
 
 ; ZF clear if a program has the device open (any device of device_list)

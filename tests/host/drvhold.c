@@ -9,11 +9,12 @@
  * DRV_ENABLE), then DRVM_INIT to its modMessage, which gives the driver a
  * device structure as when Windows finds the ES1869, and MODM_OPEN. The
  * open fails without ES1869.VXD, but the fixed driver reads the bank file
- * named in SYSTEM.INI before it (src/esfm/esfmfile.asm). It writes the bank
- * the driver holds to <outdir>\BEFORE.BIN, runs the command, waits for it
- * to finish, writes the bank again to AFTER.BIN and closes the driver.
- * WinExec keeps the command in this Win16 process, so it sees the driver.
- * Progress goes to <outdir>\DRVHOLD.LOG.
+ * named in SYSTEM.INI before it (src/esfm/esfmfile.asm), and with a second
+ * device, the OPL3 device, MODM_OPEN of that one reads its Opl3Bank= file
+ * the same way. It writes the bank the driver holds to <outdir>\BEFORE.BIN,
+ * runs the command, waits for it to finish, writes the bank again to
+ * AFTER.BIN and closes the driver. WinExec keeps the command in this Win16
+ * process, so it sees the driver. Progress goes to <outdir>\DRVHOLD.LOG.
  *
  * The bank is found the way ESFM.DRV finds it, from the far pointer at
  * 0012h of its data segment.
@@ -163,6 +164,11 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     sprintf(text, "MODM_OPEN %lu",
             mod(0, 3, (DWORD)(LPVOID)&user, (DWORD)(LPVOID)desc, 0));
     note(text);
+    if (mod(0, 1, 0, 0, 0) > 1) { // MODM_GETNUMDEVS
+      sprintf(text, "MODM_OPEN of device 1 %lu",
+              mod(1, 3, (DWORD)(LPVOID)&user, (DWORD)(LPVOID)desc, 0));
+      note(text);
+    }
   }
   dump("BEFORE.BIN");
 run:

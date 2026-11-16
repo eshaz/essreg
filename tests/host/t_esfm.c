@@ -1,8 +1,9 @@
 /*
- * t_esfm tests patch banks and ESFM.DRV patching on a copy of the driver.
+ * t_esfm tests patch banks and ESFM.DRV patching on a copy of the driver,
+ * and the GENMIDI lumps of the OPL3 device.
  *
  * Usage:
- *   t_esfm ESFM.DRV bank.bin workdir
+ *   t_esfm ESFM.DRV bank.bin workdir GENMIDI.lmp
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -200,21 +201,55 @@ static void test_driver(const char *drvpath, const u8 *bank, long bsize,
   free(orig);
 }
 
-int main(int argc, char **argv) {
-  long bsize;
-  u8 *bank;
+// a GENMIDI lump plays on the OPL3 device, an ESFM bank on the ESFM device,
+// raw or RIFF, and a file that is neither on none
+static void test_kind(const u8 *bank, long bsize, const u8 *lump, long lsize) {
+  u8 *buf = malloc((size_t)lsize + (size_t)bsize + 64);
+  u8 hdr[20];
 
-  if (argc != 4) {
-    printf("usage: t_esfm ESFM.DRV bank.bin workdir\n");
+  CHECK_EQ(lsize, GENMIDI_FULL);
+  CHECK_EQ(genmidi_check(lump, (u32)lsize), 0);
+  CHECK_EQ(bank_kind(lump, (u32)lsize), BANK_KIND_GENMIDI);
+  // the instruments are enough, one byte less isn't
+  CHECK_EQ(bank_kind(lump, GENMIDI_MIN), BANK_KIND_GENMIDI);
+  CHECK_EQ(bank_kind(lump, GENMIDI_MIN - 1), 0);
+  memcpy(buf, lump, (size_t)lsize);
+  buf[7] = '!';
+  CHECK_EQ(bank_kind(buf, (u32)lsize), 0);
+  CHECK_EQ(genmidi_check(buf, (u32)lsize), -1);
+  CHECK_EQ(bank_kind(bank, (u32)bsize), BANK_KIND_ESFM);
+  CHECK_EQ(genmidi_check(bank, (u32)bsize), -1);
+  bank_riff_header(hdr, (u16)bsize);
+  memcpy(buf, hdr, 20);
+  memcpy(buf + 20, bank, (size_t)bsize);
+  CHECK_EQ(bank_kind(buf, 20 + (u32)bsize), BANK_KIND_ESFM);
+  // a bank's table with nothing in it, and a file too small for one
+  memset(buf, 0, BANK_TABLE + 64);
+  CHECK_EQ(bank_kind(buf, BANK_TABLE + 64), 0);
+  CHECK_EQ(bank_kind(bank, BANK_TABLE - 1), 0);
+  free(buf);
+}
+
+int main(int argc, char **argv) {
+  long bsize, lsize;
+  u8 *bank, *lump;
+
+  if (argc != 5) {
+    printf("usage: t_esfm ESFM.DRV bank.bin workdir GENMIDI.lmp\n");
     return 2;
   }
   bank = load(argv[2], &bsize);
+  lump = load(argv[4], &lsize);
   CHECK(bank != 0);
+  CHECK(lump != 0);
   if (bank) {
     test_bank_check(bank, bsize);
     test_riff(bank, bsize);
     test_driver(argv[1], bank, bsize, argv[3]);
-    free(bank);
   }
+  if (bank && lump)
+    test_kind(bank, bsize, lump, lsize);
+  free(bank);
+  free(lump);
   return CHECK_DONE("t_esfm");
 }

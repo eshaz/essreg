@@ -53,6 +53,25 @@ int bank_check(const u8 *bank, u32 size, struct bank_info *info);
 // RIFF "Ptch" file (-1 if the RIFF file has no bank)
 int bank_unwrap(const u8 *file, u32 size, u32 *offset, u32 *length);
 
+// GENMIDI lumps of the DMX sound library, the OPL3 device's banks
+// (Opl3Bank=): "#OPL_II#", 175 instruments of 36 bytes, and their names of
+// 32 bytes, which the driver doesn't need
+#define GENMIDI_INSTR 175
+#define GENMIDI_MIN (8 + GENMIDI_INSTR * 36)
+#define GENMIDI_FULL (GENMIDI_MIN + GENMIDI_INSTR * 32)
+#define GENMIDI_FILE_MAX 0xFFF0 // the most ESFM.DRV reads of a bank file
+
+// 0 if file (size bytes) is a GENMIDI lump that ESFM.DRV's OPL3 device
+// plays, else -1
+int genmidi_check(const u8 *file, u32 size);
+
+// which device's bank a file is: BANK_KIND_ESFM, a bank that Bank= takes
+// (raw or RIFF), BANK_KIND_GENMIDI, a lump that Opl3Bank= takes, or 0, as
+// ESFM.DRV checks them when it reads the file
+#define BANK_KIND_ESFM 1
+#define BANK_KIND_GENMIDI 2
+int bank_kind(const u8 *file, u32 size);
+
 // RIFF "Ptch" header for a bank of size bytes
 // the file is this 20-byte header, the bank, then a pad byte if size is odd
 void bank_riff_header(u8 hdr[20], u16 size);

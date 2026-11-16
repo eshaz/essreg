@@ -21,10 +21,13 @@ verdicts are [`src/wchk.c`](../src/wchk.c)'s.
 * **env**: the VxD and its extension, whether ES1869.DRV and ESFM.DRV are
   the rebuilt ones and their settings, `DmaCountTwice`, `Opl3Driver`,
   `TrueSides` and `Opl3Device` from `SYSTEM.INI`, and the wave and MIDI
-  devices. `env.once` says what became of the StartUp batch. `env.midi`
-  gives the MIDI list of the Multimedia control panel, an entry a line with
-  its key, name, `Driver`, `Port`, `Active` and `DevNode`, `env.mapper` the
-  MIDI mapper's `CurrentInstrument`, and `env.card` the card's MIDI drivers,
+  devices. `env.banks` gives the patch banks that `Bank=` and `Opl3Bank=`
+  name, which the box of the patch banks writes
+  ([ESFM_BANK.md](ESFM_BANK.md#choosing-a-bank-in-the-multimedia-control-panel)).
+  `env.once` says what became of the StartUp batch. `env.midi` gives the
+  MIDI list of the Multimedia control panel, an entry a line with its key,
+  name, `Driver`, `Port`, `Active` and `DevNode`, `env.mapper` the MIDI
+  mapper's `CurrentInstrument`, and `env.card` the card's MIDI drivers,
   where essinst adds ESFMOPL3.DRV, the OPL3 device's driver
   ([ESFM_OPL3.md](ESFM_OPL3.md#the-multimedia-control-panel)).
 * **opl.list**: with `Opl3Device=2`, which essinst writes with the driver,

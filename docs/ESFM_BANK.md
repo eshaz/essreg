@@ -13,7 +13,9 @@ all of this applies to it too, although its built-in bank is not ESS's
 `bnk_com.bin` but `esfm_patch_banks/bnk_com_better_square_wave.bin`. The
 fixed driver can also play a bank file straight from disk and reads the file
 again when its date changes, as [Bank file](#bank-file-buildesfmdrv)
-describes.
+describes, and its OPL3 device plays a GENMIDI bank file in the same way.
+The Settings button of the Multimedia control panel chooses both files
+([below](#choosing-a-bank-in-the-multimedia-control-panel)).
 
 ## Bank format
 
@@ -240,3 +242,85 @@ read, so the next open reads the file again. The rest of segment 3 is
 unchanged, so `esfmpat` works with this driver too. The bank file's state is
 in the `ESFMFIX` block, which has held it since version 2, and essctl reads
 it there.
+
+## Choosing a bank in the Multimedia control panel
+
+With the rebuilt drivers, the Multimedia control panel chooses the bank of
+each of the two MIDI devices, the ESFM device and the OPL3 device
+([ESFM_OPL3.md](ESFM_OPL3.md)):
+
+1. Open Control Panel > *Multimedia* > *Devices*, and open *MIDI Devices and
+   Instruments*.
+2. Select the ESFM device's entry, *MIDI for Internal ESFM Synthesis*, or
+   the OPL3 device's, *MIDI for Internal OPL3 FM Synthesis*, and click
+   *Properties*.
+3. Click *Settings*. The box *MIDI patch banks* opens, with a list for each
+   device and the focus on the list of the device whose Settings opened it.
+4. Choose a bank in each list and click OK.
+
+OK writes the choices that changed to `[ESFM.DRV]` in `SYSTEM.INI`: `Bank=`
+for the ESFM device and `Opl3Bank=` for the OPL3 device, each with the
+file's full path. The driver's own bank takes the key away. Cancel changes
+nothing. A device plays its new bank from the next time a program opens it,
+as `Bank=` always did, so Windows needn't restart, but a program that has
+the device open keeps the bank it has until it closes the device.
+
+Each list holds:
+* the driver's own bank first: the square-wave bank or ESS's bank
+  (`BetterSquareWave=0`) for the ESFM device, and Freedoom's instruments for
+  the OPL3 device;
+* the files of the `ESFMBANK` folder in Windows' `SYSTEM` folder
+  (`C:\WINDOWS\SYSTEM\ESFMBANK`) that are banks of the device's kind;
+* the file that the device's key names, by its path, if it is somewhere
+  else;
+* the files that *Browse* picks.
+
+An ESFM bank is a raw bank or a RIFF `Ptch` file, which the box checks with
+the driver's rules (`bank_check`), and an OPL3 bank is a GENMIDI lump, the
+format of Doom's `GENMIDI` lump and of `.OP2` files: `#OPL_II#` and 175
+instruments of 36 bytes, the 128 General MIDI programs and the drums of
+notes 35 to 81 ([ESFM_OPL3.md](ESFM_OPL3.md#what-it-plays)). *Browse* takes
+only a file of the list's kind. With `Opl3Device=0` the OPL3 device isn't
+there, and its list is gray.
+
+essinst puts the box, `ESFMCFG.DLL`, in the `SYSTEM` folder with the
+drivers, and the banks of its `BANKS` folder in `SYSTEM\ESFMBANK`, where
+more banks can go:
+* `ESS.BIN`, ESS's bank (`esfm_patch_banks/bnk_com.bin`);
+* `ESSNT4.BIN`, the bank of ESS's Windows NT 4.0 driver (`bnk_NT4.bin`);
+* `SQUARE.BIN`, the square-wave bank (`bnk_com_better_square_wave.bin`).
+
+`essinst /restore` takes the box out with the rebuilt drivers and leaves the
+banks. esswchk's report gives the two keys (`env.banks`), and essctl's *ESFM
+patch bank* page and `essctl /dump` show what each device's last open found,
+the OPL3 device's on an `OPL3 bank file:` line.
+
+### How the Settings button works
+
+The Multimedia control panel asks a MIDI driver's `DriverProc` whether it
+has settings with `DRV_QUERYCONFIGURE`, and gives the *Settings* button
+`DRV_CONFIGURE` with the panel's window. ESS's driver answers both with 0,
+so the button is gray. The fixed `ESFM.DRV` answers the query with 1 while
+`ESFMCFG.DLL` can be found, through `OpenFile`, and at `DRV_CONFIGURE` it
+loads the DLL, calls its `BankDialog` with the panel's window and the
+device, and frees the DLL again
+([`src/esfm/esfmcfg.asm`](../src/esfm/esfmcfg.asm)). Both messages go
+through ESS's code for `DRV_ENABLE` in segment 3, whose far call reaches the
+fixed code, so that segment keeps its length. `ESFMOPL3.DRV`, the OPL3
+device's driver, does the same for its device. `BankSettings=0` turns the
+button off in both ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv)).
+
+The box is a 16-bit Windows DLL
+([`src/win/esfmcfg.c`](../src/win/esfmcfg.c)). It checks the files with
+`bank_kind` ([`src/esfmbank.c`](../src/esfmbank.c)), the checks of both
+drivers, and it reads and writes the keys with Windows' profile functions,
+which the drivers read them with at the next open.
+
+The OPL3 device reads `Opl3Bank=` at its `MODM_OPEN` as the ESFM device
+reads `Bank=`, with the same rules for the file's date and for a missing or
+broken file ([`src/esfm/esfmfile.asm`](../src/esfm/esfmfile.asm),
+`fix_opl3_check`). It keeps the instruments in a block of their own, wired
+and page-locked, because it reads them at interrupt time, and it frees the
+block it played before only while no program has a device open. Without the
+key, the device plays the instruments built into the driver. The state of
+the file is in the `ESFMFIX` block from its version 6, after `fix_opts`.

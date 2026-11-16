@@ -31,7 +31,7 @@ sed -i -e 's#\\#/#g' -e 's/ libf cstart_t//' -e 's/\r$//' ./*.mk1 Makefile
 export WATCOM="$OW" PATH="$WORK/bin:$OW/binl64:$PATH" INCLUDE="$OW/h"
 wmake -h "$@"
 mkdir -p "$ROOT/out/ow2"
-for f in ./*.exe ./*.com; do
+for f in ./*.exe ./*.com ./*.dll; do
   [ -e "$f" ] && cp "$f" "$ROOT/out/ow2/"
 done
 ls -l "$ROOT/out/ow2"

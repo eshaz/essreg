@@ -522,10 +522,11 @@ one queues the messages instead, and it fixes more:
 * Its built-in patch bank is
   [`bnk_com_better_square_wave.bin`](esfm_patch_banks), and it carries ESS's
   bank too.
-* It can play a patch bank straight from a file named in `SYSTEM.INI`. It
-  reads the file when a program opens the MIDI device, if the file's date or
-  time has changed
-  ([docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv)).
+* It can play a patch bank straight from a file named in `SYSTEM.INI`, one
+  for each device, which the Settings button of the Multimedia control panel
+  chooses. It reads the file when a program opens the device, if the file's
+  date or time has changed
+  ([docs/ESFM_BANK.md](docs/ESFM_BANK.md#choosing-a-bank-in-the-multimedia-control-panel)).
 * It has a second MIDI device, *OPL3 FM Synthesis*, which plays General MIDI
   on the chip's OPL3 compatibility mode with Freedoom's instruments, the way
   an OPL3 card plays Doom's music. The program that opens it also has the
@@ -783,9 +784,10 @@ Usage: esfmpat "c:\path\to\esfm.drv" "c:\path\to\patch.bin"
 
 essinst installs the rebuilt drivers and restarts Windows. Copy it to the
 Windows 95 or 98 machine together with `build\ES1869.VXD`,
-`build\ES1869.DRV` and `build\ESFM.DRV`, with the four files in one folder,
-and run it. It lists what it will do and asks once. When you press OK, it
-restarts Windows, and the rebuilt drivers are in place when Windows is back.
+`build\ES1869.DRV`, `build\ESFM.DRV`, `build\ESFMOPL3.DRV`,
+`build\ESFMCFG.DLL` and the `build\BANKS` folder, all in one folder, and run
+it. It lists what it will do and asks once. When you press OK, it restarts
+Windows, and the rebuilt drivers are in place when Windows is back.
 
 Windows has the drivers open while it runs, so essinst doesn't replace them
 itself. It copies each new driver next to the old one in
@@ -818,7 +820,10 @@ devices. So essinst copies `ESFMOPL3.DRV`, the OPL3 device's own driver,
 next to the others and adds it to the card's MIDI drivers, and the
 Multimedia control panel lists *MIDI for Internal OPL3 FM Synthesis* once
 Windows restarts. `/restore` takes it out again
-([docs/ESFM_OPL3.md](docs/ESFM_OPL3.md#the-multimedia-control-panel)).
+([docs/ESFM_OPL3.md](docs/ESFM_OPL3.md#the-multimedia-control-panel)). It
+also puts `ESFMCFG.DLL`, the box of the patch banks that the drivers'
+Settings button opens, in the `SYSTEM` folder, and the banks of its `BANKS`
+folder in `SYSTEM\ESFMBANK`, where the box lists them.
 
 These switches change what it does:
 * `/restore` puts ESS's drivers back from the `.ORG` copies in the same way.
@@ -852,7 +857,8 @@ and changes nothing if it is another one.
 Copy these files to `C:\ESSREG` on the Windows 98 machine, from a floppy, a
 CD or a network share:
 * `build\essinst.exe`, `build\ES1869.VXD`, `build\ES1869.DRV`,
-  `build\ESFM.DRV` and `build\ESFMOPL3.DRV`
+  `build\ESFM.DRV`, `build\ESFMOPL3.DRV`, `build\ESFMCFG.DLL` and the
+  `build\BANKS` folder
 * `build\essctl.exe`
 * `build\GMCHECK.MID`
 * `esfm_patch_banks\bnk_com.bin` and `esfm_patch_banks\bnk_NT4.bin`
@@ -887,7 +893,11 @@ names.
 
 The driver reads the file when a program opens the MIDI device, if the
 file's date or time has changed since it last read it
-([docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv)).
+([docs/ESFM_BANK.md](docs/ESFM_BANK.md#bank-file-buildesfmdrv)). The
+Multimedia control panel chooses the banks of both devices too: *Devices* >
+*MIDI Devices and Instruments* > the device's entry > *Properties* >
+*Settings*
+([docs/ESFM_BANK.md](docs/ESFM_BANK.md#choosing-a-bank-in-the-multimedia-control-panel)).
 
 ### Testing
 

@@ -644,9 +644,13 @@ Each driver reads its section once, when it starts:
 * `ESFM.DRV` reads it at its first `DRV_ENABLE`.
 
 A change therefore takes effect when Windows starts again. `ESFM.DRV`'s
-`Bank=` is the exception, because it isn't a switch: it names a bank file,
-and the driver reads the key again every time a program opens the MIDI
-device ([ESFM_BANK.md](ESFM_BANK.md#bank-file-buildesfmdrv)).
+`Bank=` and `Opl3Bank=` are the exceptions, because they aren't switches:
+each names a bank file, of the ESFM device and of the OPL3 device, and the
+driver reads the key again every time a program opens that device
+([ESFM_BANK.md](ESFM_BANK.md#bank-file-buildesfmdrv)). The box of the patch
+banks, which the Settings button of the Multimedia control panel opens,
+writes them
+([ESFM_BANK.md](ESFM_BANK.md#choosing-a-bank-in-the-multimedia-control-panel)).
 
 The VxD can read SYSTEM.INI only while Windows starts, because VMM's profile
 services are gone afterwards. A VxD that is loaded later, for a card found
@@ -904,6 +908,16 @@ its default and by what the key does at 1, and the sentence that begins
   (`Opl3Driver` above), and keeps both devices for the session otherwise.
   With 0, the driver has ESS's one device, and essinst takes ESFMOPL3.DRV
   out again.
+* **BankSettings** (default 1). The Settings button in the properties of the
+  driver in the Multimedia control panel (*Devices*, *MIDI Devices and
+  Instruments*) opens the box of the patch banks, `ESFMCFG.DLL`, where the
+  banks of both devices are chosen, while that DLL is there. ESFMOPL3.DRV
+  reads the key too. With 0, the button stays gray.
+
+`Opl3Bank=` names the OPL3 device's bank, a GENMIDI lump such as Doom's
+(`#OPL_II#` and 175 instruments), which the device reads at its open as the
+ESFM device reads `Bank=`. Without it, the device plays Freedoom's
+instruments, which the driver carries.
 
 With every key at 0, the driver writes to the chip's ports exactly as ESS's
 driver does, which `SettingsTest` in `tests/test_esfmdrv.py` checks by

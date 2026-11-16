@@ -24,8 +24,16 @@ jt_drvmsg:
         dw L3_0096                                      ; 0022
         dw L3_0066                                      ; 0024
         dw L3_0096                                      ; 0026
+%if ESFM_FIX
+        ; DRV_CONFIGURE and DRV_QUERYCONFIGURE: to the far call of the
+        ; DRV_ENABLE code, which sends them to the patch banks' box
+        ; (fix_drv_enable, esfmcfg.asm)
+        dw L3_0057                                      ; 0028
+        dw L3_0057                                      ; 002A
+%else
         dw L3_006D                                      ; 0028
         dw L3_006D                                      ; 002A
+%endif
         dw L3_0096                                      ; 002C
         dw L3_006D                                      ; 002E
         dw L3_003A                                      ; 0030
@@ -49,7 +57,8 @@ L3_003A:
 L3_0057:
 %if ESFM_FIX
         ; DRV_ENABLE: the built-in bank, and the bank file is read again at
-        ; the next MODM_OPEN (esfmfile.asm)
+        ; the next MODM_OPEN (esfmfile.asm); DRV_CONFIGURE and
+        ; DRV_QUERYCONFIGURE: the patch banks' box (esfmcfg.asm)
         callf fix_drv_enable, FIX_S3A, 0xFFFF           ; 0057 far seg1
 %else
         callf bank_load, R3_005A, R3_0069               ; 0057 far seg3

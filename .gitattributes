@@ -10,6 +10,7 @@
 *.sh text eol=lf
 *.pdf binary
 *.bin binary
+*.BIN binary
 *.ico binary
 *.res binary
 *.VXD binary
@@ -19,4 +20,6 @@
 *.EXE binary
 *.exe binary
 *.com binary
+*.dll binary
+*.DLL binary
 driver/es1869f/** binary

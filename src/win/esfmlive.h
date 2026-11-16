@@ -96,7 +96,16 @@ struct esfm_diag {
   u16 opts;       // fixed driver 4 and up: ESFM_OPT_*, the changes on
   int opl3;       // fixed driver 5 and up: the OPL3 device (device 1) is
                   // open, and the chip is its program's or in OPL3 mode
-  char why[96];   // why nothing could be read
+  // fixed driver 6 and up: the OPL3 device's bank file, Opl3Bank=, as the
+  // file_* fields (no size: a GENMIDI lump's instruments have one)
+  u16 opl3_state;
+  u16 opl3_used;
+  u16 opl3_loads;
+  u16 opl3_checks;
+  u16 opl3_date;
+  u16 opl3_time;
+  char opl3_file[128];
+  char why[96]; // why nothing could be read
 };
 
 // the fixed driver's SYSTEM.INI [ESFM.DRV] settings (src/esfm/esfmini.asm),
@@ -114,6 +123,7 @@ struct esfm_diag {
 #define ESFM_OPT_SIDES 0x0400    // TrueSides: left on the left output
 #define ESFM_OPT_OPL3 0x0800     // Opl3Device: device 1 on OPL3 mode
 #define ESFM_OPT_OPL3_DRV 0x1000 // Opl3Device=2: device 1 is ESFMOPL3.DRV's
+#define ESFM_OPT_SETTINGS 0x2000 // BankSettings: the box of the patch banks
 #define ESFM_OPT_READ 0x8000     // read from SYSTEM.INI (at DRV_ENABLE)
 
 // file_state: what the last MODM_OPEN found

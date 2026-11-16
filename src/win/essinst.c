@@ -30,6 +30,13 @@
  * all of that back, with Opl3Device=1, when ESS's driver comes back, and
  * when Opl3Device=0 turns the device off.
  *
+ * With the rebuilt ESFM.DRV, the Settings button of the two MIDI drivers
+ * in the Multimedia control panel opens ESFMCFG.DLL's box of the patch
+ * banks (src/win/esfmcfg.c), so essinst copies the DLL into the SYSTEM
+ * folder too, and the bank files of its BANKS folder into the SYSTEM
+ * folder's ESFMBANK, where the box lists them. ESS's driver takes the DLL
+ * out again, and leaves the banks.
+ *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
  * Licensed under GPL Version 3.0
@@ -37,6 +44,8 @@
 
 #include <windows.h>
 
+#include <direct.h>
+#include <dos.h>
 #include <io.h>
 #include <stdio.h>
 #include <string.h>
@@ -75,6 +84,11 @@ static char srcdir[DI_PATH], sysdir[DI_PATH];
 // the OPL3 device's driver for the Multimedia control panel
 static const struct di_extra opl3_drv = {"ESFMOPL3.DRV", "ESFMOPL3.NEW",
                                          "ESFMOPL3.$$$"};
+// and the box of the patch banks that the Settings button of the MIDI
+// drivers opens
+static const struct di_extra cfg_dll = {"ESFMCFG.DLL", "ESFMCFG.NEW",
+                                        "ESFMCFG.$$$"};
+static int banks; // the box and the banks go in with the drivers
 
 // a line for the log
 static void log_only(const char *text) {
@@ -195,6 +209,61 @@ static int opl3_file(int put, int set, char *why) {
                    "SYSTEM folder."
                  : "ESFMOPL3.DRV leaves the SYSTEM folder.");
   return r;
+}
+
+// ESFMCFG.DLL in the SYSTEM folder with the rebuilt ESFM.DRV (put), and
+// out of it with ESS's: as opl3_file
+static int cfg_file(int put, int set, char *why) {
+  int loaded = GetModuleHandle("ESFMCFG") != 0, r;
+
+  r = put ? di_put_extra(&cfg_dll, srcdir, sysdir, loaded, set, &ops, why)
+          : di_drop_extra(&cfg_dll, sysdir, loaded, set, &ops, why);
+  if (r > 0 && !set)
+    plan_add(put ? "ESFMCFG.DLL, the box of the MIDI patch banks, goes in "
+                   "the SYSTEM folder."
+                 : "ESFMCFG.DLL leaves the SYSTEM folder.");
+  return r;
+}
+
+// the bank files of essinst's BANKS folder into the SYSTEM folder's
+// ESFMBANK, which is made if needed, each as its .$$$ first, checked, then
+// renamed. 1 if one goes there (or would go), 0 if none, -1 on failure
+static int bank_files(int set, char *why) {
+  static char from[DI_PATH], to[DI_PATH], spec[DI_PATH];
+  struct find_t ff;
+  struct di_extra x;
+  int r, any = 0;
+
+  di_path(from, srcdir, "BANKS");
+  di_path(to, sysdir, "ESFMBANK");
+  di_path(spec, from, "*.*");
+  if (_dos_findfirst(spec, _A_NORMAL | _A_RDONLY | _A_ARCH, &ff))
+    return 0;
+  if (set && access(to, 0) && mkdir(to)) {
+    _bprintf(why, DI_WHY, "%.*s can't be made.", DI_PATH, to);
+    log_line(0, why);
+    return -1;
+  }
+  do {
+    x.name = x.staged = ff.name;
+    x.temp = "ESFMBANK.$$$";
+    r = di_put_extra(&x, from, to, 0, set, &ops, why);
+    if (r < 0)
+      return r;
+    any |= r;
+  } while (!_dos_findnext(&ff));
+  if (any && !set)
+    plan_add("The patch banks of its BANKS folder go in SYSTEM\\ESFMBANK, "
+             "where the box lists them.");
+  return any;
+}
+
+// the box and the banks with the rebuilt ESFM.DRV (put), the box out with
+// ESS's: 1 if something changes (or would), -1 if something can't
+static int banks_apply(int put, int set, char *why) {
+  int c = cfg_file(put, set, why), b = put && c >= 0 ? bank_files(set, why) : 0;
+
+  return c < 0 || b < 0 ? -1 : c || b;
 }
 
 // [ESFM.DRV] Opl3Device=2 in SYSTEM.INI while the card has ESFMOPL3.DRV
@@ -323,7 +392,8 @@ static int failed(const char *why) {
 int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   static char src[DI_PATH], sys[DI_PATH], win[DI_PATH], path[DI_PATH];
   static char why[DI_WHY], text[TEXT], args[128];
-  int restore = 0, restart = 1, n, m, o, f, k, has = 0, names = DI_NAMES_ESS;
+  int restore = 0, restart = 1, n, m, o, f, k, c, midi, has = 0;
+  int names = DI_NAMES_ESS;
   char *p;
 
   (void)prev;
@@ -377,6 +447,14 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
                 "ESFM.DRV's device 1, without an entry in the MIDI list.");
     opl3 = 0;
   }
+  // the box of the patch banks, with a rebuilt ESFM.DRV that opens it
+  banks = di_rebuilt_has(2, restore ? 0 : src, sys, "BankSettings");
+  di_path(path, src, cfg_dll.name);
+  if (banks && access(path, 0)) {
+    log_line(0, "ESFMCFG.DLL isn't next to essinst: the Settings button of "
+                "the MIDI drivers has no box of the patch banks.");
+    banks = 0;
+  }
 
   // what there is to do
   collect = 1;
@@ -386,10 +464,12 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
   o = n >= 0 ? midi_list(0, &has) : 0;
   f = n >= 0 ? opl3_file(has, 0, why) : 0;
   k = n >= 0 && f >= 0 ? opl3_key(has, 0) : 0;
+  c = n >= 0 && f >= 0 ? banks_apply(banks, 0, why) : 0;
   collect = 0;
-  if (n < 0 || f < 0)
+  if (n < 0 || f < 0 || c < 0)
     return failed(why);
-  o = o || f || k;
+  midi = o || f || k;
+  o = midi || c;
   if (!n && !m && !o) {
     box(restore ? "ESS's drivers are in place already."
                 : "The rebuilt drivers are installed already.",
@@ -403,9 +483,9 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
              "essinst brings Windows' devices in line with the drivers in "
              "place:\n\n%s\n%s",
              plan,
-             o ? "The MIDI list's change takes effect when Windows starts "
-                 "again."
-               : "Windows doesn't restart.");
+             midi ? "The MIDI list's change takes effect when Windows starts "
+                    "again."
+                  : "Windows doesn't restart.");
     if (box(text, MB_OKCANCEL | MB_ICONQUESTION) != IDOK) {
       log_line(0, "Cancelled: nothing was changed.");
       return 0;
@@ -417,6 +497,7 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     if (o) {
       log_line(0, "The OPL3 device's driver and the MIDI list:");
       opl3_apply(has);
+      banks_apply(banks, 1, why);
     }
     box("Windows' devices are in line with the drivers.",
         MB_OK | MB_ICONINFORMATION);
@@ -442,6 +523,7 @@ int PASCAL WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     return failed(why);
   prefer(names, 1);
   opl3_apply(has);
+  banks_apply(banks, 1, why);
   WritePrivateProfileString(0, 0, 0, ini);
   if (!restart) {
     log_line(0, "Done: the drivers go in place at the next restart.");

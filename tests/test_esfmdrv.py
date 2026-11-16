@@ -105,6 +105,19 @@ class RebuildTest(unittest.TestCase):
                              "build/ESFMOPL3.DRV is out of date: run "
                              "tools/build_esfm.py")
 
+    def test_banks_folder(self):
+        # the banks that essinst puts in SYSTEM\\ESFMBANK, where the box of
+        # the patch banks lists them: esfm_patch_banks under short names
+        names = {"ESS.BIN": "bnk_com.bin", "ESSNT4.BIN": "bnk_NT4.bin",
+                 "SQUARE.BIN": "bnk_com_better_square_wave.bin"}
+        folder = os.path.join(ROOT, "build", "BANKS")
+        self.assertEqual(sorted(os.listdir(folder)), sorted(names))
+        for name, orig in names.items():
+            with open(os.path.join(folder, name), "rb") as f, \
+                    open(os.path.join(ROOT, "esfm_patch_banks", orig),
+                         "rb") as g:
+                self.assertEqual(f.read(), g.read(), name)
+
     def test_opl3_driver(self):
         ne = NEFile(builds()["opl3"])
         self.assertEqual(ne.module_name, "ESFMOPL3")
@@ -617,8 +630,8 @@ class SustainTest(unittest.TestCase):
 
     def test_status_block_version(self):
         # 3 was an earlier build's pedal times, 4 added the settings, 5
-        # the OPL3 device
-        self.assertEqual(self.emu("fixed").fix_state()["version"], 5)
+        # the OPL3 device, 6 its bank file
+        self.assertEqual(self.emu("fixed").fix_state()["version"], 6)
 
 
 # General MIDI (esfmgm.asm): device fields, esfmdev.inc
@@ -1325,9 +1338,11 @@ class BankFileTest(unittest.TestCase):
 # SYSTEM.INI [ESFM.DRV] keys, in the order of their fix_opts bits
 SETTINGS = ["QueueWhileBusy", "SilenceOnClose", "PedalRelease", "Vibrato",
             "Tuning", "ResetControllers", "LivePan", "SysEx",
-            "RunningStatus", "BetterSquareWave", "TrueSides", "Opl3Device"]
-OPT = {k: 1 << i for i, k in enumerate(SETTINGS)}
-OPT_DEFAULT, OPT_READ = 0x0FFF, 0x8000
+            "RunningStatus", "BetterSquareWave", "TrueSides", "Opl3Device",
+            "BankSettings"]
+OPT = {k: 1 << i for i, k in enumerate(SETTINGS[:12])}
+OPT["BankSettings"] = 0x2000    # after OPT_OPL3_DRV
+OPT_DEFAULT, OPT_READ = 0x2FFF, 0x8000
 OPT_OPL3_DRV = 0x1000           # Opl3Device=2: device 1 is ESFMOPL3.DRV's
 GM_ON = bytes([0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7])
 
@@ -1589,11 +1604,12 @@ MOM_OPEN = 0x3C7
 DRVM_INIT, DRVM_ENABLE = 0x64, 0x67
 
 
-def genmidi():
-    """Freedoom's GENMIDI: 175 instruments, each {flags, fine, fixed,
-    voices: [{mod, fb, car, offset}] * 2}"""
-    with open(GENMIDI, "rb") as f:
-        d = f.read()
+def genmidi(d=None):
+    """Freedoom's GENMIDI, or the lump d: 175 instruments, each {flags,
+    fine, fixed, voices: [{mod, fb, car, offset}] * 2}"""
+    if d is None:
+        with open(GENMIDI, "rb") as f:
+            d = f.read()
     out = []
     for i in range(175):
         r = d[8 + 36 * i:8 + 36 * (i + 1)]
@@ -1801,8 +1817,9 @@ class Opl3Test(unittest.TestCase):
 
     # -- notes ---------------------------------------------------------------
 
-    def check_note(self, e, program, key, vel=127, vol=100, pan=0x30):
-        ins = self.bank[program]
+    def check_note(self, e, program, key, vel=127, vol=100, pan=0x30,
+                   bank=None):
+        ins = (bank or self.bank)[program]
         voices = self.keyed(e, 0, key)
         self.assertEqual(len(voices), 2 if ins["flags"] & 4 else 1)
         for v in voices:
@@ -1888,6 +1905,154 @@ class Opl3Test(unittest.TestCase):
                      ini={"PedalRelease": "0"})
         self.assertTrue(self.keyed(e, 0, 60))
         self.assertEqual(e.dev8(DEV_OPL_CHAN + 4), 1)
+
+    # -- the bank file, Opl3Bank= (esfmfile.asm) -----------------------------
+
+    LUMP = r"C:\BANKS\DOOM.OP2"
+
+    def lump(self, mark, data=None):
+        """Freedoom's GENMIDI with each instrument's first modulator 20h
+        set to mark, and its parse"""
+        if data is None:
+            with open(GENMIDI, "rb") as f:
+                data = f.read()
+        d = bytearray(data)
+        for i in range(175):
+            d[8 + 36 * i + 4] = mark
+        return bytes(d), genmidi(bytes(d))
+
+    def bank_emu(self, files, key=LUMP, ini=None):
+        """the driver enabled with Opl3Bank=key (None: no key) and files"""
+        e = self.enabled(ini=ini)
+        e.files.update({k.upper(): v for k, v in files.items()})
+        if key is not None:
+            e.ini[("esfm.drv", "opl3bank")] = key
+        return e
+
+    def blk(self, e):
+        """the block of the OPL3 bank that plays, 0 for the built-in one"""
+        return e.fix_state()["oblk"]
+
+    def test_bank_file(self):
+        data, bank = self.lump(0x21)
+        e = self.bank_emu({self.LUMP: data})
+        self.assertEqual(e.opens, [])                   # not at enable
+        self.assertEqual(e.try_open(1), 0)
+        st = e.fix_state()
+        self.assertEqual((st["ostate"], st["osrc"], st["oloads"],
+                          st["ochecks"], st["opath"]),
+                         (BS_LOADED, 1, 1, 1, self.LUMP))
+        self.assertIn(("SYSTEM.INI", "ESFM.DRV", "Opl3Bank"), e.ini_reads)
+        blk = self.blk(e)
+        self.assertEqual(e.plocks.get(blk), 1)          # read at interrupts
+        p = self.double[0]
+        for m in (p << 8 | 0xC0, 0x7F3C90):
+            self.assertEqual(e.data(m), 0)
+        self.check_note(e, p, 60, bank=bank)
+        self.assertEqual(e.close(), 0)
+        # the same file again: checked, not read
+        self.assertEqual(e.try_open(1), 0)
+        st = e.fix_state()
+        self.assertEqual((st["oloads"], st["ochecks"]), (1, 2))
+        self.assertEqual(self.blk(e), blk)
+        self.assertEqual(e.close(), 0)
+        # saved again: read, and the old block freed, unlocked first
+        data2, bank2 = self.lump(0x22)
+        e.files[self.LUMP.upper()] = data2
+        e.touch(self.LUMP.upper())
+        self.assertEqual(e.try_open(1), 0)
+        self.assertEqual(e.fix_state()["oloads"], 2)
+        self.assertNotIn(blk, e.gblocks)
+        for m in (p << 8 | 0xC0, 0x7F3C90):
+            self.assertEqual(e.data(m), 0)
+        self.check_note(e, p, 60, bank=bank2)
+        self.assertEqual(e.close(), 0)
+        # the key gone: Freedoom's lump, and the file's block freed
+        blk = self.blk(e)
+        del e.ini[("esfm.drv", "opl3bank")]
+        self.assertEqual(e.try_open(1), 0)
+        st = e.fix_state()
+        self.assertEqual((st["ostate"], st["osrc"], self.blk(e)),
+                         (BS_NONE, 0, 0))
+        self.assertNotIn(blk, e.gblocks)
+        for m in (p << 8 | 0xC0, 0x7F3C90):
+            self.assertEqual(e.data(m), 0)
+        self.check_note(e, p, 60)
+        self.assertEqual(e.close(), 0)
+        self.assertEqual((e.freed_locked, e.stale, e.handles), ([], [], {}))
+
+    def test_bank_file_names(self):
+        # the lump of a WAD keeps its names after the instruments, and a
+        # file without them plays all the same
+        data, bank = self.lump(0x23)
+        for size in (len(data), 8 + 175 * 36):
+            with self.subTest(size=size):
+                e = self.bank_emu({self.LUMP: data[:size]})
+                self.assertEqual(e.try_open(1), 0)
+                self.assertEqual(e.fix_state()["ostate"], BS_LOADED)
+                p = self.single[0]
+                for m in (p << 8 | 0xC0, 0x7F3C90):
+                    self.assertEqual(e.data(m), 0)
+                self.check_note(e, p, 60, bank=bank)
+
+    def test_bank_file_refused(self):
+        # a file that isn't a GENMIDI lump, or can't be read: Freedoom's
+        # lump plays, and a bad file isn't read again until it changes
+        data, _bank = self.lump(0x24)
+        for name, files, state in (
+                ("missing", {}, BS_MISSING),
+                ("header", {self.LUMP: b"#OPL_IX#" + data[8:]}, BS_BAD),
+                ("short", {self.LUMP: data[:8 + 174 * 36]}, BS_BAD),
+                ("tiny", {self.LUMP: data[:100]}, BS_BAD)):
+            with self.subTest(name):
+                e = self.bank_emu(files)
+                self.assertEqual(e.try_open(1), 0)
+                st = e.fix_state()
+                self.assertEqual((st["ostate"], st["osrc"], self.blk(e)),
+                                 (state, 0, 0))
+                p = self.single[0]
+                for m in (p << 8 | 0xC0, 0x7F3C90):
+                    self.assertEqual(e.data(m), 0)
+                self.check_note(e, p, 60)
+                self.assertEqual(e.close(), 0)
+                self.assertEqual(e.try_open(1), 0)
+                st = e.fix_state()
+                self.assertEqual((st["ostate"], st["oloads"], st["ochecks"]),
+                                 (state, 0, 2))
+                self.assertEqual((e.freed_locked, e.stale, e.handles),
+                                 ([], [], {}))
+
+    def test_bank_file_only_for_device_1(self):
+        # device 0's open reads Bank= only, and Opl3Device=0 reads neither
+        # the key nor the file
+        data, _bank = self.lump(0x25)
+        e = self.bank_emu({self.LUMP: data})
+        self.assertEqual(e.try_open(0), 0)
+        self.assertNotIn(("SYSTEM.INI", "ESFM.DRV", "Opl3Bank"), e.ini_reads)
+        self.assertEqual(e.fix_state()["ochecks"], 0)
+        e = self.bank_emu({self.LUMP: data}, ini={"Opl3Device": "0"})
+        self.assertEqual(e.try_open(1), 2)              # BADDEVICEID
+        self.assertEqual(e.fix_state()["ochecks"], 0)
+
+    def test_bank_file_and_enable(self):
+        # DRV_ENABLE puts Freedoom's lump back, and the next open reads
+        # the file again
+        data, bank = self.lump(0x26)
+        e = self.bank_emu({self.LUMP: data})
+        self.assertEqual(e.try_open(1), 0)
+        blk = self.blk(e)
+        self.assertEqual(e.close(), 0)
+        self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
+        st = e.fix_state()
+        self.assertEqual((st["osrc"], self.blk(e)), (0, 0))
+        self.assertNotIn(blk, e.gblocks)
+        self.assertEqual(e.try_open(1), 0)
+        self.assertEqual(e.fix_state()["oloads"], 2)
+        p = self.single[0]
+        for m in (p << 8 | 0xC0, 0x7F3C90):
+            self.assertEqual(e.data(m), 0)
+        self.check_note(e, p, 60, bank=bank)
+        self.assertEqual((e.freed_locked, e.stale), ([], []))
 
     def test_bend(self):
         p = self.single[0]
@@ -2069,16 +2234,82 @@ MODM_GETNUMDEVS = 1
 
 
 @unittest.skipUnless(HAVE_UNICORN, "needs the unicorn module")
+class ConfigureTest(unittest.TestCase):
+    """The Multimedia control panel's Settings button of the driver:
+    DRV_QUERYCONFIGURE and DRV_CONFIGURE open ESFMCFG.DLL's box of the
+    patch banks for device 0 (src/esfm/esfmcfg.asm)"""
+
+    def enabled(self, which="fixed", ini=None):
+        e = ESFMEmu(builds()[which])
+        for key, value in (ini or {}).items():
+            e.ini[("esfm.drv", key.lower())] = value
+        self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
+        return e
+
+    def test_query(self):
+        # the button is there when the DLL can be found
+        e = self.enabled()
+        self.assertEqual(e.driverproc(DRV_QUERYCONFIGURE), 1)
+        self.assertEqual(e.file_lookups, [("ESFMCFG.DLL", 0x4000)])
+        e.cfg_dll = False
+        self.assertEqual(e.driverproc(DRV_QUERYCONFIGURE), 0)
+        self.assertEqual(e.libraries, {})
+
+    def test_configure(self):
+        # the box gets the panel's window and device 0, and the driver
+        # answers DRVCNF_OK or DRVCNF_CANCEL as the box ended (ESS's
+        # DRV_ENABLE code, which they go through, answers 1 or 0); the
+        # library is freed after it
+        for result, want in ((1, 1), (0, 0), (2, 1)):
+            with self.subTest(result=result):
+                e = self.enabled()
+                e.cfg_result = result
+                self.assertEqual(e.driverproc(DRV_CONFIGURE, 0x1234,
+                                              0x56789ABC), want)
+                self.assertEqual(e.cfg_calls, [(0x1234, 0)])
+                self.assertEqual(e.libraries, {})
+        # no DLL: DRVCNF_CANCEL, and no box
+        e = self.enabled()
+        e.cfg_dll = False
+        self.assertEqual(e.driverproc(DRV_CONFIGURE, 0x1234), 0)
+        self.assertEqual(e.cfg_calls, [])
+
+    def test_bank_settings_0(self):
+        # BankSettings=0: ESS's answers, 0 to both, and nothing looked for
+        e = self.enabled(ini={"BankSettings": "0"})
+        for msg in (DRV_QUERYCONFIGURE, DRV_CONFIGURE):
+            self.assertEqual(e.driverproc(msg, 0x1234), 0)
+        self.assertEqual((e.file_lookups, e.cfg_calls, e.libraries),
+                         ([], [], {}))
+        e = self.enabled("stock")
+        for msg in (DRV_QUERYCONFIGURE, DRV_CONFIGURE):
+            self.assertEqual(e.driverproc(msg, 0x1234), 0)
+        self.assertEqual((e.file_lookups, e.cfg_calls), ([], []))
+
+    def test_other_messages_stay(self):
+        # the messages around them in ESS's table answer as before
+        for which in ("fixed", "stock"):
+            with self.subTest(which):
+                e = self.enabled(which)
+                for msg, want in ((DRV_OPEN, 1), (DRV_CLOSE, 1),
+                                  (DRV_INSTALL, 1), (DRV_REMOVE, 0)):
+                    self.assertEqual(e.driverproc(msg) & 0xFFFF, want, msg)
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs the unicorn module")
 class Opl3DriverTest(unittest.TestCase):
     """ESFMOPL3.DRV in front of ESFM.DRV's device 1: one device, whose
     messages go on to ESFM.DRV's modMessage as device 1's"""
 
-    def pair(self, value="2", which="fixed", esfm=True):
+    def pair(self, value="2", which="fixed", esfm=True, ini=None):
         """both drivers loaded and enabled, with Opl3Device=value (None:
-        no key), and ESFM.DRV found by name if esfm"""
+        no key) and [ESFM.DRV] as in ini, and ESFM.DRV found by name if
+        esfm"""
         e = ESFMEmu(builds()[which])
         if value is not None:
             e.ini[("esfm.drv", "opl3device")] = value
+        for key, v in (ini or {}).items():
+            e.ini[("esfm.drv", key.lower())] = v
         e.load_opl3(builds()["opl3"])
         e.esfm_loaded = esfm
         self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
@@ -2217,16 +2448,39 @@ class Opl3DriverTest(unittest.TestCase):
     def test_driverproc(self):
         e = self.pair()
         for msg, want in ((DRV_CLOSE, 1), (DRV_DISABLE, 1), (DRV_FREE, 1),
-                          (DRV_QUERYCONFIGURE, 0), (DRV_INSTALL, 1),
-                          (DRV_REMOVE, 1), (DRV_POWER, 1)):
+                          (DRV_INSTALL, 1), (DRV_REMOVE, 1), (DRV_POWER, 1)):
             self.assertEqual(e.opl3_driverproc(msg), want, msg)
         self.assertEqual(e.defdriverprocs, [])
-        e.opl3_driverproc(DRV_CONFIGURE)
         e.opl3_driverproc(0x4000)
-        self.assertEqual(e.defdriverprocs, [DRV_CONFIGURE, 0x4000])
-        # the setting, read once
-        self.assertEqual(len([r for r in e.int_reads
-                              if r[2] == "Opl3Device"]), 2)
+        self.assertEqual(e.defdriverprocs, [0x4000])
+        # the settings, read once
+        for key in ("Opl3Device", "BankSettings"):
+            self.assertEqual(len([r for r in e.int_reads
+                                  if r[2] == key]), 2, key)
+
+    def test_settings_box(self):
+        # the Multimedia control panel's Settings button: ESFMCFG.DLL's
+        # box for device 1, as ESFM.DRV opens it for device 0
+        e = self.pair()
+        self.assertEqual(e.opl3_driverproc(DRV_QUERYCONFIGURE), 1)
+        self.assertEqual(e.file_lookups, [("ESFMCFG.DLL", 0x4000)])
+        for result in (1, 0):
+            e.cfg_result = result
+            self.assertEqual(e.opl3_driverproc(DRV_CONFIGURE, 0x2345,
+                                               0x11112222), result)
+        self.assertEqual(e.cfg_calls, [(0x2345, 1), (0x2345, 1)])
+        self.assertEqual(e.libraries, {})
+        self.assertEqual(e.defdriverprocs, [])
+        # without the DLL: no button, and no box
+        e.cfg_dll = False
+        self.assertEqual(e.opl3_driverproc(DRV_QUERYCONFIGURE), 0)
+        self.assertEqual(e.opl3_driverproc(DRV_CONFIGURE, 0x2345), 0)
+        self.assertEqual(len(e.cfg_calls), 2)
+        # BankSettings=0: neither, and nothing looked for
+        e = self.pair(ini={"BankSettings": "0"})
+        for msg in (DRV_QUERYCONFIGURE, DRV_CONFIGURE):
+            self.assertEqual(e.opl3_driverproc(msg, 0x2345), 0)
+        self.assertEqual((e.file_lookups, e.cfg_calls), ([], []))
 
 
 if __name__ == "__main__":

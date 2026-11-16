@@ -854,7 +854,7 @@ opl_note_on:
         call    opl_voice_on            ; its first voice
         pop     ax
         call    opl_gi_ax
-        test    byte [cs:bx+GI_FLAGS],GIF_DOUBLE
+        test    byte [gs:bx+GI_FLAGS],GIF_DOUBLE
         jz      .out
         shl     ax,1
         inc     ax
@@ -1188,33 +1188,33 @@ opl_load:
         call    opl_vregs               ; DX = the first operator's registers
         mov     bx,dx
         add     bx,0x20
-        mov     al,[cs:bp+GV_MOD+GO_20]
+        mov     al,[gs:bp+GV_MOD+GO_20]
         call    opl_out
         add     bx,0x40                 ; 60h
-        mov     al,[cs:bp+GV_MOD+GO_60]
+        mov     al,[gs:bp+GV_MOD+GO_60]
         call    opl_out
         add     bx,0x20                 ; 80h
-        mov     al,[cs:bp+GV_MOD+GO_80]
+        mov     al,[gs:bp+GV_MOD+GO_80]
         call    opl_out
         add     bx,0x60                 ; E0h
-        mov     al,[cs:bp+GV_MOD+GO_E0]
+        mov     al,[gs:bp+GV_MOD+GO_E0]
         call    opl_out
         sub     bx,0xA0                 ; 40h
-        mov     al,[cs:bp+GV_MOD+GO_KSL]
+        mov     al,[gs:bp+GV_MOD+GO_KSL]
         and     al,0xC0
-        or      al,[cs:bp+GV_MOD+GO_TL]
+        or      al,[gs:bp+GV_MOD+GO_TL]
         call    opl_out
         add     bx,3 - 0x40 + 0x20      ; the carrier's 20h
-        mov     al,[cs:bp+GV_CAR+GO_20]
+        mov     al,[gs:bp+GV_CAR+GO_20]
         call    opl_out
         add     bx,0x40                 ; 60h
-        mov     al,[cs:bp+GV_CAR+GO_60]
+        mov     al,[gs:bp+GV_CAR+GO_60]
         call    opl_out
         add     bx,0x20                 ; 80h
-        mov     al,[cs:bp+GV_CAR+GO_80]
+        mov     al,[gs:bp+GV_CAR+GO_80]
         call    opl_out
         add     bx,0x60                 ; E0h
-        mov     al,[cs:bp+GV_CAR+GO_E0]
+        mov     al,[gs:bp+GV_CAR+GO_E0]
         call    opl_out
         mov     byte [di+OV_TL],0xFF
         mov     byte [di+OV_C0],0xFF
@@ -1237,14 +1237,14 @@ opl_pitch:
         push    bp
         call    opl_gi                  ; BX = the instrument
         call    opl_gv                  ; BP = its voice
-        test    byte [cs:bx+GI_FLAGS],GIF_FIXED
+        test    byte [gs:bx+GI_FLAGS],GIF_FIXED
         jz      .key
-        mov     al,[cs:bx+GI_FIXED]
+        mov     al,[gs:bx+GI_FIXED]
         xor     ah,ah
         jmp     .note
 .key:   mov     al,[di+OV_KEY]
         xor     ah,ah
-        add     ax,[cs:bp+GV_OFFSET]
+        add     ax,[gs:bp+GV_OFFSET]
 .note:  add     ax,12
 .low:   cmp     ax,12
         jge     .high
@@ -1258,7 +1258,7 @@ opl_pitch:
         xor     al,al
         test    byte [di+OV_INSTR],1
         jz      .set
-        mov     cl,[cs:bx+GI_FINE]
+        mov     cl,[gs:bx+GI_FINE]
         shr     cl,1
         sub     cl,64
         mov     ch,cl
@@ -1303,19 +1303,19 @@ opl_level:
         call    opl_vregs               ; DX = the first operator's registers
         mov     bx,dx
         add     bx,3 + 0x40             ; the carrier's 40h
-        mov     al,[cs:bp+GV_CAR+GO_KSL]
+        mov     al,[gs:bp+GV_CAR+GO_KSL]
         and     al,0xC0
         or      al,ah
         call    opl_out
-        test    byte [cs:bp+GV_FB],1    ; additive
+        test    byte [gs:bp+GV_FB],1    ; additive
         jz      .out
-        mov     al,[cs:bp+GV_MOD+GO_TL]
+        mov     al,[gs:bp+GV_MOD+GO_TL]
         cmp     al,0x3F
         je      .out                    ; a silent modulator stays silent
         cmp     al,ah
         jae     .mod
         mov     al,ah
-.mod:   mov     ah,[cs:bp+GV_MOD+GO_KSL]
+.mod:   mov     ah,[gs:bp+GV_MOD+GO_KSL]
         and     ah,0xC0
         or      al,ah
         sub     bx,3
@@ -1337,7 +1337,7 @@ opl_pan:
         call    opl_chrec
         mov     ah,[bx+OCH_PAN]
         call    opl_gv
-        mov     al,[cs:bp+GV_FB]
+        mov     al,[gs:bp+GV_FB]
         and     al,0x0F
         or      al,ah
         cmp     al,[di+OV_C0]
@@ -1372,11 +1372,11 @@ opl_vib:
         call    opl_vregs
         mov     bx,dx
         add     bx,0x20
-        mov     al,[cs:bp+GV_MOD+GO_20]
+        mov     al,[gs:bp+GV_MOD+GO_20]
         or      al,ah
         call    opl_out
         add     bx,3
-        mov     al,[cs:bp+GV_CAR+GO_20]
+        mov     al,[gs:bp+GV_CAR+GO_20]
         or      al,ah
         call    opl_out
 .out:   pop     bp
@@ -1530,19 +1530,19 @@ opl_chrec:
         pop     ax
         ret
 
-; BX = instrument AX's GENMIDI record, an offset in CS
+; BX = instrument AX's GENMIDI record, an offset in GS
 opl_gi_ax:
         push    ax
         push    dx
         mov     dx,GI_SIZE
         mul     dx
-        add     ax,opl_bank
+        add     ax,[fix_opl3_off]       ; in GS (esfmfile.asm)
         mov     bx,ax
         pop     dx
         pop     ax
         ret
 
-; BX = the GENMIDI instrument of voice DI, an offset in CS
+; BX = the GENMIDI instrument of voice DI, an offset in GS
 opl_gi:
         push    ax
         mov     ax,[di+OV_INSTR]
@@ -1551,7 +1551,7 @@ opl_gi:
         pop     ax
         ret
 
-; BP = the GENMIDI voice of voice DI, an offset in CS
+; BP = the GENMIDI voice of voice DI, an offset in GS
 opl_gv:
         push    ax
         push    bx

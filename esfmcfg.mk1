@@ -1,0 +1,31 @@
+# Builds esfmcfg.dll, the box of the MIDI patch banks that ESFM.DRV and
+# ESFMOPL3.DRV open with the Multimedia control panel's Settings button
+# (16-bit Windows DLL, large model).
+#
+# Notes:
+#
+# It uses WIN_CFLAGS of essctl.mk1, so the Makefile includes it after
+# essctl.mk1. A DLL's stack is its caller's, so SS isn't DGROUP (-zu).
+#
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+
+DLL_CFLAGS=$(WIN_CFLAGS) -bd -zu
+
+d_esfmbank.obj : src\esfmbank.c .AUTODEPEND
+ *wcc src\esfmbank.c $(DLL_CFLAGS) -fo=d_esfmbank.obj
+
+d_esfmcfg.obj : src\win\esfmcfg.c .AUTODEPEND
+ *wcc src\win\esfmcfg.c $(DLL_CFLAGS) -fo=d_esfmcfg.obj
+
+esfmcfg.res : src\win\esfmcfg.rc src\win\esfmcfg.h
+ *wrc -q -r -bt=windows -i="$(%watcom)/h;$(%watcom)/h/win;src\win" src\win\esfmcfg.rc -fo=esfmcfg.res
+
+esfmcfg.dll : d_esfmcfg.obj d_esfmbank.obj esfmcfg.res nestamp.exe .AUTODEPEND
+ @%write esfmcfg.lk1 FIL d_esfmcfg.obj,d_esfmbank.obj
+ @%append esfmcfg.lk1 LIB commdlg.lib
+ @%append esfmcfg.lk1 OPTION DESCRIPTION 'ES1869 MIDI patch banks'
+ *wlink name esfmcfg.dll sys windows_dll op m op maxe=10 op q op el op heapsize=1k @esfmcfg.lk1
+ *wrc -q -bt=windows esfmcfg.res esfmcfg.dll
+ nestamp esfmcfg.dll

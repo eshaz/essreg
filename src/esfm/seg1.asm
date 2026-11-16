@@ -3819,6 +3819,7 @@ R1_1ECB: dw 0xFFFF, 0x0000                              ; 1ECB KERNEL.LocalSize
 %include "esfmped.asm"
 %include "esfmgm.asm"
 %include "esfmopl.asm"
+%include "esfmcfg.asm"
 %endif
 
 seg1_data_end:

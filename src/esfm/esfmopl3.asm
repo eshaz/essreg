@@ -27,6 +27,12 @@
 ;    (DRVM_INIT, DRVM_ENABLE, DRVM_DISABLE, DRVM_EXIT).  ESFM.DRV hears of
 ;    it itself, so this driver answers them and passes none on, and it
 ;    passes on only the messages of a device (below DRVM_INIT).
+; 5. The Multimedia control panel's Settings button in the driver's
+;    properties (DRV_QUERYCONFIGURE, DRV_CONFIGURE) opens ESFMCFG.DLL's box
+;    of the patch banks, for the OPL3 device, as ESFM.DRV's does for its
+;    own (src/esfm/esfmcfg.asm), unless BankSettings=0 in [ESFM.DRV].  The
+;    button is there when the DLL can be found; the DLL is loaded for the
+;    box only.
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
@@ -38,6 +44,7 @@
 DRV_LOAD        equ 1
 DRV_ENABLE      equ 2
 DRV_FREE        equ 6
+DRV_CONFIGURE   equ 7
 DRV_QUERYCONFIGURE equ 8
 DRV_INSTALL     equ 9
 DRV_REMOVE      equ 10
@@ -52,6 +59,8 @@ MMSYSERR_BADDEVICEID equ 2
 MMSYSERR_NODRIVER equ 6
 MMSYSERR_NOTSUPPORTED equ 8
 OPL3_DEVICE     equ 1               ; ESFM.DRV's device that this one is
+OF_EXIST        equ 0x4000
+OFSTRUCT_SIZE   equ 136
 
 ; module references, in the order of esfmopl3.json
 KERNEL          equ 1
@@ -59,6 +68,9 @@ USER            equ 2
 
 %define KERNEL_GetModuleHandle 47
 %define KERNEL_GetProcAddress 50
+%define KERNEL_OpenFile 74
+%define KERNEL_LoadLibrary 95
+%define KERNEL_FreeLibrary 96
 %define KERNEL_GetPrivateProfileInt 127
 %define USER_DefDriverProc 255
 
@@ -130,7 +142,9 @@ DriverProc:
         xor     dx,dx
         jmp     .out
 .other: cmp     ax,DRV_QUERYCONFIGURE
-        je      .zero
+        je      .query
+        cmp     ax,DRV_CONFIGURE
+        je      .config
         cmp     ax,DRV_INSTALL
         je      .one
         cmp     ax,DRV_REMOVE
@@ -152,9 +166,76 @@ DriverProc:
 .out:   pop     ds
         pop     bp
         retf    0x10
+.query: call    read_setting
+        call    cfg_query
+        xor     dx,dx
+        jmp     .out
+.config:
+        call    read_setting
+        call    cfg_run
+        xor     dx,dx
+        jmp     .out
 
-; [ESFM.DRV] Opl3Device of SYSTEM.INI, once: 2 gives this driver its
-; device.  DS = DGROUP
+; DRV_QUERYCONFIGURE: AX = 1 if ESFMCFG.DLL can be found, 0 with
+; BankSettings=0.  DS = DGROUP
+cfg_query:
+        push    di
+        xor     ax,ax
+        cmp     word [cfgok],0
+        je      .out
+        sub     sp,OFSTRUCT_SIZE
+        mov     di,sp
+        push    ds
+        push    word s_dll
+        push    ss
+        push    di
+        push    word OF_EXIST
+        kernel  OpenFile
+        add     sp,OFSTRUCT_SIZE
+        inc     ax                      ; HFILE_ERROR (-1): 0
+        jz      .out
+        mov     ax,1
+.out:   pop     di
+        ret
+
+; DRV_CONFIGURE: ESFMCFG.DLL's box for the OPL3 device, with the panel's
+; window in lParam1; AX = its DRVCNF_*, or 0 without the DLL or with
+; BankSettings=0.  BP = DriverProc's frame, DS = DGROUP
+cfg_run:
+        push    si
+        push    di
+        xor     di,di
+        cmp     word [cfgok],0
+        je      .out
+        push    ds
+        push    word s_dll
+        kernel  LoadLibrary
+        cmp     ax,32
+        jb      .out
+        mov     si,ax                   ; SI = the library
+        push    si
+        push    ds
+        push    word s_proc
+        kernel  GetProcAddress
+        mov     cx,ax
+        or      cx,dx
+        jz      .free
+        mov     [cfg_ptr],ax
+        mov     [cfg_ptr+2],dx
+        push    word [bp+DP_LP1]        ; the parent window
+        push    word OPL3_DEVICE
+        call    far [cfg_ptr]           ; BankDialog, pascal
+        mov     di,ax                   ; DRVCNF_*
+.free:  push    si
+        kernel  FreeLibrary
+.out:   mov     ax,di
+        pop     di
+        pop     si
+        ret
+
+; [ESFM.DRV] Opl3Device and BankSettings of SYSTEM.INI, once: 2 gives
+; this driver its device, and BankSettings=0 takes its Settings box away.
+; DS = DGROUP
 read_setting:
         cmp     word [read],0
         jne     .done
@@ -172,6 +253,16 @@ read_setting:
         jne     .set
         inc     cx
 .set:   mov     [devs],cx
+        push    ds
+        push    word s_sect
+        push    ds
+        push    word s_cfgkey
+        mov     ax,1
+        push    ax
+        push    ds
+        push    word s_file
+        kernel  GetPrivateProfileInt
+        mov     [cfgok],ax
         mov     word [read],1
 .done:  ret
 
@@ -301,11 +392,16 @@ seg1_end:
 esfm_msg:       dd 0            ; ESFM.DRV's modMessage, 0 until found
 devs:           dw 0            ; this driver's devices: 1 with Opl3Device=2
 read:           dw 0            ; SYSTEM.INI was read
+cfgok:          dw 1            ; BankSettings: the Settings box
+cfg_ptr:        dd 0            ; ESFMCFG.DLL's BankDialog, while it's open
 s_esfm:         db 'ESFM', 0
 s_modmsg:       db 'modMessage', 0
 s_sect:         db 'ESFM.DRV', 0
 s_key:          db 'Opl3Device', 0
+s_cfgkey:       db 'BankSettings', 0
 s_file:         db 'SYSTEM.INI', 0
+s_dll:          db 'ESFMCFG.DLL', 0
+s_proc:         db 'BANKDIALOG', 0
 
 seg2_data_end:
 seg2_end:

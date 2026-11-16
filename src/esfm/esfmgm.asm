@@ -645,7 +645,10 @@ fix_process:
         call    fix_read_settings       ; maybe before DRV_ENABLE
 .opl:   test    word [fix_opts],OPT_OPL3
         jz      .gm
+        push    gs                      ; GS = the OPL3 device's bank
+        mov     gs,[fix_opl3_sel]       ; (esfmfile.asm)
         call    opl_route               ; device 1, esfmopl.asm
+        pop     gs
         jnc     .gm
         pop     bp
         retf    0x10

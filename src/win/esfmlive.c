@@ -194,8 +194,10 @@ static u16 fix_version(const struct live *lv) {
   return fix ? *(u16 __far *)(fix + 8) : 0;
 }
 
-// the fixed driver's settings (version 4 and up), ESFM_OPT_*
+// the fixed driver's settings (version 4 and up), ESFM_OPT_*, and from
+// version 6 the OPL3 device's bank file after them (src/esfm/esfmfixd.asm)
 #define FIX_OPTS 304
+#define FIX_OPATH 318
 static u16 fix_opts(const struct live *lv) {
   const u8 __far *fix = find_fix(lv);
 
@@ -480,6 +482,17 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
   }
   if (fix && d->version >= 4)
     d->opts = fix_opts(&lv);
+  // version 6: the OPL3 device's bank file, after fix_opts
+  if (fix && d->version >= 6 &&
+      (u32)(FP_OFF(fix) - FP_OFF(lv.dg)) + FIX_OPATH + 128 <= dgsize) {
+    d->opl3_state = *(u16 __far *)(fix + FIX_OPTS + 2);
+    d->opl3_used = *(u16 __far *)(fix + FIX_OPTS + 4);
+    d->opl3_loads = *(u16 __far *)(fix + FIX_OPTS + 6);
+    d->opl3_checks = *(u16 __far *)(fix + FIX_OPTS + 8);
+    d->opl3_date = *(u16 __far *)(fix + FIX_OPTS + 10);
+    d->opl3_time = *(u16 __far *)(fix + FIX_OPTS + 12);
+    _fmemcpy(d->opl3_file, fix + FIX_OPATH, sizeof(d->opl3_file) - 1);
+  }
   // version 5: the OPL3 device (src/esfm/esfmopl.asm), whose program may
   // write the chip itself while it's open, also after a power resume
   d->opl3 = fix && d->version >= 5 && ((opl & 1) || opl_client);
@@ -513,43 +526,54 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
   return 0;
 }
 
-// the bank file of the fixed driver, as the last MODM_OPEN found it
-static void file_text(const struct esfm_diag *d, const char *nl, char *buf,
-                      unsigned size) {
-  static char line[240];
-  const char *plays = d->file_used ? "its last good version plays"
-                                   : "the driver's own bank plays";
+// a bank file of the fixed driver, as the last MODM_OPEN found it: Bank=
+// of the ESFM device, or with opl3 Opl3Bank= of the OPL3 device
+static void file_text(const struct esfm_diag *d, int opl3, const char *nl,
+                      char *buf, unsigned size) {
+  static char line[240], bytes[24];
+  const char *what = opl3 ? "OPL3 bank file" : "Bank file";
+  const char *file = opl3 ? d->opl3_file : d->file;
+  u16 state = opl3 ? d->opl3_state : d->file_state;
+  u16 used = opl3 ? d->opl3_used : d->file_used;
+  u16 date = opl3 ? d->opl3_date : d->file_date;
+  u16 time = opl3 ? d->opl3_time : d->file_time;
+  u16 checks = opl3 ? d->opl3_checks : d->file_checks;
+  u16 loads = opl3 ? d->opl3_loads : d->file_loads;
+  const char *plays =
+      used ? "its last good version plays" : "the driver's own bank plays";
 
-  switch (d->file_state) {
+  switch (state) {
   case ESFM_FILE_NONE:
-    sprintf(line, "Bank file: none, %s%s",
-            d->file_used ? "the last file's bank still plays"
-                         : "the driver's own bank plays",
+    sprintf(line, "%s: none, %s%s", what,
+            used ? "the last file's bank still plays"
+                 : "the driver's own bank plays",
             nl);
     break;
   case ESFM_FILE_LOADED:
     // DOS date and time: year-1980:7 month:4 day:5, hour:5 minute:6
-    sprintf(line, "Bank file: %.110s, %u bytes, dated %u-%02u-%02u %02u:%02u%s",
-            d->file, d->file_size, (d->file_date >> 9) + 1980,
-            (d->file_date >> 5) & 15, d->file_date & 31, d->file_time >> 11,
-            (d->file_time >> 5) & 63, nl);
+    bytes[0] = 0;
+    if (!opl3)
+      sprintf(bytes, ", %u bytes", d->file_size);
+    sprintf(line, "%s: %.110s%s, dated %u-%02u-%02u %02u:%02u%s", what, file,
+            bytes, (date >> 9) + 1980, (date >> 5) & 15, date & 31, time >> 11,
+            (time >> 5) & 63, nl);
     break;
   case ESFM_FILE_MISSING:
-    sprintf(line, "Bank file: cannot read %.110s, %s%s", d->file, plays, nl);
+    sprintf(line, "%s: cannot read %.110s, %s%s", what, file, plays, nl);
     break;
   case ESFM_FILE_BAD:
-    sprintf(line, "Bank file: %.110s is not a patch bank, %s%s", d->file, plays,
-            nl);
+    sprintf(line, "%s: %.110s is not a %s, %s%s", what, file,
+            opl3 ? "GENMIDI bank" : "patch bank", plays, nl);
     break;
   default:
-    sprintf(line, "Bank file: not enough memory for %.110s, %s%s", d->file,
-            plays, nl);
+    sprintf(line, "%s: not enough memory for %.110s, %s%s", what, file, plays,
+            nl);
   }
   strncat(buf, line, size - strlen(buf) - 1);
   sprintf(line,
           "Read when a program opens the device, if its date or time "
           "changed: %u checks, %u load%s%s",
-          d->file_checks, d->file_loads, d->file_loads == 1 ? "" : "s", nl);
+          checks, loads, loads == 1 ? "" : "s", nl);
   strncat(buf, line, size - strlen(buf) - 1);
 }
 
@@ -563,7 +587,7 @@ static const struct {
     {ESFM_OPT_TUNING, "Tuning"},         {ESFM_OPT_CC121, "ResetControllers"},
     {ESFM_OPT_LIVE_PAN, "LivePan"},      {ESFM_OPT_SYSEX, "SysEx"},
     {ESFM_OPT_RUNNING, "RunningStatus"}, {ESFM_OPT_SIDES, "TrueSides"},
-    {ESFM_OPT_OPL3, "Opl3Device"},
+    {ESFM_OPT_OPL3, "Opl3Device"},       {ESFM_OPT_SETTINGS, "BankSettings"},
 };
 
 static void settings_text(const struct esfm_diag *d, const char *nl, char *buf,
@@ -628,7 +652,9 @@ void esfm_diag_text(const struct esfm_diag *d, int rc, const char *nl,
   if (d->fixed && d->version >= 4)
     settings_text(d, nl, buf, size);
   if (d->fixed && d->version >= 2)
-    file_text(d, nl, buf, size);
+    file_text(d, 0, nl, buf, size);
+  if (d->fixed && d->version >= 6 && (d->opts & ESFM_OPT_OPL3))
+    file_text(d, 1, nl, buf, size);
   sprintf(line, "%sVoice  Channel  Note   State          Age  Chip%s", nl, nl);
   strncat(buf, line, size - strlen(buf) - 1);
   for (i = 0; i < ESFM_VOICES; i++) {

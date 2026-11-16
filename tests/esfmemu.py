@@ -37,6 +37,7 @@ from unicorn.x86_const import (UC_X86_REG_AX, UC_X86_REG_BX, UC_X86_REG_CX,
                                UC_X86_REG_SP, UC_X86_REG_IP, UC_X86_REG_ECX,
                                UC_X86_REG_CS, UC_X86_REG_DS, UC_X86_REG_ES,
                                UC_X86_REG_SS, UC_X86_REG_EFLAGS,
+                               UC_X86_REG_FS, UC_X86_REG_GS,
                                UC_X86_INS_IN, UC_X86_INS_OUT)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -99,12 +100,16 @@ STUB_ARGS = {
     ("MMSYSTEM", 216): 12,  # midiOutMessage(h, msg, dw1, dw2)
     ("KERNEL", 47): 4,      # GetModuleHandle(lpModuleName)
     ("KERNEL", 50): 6,      # GetProcAddress(hModule, lpProcName)
+    ("KERNEL", 74): 10,     # OpenFile(lpFileName, lpReOpenBuff, wStyle)
+    ("KERNEL", 95): 4,      # LoadLibrary(lpLibFileName)
+    ("KERNEL", 96): 2,      # FreeLibrary(hModule)
     ("USER", 255): 16,      # DefDriverProc(id, hDriver, msg, lp1, lp2)
 }
 
 # ESFMOPL3.DRV (load_opl3): its segments, and the two modules' handles
 OPL3_PARA = {1: 0x6000, 2: 0x6800}
 ESFM_HMOD = 0x0E5F
+CFG_HMOD = 0x0E71      # ESFMCFG.DLL, the Settings box
 OPL3_HMOD = 0x0E67
 
 
@@ -245,6 +250,7 @@ class ESFMEmu:
         self.sentinel = self._stub(("SENTINEL", 0))
         self.marker = self._stub(("MARKER", 0))
         self.vxd_entry = self._stub(("VXD", 0))
+        self.cfg_entry = self._stub(("CFG", 0))     # ESFMCFG.DLL's box
         self._relocate()
         entries = ne.entries
         seg, off, _f = entries[3]
@@ -314,6 +320,15 @@ class ESFMEmu:
         self.esfm_loaded = True
         self.module_lookups = []
         self.defdriverprocs = []
+        # ESFMCFG.DLL, the Settings box of the patch banks: whether it's
+        # there, what its BankDialog answers, how it was called (the
+        # window, the device), the files OpenFile looked for, and the
+        # libraries loaded and not freed
+        self.cfg_dll = True
+        self.cfg_result = 1
+        self.cfg_calls = []
+        self.file_lookups = []
+        self.libraries = {}
 
     # --- memory -----------------------------------------------------------
 
@@ -442,7 +457,8 @@ class ESFMEmu:
             # selector faults when it's loaded again, by the code or by an
             # interrupt handler that saves and restores it
             for name, reg in (("DS", UC_X86_REG_DS), ("ES", UC_X86_REG_ES),
-                              ("SS", UC_X86_REG_SS)):
+                              ("SS", UC_X86_REG_SS), ("FS", UC_X86_REG_FS),
+                              ("GS", UC_X86_REG_GS)):
                 if uc.reg_read(reg) in self.freed:
                     self.stale.append((uc.reg_read(UC_X86_REG_CS),
                                        uc.reg_read(UC_X86_REG_IP), name))
@@ -730,6 +746,12 @@ class ESFMEmu:
         inject_after = None
         if key == ("MARKER", 0):
             raise EmuError("marker")
+        if key == ("CFG", 0):               # BankDialog(hwnd, device)
+            self.cfg_calls.append((arg(2), arg(0)))
+            uc.reg_write(UC_X86_REG_AX, self.cfg_result)
+            uc.reg_write(UC_X86_REG_DX, 0)
+            uc.reg_write(UC_X86_REG_SP, sp + 8)
+            return ret_cs, ret_ip
         if key == ("VXD", 0):
             fn = uc.reg_read(UC_X86_REG_DX)
             self.vxd_calls.append(fn)
@@ -893,6 +915,27 @@ class ESFMEmu:
             name = self.rdstr(name) if name >> 16 else "#%d" % name
             if hmod == ESFM_HMOD and name.upper() in ("MODMESSAGE", "#3"):
                 dx, ax = self.modmsg_addr
+            elif hmod == CFG_HMOD and name.upper() == "BANKDIALOG":
+                dx, ax = STUB_PARA, self.cfg_entry
+        elif key == ("KERNEL", 74):         # OpenFile(name, of, style)
+            name = self.rdstr(arg(6, 4))
+            self.file_lookups.append((name, arg(0)))
+            found = name.upper() == "ESFMCFG.DLL" and self.cfg_dll
+            ax = 5 if found else 0xFFFF
+        elif key == ("KERNEL", 95):         # LoadLibrary(name)
+            name = self.rdstr(arg(0, 4))
+            if name.upper() == "ESFMCFG.DLL" and self.cfg_dll:
+                ax = CFG_HMOD
+                self.libraries[ax] = self.libraries.get(ax, 0) + 1
+            else:
+                ax = 2                      # file not found
+        elif key == ("KERNEL", 96):         # FreeLibrary(h)
+            h = arg(0)
+            if not self.libraries.get(h):
+                raise EmuError("FreeLibrary of %04x, not loaded" % h)
+            self.libraries[h] -= 1
+            if not self.libraries[h]:
+                del self.libraries[h]
         elif key == ("USER", 255):          # DefDriverProc
             self.defdriverprocs.append(arg(8))      # uMsg
             ax = 0
@@ -1099,6 +1142,13 @@ class ESFMEmu:
             st["bpath"] = path.split(b"\0")[0].decode("latin-1")
         if st["version"] >= 4:                  # the SYSTEM.INI settings
             st["opts"] = struct.unpack_from("<H", dgroup, at + 304)[0]
+        if st["version"] >= 6:                  # the OPL3 device's file
+            names = ("ostate", "osrc", "oloads", "ochecks", "odate", "otime")
+            st.update(zip(names, struct.unpack_from("<6H", dgroup, at + 306)))
+            path = dgroup[at + 318:at + 318 + 128]
+            st["opath"] = path.split(b"\0")[0].decode("latin-1")
+            names = ("okstate", "osel", "ooff", "oblk")
+            st.update(zip(names, struct.unpack_from("<4H", dgroup, at + 574)))
         return st
 
     def pedals(self):

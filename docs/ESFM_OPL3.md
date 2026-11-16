@@ -112,6 +112,13 @@ the DMX sound library that Doom plays its music with
 * the 128 General MIDI programs;
 * the drums of notes 35 to 81 on channel 10, each with its own fixed note.
 
+Another lump of that format, such as an `.OP2` file, plays instead when
+`Opl3Bank=` under `[ESFM.DRV]` in `SYSTEM.INI` names it. The device reads
+the file when a program opens it, if the file's date or time changed, as the
+ESFM device reads `Bank=`, and the Settings button of the Multimedia control
+panel chooses it
+([ESFM_BANK.md](ESFM_BANK.md#choosing-a-bank-in-the-multimedia-control-panel)).
+
 The device plays them as DMX does in Chocolate Doom, for which they were
 made:
 * An instrument of two voices takes two of the chip's 18 voices, the second
@@ -259,12 +266,15 @@ MIDI devices have its name.
   status, long messages, resets, messages from an interrupt, a suspend and
   resume, and ESS's writes dropped while the device is open. A program that
   writes the chip itself keeps every register as it wrote it, and the close
-  and a suspend key off its notes and its rhythm.
+  and a suspend key off its notes and its rhythm. A bank file named by
+  `Opl3Bank=` plays from the next open, read again only when its date
+  changes, and a missing or broken one leaves the bank that plays.
 * `Opl3DriverTest` in [tests/test_esfmdrv.py](../tests/test_esfmdrv.py) runs
   `ESFMOPL3.DRV` next to ESFM.DRV in the emulator: one device with
   `Opl3Device=2` and none without, its caps and notes through ESFM.DRV's
   device 1, the devnode's messages kept, no import at interrupt time, and
-  both orders of loading, with the VxD's answer to 040E and without.
+  both orders of loading, with the VxD's answer to 040E and without, and the
+  Settings button of both drivers (`ConfigureTest` the ESFM device's).
 * `test_opl3_driver` in [tests/test_vxdini.py](../tests/test_vxdini.py) runs
   the VxD's call at the card's start in the emulator: Windows hears of both
   drivers when the card's software key has `esfmopl3.drv`, of ESFM.DRV alone

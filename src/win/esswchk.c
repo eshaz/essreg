@@ -90,7 +90,7 @@
 #include "wchk.h"
 #include "winio.h"
 
-#define VERSION "1.3"
+#define VERSION "1.4"
 #define TITLE "ES1869 Windows checks"
 #define IDC_CHECK 101
 #define IDC_STEP 102
@@ -615,6 +615,7 @@ static void env_midi(void) {
 }
 
 static void check_env(void) {
+  static char bank[128], opl3_bank[128];
   struct wavestat ws;
   struct esfm_diag d;
   WAVEOUTCAPS oc;
@@ -678,6 +679,14 @@ static void check_env(void) {
       GetPrivateProfileInt("ES1869.VXD", "SoundBlaster16DMA", 5, "SYSTEM.INI"),
       GetPrivateProfileInt("ES1869.VXD", "Opl3Driver", 1, "SYSTEM.INI"), drv.ts,
       GetPrivateProfileInt("ESFM.DRV", "Opl3Device", 1, "SYSTEM.INI"));
+  // the patch banks that the devices play, as the box of the Multimedia
+  // control panel's Settings button chose them (ESFMCFG.DLL)
+  GetPrivateProfileString("ESFM.DRV", "Bank", "", bank, sizeof(bank),
+                          "SYSTEM.INI");
+  GetPrivateProfileString("ESFM.DRV", "Opl3Bank", "", opl3_bank,
+                          sizeof(opl3_bank), "SYSTEM.INI");
+  res("env.banks", WCHK_INFO,
+      "SYSTEM.INI: [ESFM.DRV] Bank=%.80s, Opl3Bank=%.80s", bank, opl3_bank);
   if (opt.once[0])
     res("env.once", WCHK_INFO, "the StartUp batch, %s", once_note);
   if (opt.sim)

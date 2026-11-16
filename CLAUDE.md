@@ -40,6 +40,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   the Multimedia control panel and the card's MIDI drivers, where essinst
   adds ESFMOPL3.DRV, the OPL3 device's driver, and esswchk reads them.
   `wheel.c` gives the sliders of essctl and ess3d the mouse wheel.
+  `esfmcfg.c` is `ESFMCFG.DLL`, the box of the two devices' patch banks
+  (`Bank=` and `Opl3Bank=`), which the Settings button of either MIDI driver
+  opens, and which essinst puts in the `SYSTEM` folder with the banks of
+  `build/BANKS` in `SYSTEM\ESFMBANK`.
 * `src/vxd/` holds `ES1869.VXD` as NASM source, made by `tools/vxd2asm.py`.
   `essext.asm` adds the register API, the DOS box improvements (the virtual
   FM chip, Windows' mixer around a DOS program, the DACs' modes for it, and
@@ -49,9 +53,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
 * `src/esfm/` holds `ESFM.DRV` as NASM source, made by `tools/ne2asm.py`.
   `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm`
   and `esfmgm.asm` hold the fixes and General MIDI, `esfmopl.asm` the OPL3
-  device (device 1: General MIDI on the chip's OPL3 mode), and `esfmini.asm`
-  their SYSTEM.INI switches, all assembled with `ESFM_FIX=1`. `esfmopl3.asm`
-  is `ESFMOPL3.DRV`, a MIDI driver of its own whose one device is ESFM.DRV's
+  device (device 1: General MIDI on the chip's OPL3 mode), `esfmcfg.asm` the
+  Settings button of the Multimedia control panel, and `esfmini.asm` their
+  SYSTEM.INI switches, all assembled with `ESFM_FIX=1`. `esfmopl3.asm` is
+  `ESFMOPL3.DRV`, a MIDI driver of its own whose one device is ESFM.DRV's
   device 1, so that Windows lists the OPL3 device in the Multimedia control
   panel, linked by `tools/build_esfm.py` with `esfmopl3.json`.
 * `src/es1869/` holds `ES1869.DRV` (wave, mixer and aux) as NASM source,
@@ -188,9 +193,9 @@ tools/wineshot.sh run ess3d.exe /sim tray
   the driver reads once when it starts, and `0` gives back what ESS's driver
   does there. The exceptions: `Audio2Oversampling`, `Audio2Filter` and
   `Audio1Filter`, where `1` is ESS's setting of a DAC stage and the default
-  `0` turns the stage off, and ESFM.DRV's `Bank=`, a file name, read at
-  every MIDI open. A new change gets a key with its default, a row in
-  section 6 of
+  `0` turns the stage off, and ESFM.DRV's `Bank=` and `Opl3Bank=`, file
+  names, read at every open of their device. A new change gets a key with
+  its default, a row in section 6 of
   [DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md#6-the-rebuilt-drivers-systemini-settings),
   and tests of both values (`tests/test_vxdini.py`,
   `tests/test_es1869drv.py`, `tests/test_a1play.py`, `SettingsTest` in
@@ -313,9 +318,11 @@ tools/wineshot.sh run ess3d.exe /sim tray
 * **Committed binaries.** After changing their sources, rebuild
   `build/ESFM.DRV` (with `build/ESFMOPL3.DRV`), `build/ES1869.VXD`,
   `build/ES1869.DRV` or `build/esssb16.com`, and copy the changed programs
-  from `out/ow2/` to `build/`, `essprobe.exe` and `esswchk.exe` among them.
-  `test_build_is_current` checks `ESFM.DRV` and `ES1869.DRV`, and
-  `test_opl3_driver_is_current` `ESFMOPL3.DRV`.
+  from `out/ow2/` to `build/`, `essprobe.exe`, `esswchk.exe` and
+  `esfmcfg.dll` (as `ESFMCFG.DLL`) among them. `test_build_is_current`
+  checks `ESFM.DRV` and `ES1869.DRV`, `test_opl3_driver_is_current`
+  `ESFMOPL3.DRV`, and `test_banks_folder` that `build/BANKS` holds
+  `esfm_patch_banks` under the names essinst installs.
 * **ESFM_FIX code:**
   * A label at a relocation site is a `..@` name, so that it doesn't end
     NASM's local label scope.
@@ -359,9 +366,22 @@ tools/wineshot.sh run ess3d.exe /sim tray
     drivers, the VxD's `midi\esfmopl3.drv`, `midireg.c` and esswchk's
     `opl.list`, and `Opl3DriverTest` runs the two drivers together in the
     emulator.
+  * The OPL3 device reads its instruments through GS (`fix_opl3_sel` and
+    `fix_opl3_off`), which `fix_process` loads around `opl_route`: the
+    built-in lump in CS, or the `Opl3Bank=` file's block, wired and
+    page-locked. `fix_opl3_check` changes the bank only while no device is
+    open, and frees the old block with no segment register holding it.
+  * The Settings button's `DRV_QUERYCONFIGURE` and `DRV_CONFIGURE` reach
+    `fix_config` (`esfmcfg.asm`) through ESS's `DRV_ENABLE` code in segment
+    3 (`jt_drvmsg` and its far call), which answers 1 for DX:AX = 0, so that
+    segment 3 keeps its length, which esfmpat needs. `ESFMCFG.DLL` is loaded
+    for the box only, at task time, and the box only writes the keys, which
+    the devices read at their next open. `ConfigureTest` and
+    `Opl3DriverTest` test both drivers' answers, and `test_bank_box` in
+    `tests/test_wine.py` the box.
 * **The status block** (`esfmfixd.asm`, found by `ESFMFIX`) is read by
   essctl at fixed offsets (`src/win/esfmlive.c`). A change to its layout
-  bumps `fix_version`, and the next version is 6.
+  bumps `fix_version`, and the next version is 7.
 * **ES1869.DRV's status** (`es_status` in `src/es1869/fixdata.asm`, found by
   `ESDRVFIX`, the player's block and the FM recording device's) is read by
   essctl (`src/wavestat.c` and `src/win/wavelive.c`). A change to its layout

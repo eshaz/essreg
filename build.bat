@@ -14,4 +14,5 @@ copy essinst.exe build\essinst.exe /y
 copy sb16test.exe build\sb16test.exe /y
 copy essprobe.exe build\essprobe.exe /y
 copy esswchk.exe build\esswchk.exe /y
+copy esfmcfg.dll build\ESFMCFG.DLL /y
 

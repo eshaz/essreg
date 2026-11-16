@@ -87,6 +87,9 @@ modMessage:
         cmp     ax,MODM_OPEN
         jne     .plain
         call    fix_bank_check
+        cmp     word [ARG_ID],1
+        jne     .plain
+        call    fix_opl3_check          ; the OPL3 device's (esfmfile.asm)
 .plain: call    call_orig
         jmp     .ret
 
@@ -120,8 +123,12 @@ modMessage:
         jmp     .answer
 
 .open:
-        ; load the bank file first if it changed (esfmfile.asm)
+        ; load the bank file first if it changed (esfmfile.asm), and the
+        ; OPL3 device's for device 1
         call    fix_bank_check
+        cmp     word [ARG_ID],1
+        jne     .hold
+        call    fix_opl3_check
 .hold:
         ; OPEN and CLOSE come at task time, so if the driver is already
         ; held, the caller itself holds it (a callback): just count

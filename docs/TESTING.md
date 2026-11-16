@@ -792,6 +792,9 @@ These steps need `build\ESFM.DRV` installed. See
 7. Choose ESFM > *Restore original bank*. The `Bank=` line is gone from
    `SYSTEM.INI`, and the driver's own bank plays. ESFM > *Load patch bank*
    writes the line again.
+8. In Control Panel > *Multimedia* > *Devices*, the *Settings* of either
+   device's MIDI entry opens *MIDI patch banks*. Choose `ESSNT4.BIN` for the
+   ESFM device. The next open plays it ([ESFM_BANK.md](ESFM_BANK.md)).
 
 ### G3. General MIDI
 

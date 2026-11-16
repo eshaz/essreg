@@ -21,8 +21,13 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
 - ES1869.DRV: "essctl /dump" with ESS's driver, then the rebuilt one,
   loaded by drvhold, names it and the rebuilt one's settings
 - ESFM bank file: the fixed build loads the bank named in SYSTEM.INI
-  [ESFM.DRV] Bank= when a program opens the device, and "essctl /load" of
-  a profile with a bank names it there
+  [ESFM.DRV] Bank= when a program opens the device, and the OPL3 device's
+  Opl3Bank= at its open, and "essctl /load" of a profile with a bank names
+  it there
+- the box of the patch banks: tests/host/cfgcall.c opens ESFMCFG.DLL's
+  box as the drivers' Settings button does, reads both lists from the
+  banks folder and SYSTEM.INI, and chooses; OK writes the keys that
+  changed, Cancel nothing, and Opl3Device=0 grays the OPL3 list
 - ess3d: commands against the simulated chip, bad input and no card, read
   from its /log= file, since Wine's winevdm always exits with 0 and drops
   the program's exit code; without /q, no card shows in the display, which
@@ -56,7 +61,8 @@ Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
   them in place, and /restore stages ESS's again. Another driver in place
   changes nothing. The OPL3 device gets a copy of ESS's entry in the MIDI
   list, and loses it with Opl3Device=0 or /restore, which gives the MIDI
-  mapper ESS's device back
+  mapper ESS's device back. The box of the patch banks goes in the SYSTEM
+  folder and the banks in its ESFMBANK, and /restore takes the box out
 
 Win16 wants 8.3 path names, so the work directory is reached through a
 short symbolic link in /tmp.
@@ -121,6 +127,15 @@ class WineTest(unittest.TestCase):
         subprocess.run(["wlink", "name", "drvhold.exe", "system", "windows",
                         "option", "quiet", "file", "drvhold.obj", "library",
                         "mmsystem.lib"], cwd=work, env=env, check=True)
+        # cfgcall opens ESFMCFG.DLL's box and works it from a timer
+        subprocess.run(["wcc", os.path.join(ROOT, "tests", "host", "cfgcall.c"),
+                        "-i=%s;%s" % (os.path.join(OW2, "h"),
+                                      os.path.join(OW2, "h", "win")),
+                        "-bt=windows", "-ml", "-zW", "-zc", "-3", "-zq",
+                        "-fo=cfgcall.obj"], cwd=work, env=env, check=True)
+        subprocess.run(["wlink", "name", "cfgcall.exe", "system", "windows",
+                        "option", "quiet", "file", "cfgcall.obj"], cwd=work,
+                       env=env, check=True)
         cls.env = dict(os.environ, WINEARCH="win32", WINEDEBUG="-all",
                        WINEPREFIX=os.path.join(work, "prefix"),
                        DISPLAY=":93")
@@ -279,19 +294,28 @@ class WineTest(unittest.TestCase):
         bank[off + 4] = 0x5A
         with open(self.path("MARK.BIN"), "wb") as f:
             f.write(bank)
+        # and the OPL3 device's, a GENMIDI lump
+        shutil.copy(os.path.join(ROOT, "third_party", "genmidi",
+                                 "GENMIDI.lmp"), self.path("DOOM.OP2"))
         ini = self.system_ini()
         saved = read(ini)
         try:
             with open(ini, "ab") as f:
-                f.write(b"\r\n[ESFM.DRV]\r\nBank=%s\\MARK.BIN\r\n" %
-                        self.win.encode())
+                f.write(b"\r\n[ESFM.DRV]\r\nBank=%s\\MARK.BIN\r\n"
+                        b"Opl3Bank=%s\\DOOM.OP2\r\n" %
+                        (self.win.encode(), self.win.encode()))
             text = self.driver_dump(self.fixed_driver())
             # the driver read SYSTEM.INI, the file's date and the file
-            # through KERNEL when drvhold opened the device
+            # through KERNEL when drvhold opened the devices
             self.assertEqual(read(self.path("BEFORE.BIN"))[:len(bank)],
                              bytes(bank))
             self.assertIn("Bank file: %s\\MARK.BIN, %d bytes" %
                           (self.win, len(bank)), text)
+            self.assertRegex(text, r"OPL3 bank file: %s\\DOOM\.OP2, dated "
+                             r"\d{4}-\d\d-\d\d \d\d:\d\d\r\nRead when a "
+                             r"program opens the device, if its date or "
+                             r"time changed: 1 checks, 1 load\r" %
+                             re.escape(self.win))
         finally:
             with open(ini, "wb") as f:
                 f.write(saved)
@@ -332,6 +356,8 @@ class WineTest(unittest.TestCase):
         self.assertIn("Settings: from SYSTEM.INI, the square-wave bank",
                       text)
         self.assertIn("Bank file: none, the driver's own bank plays", text)
+        self.assertIn("OPL3 bank file: none, the driver's own bank plays",
+                      text)
         self.assertEqual(text.count("  free"), 18)
 
     def test_esfm_settings_from_system_ini(self):
@@ -649,8 +675,15 @@ class WineTest(unittest.TestCase):
         name, /once= deletes its file, and the log has the exit code"""
         with open(self.path("ONCE.BAT"), "w", newline="\r\n") as f:
             f.write("@ECHO OFF\n")
+        # and the banks that SYSTEM.INI names, for env.banks
+        self.keep_system_ini()
+        self.set_ini("ESFM.DRV", "Bank", r"C:\BANKS\SQUARE.BIN")
+        self.set_ini("ESFM.DRV", "Opl3Bank", None)
         res, text, log = self.wchk("W1", "/sim", "/auto", "/q", "/nobox",
                                    "/once=ONCE.BAT")
+        self.assertEqual(res["env.banks"], [(
+            "INFO", r"SYSTEM.INI: [ESFM.DRV] Bank=C:\BANKS\SQUARE.BIN, "
+            "Opl3Bank=")])
         for c in self.WCHK:
             self.assertEqual([r for r, _d in res[c]], ["PASS"], c)
         self.assertIn("100000 readings, 0 torn", res["vxd.count2"][0][1])
@@ -965,13 +998,23 @@ class WineTest(unittest.TestCase):
                     os.remove(found)
             shutil.copy(os.path.join(ROOT, "driver", name),
                         os.path.join(system, name))
-        # and the OPL3 device's driver, which ESS's set doesn't have
-        shutil.copy(os.path.join(ROOT, "build", "ESFMOPL3.DRV"),
-                    self.path(os.path.join("INST", "ESFMOPL3.DRV")))
-        for left in ("ESFMOPL3.DRV", "ESFMOPL3.NEW", "ESFMOPL3.$$$"):
+        # and the OPL3 device's driver, which ESS's set doesn't have, the
+        # box of the patch banks and the banks
+        for name in ("ESFMOPL3.DRV", "ESFMCFG.DLL"):
+            shutil.copy(os.path.join(ROOT, "build", name),
+                        self.path(os.path.join("INST", name)))
+        shutil.rmtree(self.path(os.path.join("INST", "BANKS")),
+                      ignore_errors=True)
+        shutil.copytree(os.path.join(ROOT, "build", "BANKS"),
+                        self.path(os.path.join("INST", "BANKS")))
+        for left in ("ESFMOPL3.DRV", "ESFMOPL3.NEW", "ESFMOPL3.$$$",
+                     "ESFMCFG.DLL", "ESFMCFG.NEW", "ESFMCFG.$$$"):
             found = self.find(system, left)
             if found:
                 os.remove(found)
+        found = self.find(system, "ESFMBANK")
+        if found:
+            shutil.rmtree(found)
         for left in ("WININIT.INI", "ESSINST.LOG"):
             found = self.find(self.windows(), left)
             if found:
@@ -1031,6 +1074,17 @@ class WineTest(unittest.TestCase):
             self.assertTrue(renames[dest[0]].endswith(
                 "\\%s.new" % base.lower()))
             self.assertTrue(dest[0].startswith("c:\\windows\\system\\"))
+        # the box of the patch banks, which nothing has loaded, goes in at
+        # once, and the banks into SYSTEM\\ESFMBANK, where it lists them
+        self.assertEqual(read(self.find(system, "ESFMCFG.DLL")),
+                         read(os.path.join(ROOT, "build", "ESFMCFG.DLL")))
+        banks = sorted(os.listdir(os.path.join(ROOT, "build", "BANKS")))
+        folder = self.find(system, "ESFMBANK")
+        self.assertEqual(sorted(f.upper() for f in os.listdir(folder)), banks)
+        for name in banks:
+            self.assertEqual(read(self.find(folder, name)), read(
+                os.path.join(ROOT, "build", "BANKS", name)))
+        self.assertIn("ESFMCFG.DLL: copied into place.", log)
 
         # the restart puts them in place, and then there's nothing to do
         self.restart()
@@ -1038,12 +1092,16 @@ class WineTest(unittest.TestCase):
             self.assertEqual(read(self.find(system, name)),
                              read(os.path.join(ROOT, "build", name)))
         self.wine("INST\\essinst.exe", "/y", "/norestart")
-        self.assertEqual(self.essinst_log().count("installed already."), 3)
+        self.assertEqual(self.essinst_log().count("installed already."),
+                         3 + 1 + len(banks))
         self.assertEqual(self.wininit(), {})
 
-        # /restore stages ESS's drivers again, from the copies
+        # /restore stages ESS's drivers again, from the copies, takes the
+        # box out and leaves the banks
         self.wine("INST\\essinst.exe", "/y", "/restore", "/norestart")
         self.assertEqual(len(self.wininit()), 3)
+        self.assertIsNone(self.find(system, "ESFMCFG.DLL"))
+        self.assertEqual(len(os.listdir(folder)), len(banks))
         self.restart()
         for name, base in self.DRIVERS:
             ess = read(os.path.join(ROOT, "driver", name))
@@ -1208,6 +1266,146 @@ class WineTest(unittest.TestCase):
         with open(self.system_ini(), "wb") as f:
             f.write(new)
 
+    # --- the box of the MIDI patch banks (ESFMCFG.DLL) ----------------------
+
+    def ini_value(self, section, key):
+        """key in section of SYSTEM.INI, or None"""
+        text = read(self.system_ini()).decode("latin-1").replace("\r", "")
+        cur = None
+        for row in text.splitlines():
+            row = row.strip()
+            if row.startswith("["):
+                cur = row.lower()
+            elif cur == "[%s]" % section.lower() and "=" in row and \
+                    row.split("=", 1)[0].strip().lower() == key.lower():
+                return row.split("=", 1)[1].strip()
+        return None
+
+    def set_ini(self, section, key, value):
+        """key=value in section of SYSTEM.INI, None takes it out"""
+        text = read(self.system_ini()).decode("latin-1").replace("\r", "")
+        rows, cur, done = [], None, False
+        for row in text.splitlines():
+            s = row.strip()
+            if s.startswith("["):
+                if cur == "[%s]" % section.lower() and not done and value:
+                    rows.append("%s=%s" % (key, value))
+                    done = True
+                cur = s.lower()
+            elif cur == "[%s]" % section.lower() and "=" in s and \
+                    s.split("=", 1)[0].strip().lower() == key.lower():
+                if value is not None:
+                    rows.append("%s=%s" % (key, value))
+                done = True
+                continue
+            rows.append(row)
+        if not done and value is not None:
+            if cur != "[%s]" % section.lower():
+                rows.append("[%s]" % section)
+            rows.append("%s=%s" % (key, value))
+        with open(self.system_ini(), "wb") as f:
+            f.write(("\r\n".join(rows) + "\r\n").encode("latin-1"))
+
+    def banks_setup(self):
+        """ESFMCFG.DLL in the SYSTEM folder, and in its ESFMBANK folder an
+        ESFM bank, one wrapped in RIFF, a GENMIDI lump and a file that is
+        neither"""
+        self.keep_system_ini()
+        system = self.windows("system")
+        shutil.copy(os.path.join(ROOT, "out", "ow2", "esfmcfg.dll"),
+                    os.path.join(system, "ESFMCFG.DLL"))
+        folder = os.path.join(system, "ESFMBANK")
+        os.makedirs(folder, exist_ok=True)
+        self.addCleanup(shutil.rmtree, folder)
+        self.addCleanup(os.remove, os.path.join(system, "ESFMCFG.DLL"))
+        bank = read(os.path.join(ROOT, "esfm_patch_banks", "bnk_com.bin"))
+        riff = (b"RIFF" + struct.pack("<I", 12 + len(bank) + (len(bank) & 1))
+                + b"Ptchfm4 " + struct.pack("<I", len(bank)) + bank +
+                b"\0" * (len(bank) & 1))
+        for name, data in (
+                ("ESS.BIN", bank), ("RIFF.PAT", riff),
+                ("DOOM.OP2", read(os.path.join(ROOT, "third_party", "genmidi",
+                                               "GENMIDI.lmp"))),
+                ("JUNK.BIN", bytes(range(256)) * 12)):
+            with open(os.path.join(folder, name), "wb") as f:
+                f.write(data)
+        for key in ("Bank", "Opl3Bank", "Opl3Device", "BetterSquareWave"):
+            self.set_ini("ESFM.DRV", key, None)
+
+    def box(self, device, esfm, opl3):
+        """cfgcall's run: the box for device, entries esfm and opl3 picked
+        (-1 keeps one) and OK, or Cancel with esfm "cancel"; what it saw,
+        {name: value}, with the lists as name_entries"""
+        self.wine("cfgcall.exe", self.win, str(device), str(esfm), str(opl3))
+        seen = {"esfm_entries": [], "opl3_entries": []}
+        for row in read(self.path("CFGCALL.TXT")).decode(
+                "latin-1").splitlines():
+            name, _sp, rest = row.partition(" ")
+            first, _sp, text = rest.partition(" ")
+            if name in ("esfm", "opl3") and first.isdigit():
+                seen[name + "_entries"].append(text)
+            elif name in ("esfm", "opl3"):
+                seen["%s_%s" % (name, first)] = text
+            else:
+                seen[name] = rest
+        return seen
+
+    def test_bank_box(self):
+        """ESFMCFG.DLL's box, which the Settings button of either MIDI
+        driver opens: each list has the driver's own bank and the files of
+        its kind in SYSTEM\\ESFMBANK, and OK writes the keys that changed"""
+        self.banks_setup()
+        seen = self.box(0, 1, 1)
+        self.assertEqual(seen["title"], "MIDI patch banks")
+        self.assertEqual(seen["esfm_entries"], [
+            "The driver's own: the square-wave bank", "ESS.BIN", "RIFF.PAT"])
+        self.assertEqual(seen["opl3_entries"], [
+            "The driver's own: Freedoom's GENMIDI", "DOOM.OP2"])
+        self.assertEqual((seen["esfm_selected"], seen["opl3_selected"],
+                          seen["opl3_enabled"]), ("0", "0", "1"))
+        self.assertEqual(seen["focus"], "102")          # the ESFM list
+        self.assertEqual(seen["result"], "1")           # DRVCNF_OK
+        folder = "c:\\windows\\system\\esfmbank\\"
+        self.assertEqual(self.ini_value("ESFM.DRV", "Bank").lower(),
+                         folder + "ess.bin")
+        self.assertEqual(self.ini_value("ESFM.DRV", "Opl3Bank").lower(),
+                         folder + "doom.op2")
+        # from the OPL3 device's Settings: its list first; Cancel changes
+        # nothing
+        seen = self.box(1, "cancel", -1)
+        self.assertEqual((seen["esfm_selected"], seen["opl3_selected"],
+                          seen["focus"], seen["result"]),
+                         ("1", "1", "105", "0"))
+        self.assertEqual(self.ini_value("ESFM.DRV", "Bank").lower(),
+                         folder + "ess.bin")
+        # the driver's own banks: the keys go
+        seen = self.box(0, 0, 0)
+        self.assertEqual(seen["result"], "1")
+        self.assertIsNone(self.ini_value("ESFM.DRV", "Bank"))
+        self.assertIsNone(self.ini_value("ESFM.DRV", "Opl3Bank"))
+
+    def test_bank_box_settings(self):
+        """a key that names a file elsewhere is in the list by its path;
+        BetterSquareWave=0 names ESS's bank the driver's own, and with
+        Opl3Device=0 the OPL3 list is off and its key stays"""
+        self.banks_setup()
+        self.set_ini("ESFM.DRV", "Bank", r"C:\BANKS\MINE.BIN")
+        self.set_ini("ESFM.DRV", "Opl3Bank", r"C:\BANKS\X.OP2")
+        self.set_ini("ESFM.DRV", "BetterSquareWave", "0")
+        self.set_ini("ESFM.DRV", "Opl3Device", "0")
+        seen = self.box(1, 2, 0)
+        self.assertEqual(seen["esfm_entries"], [
+            "The driver's own: ESS's bank", "ESS.BIN", "RIFF.PAT",
+            r"C:\BANKS\MINE.BIN"])
+        self.assertEqual((seen["esfm_selected"], seen["opl3_enabled"],
+                          seen["focus"]), ("3", "0", "102"))
+        self.assertEqual(seen["opl3_entries"][-1], r"C:\BANKS\X.OP2")
+        self.assertEqual(seen["result"], "1")
+        self.assertTrue(self.ini_value("ESFM.DRV", "Bank").lower().endswith(
+            "esfmbank\\riff.pat"))
+        self.assertEqual(self.ini_value("ESFM.DRV", "Opl3Bank"),
+                         r"C:\BANKS\X.OP2")
+
     def keep_system_ini(self):
         saved = read(self.system_ini())
 
@@ -1259,10 +1457,12 @@ class WineTest(unittest.TestCase):
         self.assertEqual(len(self.wininit()), 3)
         self.restart()
 
-        # in place: nothing to do
+        # in place: nothing to do (the drivers, ESFMOPL3.DRV, the box of the
+        # patch banks and the banks)
         self.wine("INST\\essinst.exe", "/y", "/norestart")
         log = self.essinst_log()
-        self.assertEqual(log.count("installed already."), 4)
+        self.assertEqual(log.count("installed already."), 4 + 1 + len(
+            os.listdir(os.path.join(ROOT, "build", "BANKS"))))
         self.assertIn("The MIDI list has the OPL3 device, MIDI for Internal "
                       "OPL3 FM Synthesis, as esfmopl3.drv<0018>.", log)
 

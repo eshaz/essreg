@@ -102,6 +102,27 @@ int bank_unwrap(const u8 *file, u32 size, u32 *offset, u32 *length) {
   return -1;
 }
 
+int genmidi_check(const u8 *file, u32 size) {
+  return size >= GENMIDI_MIN && size <= GENMIDI_FILE_MAX &&
+                 !memcmp(file, "#OPL_II#", 8)
+             ? 0
+             : -1;
+}
+
+int bank_kind(const u8 *file, u32 size) {
+  struct bank_info info;
+  u32 off, len;
+
+  if (size < BANK_TABLE || size > GENMIDI_FILE_MAX)
+    return 0;
+  if (!genmidi_check(file, size))
+    return BANK_KIND_GENMIDI;
+  if (!bank_unwrap(file, size, &off, &len) &&
+      !bank_check(file + off, len, &info))
+    return BANK_KIND_ESFM;
+  return 0;
+}
+
 void bank_riff_header(u8 hdr[20], u16 size) {
   memcpy(hdr, "RIFF", 4);
   wr32(hdr + 4, 4 + 8 + (u32)size + (size & 1));
