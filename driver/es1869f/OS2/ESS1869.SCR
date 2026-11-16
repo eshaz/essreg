@@ -1,0 +1,42 @@
+/************************ START OF SPECIFICATIONS ****************************/
+/*                                                                           */
+/* SOURCE FILE NAME:  ESS1869.SCR                                            */
+/*                                                                           */
+/* DESCRIPTIVE NAME:  Filelist control file audio device installation        */
+/*                                                                           */
+/* COPYRIGHT:                                                                */
+/*              Copyright (c) IBM Corporation  1994                          */
+/*                        All Rights Reserved                                */
+/*                                                                           */
+/* DESCRIPTION:                                                              */
+/* This file lists all the files that should be copied by Minstall in order  */
+/* to install the adapter.                                                   */
+/*                                                                           */
+/* The subdirectories used are listed below.  If you need other              */
+/* subdirectories, you must define them in the CONTROL.SCR file.             */
+/*                                                                           */
+/*   sourcedir= "\\"                                       = 0               */
+/*                                                                           */
+/*   destindir= "\\MMOS2\\"                                = 0               */
+/*   destindir= "\\MMOS2\\DLL\\"                           = 2               */
+/*   destindir= "\\MMOS2\\INSTALL\\'                       = 4               */
+/*   destindir= "\\MMOS2\\HELP\\"                          = 7               */
+/*   destindir= "\\OS2\\BOOT\\"                            = 8               */
+/*                                                                           */
+/*************************** END OF SPECIFICATIONS ***************************/
+
+/*  Total Number of Files to copy                                            */
+/*  Change this number to match the number of files you are copying          */
+    7
+
+/* Disk# Group# Dest# Source# Filename         Comment                       */
+
+    0       0     2      3    "CARDINFO.DLL"   /* Info for install           */
+    0       1     2      3    "ESSVSD88.DLL"   /* Audio Resource   */
+    0       0     7      3    "ES1869IN.HLP"   /* ES1869 Installation Help */
+    0       1     0      3    "ES1869DD.SYS"   /* Audio Driver     */
+
+    0       1     0      2    "VAUDDRV.SYS"    /* Audio VDD        */
+    0       1     0      2    "ESDAEMON.EXE"   /* ESS volume daemon */
+    0       1     0      2    "ES938.EXE"      /* ES938 Controls */
+
