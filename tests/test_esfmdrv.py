@@ -2108,25 +2108,59 @@ class Opl3DriverTest(unittest.TestCase):
         self.assertEqual(e.module_lookups, ["ESFM"])
 
     def test_loaded_after_the_count(self):
-        # Windows counted ESFM.DRV's devices before it loaded this driver:
-        # ESFM.DRV keeps device 1 and this driver has none, so a program
-        # sees the OPL3 device once
+        # Windows counted ESFM.DRV's devices before it loaded this driver.
+        # ES1869.VXD told Windows at the card's start that this driver is
+        # there (040E answers 1): ESFM.DRV leaves device 1 to it all the
+        # same. Otherwise, ESS's VxD (CF set) or 0: ESFM.DRV keeps device 1
+        # and this driver has none, so a program sees the OPL3 device once
+        for said, esfm, mine in ((None, 2, 0), (0, 2, 0), (1, 1, 1)):
+            with self.subTest(said=said):
+                e = ESFMEmu(builds()["fixed"])
+                e.ini[("esfm.drv", "opl3device")] = "2"
+                e.vxd_opl3 = said
+                self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
+                for msg in (DRVM_INIT, DRVM_ENABLE):
+                    self.assertEqual(e.modmessage(
+                        msg, 0, esfmemu.DEVNODE, user=0, device=0), 0)
+                self.assertEqual(e.getnumdevs(), esfm)
+                self.assertEqual(e.vxd_calls.count(0x040E), 1)
+                e.load_opl3(builds()["opl3"])
+                e.esfm_loaded = True
+                for msg in (DRV_LOAD, DRV_ENABLE, DRV_OPEN):
+                    self.assertEqual(e.opl3_driverproc(msg), 1)
+                self.assertEqual(self.count(e), mine)
+                self.assertEqual(e.getnumdevs(), esfm)
+                self.assertEqual(bool(e.fix_state()["opts"] & OPT_OPL3_DRV),
+                                 bool(mine))
+                self.assertEqual(e.vxd_calls.count(0x040E), 1)
+                if mine:
+                    e.dev = e.r16(4, 0x3C)
+                    self.assertEqual(e.opl3_open(), 0)
+                    self.assertEqual(e.opl3_data(0x7F3C90), 0)
+                    self.assertTrue(e.chip.opl_keyed())
+                    self.assertEqual(e.opl3_close(), 0)
+        # and the other way round: this driver's count is ESFM.DRV's first,
+        # and the VxD isn't asked
+        e = self.pair()
+        self.assertEqual((self.count(e), e.getnumdevs()), (1, 1))
+        self.assertEqual(e.vxd_calls.count(0x040E), 0)
+
+    def test_count_without_the_card(self):
+        # a count for a devnode that ESFM.DRV doesn't have, or before the
+        # card is enabled, is 0 and decides nothing: the card's first count
+        # does
         e = ESFMEmu(builds()["fixed"])
         e.ini[("esfm.drv", "opl3device")] = "2"
+        e.vxd_opl3 = 1
         self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
+        self.assertEqual(e.getnumdevs(), 0)
+        self.assertEqual(e.fix_state()["opts"] & OPT_OPL3_DRV, OPT_OPL3_DRV)
+        self.assertEqual(e.vxd_calls.count(0x040E), 0)
         for msg in (DRVM_INIT, DRVM_ENABLE):
             self.assertEqual(e.modmessage(msg, 0, esfmemu.DEVNODE, user=0,
                                           device=0), 0)
-        self.assertEqual(e.getnumdevs(), 2)
-        e.load_opl3(builds()["opl3"])
-        for msg in (DRV_LOAD, DRV_ENABLE, DRV_OPEN):
-            self.assertEqual(e.opl3_driverproc(msg), 1)
-        self.assertEqual(self.count(e), 0)
-        self.assertEqual(e.getnumdevs(), 2)
-        self.assertEqual(e.fix_state()["opts"] & OPT_OPL3_DRV, 0)
-        # and the other way round: this driver's count is ESFM.DRV's first
-        e = self.pair()
-        self.assertEqual((self.count(e), e.getnumdevs()), (1, 1))
+        self.assertEqual(e.getnumdevs(), 1)
+        self.assertEqual(e.vxd_calls.count(0x040E), 1)
 
     def test_devnode_news_stay_here(self):
         # ESFM.DRV hears of its devnode itself: this driver's DRVM_DISABLE

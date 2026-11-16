@@ -33,9 +33,11 @@
 ;    this modMessage as device 1's (src/esfm/esfmopl3.asm), so that
 ;    Windows lists the device in the Multimedia control panel as a driver
 ;    of the card.  Device 1 answers here as it does with Opl3Device=1.
-;    That holds if ESFMOPL3.DRV is loaded at the first count; if it isn't,
-;    this driver counts device 1 itself for the session (opl_drv_latch),
-;    and ESFMOPL3.DRV, which asks this count, has none.
+;    That holds if ESFMOPL3.DRV is loaded at the card's first count, or if
+;    ES1869.VXD told Windows at the card's start that it is there, so that
+;    Windows loads it after this driver (function 040E); otherwise this
+;    driver counts device 1 itself for the session (opl_drv_latch), and
+;    ESFMOPL3.DRV, which asks this count, has none.
 ; 5. The voices play the bank as DMX does in Chocolate Doom, for which it
 ;    was made: a second voice with the instrument's fine tuning, the base
 ;    note offsets an octave below DMX's table, the fixed notes of the drums,
@@ -100,13 +102,15 @@ opl_route:
         clc
         ret
 .numdevs:
-        call    opl_drv_latch
         call    opl_ess                 ; 1 with an ES1869 makes 2, but
-        test    word [fix_opts],OPT_OPL3_DRV    ; ESFMOPL3.DRV counts
-        jnz     .done                   ; device 1 itself
-        cmp     ax,1
+        cmp     ax,1                    ; ESFMOPL3.DRV may count device 1
         jne     .done
         or      dx,dx
+        jnz     .done
+        call    opl_drv_latch
+        mov     ax,1
+        xor     dx,dx
+        test    word [fix_opts],OPT_OPL3_DRV
         jnz     .done
         inc     ax
         jmp     .done
@@ -142,11 +146,13 @@ opl_route:
         stc
         ret
 
-; Opl3Device=2, at the first count: device 1 is ESFMOPL3.DRV's if that
-; driver is loaded, and this driver's for the rest of the session if it
-; isn't, so that the device is neither missing nor counted twice whatever
-; order Windows loads the two drivers in.  The count comes at task time.
-; DS = DGROUP, keeps SI and DI
+; Opl3Device=2, at the first count of an ES1869: device 1 is
+; ESFMOPL3.DRV's if that driver is loaded, or if ES1869.VXD told Windows at
+; the card's start that it is there (opl_vxd_said), so that Windows loads
+; it after this driver, and this driver's for the rest of the session
+; otherwise, so that the device is neither missing nor counted twice
+; whatever order Windows loads the two drivers in.  The count comes at
+; task time.  BP = modMessage's frame, DS = DGROUP, keeps SI and DI
 opl_drv_latch:
         cmp     byte [fix_opl3_latched],0
         jne     .out
@@ -158,8 +164,45 @@ opl_drv_latch:
         kernel  GetModuleHandle
         or      ax,ax
         jnz     .out
+        call    opl_vxd_said
+        jnc     .out
         and     word [fix_opts],~OPT_OPL3_DRV
 .out:   ret
+
+; CF clear if ES1869.VXD told Windows at the start of the ES1869 whose
+; devnode is GETNUMDEVS's dwParam1 that its ESFMOPL3.DRV is there (the
+; extension's function 040E): ESS's VxD and an older extension answer
+; with CF set.  BP = modMessage's frame, DS = DGROUP, keeps SI and DI
+opl_vxd_said:
+        push    si
+        push    ecx
+        mov     ax,[bp+0x0A]            ; dwParam1: the devnode
+        mov     dx,[bp+0x0C]
+        mov     si,[device_list]
+.find:  or      si,si
+        jz      .no
+        cmp     [si+DEV_DEVNODE],ax
+        jne     .next
+        cmp     [si+DEV_DEVNODE+2],dx
+        je      .found
+.next:  mov     si,[si+DEV_NEXT]
+        jmp     .find
+.found: mov     ax,[si+DEV_VXD_ENTRY]
+        or      ax,[si+DEV_VXD_ENTRY+2]
+        jz      .no
+        mov     ecx,[si+DEV_DEVNODE]
+        xor     ax,ax
+        mov     dx,0x040E
+        call    far [si+DEV_VXD_ENTRY]
+        jc      .no
+        cmp     ax,1
+        jne     .no
+        clc
+        jmp     .out
+.no:    stc
+.out:   pop     ecx
+        pop     si
+        ret
 
 ; CF set if this call is a message of device 1's client (close, data, long
 ; data, reset): SI = dev, DI = the client

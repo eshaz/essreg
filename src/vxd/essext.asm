@@ -85,7 +85,7 @@
 ;
 ; Licensed under GPL Version 3.0
 
-ESSREG_VERSION          equ 0x0126
+ESSREG_VERSION          equ 0x0127
 ESSREG_COUNT_AGREE      equ 32          ; two readings of a moving channel
 ESSREG_COUNT_TRIES      equ 4           ; this close agree; readings at most
 ESSREG_FEATURES         equ 0xFFFF      ; mixer, controller, ports, config,
@@ -122,6 +122,7 @@ OPT_DRQ_LATCH           equ 0x2000      ; DrqLatch: 25h bit 7 at each acquisitio
 OPT_SB16                equ 0x4000      ; SoundBlaster16: the front for DOS VMs
 OPT_READ                equ 0x8000      ; SYSTEM.INI was read
 OPT_DEFAULT             equ 0x48FF
+ESSREG_OPL3_BUF         equ 32          ; the card's key's Driver for ESFMOPL3
 
 S16_VERSION             equ 0x0405      ; the DSP version the front answers
 S16_CHAN                equ 5           ; SoundBlaster16DMA's default
@@ -5914,6 +5915,75 @@ ESSREG_S16_Position:
 .done:  popad
 .out:   ret
 
+; in place of MMDEVLDR_SetDevicePresence for midi\esfm.drv as the card
+; starts (5:0680), a 6-byte instruction, with the service's arguments on
+; the stack (the devnode, the driver, present): ESS's call, and then the
+; same presence for midi\esfmopl3.drv when Opl3Driver isn't 0 and the
+; card's software key has that MIDI driver, which essinst adds for
+; ESFM.DRV's OPL3 device (ESFMOPL3.DRV). ESS's VxD tells MMDEVLDR only of
+; ESFM.DRV and ESSMPU.DRV, and Windows 98 left the entry of a third MIDI
+; driver of the card inactive without it. The devnode of a card whose
+; ESFMOPL3.DRV is there goes in ESSREG_Opl3_Node for ESFM.DRV (040E).
+; Keeps every register but EAX, ECX and EDX, as the service
+ESSREG_FM_Presence:
+        push    dword [esp+12]          ; present
+        push    dword [esp+12]          ; midi\esfm.drv
+        push    dword [esp+12]          ; the devnode
+        VxDCall MMDEVLDR_SetDevicePresence
+        add     esp,12
+        pushad
+        mov     esi,[esp+32+4]          ; the devnode
+        cmp     [ESSREG_Opl3_Node],esi
+        jne     .on
+        and     dword [ESSREG_Opl3_Node],0
+.on:    cmp     dword [ESSREG_Opl3_Driver],0
+        je      .done
+        mov     dword [ESSREG_Opl3_Len],ESSREG_OPL3_BUF
+        push    byte 1                  ; CM_REGISTRY_SOFTWARE
+        push    dword ESSREG_Opl3_Len
+        push    dword ESSREG_Opl3_Buf
+        push    byte 1                  ; REG_SZ
+        push    dword ESSREG_Opl3_Value
+        push    dword ESSREG_Opl3_Key
+        push    esi
+        call    CM_Read_Registry_Value
+        add     esp,28
+        or      eax,eax
+        jnz     .done                   ; not one of the card's drivers
+        mov     edi,[esp+32+12]         ; present, as ESFM.DRV
+        push    edi
+        push    dword ESSREG_Opl3_Reg
+        push    esi
+        xor     eax,eax
+        xor     ecx,ecx
+        xor     edx,edx
+        VxDCall MMDEVLDR_SetDevicePresence
+        add     esp,12
+        or      edi,edi
+        jz      .done
+        mov     [ESSREG_Opl3_Node],esi
+.done:  popad
+        ret
+
+; --- 040E: the card's MIDI drivers -------------------------------------------
+
+; AX = 1 when ESSREG_FM_Presence told MMDEVLDR at the card's start that its
+; ESFMOPL3.DRV is there, so that Windows loads that driver too, and 0
+; otherwise. ESFM.DRV asks at its first device count, to count its OPL3
+; device or leave it to ESFMOPL3.DRV whichever of the two Windows loads
+; first
+ESSREG_API_Midi:
+        call    ESSREG_Get_ADI
+        jc      .done
+        xor     eax,eax
+        mov     ecx,[ebp+Client_ECX]
+        cmp     ecx,[ESSREG_Opl3_Node]
+        jne     .out
+        inc     eax
+.out:   mov     [ebp+Client_EAX],ax
+        clc
+.done:  ret
+
 ; ESS's two looks at a DMA channel's count, function 0004 (5:14DB, ES1869.DRV's
 ; positions) and DirectSound's position (5:327C), each a 6-byte instruction
 ; in place of ESS's VxDCall: with DmaCountTwice, readings until two agree
@@ -6531,8 +6601,12 @@ ESSREG_Read_Settings:
         mov     [ESSREG_S16_Audio2],eax ; SoundBlaster16Audio2: 0 or not
         jmp     .skip
 .twice: cmp     dword [ebx],ESSREG_Key_Twice
-        jne     .bit
+        jne     .opl3
         mov     [ESSREG_Count_Twice],eax ; DmaCountTwice: 0 or not
+        jmp     .skip
+.opl3:  cmp     dword [ebx],ESSREG_Key_Opl3
+        jne     .bit
+        mov     [ESSREG_Opl3_Driver],eax ; Opl3Driver: 0 or not
         jmp     .skip
 .bit:   mov     ecx,[ebx+8]             ; its bit
         or      eax,eax
@@ -6944,6 +7018,11 @@ ESSREG_S16_Audio2:      dd 1            ; SoundBlaster16Audio2: the 16-bit
                                         ; playback on Audio 2, 0 for Audio 1
 ESSREG_Count_Twice:     dd 1            ; DmaCountTwice: ESS's looks at a
                                         ; count until two readings agree
+ESSREG_Opl3_Driver:     dd 1            ; Opl3Driver: ESFMOPL3.DRV is there
+                                        ; with ESFM.DRV (ESSREG_FM_Presence)
+ESSREG_Opl3_Node:       dd 0            ; the card it was said of, for 040E
+ESSREG_Opl3_Len:        dd 0            ; and the card's key's Driver for it
+ESSREG_Opl3_Buf:        times ESSREG_OPL3_BUF db 0
 
 section PDAT
 
@@ -6962,6 +7041,7 @@ ESSREG_Group4_Funcs:
         dd ESSREG_API_MixerBlock        ; 040B
         dd ESSREG_API_Owners            ; 040C
         dd ESSREG_API_TakeDSP           ; 040D
+        dd ESSREG_API_Midi              ; 040E
 ESSREG_FUNC_COUNT equ ($ - ESSREG_Group4_Funcs) / 4
 
 ; ESS's groups 0, 1 and 3 with the acquire functions wrapped
@@ -7021,6 +7101,7 @@ ESSREG_Settings:
         dd ESSREG_Key_S16DMA, ESSREG_Sec_VxD, 0 ; the channel, no bit
         dd ESSREG_Key_S16A2, ESSREG_Sec_VxD, 0  ; no bit either
         dd ESSREG_Key_Twice, ESSREG_Sec_VxD, 0  ; nor here
+        dd ESSREG_Key_Opl3, ESSREG_Sec_VxD, 0   ; nor here
         dd 0
 ESSREG_Sec_VxD:         db "ES1869.VXD", 0
 ESSREG_Sec_Drv:         db "ES1869.DRV", 0
@@ -7042,3 +7123,7 @@ ESSREG_Key_SB16:        db "SoundBlaster16", 0
 ESSREG_Key_S16DMA:      db "SoundBlaster16DMA", 0
 ESSREG_Key_S16A2:       db "SoundBlaster16Audio2", 0
 ESSREG_Key_Twice:       db "DmaCountTwice", 0
+ESSREG_Key_Opl3:        db "Opl3Driver", 0
+ESSREG_Opl3_Key:        db "Drivers\midi\esfmopl3.drv", 0
+ESSREG_Opl3_Value:      db "Driver", 0
+ESSREG_Opl3_Reg:        db "midi\esfmopl3.drv", 0

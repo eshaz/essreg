@@ -25,7 +25,8 @@ WINDOWS = test_vxddos.DosMixerTest.WINDOWS
 if HAVE_UNICORN:
     from vxdemu import (VM_SYS, VM_DOS, VM_DOS2, ADI_FM_OWNER,  # noqa: E402
                         ADI_DSP_OWNER, ADI_MPU_OWNER, ADI, ADI_DMA1, ADI_DMA2,
-                        DMA1, DMA2, STACK, SVC_VDMAD_GET_PHYS_COUNT)
+                        DMA1, DMA2, STACK, SVC_VDMAD_GET_PHYS_COUNT, DEVNODE)
+    from unicorn.x86_const import UC_X86_REG_ESP  # noqa: E402
     from sbfronts import VxDCard, play16  # noqa: E402
 
 VXD, DRV = "ES1869.VXD", "ES1869.DRV"
@@ -50,12 +51,12 @@ DEFAULT, READ = 0x48FF, 0x8000
 # the keys without a bit: the Sound Blaster 16's channel and Audio 2, and
 # ESS's looks at a DMA count
 OTHER = ((VXD, "SoundBlaster16DMA"), (VXD, "SoundBlaster16Audio2"),
-         (VXD, "DmaCountTwice"))
+         (VXD, "DmaCountTwice"), (VXD, "Opl3Driver"))
 # every change off: ESS's driver
 ESS = {key: "0" for key in KEYS}
 ESS.update({(DRV, "Audio2Oversampling"): "1", (DRV, "Audio2Filter"): "1",
             (DRV, "Audio1Filter"): "1", (VXD, "SoundBlaster16Audio2"): "0",
-            (VXD, "DmaCountTwice"): "0"})
+            (VXD, "DmaCountTwice"): "0", (VXD, "Opl3Driver"): "0"})
 WIN_AUDIO = 0x220
 
 
@@ -155,7 +156,7 @@ class ReadTest(VxDBuilds, unittest.TestCase):
         m.start({})
         out, cf = m.api(VM_SYS, 0x0400)
         self.assertFalse(cf)
-        self.assertEqual(out["EAX"] & 0xFFFF, 0x0126)
+        self.assertEqual(out["EAX"] & 0xFFFF, 0x0127)
         # DrqLatch and the DirectSound lock are off
         self.assertEqual(out["EBX"] & 0xFFFF, 0x9FFF)
         self.assertEqual(out["ECX"] & 0xFFFF, DEFAULT | READ)
@@ -354,6 +355,64 @@ class EachSettingTest(VxDBuilds, unittest.TestCase):
                     self.assertEqual(read(), 0x2000 - looks * step)
                     self.assertEqual(
                         e.services.count(SVC_VDMAD_GET_PHYS_COUNT) - n, looks)
+
+    def presence(self, m, present):
+        # ESS's call at 5:0680 as the card starts, through the hook
+        e = m.emu
+        sp = STACK - 0x100
+        for i, v in enumerate((DEVNODE, m.syms["D6_0144"], present)):
+            e.write32(sp + 4 + 4 * i, v)
+        regs = {"EBX": 0x1111, "ESI": 0x2222, "EDI": 0x3333, "EBP": 0x4444}
+        out = e.run(m.syms["ESSREG_FM_Presence"], regs)
+        self.assertEqual({r: out[r] for r in regs}, regs)
+        self.assertEqual(e.uc.reg_read(UC_X86_REG_ESP), sp + 4)
+
+    def test_opl3_driver(self):
+        # ESS's VxD tells MMDEVLDR that ESFM.DRV is there as the card starts
+        # (5:0680), and Windows 98 left a third MIDI driver of the card
+        # inactive without such a word. On, the default: ESFMOPL3.DRV gets
+        # the same answer when the card's software key has it among its
+        # MIDI drivers, which essinst adds, and 040E tells ESFM.DRV that it
+        # is there; 0: ESS's one call
+        key = (DEVNODE, r"Drivers\midi\esfmopl3.drv", "Driver", 1)
+        for ini, registry, present, want, there in (
+                ({}, {key: "esfmopl3.drv"}, 1, ["midi\\esfm.drv",
+                                                "midi\\esfmopl3.drv"], 1),
+                ({}, {key: "esfmopl3.drv"}, 0, ["midi\\esfm.drv",
+                                                "midi\\esfmopl3.drv"], 0),
+                ({}, {}, 1, ["midi\\esfm.drv"], 0),
+                ({}, {key[:3] + (0,): "esfmopl3.drv"}, 1,
+                 ["midi\\esfm.drv"], 0),      # the hardware key
+                ({(VXD, "Opl3Driver"): "0"}, {key: "esfmopl3.drv"}, 1,
+                 ["midi\\esfm.drv"], 0)):
+            with self.subTest(ini=ini, registry=registry, present=present):
+                m = self.machine_with(ini)
+                e = m.emu
+                e.registry = registry
+                self.presence(m, present)
+                self.assertEqual([(n, d, p) for n, d, p in e.presence],
+                                 [(DEVNODE, d, present) for d in want])
+                out, cf = m.api(VM_SYS, 0x040E)
+                self.assertEqual((cf, out["EAX"] & 0xFFFF), (False, there))
+
+    def test_opl3_driver_api(self):
+        # 040E answers for the card it was said of, and the card's next
+        # start says it again or takes it back
+        m = self.machine_with({})
+        m.emu.registry = {(DEVNODE, r"Drivers\midi\esfmopl3.drv", "Driver",
+                           1): "esfmopl3.drv"}
+        out, cf = m.api(VM_SYS, 0x040E)
+        self.assertEqual((cf, out["EAX"] & 0xFFFF), (False, 0))
+        self.presence(m, 1)
+        for vm in (VM_SYS, VM_DOS):
+            out, cf = m.api(vm, 0x040E)
+            self.assertEqual((cf, out["EAX"] & 0xFFFF), (False, 1))
+        out, cf = m.api(VM_SYS, 0x040E, ECX=0x1234)
+        self.assertEqual((cf, out["EAX"] & 0xFFFF), (True, 1))  # NODEV
+        m.emu.registry = {}                     # essinst took it out
+        self.presence(m, 1)
+        out, cf = m.api(VM_SYS, 0x040E)
+        self.assertEqual((cf, out["EAX"] & 0xFFFF), (False, 0))
 
     def test_reset_dos_fm(self):
         m = self.machine_with({(VXD, "ResetDosFM"): "0"})

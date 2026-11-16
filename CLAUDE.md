@@ -44,7 +44,8 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   `essext.asm` adds the register API, the DOS box improvements (the virtual
   FM chip, Windows' mixer around a DOS program, the DACs' modes for it, and
   a Sound Blaster 16 in front of the chip), DirectSound's Lock and Unlock on
-  a 16-bit DMA channel and the DRQ latch, and `essext.inc` has its layout.
+  a 16-bit DMA channel, the DRQ latch, and ESFMOPL3.DRV's word to MMDEVLDR,
+  and `essext.inc` has its layout.
 * `src/esfm/` holds `ESFM.DRV` as NASM source, made by `tools/ne2asm.py`.
   `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm`
   and `esfmgm.asm` hold the fixes and General MIDI, `esfmopl.asm` the OPL3
@@ -344,16 +345,20 @@ tools/wineshot.sh run ess3d.exe /sim tray
   * Windows 95 and 98 list a card's MIDI drivers, not their devices, so the
     OPL3 device reaches the MIDI list of the Multimedia control panel
     through `ESFMOPL3.DRV` (`esfmopl3.asm`), which essinst adds to the
-    card's MIDI drivers (`src/win/midireg.c`) with `Opl3Device=2`. With 2,
-    ESFM.DRV counts only device 0 if ESFMOPL3.DRV is loaded at its first
-    count, and keeps device 1 for the session if it isn't (`opl_drv_latch`),
-    and ESFMOPL3.DRV, whose count is 1 only when ESFM.DRV's is 1, passes
-    every message of its one device on to ESFM.DRV's modMessage as device
-    1's; it answers the devnode's messages (`DRVM_*`) itself, and looks
-    ESFM.DRV up at task time only. So the device is never missing nor there
-    twice. A change to device 1's number or name goes into both drivers,
-    `midireg.c` and esswchk's `opl.list`, and `Opl3DriverTest` runs the two
-    drivers together in the emulator.
+    card's MIDI drivers (`src/win/midireg.c`) with `Opl3Device=2`. As the
+    card starts, ES1869.VXD tells MMDEVLDR that the driver is there, as
+    ESS's code does of ESFM.DRV (`ESSREG_FM_Presence`, `Opl3Driver`), and
+    function 040E says so. With 2, ESFM.DRV counts only device 0 if
+    ESFMOPL3.DRV is loaded at the card's first count or 040E answers 1, and
+    keeps device 1 for the session otherwise (`opl_drv_latch`), and
+    ESFMOPL3.DRV, whose count is 1 only when ESFM.DRV's is 1, passes every
+    message of its one device on to ESFM.DRV's modMessage as device 1's; it
+    answers the devnode's messages (`DRVM_*`) itself, and looks ESFM.DRV up
+    at task time only. So the device is there once whatever order Windows
+    loads the two in. A change to device 1's number or name goes into both
+    drivers, the VxD's `midi\esfmopl3.drv`, `midireg.c` and esswchk's
+    `opl.list`, and `Opl3DriverTest` runs the two drivers together in the
+    emulator.
 * **The status block** (`esfmfixd.asm`, found by `ESFMFIX`) is read by
   essctl at fixed offsets (`src/win/esfmlive.c`). A change to its layout
   bumps `fix_version`, and the next version is 6.

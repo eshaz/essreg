@@ -110,6 +110,9 @@ NOOP_SERVICES = {
     0x0017000E,                         # SHELL_CallAtAppyTime
 }
 SVC_VPICD_STATUS = 0x00030005
+SVC_MMDEVLDR_SET_PRESENCE = 0x044A0001  # (devnode, driver, present)
+SVC_CM_READ_REGISTRY_VALUE = 0x0033003E
+CR_NO_SUCH_VALUE = 0x25
 
 
 def obj_base(n):
@@ -468,6 +471,12 @@ class VxDEmu:
         # Windows starts (VMM_GetSystemInitState below 40000000h)
         self.ini = {}
         self.init_state = 0x20000000
+        # the devnodes' registry, {(devnode, key, value, flags): text}, as
+        # CONFIGMG_Read_Registry_Value reads it (flags 1: the software
+        # key), and what MMDEVLDR was told is there: (devnode, driver,
+        # present)
+        self.registry = {}
+        self.presence = []
         self.use32 = set()         # VMs whose protected mode code is 32-bit
         self.selectors = {}
         self.add_selector(0x1234, BUFFER, 0xFFF)
@@ -743,6 +752,23 @@ class VxDEmu:
             handle = uc.reg_read(UC_X86_REG_EAX)
             self.virt_cur[handle] = self._cur_count(
                 handle, uc.reg_read(UC_X86_REG_ECX))
+        elif svc == SVC_MMDEVLDR_SET_PRESENCE:
+            self.presence.append((self._arg(0), self.cstr(self._arg(1)),
+                                  self._arg(2)))
+        elif svc == SVC_CM_READ_REGISTRY_VALUE:
+            node, key, value = self._arg(0), self._arg(1), self._arg(2)
+            buf, plen, flags = self._arg(4), self._arg(5), self._arg(6)
+            found = {(n, k.lower(), v.lower(), f): t for (n, k, v, f), t
+                     in self.registry.items()}
+            text = found.get((node, self.cstr(key).lower(),
+                              self.cstr(value).lower(), flags))
+            if text is None or self._arg(3) != 1 or \
+                    len(text) + 1 > self.read32(plen):
+                uc.reg_write(UC_X86_REG_EAX, CR_NO_SUCH_VALUE)
+            else:
+                uc.mem_write(buf, text.encode("latin-1") + b"\0")
+                self.write32(plen, len(text) + 1)
+                uc.reg_write(UC_X86_REG_EAX, 0)
         elif svc in NOOP_SERVICES:
             pass
         else:

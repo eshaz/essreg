@@ -856,12 +856,26 @@ class WineTest(unittest.TestCase):
         self.midi_entries()
         self.card_keys("0018")
         self.set_opl3_device("2")
+        system = self.windows("system")
+        for left in ("ESFMOPL3.DRV",):
+            found = self.find(system, left)
+            if found:
+                os.remove(found)
         res, _text, _log = self.wchk("W10", "/auto", "/q")
         self.assertEqual(res["env.card"], [(
             "INFO", "System\\CurrentControlSet\\Services\\Class\\MEDIA\\"
             "0018\\Drivers\\midi: esfm.drv, essmpu.drv")])
         self.assertEqual(res["opl.list"], [
             ("FAIL", "esfmopl3.drv<0018> isn't in the MIDI list")])
+        # what Windows made of the driver, whatever the verdict
+        self.assertEqual(res["env.opl3"], [
+            ("INFO", "esfmopl3.drv<0018>: no entry; not among the card's MIDI "
+             "drivers; ES1869.VXD told Windows that it is there: no "
+             "ES1869.VXD answers"),
+            ("INFO", "ESFMOPL3.DRV not loaded, and SYSTEM's copy is missing "
+             "(2); ESFM.DRV isn't the fixed one; 0 MIDI devices called OPL3 "
+             "FM Synthesis")])
+        self.assertIn("Opl3Driver=1", res["env.ini"][0][1])
         # essinst's entry as Windows left it after a start, inactive: the
         # copy of ESS's entry did so on the laptop
         ess, _keys = self.reg_values(self.MEDIA + r"\esfm.drv<0018>")
@@ -875,6 +889,14 @@ class WineTest(unittest.TestCase):
         self.assertEqual(res["opl.list"], [
             ("FAIL", "esfmopl3.drv<0018> is inactive (Active 0): Windows "
              "didn't take it over at the start")])
+        self.assertEqual(res["env.opl3"][0], (
+            "INFO", "esfmopl3.drv<0018>: Active 0, DevNode the card's; among "
+            "the card's MIDI drivers; ES1869.VXD told Windows that it is "
+            "there: no ES1869.VXD answers"))
+        # the installed file loads, which Wine's loader checks
+        shutil.copy(os.path.join(ROOT, "build", "ESFMOPL3.DRV"),
+                    os.path.join(system, "ESFMOPL3.DRV"))
+        self.addCleanup(os.remove, os.path.join(system, "ESFMOPL3.DRV"))
         # active on the card's devnode: only the driver, which Wine doesn't
         # load, is missing
         self.reg("add", self.MEDIA + r"\esfmopl3.drv<0018>", "/v", "Active",
@@ -883,6 +905,10 @@ class WineTest(unittest.TestCase):
         self.assertEqual(res["opl.list"], [
             ("FAIL", "ESFMOPL3.DRV isn't loaded")])
         self.assertIn("esfmopl3.drv", res["env.card"][0][1])
+        self.assertEqual(res["env.opl3"][1], (
+            "INFO", "ESFMOPL3.DRV not loaded, but SYSTEM's copy loads; "
+            "ESFM.DRV isn't the fixed one; 0 MIDI devices called OPL3 FM "
+            "Synthesis"))
 
     def test_esswchk_ended_by_force(self):
         """a run ended by force leaves its report as NAME.$$$, with the

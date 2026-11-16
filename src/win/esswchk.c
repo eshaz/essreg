@@ -90,7 +90,7 @@
 #include "wchk.h"
 #include "winio.h"
 
-#define VERSION "1.2"
+#define VERSION "1.3"
 #define TITLE "ES1869 Windows checks"
 #define IDC_CHECK 101
 #define IDC_STEP 102
@@ -456,6 +456,62 @@ static struct {
 // ESFMOPL3.DRV's entry in the MIDI list of n entries, as Windows keeps it
 // after a start: among the card's MIDI drivers, active on the card's
 // devnode, the driver loaded, and its device once among the MIDI devices
+// what Windows made of ESFMOPL3.DRV, whatever the verdict: its entry in
+// the MIDI list, the card's drivers, the VxD's word to Windows at the
+// card's start (040E), the driver loaded or not and whether the installed
+// file loads, which of the two drivers counts the OPL3 device, and the
+// devices of that name
+static void opl3_facts(const struct mr_entry *e, const struct mr_entry *ess,
+                       const char *want, int among, int same) {
+  static char path[160];
+  char node[40], said[40], load[96];
+  HINSTANCE h;
+  HMODULE mod;
+  u16 d;
+  int r;
+
+  if (!e)
+    strcpy(node, "no entry");
+  else
+    _bprintf(node, sizeof(node), "Active %ld, DevNode %s", e->active,
+             !e->has_devnode              ? "none"
+             : e->devnode == ess->devnode ? "the card's"
+                                          : "not the card's");
+  r = vxd.entry ? vxd_ext_midi(&d) : ESSHW_ENODEV;
+  if (!vxd.entry)
+    strcpy(said, "no ES1869.VXD answers");
+  else if (r)
+    _bprintf(said, sizeof(said), "can't tell (extension %X.%02X)",
+             vxd.ext_version >> 8, vxd.ext_version & 0xFF);
+  else
+    strcpy(said, d & VXD_MIDI_OPL3 ? "yes" : "no");
+  res("env.opl3", WCHK_INFO,
+      "%s: %s; %s the card's MIDI drivers; ES1869.VXD told Windows that "
+      "it is there: %s",
+      want, node, among ? "among" : "not among", said);
+  mod = GetModuleHandle("ESFMOPL3");
+  if (mod)
+    _bprintf(load, sizeof(load), "loaded, %d users", GetModuleUsage(mod));
+  else {
+    GetSystemDirectory(path, sizeof(path) - 16);
+    strcat(path, "\\ESFMOPL3.DRV");
+    h = LoadLibrary(path);
+    if ((UINT)h >= 32) {
+      FreeLibrary(h);
+      strcpy(load, "not loaded, but SYSTEM's copy loads");
+    } else
+      _bprintf(load, sizeof(load), "not loaded, and SYSTEM's copy %s (%u)",
+               (UINT)h == 2 ? "is missing" : "doesn't load", (UINT)h);
+  }
+  res("env.opl3", WCHK_INFO,
+      "ESFMOPL3.DRV %s; ESFM.DRV %s; %d MIDI device%s called %s Synthesis",
+      load,
+      !drv.esfm_fixed                     ? "isn't the fixed one"
+      : drv.esfm_opts & ESFM_OPT_OPL3_DRV ? "leaves the OPL3 device to it"
+                                          : "counts the OPL3 device itself",
+      same, same == 1 ? "" : "s", OPL3_MIDI);
+}
+
 static void check_opl3_list(const struct mr_entry *list, int n) {
   static char drivers[120], low[120];
   struct mr_entry ess;
@@ -493,6 +549,8 @@ static void check_opl3_list(const struct mr_entry *list, int n) {
     if (!midiOutGetDevCaps(i, &mc, sizeof(mc)) &&
         !strncmp(mc.szPname, OPL3_MIDI, strlen(OPL3_MIDI)))
       same++;
+  opl3_facts(found < 0 ? 0 : &list[found], &ess, want,
+             strstr(low, MR_OPL3_DRIVER) != 0, same);
   if (found < 0)
     res("opl.list", WCHK_FAIL, "%s isn't in the MIDI list", want);
   else if (list[found].active != 1)
@@ -614,11 +672,12 @@ static void check_env(void) {
   }
   drv.count_fixed = drv.vxd_ext >= 0x0126 && drv.dct;
   res("env.ini", WCHK_INFO,
-      "SYSTEM.INI: [ES1869.VXD] DmaCountTwice=%d, SoundBlaster16DMA=%d; "
-      "[ESFM.DRV] TrueSides=%d, Opl3Device=%d",
+      "SYSTEM.INI: [ES1869.VXD] DmaCountTwice=%d, SoundBlaster16DMA=%d, "
+      "Opl3Driver=%d; [ESFM.DRV] TrueSides=%d, Opl3Device=%d",
       drv.dct,
       GetPrivateProfileInt("ES1869.VXD", "SoundBlaster16DMA", 5, "SYSTEM.INI"),
-      drv.ts, GetPrivateProfileInt("ESFM.DRV", "Opl3Device", 1, "SYSTEM.INI"));
+      GetPrivateProfileInt("ES1869.VXD", "Opl3Driver", 1, "SYSTEM.INI"), drv.ts,
+      GetPrivateProfileInt("ESFM.DRV", "Opl3Device", 1, "SYSTEM.INI"));
   if (opt.once[0])
     res("env.once", WCHK_INFO, "the StartUp batch, %s", once_note);
   if (opt.sim)

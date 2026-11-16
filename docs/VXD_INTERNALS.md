@@ -60,9 +60,15 @@ allocated resources:
 device list, virtualizes the IRQs through VPICD and the DMA channels through
 VDMAD, and installs the I/O trap handlers. Once the device is running, the
 driver tells MMDEVLDR whether `midi\esfm.drv` and `midi\essmpu.drv` are
-present (`MMDEVLDR_SetDevicePresence`). It also sets the `BLASTER`
-environment string for DOS programs (`MMDEVLDR_SetEnvironmentString`) in the
-format `A%03X I%d D%d`, with IRQ 9 written as 2.
+present (`MMDEVLDR_SetDevicePresence`). The extended driver says the same of
+`midi\esfmopl3.drv` right after `midi\esfm.drv` (5:0680,
+`ESSREG_FM_Presence`) when the card's software key has that MIDI driver, the
+OPL3 device's ([ESFM_OPL3.md](ESFM_OPL3.md)), and function 040E tells
+ESFM.DRV so (`Opl3Driver` in
+[DRIVER_CONFIG.md](DRIVER_CONFIG.md#61-es1869vxd)). It also sets the
+`BLASTER` environment string for DOS programs
+(`MMDEVLDR_SetEnvironmentString`) in the format `A%03X I%d D%d`, with IRQ 9
+written as 2.
 
 When the devnode is the no-DMA variant (flag 0020h), a child devnode,
 `VIRTUAL\ESS1869-DMAEmulation`, takes the DMA resources, and the driver
@@ -805,7 +811,7 @@ it by hand:
    `ES1869VX.ORG` in the same directory, the name essinst uses too.
 2. Copy `build\ES1869.VXD` over `C:\WINDOWS\SYSTEM\ES1869.VXD`.
 3. Restart Windows. essctl's *Device information* page now shows "Register
-   API: version 1.26".
+   API: version 1.27".
 
 If sound stops working, run `essinst /restore`. If Windows doesn't start,
 restart, press F8 at "Starting Windows 95", choose *Command prompt only*,

@@ -167,5 +167,9 @@ int vxd_ext_owners(struct vxd_owners *o); // 040C
 // 040D, before a recording: a DOS box that has the DSP gives it up and
 // goes on with a virtual Sound Blaster; ESSHW_EINUSE if it keeps it
 int vxd_ext_take_dsp(void);
+// 040E (1.27): *drivers bit 0 set when the VxD told Windows at the card's
+// start that its ESFMOPL3.DRV is there (VXD_MIDI_OPL3)
+#define VXD_MIDI_OPL3 0x0001
+int vxd_ext_midi(u16 *drivers);
 
 #endif /* VXDAPI_H */

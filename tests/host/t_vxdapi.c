@@ -29,7 +29,7 @@
 #define DEVNODE 0xC0FFEE11UL
 
 static struct {
-  int present, ext;
+  int present, ext, opl3;
   u8 adi[ADI_COPY_SIZE];
   u16 calls[64];
   int ncalls;
@@ -121,6 +121,11 @@ int vxd_raw_call(void *entry, vxd_regs *r) {
           return fail(r, 2);
         put32(fake.adi + ADI_DSP_OWNER, 0);
       }
+      return 0;
+    case 0x040E: // 1.27: ESFMOPL3.DRV was said to be there, or not
+      if (fake.ext < 3)
+        return 1; // an older extension: past the end of group 4
+      r->eax = (r->eax & 0xFFFF0000UL) | (u16)fake.opl3;
       return 0;
     }
     return 0;
@@ -289,6 +294,28 @@ static void test_open_settings(void) {
   CHECK_EQ(vxd.ext_settings, 0);
 }
 
+static void test_midi(void) {
+  u16 d = 0x5555;
+
+  // 1.27: whether the VxD said that ESFMOPL3.DRV is there
+  fake_reset(3);
+  CHECK_EQ(vxd_open(), 0);
+  CHECK_EQ(vxd_ext_midi(&d), 0);
+  CHECK_EQ(d, 0);
+  fake.opl3 = VXD_MIDI_OPL3;
+  CHECK_EQ(vxd_ext_midi(&d), 0);
+  CHECK_EQ(d, VXD_MIDI_OPL3);
+  // an older extension, and the stock driver, can't say
+  d = 0x5555;
+  fake_reset(1);
+  CHECK_EQ(vxd_open(), 0);
+  CHECK(vxd_ext_midi(&d) != 0);
+  fake_reset(0);
+  CHECK_EQ(vxd_open(), 0);
+  CHECK(vxd_ext_midi(&d) != 0);
+  CHECK_EQ(d, 0x5555);
+}
+
 static void test_dsp_bracket(void) {
   // free DSP: acquire, then release afterwards
   fake_reset(0);
@@ -356,6 +383,7 @@ int main(void) {
   test_open_missing();
   test_open_ext();
   test_open_settings();
+  test_midi();
   test_dsp_bracket();
   test_never_called();
   return CHECK_DONE("t_vxdapi");

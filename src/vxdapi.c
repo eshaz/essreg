@@ -262,6 +262,17 @@ int vxd_ext_take_dsp(void) {
   return vxd_call(ESSX_TAKE_DSP, &r);
 }
 
+int vxd_ext_midi(u16 *drivers) {
+  vxd_regs r;
+  int err;
+
+  regs_init(&r);
+  err = vxd_call(ESSX_MIDI, &r);
+  if (!err)
+    *drivers = (u16)r.eax;
+  return err;
+}
+
 int vxd_ext_owners(struct vxd_owners *o) {
   vxd_regs r;
   int err;

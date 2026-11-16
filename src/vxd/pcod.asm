@@ -564,7 +564,11 @@ L5_0664:
         xor_ eax,eax                                    ; 067A
         xor_ ecx,ecx                                    ; 067C
         xor_ edx,edx                                    ; 067E
+%if ESSREG_EXT
+        ds call ESSREG_FM_Presence      ; essreg: and ESFMOPL3.DRV (6 bytes)
+%else
         VxDCall MMDEVLDR_SetDevicePresence              ; 0680
+%endif
         add esp,byte +0xc                               ; 0686
         db 0x66, 0x81, 0xef, 0xff, 0xff                 ; 0689
         mov [ebp-0x28],esi                              ; 068E

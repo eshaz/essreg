@@ -190,6 +190,13 @@ the card's drivers as ESS's INF adds `essmpu.drv`:
   `Instruments` key included. Windows takes it over at the next start.
 * `[ESFM.DRV]` of `SYSTEM.INI` gets `Opl3Device=2`.
 
+As the card starts, ES1869.VXD tells Windows' multimedia loader that
+`midi\esfmopl3.drv` is there too, right after ESS's code says so of
+`midi\esfm.drv`, when the card's software key has that driver (`Opl3Driver`
+in [DRIVER_CONFIG.md](DRIVER_CONFIG.md#61-es1869vxd)). On the laptop, before
+the VxD did, the entry was inactive (`Active` 0) after the restart, and
+`ESFMOPL3.DRV` wasn't loaded when Windows first counted ESFM.DRV's devices.
+
 `ESFMOPL3.DRV` has one device, whose every message it passes on to
 ESFM.DRV's `modMessage` as device 1's, with the card's devnode as Windows
 gave it, and with `Opl3Device=2` ESFM.DRV counts only its own device, so
@@ -198,11 +205,15 @@ The driver finds ESFM.DRV by name at the count, the caps and the open, and
 the messages that may come at interrupt time only follow that pointer, in
 fixed memory. The messages of the devnode's coming and going stay with it,
 since ESFM.DRV gets them itself. Without `Opl3Device=2`, it has no device.
-ESFM.DRV decides at its first count of the session: if `ESFMOPL3.DRV` isn't
-loaded then, ESFM.DRV keeps device 1 for the session and `ESFMOPL3.DRV`,
-which asks ESFM.DRV's count, has none. So whatever order Windows loads the
-two drivers in, the device is neither missing nor there twice, and esswchk's
-`opl.list` says when ESFM.DRV kept it.
+ESFM.DRV decides at its first count of the card's devices: device 1 is
+`ESFMOPL3.DRV`'s if that driver is loaded then, or if ES1869.VXD answers its
+function 040E with 1, which says that the VxD told Windows of the driver, so
+that Windows loads it after ESFM.DRV. Otherwise ESFM.DRV keeps device 1 for
+the session, and `ESFMOPL3.DRV`, which asks ESFM.DRV's count, has none. So
+whatever order Windows loads the two drivers in, the device is there once,
+and esswchk's `opl.list` says when ESFM.DRV kept it. Only if Windows left
+out a driver that the VxD named would the device be missing for the session,
+which esswchk's `env.opl3` lines would show.
 
 essinst adds all of that when the ESFM.DRV in place after its run is a
 rebuilt driver with the OPL3 device, `Opl3Device` isn't 0, the MIDI list has
@@ -223,7 +234,12 @@ esswchk's report lists the MIDI list, an entry a line with its `DevNode`
 (`env.midi`), the mapper's choice (`env.mapper`) and the card's MIDI drivers
 (`env.card`), and `opl.list` checks after a start that Windows kept the
 entry: active on the card's devnode, `ESFMOPL3.DRV` loaded, and the OPL3
-device once among the MIDI devices.
+device once among the MIDI devices. Two `env.opl3` lines give what that
+rests on, whatever the verdict: the entry's `Active` and `DevNode`, whether
+the card's drivers have `esfmopl3.drv`, the VxD's answer to 040E, whether
+`ESFMOPL3.DRV` is loaded and, if it isn't, whether the copy in the `SYSTEM`
+folder loads, which of the two drivers counts the OPL3 device, and how many
+MIDI devices have its name.
 
 ## Checks
 
@@ -240,7 +256,13 @@ device once among the MIDI devices.
 * `Opl3DriverTest` in [tests/test_esfmdrv.py](../tests/test_esfmdrv.py) runs
   `ESFMOPL3.DRV` next to ESFM.DRV in the emulator: one device with
   `Opl3Device=2` and none without, its caps and notes through ESFM.DRV's
-  device 1, the devnode's messages kept, and no import at interrupt time.
+  device 1, the devnode's messages kept, no import at interrupt time, and
+  both orders of loading, with the VxD's answer to 040E and without.
+* `test_opl3_driver` in [tests/test_vxdini.py](../tests/test_vxdini.py) runs
+  the VxD's call at the card's start in the emulator: Windows hears of both
+  drivers when the card's software key has `esfmopl3.drv`, of ESFM.DRV alone
+  otherwise and with `Opl3Driver=0`, and 040E answers as the VxD told
+  Windows.
 * `test_essinst_midi_list` in [tests/test_wine.py](../tests/test_wine.py)
   runs essinst under Wine against a MIDI list and the card's drivers as
   ESS's INF leaves them, and `test_esswchk_opl3_list` esswchk's `opl.list`.

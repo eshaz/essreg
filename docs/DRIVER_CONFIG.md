@@ -676,6 +676,7 @@ DirectSoundLock=0
 DrqLatch=0
 SoundBlaster16=0
 SoundBlaster16Audio2=0
+Opl3Driver=0
 
 [ES1869.DRV]
 Audio1Device=0
@@ -693,10 +694,10 @@ changes. Each key below is followed by its default and by what the key does
 at 1, and the sentence that begins "With 0" says what happens at 0, as in
 ESS's driver:
 * **RegisterAPI** (default 1). The VxD offers the register API, functions
-  0400-040D ([VXD_API.md](VXD_API.md)), which essctl, `ess3d`, `esfmrec` and
-  ES1869.DRV's FM recording device use. With 0, group 4 fails with CF set,
-  and the programs go through the ports as they do with ESS's driver
-  ([VXD_API.md](VXD_API.md#ownership-and-port-trapping)).
+  0400-040E ([VXD_API.md](VXD_API.md)), which essctl, `ess3d`, `esfmrec`,
+  ES1869.DRV's FM recording device and ESFM.DRV use. With 0, group 4 fails
+  with CF set, and the programs go through the ports as they do with ESS's
+  driver ([VXD_API.md](VXD_API.md#ownership-and-port-trapping)).
 * **VirtualFM** (default 1). A DOS program that can't have the FM chip gets
   a virtual one, so its FM detection succeeds. With 0, every FM read returns
   FFh while Windows' MIDI or another DOS box has FM, and ESS's "in use"
@@ -781,6 +782,16 @@ ESS's driver:
   measured on a fast channel, and a position 256 ahead lets a program write
   over what hasn't played yet. With 0, ESS's code reads the count once.
   essctl doesn't show this key.
+* **Opl3Driver** (default 1). As the card starts, ESS's VxD tells Windows'
+  multimedia device loader (MMDEVLDR) that the card's ESFM.DRV and
+  ESSMPU.DRV are there, and Windows 98 left a third MIDI driver of the card
+  inactive. When the card's software key has `ESFMOPL3.DRV` among its MIDI
+  drivers, which essinst adds for the OPL3 device
+  ([ESFM_OPL3.md](ESFM_OPL3.md)), the VxD says the same of that driver, and
+  function 040E tells ESFM.DRV so, which then leaves the OPL3 device to
+  ESFMOPL3.DRV whatever order Windows loads the two drivers in. With 0, the
+  VxD tells Windows of ESS's two drivers only, and 040E answers 0. essctl
+  doesn't show this key.
 
 ### 6.2 [ES1869.DRV]
 
@@ -889,7 +900,8 @@ its default and by what the key does at 1, and the sentence that begins
   drivers, the device is that driver's, which Windows lists in the
   Multimedia control panel: ESFM.DRV counts only its own device and serves
   the second to ESFMOPL3.DRV, if that is loaded when Windows first counts
-  ESFM.DRV's devices, and keeps both devices for the session if it isn't.
+  ESFM.DRV's devices or ES1869.VXD told Windows that it is there
+  (`Opl3Driver` above), and keeps both devices for the session otherwise.
   With 0, the driver has ESS's one device, and essinst takes ESFMOPL3.DRV
   out again.
 

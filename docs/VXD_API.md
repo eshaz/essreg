@@ -95,9 +95,11 @@ The Class column tells how safe a function is to call:
 | 040B | essext  | info           | Read mixer registers 00h-7Fh           |
 | 040C | essext  | info           | Owner and status information           |
 | 040D | essext  | ownership      | Take the DSP from a DOS box to record  |
+| 040E | essext  | info           | MIDI drivers declared to Windows       |
 
 `ES1869.DRV` uses group 0, including 0006, 0007, 0009 and 000B, and group 2.
-`ESFM.DRV` uses group 1, and `ESSMPU.DRV` uses group 3.
+`ESFM.DRV` uses group 1, and 040E of the rebuilt driver's group 4, and
+`ESSMPU.DRV` uses group 3.
 
 Of ESS's functions, essctl calls only the *info* functions, and 0002 and
 0003 only as [Ownership and port trapping](#ownership-and-port-trapping)
@@ -299,9 +301,9 @@ in another VM, or the driver's own interrupt code.
 
 The functions have these inputs and outputs:
 
-* **0400** takes nothing and returns AX = 0126h (version 1.26), BX = the
+* **0400** takes nothing and returns AX = 0127h (version 1.27), BX = the
   feature bits (FFFFh with every change on), CX = the SYSTEM.INI settings
-  and DX = the number of functions (14).
+  and DX = the number of functions (15).
 * **0401** takes BL = a mixer register and returns AL = its value.
 * **0402** takes BL = a mixer register and BH = the value.
 * **0403** takes BL = a controller register (A0h-BFh) and returns AL = its
@@ -332,6 +334,15 @@ The functions have these inputs and outputs:
   changes nothing. It fails with INUSE while `RecordTakesDSP=0`, and when a
   DOS box calls it. ES1869.DRV's FM recording device and esfmrec call it,
   and essctl never does.
+* **040E** takes nothing and returns AX = 1 when the VxD told Windows'
+  multimedia device loader, as the card started, that the card's
+  `ESFMOPL3.DRV` is there (`Opl3Driver` in
+  [DRIVER_CONFIG.md](DRIVER_CONFIG.md#61-es1869vxd)), and AX = 0 otherwise.
+  ESFM.DRV asks at its first count of the card's devices, and leaves its
+  OPL3 device to ESFMOPL3.DRV when the answer is 1, because Windows then
+  loads that driver too, before or after ESFM.DRV
+  ([ESFM_OPL3.md](ESFM_OPL3.md)). esswchk reports it. Version 1.26 and
+  earlier answer with CF set, as for any function past the group's end.
 
 The controller registers (0403, 0404) are reached through the DSP's command
 channel. Both functions first wait until the DSP is idle, for up to 2000h

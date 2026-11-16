@@ -19,21 +19,27 @@ ESS's own drivers have), INFO (what was measured) or SKIP. The measures and
 verdicts are [`src/wchk.c`](../src/wchk.c)'s.
 
 * **env**: the VxD and its extension, whether ES1869.DRV and ESFM.DRV are
-  the rebuilt ones and their settings, `DmaCountTwice`, `TrueSides` and
-  `Opl3Device` from `SYSTEM.INI`, and the wave and MIDI devices. `env.once`
-  says what became of the StartUp batch. `env.midi` gives the MIDI list of
-  the Multimedia control panel, an entry a line with its key, name,
-  `Driver`, `Port`, `Active` and `DevNode`, `env.mapper` the MIDI mapper's
-  `CurrentInstrument`, and `env.card` the card's MIDI drivers, where essinst
-  adds ESFMOPL3.DRV, the OPL3 device's driver
+  the rebuilt ones and their settings, `DmaCountTwice`, `Opl3Driver`,
+  `TrueSides` and `Opl3Device` from `SYSTEM.INI`, and the wave and MIDI
+  devices. `env.once` says what became of the StartUp batch. `env.midi`
+  gives the MIDI list of the Multimedia control panel, an entry a line with
+  its key, name, `Driver`, `Port`, `Active` and `DevNode`, `env.mapper` the
+  MIDI mapper's `CurrentInstrument`, and `env.card` the card's MIDI drivers,
+  where essinst adds ESFMOPL3.DRV, the OPL3 device's driver
   ([ESFM_OPL3.md](ESFM_OPL3.md#the-multimedia-control-panel)).
 * **opl.list**: with `Opl3Device=2`, which essinst writes with the driver,
   ESFMOPL3.DRV's entry in the MIDI list as Windows keeps it after a start:
   there, active on the card's devnode, the driver among the card's MIDI
   drivers and loaded, and the OPL3 device once among the MIDI devices. The
-  first of those that isn't so is the FAIL's reason. SKIP with another
-  `Opl3Device`: the OPL3 device is then ESFM.DRV's device 1, without an
-  entry of its own.
+  first of those that isn't so is the FAIL's reason. Two `env.opl3` lines
+  before it give all of it, whatever the verdict: the entry's `Active` and
+  `DevNode`, whether the card's drivers have it, whether ES1869.VXD told
+  Windows that the driver is there (function 040E, from the extension 1.27),
+  whether ESFMOPL3.DRV is loaded and, if it isn't, whether the copy in the
+  `SYSTEM` folder loads, with the error if it doesn't, whether ESFM.DRV
+  leaves the OPL3 device to it, and how many MIDI devices have the device's
+  name. SKIP with another `Opl3Device`: the OPL3 device is then ESFM.DRV's
+  device 1, without an entry of its own.
 * **vxd.count2** and **vxd.count1**: while each DAC plays silence, 100,000
   readings of its DMA count through VxD function 0004, which ES1869.DRV's
   positions and DirectSound's come from. A reading taken while a byte came

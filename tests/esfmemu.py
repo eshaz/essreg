@@ -34,7 +34,7 @@ from unicorn import (Uc, UC_ARCH_X86, UC_MODE_16, UC_HOOK_INTR,
                      UC_HOOK_INSN, UC_HOOK_CODE, UC_HOOK_MEM_WRITE)
 from unicorn.x86_const import (UC_X86_REG_AX, UC_X86_REG_BX, UC_X86_REG_CX,
                                UC_X86_REG_DX, UC_X86_REG_SI, UC_X86_REG_DI,
-                               UC_X86_REG_SP, UC_X86_REG_IP,
+                               UC_X86_REG_SP, UC_X86_REG_IP, UC_X86_REG_ECX,
                                UC_X86_REG_CS, UC_X86_REG_DS, UC_X86_REG_ES,
                                UC_X86_REG_SS, UC_X86_REG_EFLAGS,
                                UC_X86_INS_IN, UC_X86_INS_OUT)
@@ -255,6 +255,10 @@ class ESFMEmu:
         self.heap = max(HEAP_START, (dgroup.minalloc + 0x1F) & ~0xF)
         self.callbacks = []      # (msg, dwInstance, dw1, dw2)
         self.vxd_calls = []
+        # ES1869.VXD's 040E for the card: None, as ESS's VxD and an older
+        # extension, answers with CF set; 1 when it told Windows that
+        # ESFMOPL3.DRV is there, 0 when it didn't
+        self.vxd_opl3 = None
         self.depth = 0
         self.injects = []
         self.icount = 0
@@ -743,6 +747,11 @@ class ESFMEmu:
                 pass
             elif fn == 0x0200:
                 ax, dx = 0x0042, 0x0000
+            elif fn == 0x040E and self.vxd_opl3 is not None:
+                if uc.reg_read(UC_X86_REG_ECX) == DEVNODE:
+                    ax = self.vxd_opl3
+                else:
+                    ax, flags = 1, flags | 1    # NODEV
             else:
                 flags |= 1
             uc.reg_write(UC_X86_REG_EFLAGS, flags)
