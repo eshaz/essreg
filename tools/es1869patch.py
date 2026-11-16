@@ -38,8 +38,9 @@ snd-es18xx, which stays built and is blacklisted where snd-es1869 is used:
 * Audio 1's recordings through a correction filter, in gain and phase,
   whose taps load the same way, and a linearity stage after it, from the
   analytic signal's envelope and instantaneous frequency;
-* on PIIX4 machines whose BIOS sets Type F DMA timing on Audio 1's channel,
-  that timing turned off, since a recording then hangs the machine;
+* on PIIX4 machines, Type F DMA timing on Audio 1's channel with its
+  recordings in single transfers, since a demand burst there hung the
+  machine, and the timing off again at the driver's removal;
 * every setting a module parameter writable at runtime, an ALSA control
   where it is chip state, and a Kconfig default.
 
