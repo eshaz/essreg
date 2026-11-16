@@ -11,11 +11,15 @@ kbd's, 8 by 16.
 given), and `make install-services` puts two OpenRC services in
 `/etc/init.d`, pointed at the programs there, with the rotation of
 es1869eq's log in `/etc/logrotate.d`. A package passes `DESTDIR` and
-`PREFIX=/usr`. The services run at boot once added to the default runlevel:
-* **es1869cal** calibrates the record path before MPD starts ([The
+`PREFIX=/usr`. The services run at boot only once added to the default
+runlevel, which the Armada's kit leaves them out of, so that the corrections
+stay off as the driver's defaults have them:
+* **es1869cal** calibrates the record path before MPD starts, and turns
+  Audio 1's correction on ([The
   calibration](#the-calibration-of-audio-1s-correction));
-* **es1869eq** follows the corrections over time beside MPD ([Corrections
-  over time](#corrections-over-time)).
+* **es1869eq** follows the corrections over time beside MPD, with Audio 2 at
+  2x and its treble correction on while it runs ([Corrections over
+  time](#corrections-over-time)).
 
 ```
 make -C linux/tools/es1869scope install install-services PREFIX=/usr

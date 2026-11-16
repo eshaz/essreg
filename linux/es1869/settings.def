@@ -29,37 +29,37 @@
 
 /* the playback mixer (DS Table 21 for the levels) */
 ES1869_SET(master_volume, MASTER_VOLUME, S_MASTER, B_MIX, 0x60, 0, 6, 0, 63, 54,
-	   T_MASTER, F_CTL | F_PARAM | F_INIT, 0, "Master Playback Volume", "",
+	   T_MASTER, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Master Playback Volume", "",
 	   "master volume (60h/62h bits 5:0), 63 = 0 dB, 0.75 dB a step")
 ES1869_SET(master_switch, MASTER_SWITCH, S_MASTERSW, B_MIX, 0x60, 6, 1, 0, 1, 1,
-	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "Master Playback Switch", "",
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Master Playback Switch", "",
 	   "master on (60h/62h bit 6 clear)")
 ES1869_SET(a2_volume, A2_VOLUME, S_STEREO, B_MIX, 0x7C, 0, 4, 0, 15, 15,
-	   T_A2, F_CTL | F_PARAM | F_INIT, 0, "PCM Playback Volume", "",
+	   T_A2, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "PCM Playback Volume", "",
 	   "Audio 2's volume (7Ch), 15 = 0 dB")
 ES1869_SET(a1_volume, A1_VOLUME, S_STEREO, B_MIX, 0x14, 0, 4, 0, 15, 14,
-	   T_A1, F_CTL | F_PARAM | F_INIT, 1, "PCM Playback Volume", "",
+	   T_A1, F_CTL | F_PARAM | F_INIT | F_MIXER, 1, "PCM Playback Volume", "",
 	   "Audio 1's volume (14h), 14 = 0 dB")
 ES1869_SET(fm_volume, FM_VOLUME, S_STEREO, B_MIX, 0x36, 0, 4, 0, 15, 8,
-	   T_MIC, F_CTL | F_PARAM | F_INIT, 0, "FM Playback Volume", "",
+	   T_MIC, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "FM Playback Volume", "",
 	   "the music DAC's volume (36h), 8 = 0 dB")
 ES1869_SET(line_volume, LINE_VOLUME, S_STEREO, B_MIX, 0x3E, 0, 4, 0, 15, 0,
-	   T_AUX, F_CTL | F_PARAM | F_INIT, 0, "Line Playback Volume", "",
+	   T_AUX, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Line Playback Volume", "",
 	   "line in to the output (3Eh), 13 = 0 dB")
 ES1869_SET(cd_volume, CD_VOLUME, S_STEREO, B_MIX, 0x38, 0, 4, 0, 15, 0,
-	   T_AUX, F_CTL | F_PARAM | F_INIT, 0, "CD Playback Volume", "",
+	   T_AUX, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "CD Playback Volume", "",
 	   "AuxA (CD) to the output (38h), 13 = 0 dB")
 ES1869_SET(aux_volume, AUX_VOLUME, S_STEREO, B_MIX, 0x3A, 0, 4, 0, 15, 0,
-	   T_AUX, F_CTL | F_PARAM | F_INIT, 0, "Aux Playback Volume", "",
+	   T_AUX, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Aux Playback Volume", "",
 	   "AuxB to the output (3Ah), 13 = 0 dB")
 ES1869_SET(mic_volume, MIC_VOLUME, S_STEREO, B_MIX, 0x1A, 0, 4, 0, 15, 0,
-	   T_MIC, F_CTL | F_PARAM | F_INIT, 0, "Mic Playback Volume", "",
+	   T_MIC, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Mic Playback Volume", "",
 	   "the microphone to the output (1Ah), 8 = 0 dB")
 ES1869_SET(mono_volume, MONO_VOLUME, S_STEREO, B_MIX, 0x6D, 0, 4, 0, 15, 0,
-	   T_AUX, F_CTL | F_PARAM | F_INIT, 0, "Mono Playback Volume", "",
+	   T_AUX, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Mono Playback Volume", "",
 	   "MONO_IN to the output (6Dh), 13 = 0 dB")
 ES1869_SET(beep_volume, BEEP_VOLUME, S_INT, B_MIX, 0x3C, 0, 3, 0, 7, 0,
-	   T_BEEP, F_CTL | F_PARAM | F_INIT | F_FOUND | F_HOOK, 0, "Beep Playback Volume", "",
+	   T_BEEP, F_CTL | F_PARAM | F_INIT | F_FOUND | F_HOOK | F_MIXER, 0, "Beep Playback Volume", "",
 	   "the PC speaker (3Ch bits 2:0), 7 = -6 dB, 0 mutes it; the board mixes it in after the master, so with beep_follow this is its level at full master")
 ES1869_SET(beep_follow, BEEP_FOLLOW, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
 	   T_NONE, F_CTL | F_PARAM | F_INIT | F_HOOK, 0, "Beep Follows Master Playback Switch", "",
@@ -67,41 +67,41 @@ ES1869_SET(beep_follow, BEEP_FOLLOW, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
 
 /* recording */
 ES1869_SET(capture_source, CAPTURE_SOURCE, S_ENUM, B_MIX, 0x1C, 0, 3, 0, 7, 5,
-	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "Capture Source",
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Capture Source",
 	   "Mic|Mic Master|CD|AOUT|Mic1|Mix|Line|Master",
 	   "the record source (1Ch bits 2:0): 5 the record mixer, 7 the 3-D output before the master")
 ES1869_SET(capture_volume, CAPTURE_VOLUME, S_STEREO, B_CTRL, 0xB4, 0, 4, 0, 15, 4,
-	   T_REC, F_CTL | F_PARAM | F_INIT | F_SWAP, 0, "Capture Volume", "",
+	   T_REC, F_CTL | F_PARAM | F_INIT | F_SWAP | F_MIXER, 0, "Capture Volume", "",
 	   "the record level (B4h, right in bits 7:4), 1.5 dB a step")
 ES1869_SET(capture_switch, CAPTURE_SWITCH, S_BOOL, B_MIX, 0x1C, 4, 1, 0, 1, 1,
-	   T_NONE, F_CTL | F_PARAM | F_INIT | F_INV, 0, "Capture Switch", "",
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_INV | F_MIXER, 0, "Capture Switch", "",
 	   "the record source on (1Ch bit 4 clear)")
 ES1869_SET(record_monitor, RECORD_MONITOR, S_BOOL, B_CTRL, 0xA8, 3, 1, 0, 1, 0,
-	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "Record Monitor", "",
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Record Monitor", "",
 	   "AOUT carries the record source in place of the playback mix while Audio 1 records (A8h bit 3)")
 ES1869_SET(a2_capture, A2_CAPTURE, S_STEREO, B_MIX, 0x69, 0, 4, 0, 15, 0,
-	   T_A2, F_CTL | F_PARAM | F_INIT, 0, "PCM Capture Volume", "",
+	   T_A2, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "PCM Capture Volume", "",
 	   "Audio 2 into the record mixer (69h)")
 ES1869_SET(mic_capture, MIC_CAPTURE, S_STEREO, B_MIX, 0x68, 0, 4, 0, 15, 0,
-	   T_MIC, F_CTL | F_PARAM | F_INIT, 0, "Mic Capture Volume", "",
+	   T_MIC, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Mic Capture Volume", "",
 	   "the microphone into the record mixer (68h)")
 ES1869_SET(line_capture, LINE_CAPTURE, S_STEREO, B_MIX, 0x6E, 0, 4, 0, 15, 0,
-	   T_AUX, F_CTL | F_PARAM | F_INIT, 0, "Line Capture Volume", "",
+	   T_AUX, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Line Capture Volume", "",
 	   "line in into the record mixer (6Eh)")
 ES1869_SET(fm_capture, FM_CAPTURE, S_STEREO, B_MIX, 0x6B, 0, 4, 0, 15, 0,
-	   T_MIC, F_CTL | F_PARAM | F_INIT, 0, "FM Capture Volume", "",
+	   T_MIC, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "FM Capture Volume", "",
 	   "the music DAC into the record mixer (6Bh)")
 ES1869_SET(cd_capture, CD_CAPTURE, S_STEREO, B_MIX, 0x6A, 0, 4, 0, 15, 0,
-	   T_AUX, F_CTL | F_PARAM | F_INIT, 0, "CD Capture Volume", "",
+	   T_AUX, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "CD Capture Volume", "",
 	   "AuxA (CD) into the record mixer (6Ah)")
 ES1869_SET(aux_capture, AUX_CAPTURE, S_STEREO, B_MIX, 0x6C, 0, 4, 0, 15, 0,
-	   T_AUX, F_CTL | F_PARAM | F_INIT, 0, "Aux Capture Volume", "",
+	   T_AUX, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Aux Capture Volume", "",
 	   "AuxB into the record mixer (6Ch)")
 ES1869_SET(mono_capture, MONO_CAPTURE, S_STEREO, B_MIX, 0x6F, 0, 4, 0, 15, 0,
-	   T_AUX, F_CTL | F_PARAM | F_INIT, 0, "Mono Capture Volume", "",
+	   T_AUX, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Mono Capture Volume", "",
 	   "MONO_IN into the record mixer (6Fh)")
 ES1869_SET(mic_boost, MIC_BOOST, S_BOOL, B_MIX, 0x7D, 3, 1, 0, 1, 1,
-	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "Mic Boost (+26dB)", "",
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Mic Boost (+26dB)", "",
 	   "the microphone's +26 dB preamp (7Dh bit 3), on after a hardware reset")
 ES1869_SET(adc_offset, ADC_OFFSET, S_SMAG, B_CTRL, 0xBA, 0, 5, -16, 15, 0,
 	   T_NONE, F_CTL | F_PARAM | F_INIT | F_HOOK, 0, "Capture DC Offset", "",
@@ -127,7 +127,7 @@ ES1869_SET(audio2_to_fm, AUDIO2_TO_FM, S_BOOL, B_MIX, 0x71, 0, 1, 0, 1, 0,
 	   T_NONE, F_CTL | F_PARAM | F_INIT | F_IDLE, 0, "Audio 2 To FM Playback Switch", "",
 	   "Audio 2 slaved to the FM (71h bit 0): mixed into the music DAC at 49716 Hz, its sides swapped")
 ES1869_SET(video_switch, VIDEO_SWITCH, S_BOOL, B_MIX, 0x7F, 0, 1, 0, 1, 0,
-	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "Video Playback Switch", "",
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Video Playback Switch", "",
 	   "the music DAC driven by I2S (7Fh bit 0), which silences FM")
 ES1869_SET(es689, ES689, S_BOOL, B_MIX, 0x48, 4, 1, 0, 1, 1,
 	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "ES689 Input Switch", "",
@@ -153,10 +153,10 @@ ES1869_SET(mono_in_direct, MONO_IN_DIRECT, S_BOOL, B_MIX, 0x7D, 0, 1, 0, 1, 0,
 
 /* the 3-D effect (docs/SPATIALIZER.md) */
 ES1869_SET(spatial_switch, SPATIAL_SWITCH, S_BOOL, B_MIX, 0x50, 3, 1, 0, 1, 0,
-	   T_NONE, F_CTL | F_PARAM | F_INIT | F_HOOK, 0, "3D Control - Switch", "",
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_HOOK | F_MIXER, 0, "3D Control - Switch", "",
 	   "the effect on (50h bits 3:2), out of reset as it turns on")
 ES1869_SET(spatial_level, SPATIAL_LEVEL, S_INT, B_MIX, 0x52, 0, 6, 0, 63, 0,
-	   T_3D, F_CTL | F_PARAM | F_INIT, 0, "3D Control - Level", "",
+	   T_3D, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "3D Control - Level", "",
 	   "the effect's boost (52h), +16.8 dB near 450 Hz at 63, 0.75 dB a step")
 ES1869_SET(spatial_mono, SPATIAL_MONO, S_BOOL, B_MIX, 0x50, 1, 1, 0, 1, 0,
 	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "3D Control - Mono Switch", "",
@@ -182,7 +182,7 @@ ES1869_SET(spatial_fixed_level, SPATIAL_FIXED_LEVEL, S_INT, B_MIX, 0x5A, 0, 8, 0
 
 /* the hardware volume buttons (64h) */
 ES1869_SET(hwvol_split, HWVOL_SPLIT, S_BOOL, B_MIX, 0x64, 7, 1, 0, 1, 0,
-	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "Hardware Master Volume Split", "",
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Hardware Master Volume Split", "",
 	   "the buttons move 61h/63h instead of the master (64h bit 7)")
 ES1869_SET(hwvol_mode, HWVOL_MODE, S_ENUM, B_MIX, 0x64, 2, 2, 0, 3, 0,
 	   T_NONE, F_CTL | F_PARAM | F_INIT, 0, "Hardware Volume Mode",
@@ -194,10 +194,10 @@ ES1869_SET(hwvol_count3, HWVOL_COUNT3, S_BOOL, B_MIX, 0x64, 5, 1, 0, 1, 0,
 
 /* general-purpose outputs and power (Audio_Base+7, BDh, CEh/CFh) */
 ES1869_SET(gpo0, GPO0, S_BOOL, B_PORT7, 0x07, 0, 1, 0, 1, 0,
-	   T_NONE, F_CTL | F_PARAM | F_INIT | F_FOUND, 0, "GPO0 Switch", "",
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_FOUND | F_MIXER, 0, "GPO0 Switch", "",
 	   "the GPO0 pin (Audio_Base+7 bit 0), low after a hardware reset")
 ES1869_SET(gpo1, GPO1, S_BOOL, B_PORT7, 0x07, 1, 1, 0, 1, 1,
-	   T_NONE, F_CTL | F_PARAM | F_INIT | F_FOUND, 0, "GPO1 Switch", "",
+	   T_NONE, F_CTL | F_PARAM | F_INIT | F_FOUND | F_MIXER, 0, "GPO1 Switch", "",
 	   "the GPO1 pin (Audio_Base+7 bit 1), high after a hardware reset")
 ES1869_SET(self_power_down, SELF_POWER_DOWN, S_INT, B_CTRL, 0xBD, 0, 8, 0, 255, 0,
 	   T_NONE, F_CTL | F_PARAM | F_INIT | F_HOOK, 0, "Self-Timed Power Down", "",
@@ -252,7 +252,7 @@ ES1869_SET(a2_pause, A2_PAUSE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
 	   T_NONE, F_PARAM | F_NEXT, 0, "", "",
 	   "pause on an 8-bit Audio 2 channel through 78h, which may resume off step")
 ES1869_SET(a2_resample, A2_RESAMPLE, S_ENUM, B_NONE, 0, 0, 0, 0, 2, 2,
-	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Rate Correction",
+	   T_NONE, F_CTL | F_PARAM | F_MIXER, 0, "Audio 2 Rate Correction",
 	   "Off|Trim|Clock",
 	   "Audio 2's 16-bit streams on DMA 5 through a filter that corrects their rate, also while one plays: Trim by a2_trim, Clock also to the system's clock, as the chip's measures against it, which is true time with chronyd running; Off leaves the samples as they are")
 ES1869_SET(a2_trim, A2_TRIM, S_ENUM, B_NONE, 0, 0, 0, 0, 24, 12,
@@ -275,11 +275,11 @@ ES1869_SET(a2_zstep_r, A2_ZSTEP_R, S_INT, B_NONE, 0, 0, 0, 0, 8192, 0,
 	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Zero Step Right", "",
 	   "the right DAC's")
 ES1869_SET(a2_oversample, A2_OVERSAMPLE, S_ENUM, B_NONE, 0, 0, 0, 0, 2, 0,
-	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Output Rate",
+	   T_NONE, F_CTL | F_PARAM | F_MIXER, 0, "Audio 2 Output Rate",
 	   "1x|2x|3x",
 	   "the DAC clocked at this many times a 16-bit stream's rate on DMA 5 (70h), through the rate filter, where a divisor of the stream's own gives that exactly: no images, less droop, more of the ISA bus and CPU. A playing stream takes it at once, restarting as at a pause. 3x can't run while Audio 1 records")
 ES1869_SET(a2_treble, A2_TREBLE, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
-	   T_NONE, F_CTL | F_PARAM, 0, "Audio 2 Treble Correction Playback Switch", "",
+	   T_NONE, F_CTL | F_PARAM | F_MIXER, 0, "Audio 2 Treble Correction Playback Switch", "",
 	   "Audio 2 through the filter with the DAC's own response, its magnitude and its phase, taken back, at 1x, 2x and 3x: within 0.06 dB up to half the stream's rate, or up to the filter's edge at 20 kHz where it moves the samples, and 0.35 degrees to 20 kHz, with the DAC's stages off, for 5 dB less headroom at the top")
 ES1869_SET(a1c_filter, A1C_FILTER, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 0,
 	   T_NONE, F_CTL | F_PARAM | F_NEXT, 0, "Audio 1 Correction Capture Switch", "",

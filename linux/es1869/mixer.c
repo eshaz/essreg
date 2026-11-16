@@ -117,7 +117,7 @@ int es1869_mixer_extra(struct es1869 *chip)
 		"Hardware Master Playback Switch",
 	};
 	struct snd_kcontrol_new knew = {
-		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.iface = SNDRV_CTL_ELEM_IFACE_CARD,
 		.access = SNDRV_CTL_ELEM_ACCESS_READ |
 			  SNDRV_CTL_ELEM_ACCESS_VOLATILE,
 		.info = hwvol_info,

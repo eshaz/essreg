@@ -81,41 +81,62 @@ static int parse_param(const char *buf, long v[2])
 	return 0;
 }
 
-// probe.alsamixer: what someone looks for in alsamixer is there, in its
-// view: a control can exist and not make it to the simple mixer
+// probe.alsamixer: alsamixer shows the mixer's own controls and Audio 2's
+// output rate, rate correction and treble correction, each in its view, and
+// none of the chip's workings, which stay controls on the card interface
 enum et_result c_probe_alsamixer(struct et_ctx *c, const struct et_case *k)
 {
-	static const struct {
-		const char *name;
-		int view;
-	} t[] = {
-		{ "Audio 2 Rate Correction", ET_VIEW_PLAYBACK },
-		{ "Audio 2 Rate Trim", ET_VIEW_PLAYBACK },
-		{ "Audio 2 Rate Dither", ET_VIEW_PLAYBACK },
-		{ "Audio 2 Filter", ET_VIEW_PLAYBACK },
-		{ "Audio 2 Oversampling", ET_VIEW_PLAYBACK },
-		{ "Audio 2 Own Clock", ET_VIEW_PLAYBACK },
-		{ "Audio 2 To FM", ET_VIEW_PLAYBACK },
-		{ "Beep Follows Master", ET_VIEW_PLAYBACK },
-		{ "ESFM Vibrato", ET_VIEW_PLAYBACK },
-		{ "Dual", ET_VIEW_PLAYBACK },
-		{ "ADC Input", ET_VIEW_CAPTURE },
+	static const char *const shown[] = {
+		"Master",
+		"PCM",
+		"Mic Boost (+26dB)",
+		"Audio 2 Output Rate",
+		"Audio 2 Rate Correction",
+		"Audio 2 Treble Correction",
 	};
-	unsigned int i, n = sizeof(t) / sizeof(t[0]);
-	int seen = 0;
+	static const struct {
+		const char *elem, *ctl;
+	} hidden[] = {
+		{ "Audio 2 Rate Trim", "Audio 2 Rate Trim" },
+		{ "Audio 2 Filter", "Audio 2 Filter Playback Switch" },
+		{ "Audio 2 Zero Step", "Audio 2 Zero Step Playback Switch" },
+		{ "Audio 1 Correction", "Audio 1 Correction Capture Switch" },
+		{ "Beep Follows Master",
+		  "Beep Follows Master Playback Switch" },
+		{ "Single Mode DMA", "Single Mode DMA Switch" },
+		{ "ESFM Vibrato", "ESFM Vibrato Switch" },
+		{ "Dual", "Dual Playback Switch" },
+		{ "ADC Input", "ADC Input Capture Enum" },
+	};
+	unsigned int i, ns = sizeof(shown) / sizeof(shown[0]);
+	unsigned int nh = sizeof(hidden) / sizeof(hidden[0]);
+	struct et_ctl_info info;
+	int seen = 0, kept = 0;
 
 	(void)k;
-	for (i = 0; i < n; i++) {
+	for (i = 0; i < ns; i++) {
 		int views = 0;
 
-		if (c->hal->selem(c->hal->ctx, t[i].name, &views) < 0)
-			et_fail(c, "no element '%s'", t[i].name);
-		else if (!(views & t[i].view))
-			et_fail(c, "'%s' isn't in its view", t[i].name);
+		if (c->hal->selem(c->hal->ctx, shown[i], &views) < 0)
+			et_fail(c, "no element '%s'", shown[i]);
+		else if (!(views & ET_VIEW_PLAYBACK))
+			et_fail(c, "'%s' isn't in the Playback view", shown[i]);
 		else
 			seen++;
 	}
-	et_measure(c, "elements in their alsamixer views", seen, "", n, n);
+	for (i = 0; i < nh; i++) {
+		int views = 0;
+
+		if (c->hal->selem(c->hal->ctx, hidden[i].elem, &views) >= 0)
+			et_fail(c, "alsamixer shows '%s'", hidden[i].elem);
+		else if (c->hal->ctl_info(c->hal->ctx, hidden[i].ctl, 0,
+					  &info) < 0)
+			et_fail(c, "no control '%s'", hidden[i].ctl);
+		else
+			kept++;
+	}
+	et_measure(c, "elements in their alsamixer views", seen, "", ns, ns);
+	et_measure(c, "workings kept out of alsamixer", kept, "", nh, nh);
 	return ET_PASS;
 }
 

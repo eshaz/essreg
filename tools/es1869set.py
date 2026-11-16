@@ -305,8 +305,11 @@ def element(name):
 def view(r):
     """alsamixer's views of a control, by the simple mixer's rules: a list
     is in F3 unless it is a capture enum, a volume without a direction is
-    in both, and a switch without one is a playback switch"""
+    in both, and a switch without one is a playback switch; alsamixer shows
+    the controls of F_MIXER only, the others being on the card interface"""
     name = r["control"]
+    if "F_MIXER" not in r["flags"]:
+        return "the card interface, not in alsamixer"
     if name == "Capture Source":
         return "F4, a CAPTURE switch on each source"
     if name.endswith(("Capture Volume", "Capture Switch", " Capture Enum")):
@@ -334,9 +337,14 @@ def controls_section(rows):
         params = [r for r in members if not r["control"]]
         for r in ctls:
             when = "".join(t for f, t in WHEN if f in r["flags"])
-            out.append("* **%s** (`%s`, %s): %s. %s. Parameter `%s`.%s\n" %
-                       (element(r["control"]), r["control"], view(r),
-                        range_text(r), sentence(r["desc"]), r["id"], when))
+            if "F_MIXER" in r["flags"]:
+                head = "**%s** (`%s`, %s)" % (element(r["control"]),
+                                              r["control"], view(r))
+            else:
+                head = "`%s` (%s)" % (r["control"], view(r))
+            out.append("* %s: %s. %s. Parameter `%s`.%s\n" %
+                       (head, range_text(r), sentence(r["desc"]), r["id"],
+                        when))
             out.append(EXTRA.get(r["id"], ""))
         if params:
             out.append("\nParameters only:\n\n")

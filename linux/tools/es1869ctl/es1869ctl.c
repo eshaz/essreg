@@ -230,14 +230,23 @@ static void enum_item(const struct et_setting *s, int item, char *out,
 		 p);
 }
 
+// the mixer interface first, then the card's, where the driver keeps what
+// alsamixer doesn't show
 static int ctl_find(const struct et_setting *s, snd_ctl_elem_id_t *id,
 		    snd_ctl_elem_info_t *info)
 {
+	int err;
+
 	if (!ctl || !(s->flags & F_CTL))
 		return -ENOENT;
 	snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
 	snd_ctl_elem_id_set_name(id, s->ctl);
 	snd_ctl_elem_id_set_index(id, s->index);
+	snd_ctl_elem_info_set_id(info, id);
+	err = snd_ctl_elem_info(ctl, info);
+	if (err != -ENOENT)
+		return err;
+	snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_CARD);
 	snd_ctl_elem_info_set_id(info, id);
 	return snd_ctl_elem_info(ctl, info);
 }

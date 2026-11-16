@@ -1080,7 +1080,9 @@ static int sim_ctl_set(void *ctx, const char *name, int index, const long *v,
 	return count;
 }
 
-// a control's name less what the simple mixer takes off it
+// a control's name less what the simple mixer takes off it; alsamixer sees
+// the mixer interface only, which holds the controls of F_MIXER, and not
+// the ADC's list
 static int sim_selem(void *ctx, const char *name, int *views)
 {
 	static const char *const ends[] = { "", " Switch", " Playback Switch",
@@ -1088,11 +1090,13 @@ static int sim_selem(void *ctx, const char *name, int *views)
 					    " Capture Enum" };
 	char full[64];
 	unsigned int i;
+	int s;
 
 	(void)ctx;
 	for (i = 0; i < sizeof(ends) / sizeof(ends[0]); i++) {
 		snprintf(full, sizeof(full), "%s%s", name, ends[i]);
-		if (find_ctl(full, 0) >= 0) {
+		s = strcmp(full, ADC_LIST) ? find_ctl(full, 0) : -1;
+		if (s >= 0 && (et_settings[s].flags & F_MIXER)) {
 			*views = i == 4 ? ET_VIEW_CAPTURE : ET_VIEW_PLAYBACK;
 			return 0;
 		}

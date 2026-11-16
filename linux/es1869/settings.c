@@ -742,6 +742,10 @@ int es1869_settings_controls(struct es1869 *chip)
 
 		if (!(s->flags & F_CTL))
 			continue;
+		// alsamixer shows the mixer interface only: the mixer's own
+		// controls there, the chip's workings on the card interface
+		knew.iface = s->flags & F_MIXER ? SNDRV_CTL_ELEM_IFACE_MIXER :
+						  SNDRV_CTL_ELEM_IFACE_CARD;
 		knew.name = s->ctl;
 		knew.index = s->index;
 		knew.private_value = id;
@@ -758,8 +762,9 @@ int es1869_settings_controls(struct es1869 *chip)
 		chip->kctl[id] = kctl;
 	}
 	// alsa-lib splits "Capture Source", the name saved states know, over
-	// an element per item, so alsamixer shows no list of it: this name
-	// comes out as one list, "ADC Input", in its Capture view
+	// an element per item: this name is the source as one list, on the
+	// card interface beside the chip's workings, for amixer and es1869ctl
+	knew.iface = SNDRV_CTL_ELEM_IFACE_CARD;
 	knew.name = "ADC Input Capture Enum";
 	knew.index = 0;
 	knew.private_value = ES_S_capture_source;

@@ -155,9 +155,10 @@ against the stream, the filter's C code and the dig path.
   pitch on the clock the driver chose, which a wrong divisor or clock puts
   thousands of ppm off, and THD+N below the first image.
 * `probe`: the devices, the proc file, the register hwdep, and every control
-  and parameter against settings.def. `probe.alsamixer` looks for the rate
-  correction and the DAC stages where alsamixer does, among the simple
-  mixer's elements in its Playback view.
+  and parameter against settings.def. `probe.alsamixer` checks that
+  alsamixer shows the mixer's controls and Audio 2's output rate, rate
+  correction and treble correction, and none of the chip's workings, which
+  stay controls on the card interface.
 * `params`: a parameter written at runtime moves its control and back, and
   bad values are refused.
 * `dig`: Audio 2's formats, starts, a pause, mmap, dmix and half a minute,
@@ -212,9 +213,9 @@ against the stream, the filter's C code and the dig path.
   * `rs.dither` reads what `a2_resample_dither` does at -80 dBFS and 1 ppm,
     where rounding is at its most regular: the noise it adds and the spurs
     it takes.
-  * `rs.live` writes the mixer's controls under a playing stream, as
-    alsamixer does: Off, Trim up and down, Clock and Off again, each read
-    from the tone's pitch, with no xrun.
+  * `rs.live` writes the mixer's controls under a playing stream, as a mixer
+    program does: Off, Trim up and down, Clock and Off again, each read from
+    the tone's pitch, with no xrun.
   * `rs.pause` goes on in step within a FIFO, `rs.xrun` recovers from an
     underrun at the same pitch, `rs.drain` plays every frame, and
     `rs.runout` hears silence, not the ring's old frames, after a client

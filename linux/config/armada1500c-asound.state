@@ -356,7 +356,7 @@ state.ES1869 {
 		}
 	}
 	control.24 {
-		iface MIXER
+		iface CARD
 		name 'Capture DC Offset'
 		value.0 0
 		value.1 0
@@ -368,7 +368,7 @@ state.ES1869 {
 		}
 	}
 	control.25 {
-		iface MIXER
+		iface CARD
 		name 'Analog Wake No Mute Switch'
 		value false
 		comment {
@@ -378,7 +378,7 @@ state.ES1869 {
 		}
 	}
 	control.26 {
-		iface MIXER
+		iface CARD
 		name 'Audio 2 Oversampling Playback Switch'
 		value false
 		comment {
@@ -388,7 +388,7 @@ state.ES1869 {
 		}
 	}
 	control.27 {
-		iface MIXER
+		iface CARD
 		name 'Audio 2 Filter Playback Switch'
 		value false
 		comment {
@@ -398,7 +398,7 @@ state.ES1869 {
 		}
 	}
 	control.28 {
-		iface MIXER
+		iface CARD
 		name 'Audio 1 Filter Switch'
 		value false
 		comment {
@@ -408,7 +408,7 @@ state.ES1869 {
 		}
 	}
 	control.29 {
-		iface MIXER
+		iface CARD
 		name 'Audio 2 Own Clock Switch'
 		value true
 		comment {
@@ -418,7 +418,7 @@ state.ES1869 {
 		}
 	}
 	control.30 {
-		iface MIXER
+		iface CARD
 		name 'Audio 2 To FM Playback Switch'
 		value false
 		comment {
@@ -438,7 +438,7 @@ state.ES1869 {
 		}
 	}
 	control.32 {
-		iface MIXER
+		iface CARD
 		name 'ES689 Input Switch'
 		value true
 		comment {
@@ -448,7 +448,7 @@ state.ES1869 {
 		}
 	}
 	control.33 {
-		iface MIXER
+		iface CARD
 		name 'Mono Output Source'
 		value 'Record Mix'
 		comment {
@@ -462,7 +462,7 @@ state.ES1869 {
 		}
 	}
 	control.34 {
-		iface MIXER
+		iface CARD
 		name 'Mono Input Direct Playback Switch'
 		value false
 		comment {
@@ -496,7 +496,7 @@ state.ES1869 {
 		}
 	}
 	control.37 {
-		iface MIXER
+		iface CARD
 		name '3D Control - Mono Switch'
 		value false
 		comment {
@@ -506,7 +506,7 @@ state.ES1869 {
 		}
 	}
 	control.38 {
-		iface MIXER
+		iface CARD
 		name '3D Control - Limit Switch'
 		value false
 		comment {
@@ -516,7 +516,7 @@ state.ES1869 {
 		}
 	}
 	control.39 {
-		iface MIXER
+		iface CARD
 		name '3D Control - Limit Rise Level'
 		value 143
 		comment {
@@ -527,7 +527,7 @@ state.ES1869 {
 		}
 	}
 	control.40 {
-		iface MIXER
+		iface CARD
 		name '3D Control - Limit Fall Level'
 		value 149
 		comment {
@@ -538,7 +538,7 @@ state.ES1869 {
 		}
 	}
 	control.41 {
-		iface MIXER
+		iface CARD
 		name '3D Control - Limit Rise Speed'
 		value 9
 		comment {
@@ -549,7 +549,7 @@ state.ES1869 {
 		}
 	}
 	control.42 {
-		iface MIXER
+		iface CARD
 		name '3D Control - Limit Fall Speed'
 		value 4
 		comment {
@@ -560,7 +560,7 @@ state.ES1869 {
 		}
 	}
 	control.43 {
-		iface MIXER
+		iface CARD
 		name '3D Control - Limit Fixed Level'
 		value 128
 		comment {
@@ -581,7 +581,7 @@ state.ES1869 {
 		}
 	}
 	control.45 {
-		iface MIXER
+		iface CARD
 		name 'Hardware Volume Mode'
 		value Two-wire
 		comment {
@@ -595,7 +595,7 @@ state.ES1869 {
 		}
 	}
 	control.46 {
-		iface MIXER
+		iface CARD
 		name 'Hardware Volume Count By 3 Switch'
 		value false
 		comment {
@@ -625,7 +625,7 @@ state.ES1869 {
 		}
 	}
 	control.49 {
-		iface MIXER
+		iface CARD
 		name 'Self-Timed Power Down'
 		value 0
 		comment {
@@ -636,7 +636,7 @@ state.ES1869 {
 		}
 	}
 	control.50 {
-		iface MIXER
+		iface CARD
 		name 'GPO Power Down'
 		value 0
 		comment {
@@ -647,7 +647,7 @@ state.ES1869 {
 		}
 	}
 	control.51 {
-		iface MIXER
+		iface CARD
 		name 'Single Mode DMA Switch'
 		value false
 		comment {
@@ -657,7 +657,7 @@ state.ES1869 {
 		}
 	}
 	control.52 {
-		iface MIXER
+		iface CARD
 		name 'Audio 1 DMA Burst'
 		value 'Type 2'
 		comment {
@@ -670,7 +670,7 @@ state.ES1869 {
 		}
 	}
 	control.53 {
-		iface MIXER
+		iface CARD
 		name 'Audio 2 DMA Burst'
 		value 'Demand 4'
 		comment {
@@ -684,7 +684,7 @@ state.ES1869 {
 		}
 	}
 	control.54 {
-		iface MIXER
+		iface CARD
 		name 'DRQ Latch Switch'
 		value true
 		comment {
@@ -694,7 +694,7 @@ state.ES1869 {
 		}
 	}
 	control.55 {
-		iface MIXER
+		iface CARD
 		name 'Hardware Master Playback Volume'
 		value.0 63
 		value.1 63
@@ -706,7 +706,7 @@ state.ES1869 {
 		}
 	}
 	control.56 {
-		iface MIXER
+		iface CARD
 		name 'Hardware Master Playback Switch'
 		value.0 true
 		value.1 true

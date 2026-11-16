@@ -144,6 +144,27 @@ class TableTest(unittest.TestCase):
                 for item in r["items"].split("|"):
                     self.assertLessEqual(len(item), 63, (r["id"], item))
 
+    def test_alsamixer_shows_the_mixer(self):
+        """alsamixer shows the mixer interface: snd-es18xx's controls, which
+        saved states hold there, and Audio 2's output rate, rate correction
+        and treble correction; every other control is on the card
+        interface"""
+        shown = {(r["control"], r["index"]) for r in self.rows
+                 if r["control"] and "F_MIXER" in r["flags"]}
+        want = {(name, index) for name, index, _k, _c, _r in STOCK} | {
+            ("Audio 2 Output Rate", 0), ("Audio 2 Rate Correction", 0),
+            ("Audio 2 Treble Correction Playback Switch", 0)}
+        self.assertEqual(shown, want)
+
+    def test_corrections_off_by_default(self):
+        """Audio 1's correction and linearity stage, the zero step, the
+        treble correction and Audio 2's output rate above 1x stay off unless
+        asked for"""
+        for sid in ("a1c_filter", "a1c_linear", "a2_zstep", "a2_treble",
+                    "a2_oversample"):
+            r = next(r for r in self.rows if r["id"] == sid)
+            self.assertEqual(r["def"], 0, sid)
+
     def test_dac_stages_off_by_default(self):
         """1 is ESS's setting of a stage, the default 0 turns it off, as
         DRIVER_CONFIG.md has it for the rebuilt Windows drivers"""

@@ -219,14 +219,15 @@ Correction, puts Audio 2's stream through a filter on its way to the ring:
   out: where the treble correction or the output rate runs the filter, the
   stream keeps its rate whatever `a2_trim` and `a2_trim_ppb` hold.
 * `1`, Trim, moves the rate by `a2_trim`, the control Audio 2 Rate Trim, a
-  list from -500 to +500 ppm that alsamixer steps through, plus
-  `a2_trim_ppb` for a value in between. At 0 the samples stay exact.
+  list from -500 to +500 ppm on the card interface, plus `a2_trim_ppb` for a
+  value in between. At 0 the samples stay exact.
 * `2`, Clock, the default, plays the stream true to the system's clock, plus
   the same trim. With chronyd running that is real time.
 
-The controls show up in alsamixer's Playback view (F3) with Audio 2 Rate
-Dither, and all of them take effect while a stream plays. Turning the
-correction off under a stream leaves out less than a frame.
+Audio 2 Rate Correction shows in alsamixer's Playback view (F3), and the
+trim and Audio 2 Rate Dither are on the card interface. All of them take
+effect while a stream plays. Turning the correction off under a stream
+leaves out less than a frame.
 
 It serves S16_LE streams of Audio 2 on a 16-bit DMA channel, which is the
 Armada's, with a buffer of at least 256 frames. Any other stream, Audio 1,
@@ -728,7 +729,7 @@ through `/sys/module/snd_es1869/parameters/<name>`. A write at runtime goes
 to the chip at once, unless the setting says otherwise below, and the
 control of the same setting announces it. A stereo value is written as
 `left,right`, or as one value for both. An enum takes its number or its
-text. Where a setting has a control, alsamixer and amixer change it too;
+text. Where a setting has a control, amixer and es1869ctl change it too;
 alsactl restores the controls at boot, after the module has loaded, so a
 saved state wins over a parameter. The defaults are the Kconfig options
 `CONFIG_SND_ES1869_DEFAULT_<NAME>`.

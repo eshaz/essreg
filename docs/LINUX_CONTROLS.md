@@ -11,19 +11,20 @@ in the other. The lists at the end of this page come from that table.
 
 ## Reaching them
 
-**alsamixer** shows every control. F3 is its Playback view, F4 its Capture
-view and F5 shows both. Left and right choose an item. Up and down change a
-level or step through a list, M turns a switch on or off, and Space sets the
-CAPTURE mark in the Capture view.
+**alsamixer** shows the mixer's own controls, the ones snd-es18xx has, and
+Audio 2's Output Rate, Rate Correction and Treble Correction. Every other
+control is the chip's workings, on ALSA's card interface, which alsamixer
+doesn't show and es1869ctl and amixer reach. F3 is alsamixer's Playback
+view, F4 its Capture view and F5 shows both. Left and right choose an item.
+Up and down change a level or step through a list, M turns a switch on or
+off, and Space sets the CAPTURE mark in the Capture view, which chooses the
+record source.
 
-Three things about alsamixer are worth knowing:
+Two things about alsamixer are worth knowing:
 * It cuts the label under each item to 8 characters, so that the Audio 2
   items read alike. The Item line at the top shows the full name.
 * It shows a level with a dB scale in dB, and any other number as a
-  percentage of its range. Capture DC Offset at 0 shows as 52.
-* The bottom of a slider is the lowest value, which isn't always nothing.
-  Capture DC Offset at the bottom is -16, and every recording then carries
-  -1024 of DC.
+  percentage of its range.
 
 **es1869ctl** (`linux/tools/es1869ctl`) is a full-screen panel of the same
 settings, by group, with each setting's real value, its dB, what it does and
@@ -33,8 +34,9 @@ hearing. It follows alsamixer and the volume buttons at once. A setting with
 a control needs only the audio group, and one without needs root.
 `es1869ctl --dump` prints every page.
 
-**amixer** takes the full names, such as `amixer -c ES1869 cset name='ADC
-Input Capture Enum' Line`.
+**amixer** takes the full names, with `iface=CARD` for a control on the card
+interface, such as `amixer -c ES1869 cset iface=CARD,name='ADC Input Capture
+Enum' Line`. `amixer -c ES1869 controls` lists them all.
 
 **A parameter** takes `/sys/module/snd_es1869/parameters/<name>` at runtime,
 or the modprobe option of the same name at load.
@@ -81,8 +83,10 @@ only the element's name in alsamixer.
 
 ## Choosing the ADC's input
 
-The chip has one stereo ADC, and it hears one of eight record sources. **ADC
-Input**, in alsamixer's Capture view (F4), is the list of them:
+The chip has one stereo ADC, and it hears one of eight record sources. In
+alsamixer's Capture view (F4), Space puts the CAPTURE mark on the source.
+**ADC Input** (`ADC Input Capture Enum`, on the card interface) is the same
+choice as a list, for es1869ctl and amixer:
 
 | Value | ADC Input  | What the ADC hears                             |
 |-------|------------|------------------------------------------------|
@@ -107,8 +111,8 @@ The stock name of the same setting is Capture Source, which saved mixer
 states use. alsa-lib doesn't show a control of that name as a list. It takes
 each of its items to the element of the same name, and gives that element a
 CAPTURE mark in F4, so Mic, Line and Master have one, and Mic Master, Mic1,
-AOUT and Mix are elements of their own that have only that. Those marks
-still work, and they and ADC Input always show the same choice.
+AOUT and Mix are elements of their own that have only that. The marks and
+ADC Input always show the same choice.
 
 Capture is the level after the choice, B4h, and it also turns recording on
 and off. Its dB scale is the same for every source, -6 to +16.5 dB. The two
@@ -169,9 +173,10 @@ es1869ctl's pages.
   (3Ch bits 2:0), 7 = -6 dB, 0 mutes it; the board mixes it in after the
   master, so with beep_follow this is its level at full master. Parameter
   `beep_volume`. Without a parameter at load, the chip keeps its level.
-* **Beep Follows Master** (`Beep Follows Master Playback Switch`, F3): 0 to
-  1, default 1. 3Ch scaled by the master and 0 while it is muted, as ESS's
-  ES1869.DRV does it; 0 keeps the two apart. Parameter `beep_follow`.
+* `Beep Follows Master Playback Switch` (the card interface, not in
+  alsamixer): 0 to 1, default 1. 3Ch scaled by the master and 0 while it is
+  muted, as ESS's ES1869.DRV does it; 0 keeps the two apart. Parameter
+  `beep_follow`.
 
 ### Record
 
@@ -206,38 +211,40 @@ es1869ctl's pages.
 * **Mic Boost (+26dB)** (`Mic Boost (+26dB)`, F3): 0 to 1, default 1. The
   microphone's +26 dB preamp (7Dh bit 3), on after a hardware reset.
   Parameter `mic_boost`.
-* **Capture DC Offset** (`Capture DC Offset`, F3 and F4): -16 to 15,
+* `Capture DC Offset` (the card interface, not in alsamixer): -16 to 15,
   default 0. The ADC's offsets (BAh/BBh bits 4:0), 64 a step of the 16-bit
   sample. Parameter `adc_offset`.
-* **Analog Wake No Mute** (`Analog Wake No Mute Switch`, F3): 0 to 1,
-  default 0. No 100 ms AOUT mute when the analog section wakes (BAh bit 5).
-  Parameter `wake_no_mute`.
+* `Analog Wake No Mute Switch` (the card interface, not in alsamixer): 0 to
+  1, default 0. No 100 ms AOUT mute when the analog section wakes (BAh bit
+  5). Parameter `wake_no_mute`.
 
 ### DACs
 
-* **Audio 2 Oversampling** (`Audio 2 Oversampling Playback Switch`, F3): 0
-  to 1, default 0. Audio 2's 4x oversampling (71h bit 4), which also
-  bypasses its filter. Parameter `audio2_oversampling`.
-* **Audio 2 Filter** (`Audio 2 Filter Playback Switch`, F3): 0 to 1,
-  default 0. Audio 2's switched-capacitor filter in use (71h bit 3 clear).
-  Parameter `audio2_filter`.
-* **Audio 1 Filter** (`Audio 1 Filter Switch`, F3): 0 to 1, default 0. Audio
-  1's filter in use (71h bit 2 clear), also the ADC's anti-alias filter.
-  Parameter `audio1_filter`.
-* **Audio 2 Own Clock** (`Audio 2 Own Clock Switch`, F3): 0 to 1, default 1.
-  Audio 2 at its own rate (71h bit 1), else slaved to Audio 1's. Parameter
-  `audio2_own_clock`. A write fails with EBUSY while Audio 2 is open.
-* **Audio 2 To FM** (`Audio 2 To FM Playback Switch`, F3): 0 to 1,
-  default 0. Audio 2 slaved to the FM (71h bit 0): mixed into the music DAC
-  at 49716 Hz, its sides swapped. Parameter `audio2_to_fm`. A write fails
-  with EBUSY while Audio 2 is open.
+* `Audio 2 Oversampling Playback Switch` (the card interface, not in
+  alsamixer): 0 to 1, default 0. Audio 2's 4x oversampling (71h bit 4),
+  which also bypasses its filter. Parameter `audio2_oversampling`.
+* `Audio 2 Filter Playback Switch` (the card interface, not in alsamixer): 0
+  to 1, default 0. Audio 2's switched-capacitor filter in use (71h bit 3
+  clear). Parameter `audio2_filter`.
+* `Audio 1 Filter Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 0. Audio 1's filter in use (71h bit 2 clear), also the ADC's
+  anti-alias filter. Parameter `audio1_filter`.
+* `Audio 2 Own Clock Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 1. Audio 2 at its own rate (71h bit 1), else slaved to Audio 1's.
+  Parameter `audio2_own_clock`. A write fails with EBUSY while Audio 2 is
+  open.
+* `Audio 2 To FM Playback Switch` (the card interface, not in alsamixer): 0
+  to 1, default 0. Audio 2 slaved to the FM (71h bit 0): mixed into the
+  music DAC at 49716 Hz, its sides swapped. Parameter `audio2_to_fm`. A
+  write fails with EBUSY while Audio 2 is open.
 * **Video** (`Video Playback Switch`, F3): 0 to 1, default 0. The music DAC
   driven by I2S (7Fh bit 0), which silences FM. Parameter `video_switch`.
-* **ES689 Input** (`ES689 Input Switch`, F3): 0 to 1, default 1. The ES689
-  wavetable interface (48h bit 4). Parameter `es689`.
-* **Filter Corner** (`Filter Corner`, F3 and F4): 100 to 1000, default 875.
-  The filters' corner below 44.1 kHz, in thousandths of half the rate;
-  ESS's 875. Parameter `filter_corner`. It takes effect at the next prepare.
+* `ES689 Input Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 1. The ES689 wavetable interface (48h bit 4). Parameter `es689`.
+* `Filter Corner` (the card interface, not in alsamixer): 100 to 1000,
+  default 875. The filters' corner below 44.1 kHz, in thousandths of half
+  the rate; ESS's 875. Parameter `filter_corner`. It takes effect at the
+  next prepare.
 
 Parameters only:
 
@@ -250,12 +257,12 @@ Parameters only:
 
 ### Mono
 
-* **Mono Output Source** (`Mono Output Source`, F3): 0 Mute, 1 CIN_R, 2
-  Audio 2 Right, 3 Record Mix, default Record Mix. What MONO_OUT carries
-  (7Dh bits 2:1); ESS's 3. Parameter `mono_out`.
-* **Mono Input Direct** (`Mono Input Direct Playback Switch`, F3): 0 to 1,
-  default 0. MONO_IN straight to the output at unity gain (7Dh bit 0).
-  Parameter `mono_in_direct`.
+* `Mono Output Source` (the card interface, not in alsamixer): 0 Mute, 1
+  CIN_R, 2 Audio 2 Right, 3 Record Mix, default Record Mix. What MONO_OUT
+  carries (7Dh bits 2:1); ESS's 3. Parameter `mono_out`.
+* `Mono Input Direct Playback Switch` (the card interface, not in
+  alsamixer): 0 to 1, default 0. MONO_IN straight to the output at unity
+  gain (7Dh bit 0). Parameter `mono_in_direct`.
 
 ### 3-D
 
@@ -265,38 +272,39 @@ Parameters only:
 * **3D Control - Level** (`3D Control - Level`, F3 and F4): 0 to 63,
   default 0. The effect's boost (52h), +16.8 dB near 450 Hz at 63, 0.75 dB a
   step. Parameter `spatial_level`.
-* **3D Control - Mono** (`3D Control - Mono Switch`, F3): 0 to 1, default 0.
-  Stereo made from the mono sum (50h bit 1). Parameter `spatial_mono`.
-* **3D Control - Limit** (`3D Control - Limit Switch`, F3): 0 to 1,
-  default 0. The automatic width limit (50h bit 0). Parameter
+* `3D Control - Mono Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 0. Stereo made from the mono sum (50h bit 1). Parameter
+  `spatial_mono`.
+* `3D Control - Limit Switch` (the card interface, not in alsamixer): 0 to
+  1, default 0. The automatic width limit (50h bit 0). Parameter
   `spatial_limit`.
-* **3D Control - Limit Rise Level** (`3D Control - Limit Rise Level`, F3 and
-  F4): 0 to 255, default 143. The limit's rise level (54h); ESS's 8Fh.
-  Parameter `spatial_rise_level`.
-* **3D Control - Limit Fall Level** (`3D Control - Limit Fall Level`, F3 and
-  F4): 0 to 255, default 149. The limit's fall level (56h); ESS's 95h.
-  Parameter `spatial_fall_level`.
-* **3D Control - Limit Rise Speed** (`3D Control - Limit Rise Speed`, F3 and
-  F4): 0 to 15, default 9. The limit's rise speed (58h bits 7:4); ESS's 9.
+* `3D Control - Limit Rise Level` (the card interface, not in alsamixer): 0
+  to 255, default 143. The limit's rise level (54h); ESS's 8Fh. Parameter
+  `spatial_rise_level`.
+* `3D Control - Limit Fall Level` (the card interface, not in alsamixer): 0
+  to 255, default 149. The limit's fall level (56h); ESS's 95h. Parameter
+  `spatial_fall_level`.
+* `3D Control - Limit Rise Speed` (the card interface, not in alsamixer): 0
+  to 15, default 9. The limit's rise speed (58h bits 7:4); ESS's 9.
   Parameter `spatial_rise_speed`.
-* **3D Control - Limit Fall Speed** (`3D Control - Limit Fall Speed`, F3 and
-  F4): 0 to 15, default 4. The limit's fall speed (58h bits 3:0); ESS's 4.
+* `3D Control - Limit Fall Speed` (the card interface, not in alsamixer): 0
+  to 15, default 4. The limit's fall speed (58h bits 3:0); ESS's 4.
   Parameter `spatial_fall_speed`.
-* **3D Control - Limit Fixed Level** (`3D Control - Limit Fixed Level`, F3
-  and F4): 0 to 255, default 128. The limit's fixed level (5Ah); ESS's 80h.
-  Parameter `spatial_fixed_level`.
+* `3D Control - Limit Fixed Level` (the card interface, not in alsamixer): 0
+  to 255, default 128. The limit's fixed level (5Ah); ESS's 80h. Parameter
+  `spatial_fixed_level`.
 
 ### Buttons
 
 * **Hardware Master Volume Split** (`Hardware Master Volume Split`, F3): 0
   to 1, default 0. The buttons move 61h/63h instead of the master (64h bit
   7). Parameter `hwvol_split`.
-* **Hardware Volume Mode** (`Hardware Volume Mode`, F3): 0 Three-wire, 1
-  Two-wire, 2 Two-wire Fast, 3 Disabled, default Three-wire. The buttons'
-  wiring and debounce (64h bits 3:2). Parameter `hwvol_mode`.
-* **Hardware Volume Count By 3** (`Hardware Volume Count By 3 Switch`, F3):
-  0 to 1, default 0. 2.25 dB a push instead of 0.75 dB (64h bit 5).
-  Parameter `hwvol_count3`.
+* `Hardware Volume Mode` (the card interface, not in alsamixer): 0
+  Three-wire, 1 Two-wire, 2 Two-wire Fast, 3 Disabled, default Three-wire.
+  The buttons' wiring and debounce (64h bits 3:2). Parameter `hwvol_mode`.
+* `Hardware Volume Count By 3 Switch` (the card interface, not in
+  alsamixer): 0 to 1, default 0. 2.25 dB a push instead of 0.75 dB (64h bit
+  5). Parameter `hwvol_count3`.
 * **Hardware Master** (`Hardware Master Playback Volume` and
   `Hardware Master Playback Switch`, F3): 61h and 63h, the counters the
   buttons move in split mode.
@@ -309,33 +317,35 @@ Parameters only:
 * **GPO1** (`GPO1 Switch`, F3): 0 to 1, default 1. The GPO1 pin
   (Audio_Base+7 bit 1), high after a hardware reset. Parameter `gpo1`.
   Without a parameter at load, the chip keeps its level.
-* **Self-Timed Power Down** (`Self-Timed Power Down`, F3 and F4): 0 to 255,
+* `Self-Timed Power Down` (the card interface, not in alsamixer): 0 to 255,
   default 0. Partly power down after this many 8 s of no access (BDh), 0
   never. Parameter `self_power_down`.
-* **GPO Power Down** (`GPO Power Down`, F3 and F4): 0 to 255, default 0. The
-  GPOs at power-down (DSP CFh, read with CEh). Parameter `gpo_power_down`.
-* **Power Save Seconds** (`Power Save Seconds`, F3 and F4): 0 to 3600,
+* `GPO Power Down` (the card interface, not in alsamixer): 0 to 255,
+  default 0. The GPOs at power-down (DSP CFh, read with CEh). Parameter
+  `gpo_power_down`.
+* `Power Save Seconds` (the card interface, not in alsamixer): 0 to 3600,
   default 0. Seconds of idleness before a power-down, 0 never. Parameter
   `pwr_save`.
-* **Full Power Down** (`Full Power Down Switch`, F3): 0 to 1, default 0.
-  Power down fully (the inputs go silent) instead of partly. Parameter
-  `pwr_full`.
+* `Full Power Down Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 0. Power down fully (the inputs go silent) instead of partly.
+  Parameter `pwr_full`.
 
 ### DMA
 
-* **Single Mode DMA** (`Single Mode DMA Switch`, F3): 0 to 1, default 0.
-  Single transfers instead of demand transfers (8237, B9h, 78h). Parameter
-  `dma_single`. It takes effect at the next prepare.
-* **Audio 1 DMA Burst** (`Audio 1 DMA Burst`, F3): 0 Type 0, 1 Type 1, 2
-  Type 2, default Type 2. Audio 1's demand transfers (B9h); ESS's 2.
-  Parameter `a1_burst`. It takes effect at the next prepare.
-* **Audio 2 DMA Burst** (`Audio 2 DMA Burst`, F3): 0 Single, 1 Demand 2, 2
-  Demand 4, 3 Demand 8, default Demand 4. Audio 2's transfers (78h bits
-  7:6); ESS's demand 4. Parameter `a2_burst`. It takes effect at the next
-  prepare.
-* **DRQ Latch** (`DRQ Latch Switch`, F3): 0 to 1, default 1. Each DRQ held
-  until its DACK (card register 25h bit 7). Parameter `drq_latch`.
-* **ADC Settle Milliseconds** (`ADC Settle Milliseconds`, F3 and F4): 0 to
+* `Single Mode DMA Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 0. Single transfers instead of demand transfers (8237, B9h, 78h).
+  Parameter `dma_single`. It takes effect at the next prepare.
+* `Audio 1 DMA Burst` (the card interface, not in alsamixer): 0 Type 0, 1
+  Type 1, 2 Type 2, default Type 2. Audio 1's demand transfers (B9h);
+  ESS's 2. Parameter `a1_burst`. It takes effect at the next prepare.
+* `Audio 2 DMA Burst` (the card interface, not in alsamixer): 0 Single, 1
+  Demand 2, 2 Demand 4, 3 Demand 8, default Demand 4. Audio 2's transfers
+  (78h bits 7:6); ESS's demand 4. Parameter `a2_burst`. It takes effect at
+  the next prepare.
+* `DRQ Latch Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 1. Each DRQ held until its DACK (card register 25h bit 7).
+  Parameter `drq_latch`.
+* `ADC Settle Milliseconds` (the card interface, not in alsamixer): 0 to
   1000, default 200. How long a recording waits for the ADC's input to
   settle after the codec turns to it (ms); 0 starts at once, as ESS's
   drivers do, and the first 100 ms then carry the input's offset decaying.
@@ -369,23 +379,23 @@ Parameters only:
   Clock also to the system's clock, as the chip's measures against it, which
   is true time with chronyd running; Off leaves the samples as they are.
   Parameter `a2_resample`.
-* **Audio 2 Rate Trim** (`Audio 2 Rate Trim`, F3): 0 -500 ppm, 1 -200 ppm, 2
-  -100 ppm, 3 -50 ppm, 4 -20 ppm, 5 -10 ppm, 6 -5 ppm, 7 -2 ppm, 8 -1 ppm, 9
-  -0.5 ppm, 10 -0.2 ppm, 11 -0.1 ppm, 12 0, 13 +0.1 ppm, 14 +0.2 ppm, 15
-  +0.5 ppm, 16 +1 ppm, 17 +2 ppm, 18 +5 ppm, 19 +10 ppm, 20 +20 ppm, 21 +50
-  ppm, 22 +100 ppm, 23 +200 ppm, 24 +500 ppm, default 0. What the rate
-  correction adds to the stream's rate. Parameter `a2_trim`.
-* **Audio 2 Rate Dither** (`Audio 2 Rate Dither Playback Switch`, F3): 0 to
-  1, default 0. The rate correction's rounding to 16 bits with triangular
-  noise of 1 LSB: 3 dB more noise for spurs at about -100 dBFS. Parameter
-  `a2_resample_dither`.
-* **Audio 2 Zero Step** (`Audio 2 Zero Step Playback Switch`, F3): 0 to 1,
-  default 0. The DAC's gap at its sign taken back, each code moved about it.
-  Parameter `a2_zstep`.
-* **Audio 2 Zero Step Left** (`Audio 2 Zero Step Left`, F3 and F4): 0 to
+* `Audio 2 Rate Trim` (the card interface, not in alsamixer): 0 -500 ppm, 1
+  -200 ppm, 2 -100 ppm, 3 -50 ppm, 4 -20 ppm, 5 -10 ppm, 6 -5 ppm, 7 -2 ppm,
+  8 -1 ppm, 9 -0.5 ppm, 10 -0.2 ppm, 11 -0.1 ppm, 12 0, 13 +0.1 ppm, 14 +0.2
+  ppm, 15 +0.5 ppm, 16 +1 ppm, 17 +2 ppm, 18 +5 ppm, 19 +10 ppm, 20 +20 ppm,
+  21 +50 ppm, 22 +100 ppm, 23 +200 ppm, 24 +500 ppm, default 0. What the
+  rate correction adds to the stream's rate. Parameter `a2_trim`.
+* `Audio 2 Rate Dither Playback Switch` (the card interface, not in
+  alsamixer): 0 to 1, default 0. The rate correction's rounding to 16 bits
+  with triangular noise of 1 LSB: 3 dB more noise for spurs at about -100
+  dBFS. Parameter `a2_resample_dither`.
+* `Audio 2 Zero Step Playback Switch` (the card interface, not in
+  alsamixer): 0 to 1, default 0. The DAC's gap at its sign taken back, each
+  code moved about it. Parameter `a2_zstep`.
+* `Audio 2 Zero Step Left` (the card interface, not in alsamixer): 0 to
   8192, default 0. The left DAC's gap in 1/256 LSB, as a recorder on the
   line out measures it: 2048 on the Armada. Parameter `a2_zstep_l`.
-* **Audio 2 Zero Step Right** (`Audio 2 Zero Step Right`, F3 and F4): 0 to
+* `Audio 2 Zero Step Right` (the card interface, not in alsamixer): 0 to
   8192, default 0. The right DAC's. Parameter `a2_zstep_r`.
 * **Audio 2 Output Rate** (`Audio 2 Output Rate`, F3): 0 1x, 1 2x, 2 3x,
   default 1x. The DAC clocked at this many times a 16-bit stream's rate on
@@ -412,13 +422,13 @@ Parameters only:
   frame k after and takes as much of the one k before, which takes back the
   turn of the phase that the DAC's last sample makes, 2 degrees at 20 kHz at
   1x. treble.h's until others are loaded, and taken the same way.
-* **Audio 1 Correction** (`Audio 1 Correction Capture Switch`, F4): 0 to 1,
-  default 0. Audio 1's 16-bit recordings through a filter of 33 taps a
-  channel that takes back the record path's own response, its magnitude and
-  its phase, with the taps of "Audio 1 Correction Capture Taps" and "Phase
-  Taps" (es1869scope -v 3 -C measures and loads them): the frames come 16
-  later, and the FM recording stays exact. Parameter `a1c_filter`. It takes
-  effect at the next prepare.
+* `Audio 1 Correction Capture Switch` (the card interface, not in
+  alsamixer): 0 to 1, default 0. Audio 1's 16-bit recordings through a
+  filter of 33 taps a channel that takes back the record path's own
+  response, its magnitude and its phase, with the taps of "Audio 1
+  Correction Capture Taps" and "Phase Taps" (es1869scope -v 3 -C measures
+  and loads them): the frames come 16 later, and the FM recording stays
+  exact. Parameter `a1c_filter`. It takes effect at the next prepare.
 * **Audio 1 Correction Taps** (`Audio 1 Correction Capture Taps`): the
   correction filter's taps, 17 for each channel, the left's first, each the
   centre then outward, in units of 1/16384; the identity until a calibration
@@ -431,13 +441,13 @@ Parameters only:
   centre and takes as much of the one m after, which turns the phase where
   the symmetric taps can only scale. All 0 until a calibration loads its
   own.
-* **Audio 1 Linearity** (`Audio 1 Linearity Capture Switch`, F4): 0 to 1,
-  default 0. Audio 1's 16-bit recordings, after the correction filter,
-  through a stage that takes back what the record path does to a sample's
-  size: a curve about each side's centre, then a gain and a turn of the
-  phase by the analytic signal's envelope and instantaneous frequency, from
-  "Audio 1 Linearity Capture Curve", "Gain" and "Turn" (es1869scope -C and
-  -E measure and load them); the frames come 16 later, as through the
+* `Audio 1 Linearity Capture Switch` (the card interface, not in alsamixer):
+  0 to 1, default 0. Audio 1's 16-bit recordings, after the correction
+  filter, through a stage that takes back what the record path does to a
+  sample's size: a curve about each side's centre, then a gain and a turn of
+  the phase by the analytic signal's envelope and instantaneous frequency,
+  from "Audio 1 Linearity Capture Curve", "Gain" and "Turn" (es1869scope -C
+  and -E measure and load them); the frames come 16 later, as through the
   filter. Parameter `a1c_linear`. It takes effect at the next prepare.
 * **Audio 1 Linearity Tables** (`Audio 1 Linearity Capture Curve`, `Gain`
   and `Turn`): the stage's tables, the left's first. The curve: its centre,
@@ -456,9 +466,9 @@ Parameters only:
 
 ### Limits
 
-* **Rate Limit** (`Rate Limit Switch`, F3): 0 to 1, default 1. 0 lifts the
-  rate limits above, for es1869test's rate.max. Parameter `rate_limit`. It
-  takes effect at the next prepare.
+* `Rate Limit Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 1. 0 lifts the rate limits above, for es1869test's rate.max.
+  Parameter `rate_limit`. It takes effect at the next prepare.
 
 Parameters only:
 
@@ -477,15 +487,15 @@ Parameters only:
 
 ### Devices
 
-* **FM Digital** (`FM Digital Capture Switch`, F4): 0 to 1, default 1. PCM
-  device 1, the music DAC recorded digitally, opens. Parameter
-  `fmdig_device`. It takes effect at the next open.
-* **Dual** (`Dual Playback Switch`, F3): 0 to 1, default 0. PCM device 2,
-  both DACs as four channels, opens. Parameter `dual_playback`. It takes
-  effect at the next open.
-* **Audio 2 Monitor** (`Audio 2 Monitor Capture Switch`, F4): 0 to 1,
-  default 1. PCM device 3, the frames Audio 2's DAC took, opens. Parameter
-  `monitor_device`. It takes effect at the next open.
+* `FM Digital Capture Switch` (the card interface, not in alsamixer): 0 to
+  1, default 1. PCM device 1, the music DAC recorded digitally, opens.
+  Parameter `fmdig_device`. It takes effect at the next open.
+* `Dual Playback Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 0. PCM device 2, both DACs as four channels, opens. Parameter
+  `dual_playback`. It takes effect at the next open.
+* `Audio 2 Monitor Capture Switch` (the card interface, not in alsamixer): 0
+  to 1, default 1. PCM device 3, the frames Audio 2's DAC took, opens.
+  Parameter `monitor_device`. It takes effect at the next open.
 
 Parameters only:
 
@@ -500,39 +510,40 @@ Parameters only:
 
 ### FM
 
-* **OPL3** (`OPL3 Switch`, F3): 0 to 1, default 1. The OPL3 hwdep and synth
-  open. Parameter `opl3`.
-* **ESFM** (`ESFM Switch`, F3): 0 to 1, default 1. The ESFM hwdep and synth
-  open. Parameter `esfm`. It takes effect at the next open.
-* **FM Sides** (`FM Sides Switch`, F3): 0 to 1, default 1. OPL3 channel A
-  and the ESFM synth's pan left on the left output; 0 the chip's mirror.
-  Parameter `fm_sides`.
-* **ESFM Better Square** (`ESFM Better Square Switch`, F3): 0 to 1,
-  default 0. The bank with the better square wave
-  (es1869/esfm-gm-square.bin). Parameter `esfm_square`.
-* **ESFM Silence On Close** (`ESFM Silence On Close Switch`, F3): 0 to 1,
-  default 1. Every voice off when the synth's last user goes, the pedal's
-  too; 0 is ESS's all notes off, though the FM's return to the OPL3 mode
-  stops them right after. Parameter `esfm_silence_on_close`. It takes effect
-  at the next open.
-* **ESFM Pedal Release** (`ESFM Pedal Release Switch`, F3): 0 to 1,
-  default 1. A program change releases the sustain pedal. Parameter
-  `esfm_pedal_release`. It takes effect at the next open.
-* **ESFM Vibrato** (`ESFM Vibrato Switch`, F3): 0 to 1, default 1. Vibrato
-  from the modulation wheel and channel pressure. Parameter `esfm_vibrato`.
-  It takes effect at the next open.
-* **ESFM Tuning** (`ESFM Tuning Switch`, F3): 0 to 1, default 1. RPN 1 and
-  2, fine and coarse tuning. Parameter `esfm_tuning`. It takes effect at the
+* `OPL3 Switch` (the card interface, not in alsamixer): 0 to 1, default 1.
+  The OPL3 hwdep and synth open. Parameter `opl3`.
+* `ESFM Switch` (the card interface, not in alsamixer): 0 to 1, default 1.
+  The ESFM hwdep and synth open. Parameter `esfm`. It takes effect at the
   next open.
-* **ESFM Reset Controllers** (`ESFM Reset Controllers Switch`, F3): 0 to 1,
-  default 1. Controller 121 as RP-015 has it; 0 ESS's reset. Parameter
+* `FM Sides Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 1. OPL3 channel A and the ESFM synth's pan left on the left
+  output; 0 the chip's mirror. Parameter `fm_sides`.
+* `ESFM Better Square Switch` (the card interface, not in alsamixer): 0 to
+  1, default 0. The bank with the better square wave
+  (es1869/esfm-gm-square.bin). Parameter `esfm_square`.
+* `ESFM Silence On Close Switch` (the card interface, not in alsamixer): 0
+  to 1, default 1. Every voice off when the synth's last user goes, the
+  pedal's too; 0 is ESS's all notes off, though the FM's return to the OPL3
+  mode stops them right after. Parameter `esfm_silence_on_close`. It takes
+  effect at the next open.
+* `ESFM Pedal Release Switch` (the card interface, not in alsamixer): 0 to
+  1, default 1. A program change releases the sustain pedal. Parameter
+  `esfm_pedal_release`. It takes effect at the next open.
+* `ESFM Vibrato Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 1. Vibrato from the modulation wheel and channel pressure.
+  Parameter `esfm_vibrato`. It takes effect at the next open.
+* `ESFM Tuning Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 1. RPN 1 and 2, fine and coarse tuning. Parameter `esfm_tuning`.
+  It takes effect at the next open.
+* `ESFM Reset Controllers Switch` (the card interface, not in alsamixer): 0
+  to 1, default 1. Controller 121 as RP-015 has it; 0 ESS's reset. Parameter
   `esfm_reset_controllers`. It takes effect at the next open.
-* **ESFM Live Pan** (`ESFM Live Pan Switch`, F3): 0 to 1, default 1. A pan
-  change moves sounding notes too. Parameter `esfm_live_pan`. It takes
-  effect at the next open.
-* **ESFM SysEx** (`ESFM SysEx Switch`, F3): 0 to 1, default 1. The GM, GM2,
-  GS and XG resets and the master volume. Parameter `esfm_sysex`. It takes
-  effect at the next open.
+* `ESFM Live Pan Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 1. A pan change moves sounding notes too. Parameter
+  `esfm_live_pan`. It takes effect at the next open.
+* `ESFM SysEx Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 1. The GM, GM2, GS and XG resets and the master volume. Parameter
+  `esfm_sysex`. It takes effect at the next open.
 
 Parameters only:
 

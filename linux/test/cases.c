@@ -137,7 +137,7 @@ const struct et_case et_cases[] = {
 	CASE("probe.controls", Q | N, c_probe_controls, 0,
 	     "every control as settings.def has it, its parameter agreeing")
 	CASE("probe.alsamixer", Q | N, c_probe_alsamixer, 0,
-	     "the rate correction and the DAC stages in alsamixer's Playback view")
+	     "alsamixer shows the mixer and Audio 2's rate and treble, not the chip's workings")
 	CASE("probe.params", Q | N, c_probe_params, 0,
 	     "every parameter readable and in its range")
 	CASE("params.rw", Q | ET_ROOT | N, c_params_rw, 0,

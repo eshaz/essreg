@@ -49,5 +49,6 @@
 #define F_NEXT 0x100
 #define F_IDLE_A1 0x200
 #define F_OPEN 0x400
+#define F_MIXER 0x800 // a control alsamixer shows; the others are the card's
 
 #endif /* ES1869_SETTINGS_KINDS_H */

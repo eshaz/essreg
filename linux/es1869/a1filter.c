@@ -305,14 +305,14 @@ int es1869_a1c_new(struct es1869 *chip)
 {
 	static const struct snd_kcontrol_new knew[] = {
 		{
-			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+			.iface = SNDRV_CTL_ELEM_IFACE_CARD,
 			.name = "Audio 1 Correction Capture Taps",
 			.info = taps_info,
 			.get = taps_get,
 			.put = taps_put,
 		},
 		{
-			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+			.iface = SNDRV_CTL_ELEM_IFACE_CARD,
 			.name = "Audio 1 Correction Capture Phase Taps",
 			.info = taps_info,
 			.get = taps_get,
@@ -326,7 +326,7 @@ int es1869_a1c_new(struct es1869 *chip)
 		[CL_TURN] = "Audio 1 Linearity Capture Turn",
 	};
 	struct snd_kcontrol_new cl = {
-		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.iface = SNDRV_CTL_ELEM_IFACE_CARD,
 		.info = cl_info,
 		.get = cl_get,
 		.put = cl_put,

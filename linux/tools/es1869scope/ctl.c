@@ -9,13 +9,23 @@
 
 #include "ctl.h"
 
+#include <errno.h>
 #include <string.h>
 
+// the mixer interface first, then the card's, where the driver keeps what
+// alsamixer doesn't show
 static int ctl_info(snd_ctl_t *h, const char *name, snd_ctl_elem_id_t *id,
 		    snd_ctl_elem_info_t *info)
 {
+	int err;
+
 	snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
 	snd_ctl_elem_id_set_name(id, name);
+	snd_ctl_elem_info_set_id(info, id);
+	err = snd_ctl_elem_info(h, info);
+	if (err != -ENOENT)
+		return err;
+	snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_CARD);
 	snd_ctl_elem_info_set_id(info, id);
 	return snd_ctl_elem_info(h, info);
 }

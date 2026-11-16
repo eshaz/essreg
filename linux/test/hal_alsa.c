@@ -617,14 +617,23 @@ static const char *alsa_rec2(void *ctx)
 	return a->rec2[0] ? a->rec2 : NULL;
 }
 
+// the mixer interface first, then the card's, where snd-es1869 keeps what
+// alsamixer doesn't show
 static int elem(struct alsa *a, const char *name, int index,
 		snd_ctl_elem_id_t *id, snd_ctl_elem_info_t *info)
 {
+	int err;
+
 	if (!a->ctl)
 		return -ENODEV;
 	snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
 	snd_ctl_elem_id_set_name(id, name);
 	snd_ctl_elem_id_set_index(id, index);
+	snd_ctl_elem_info_set_id(info, id);
+	err = snd_ctl_elem_info(a->ctl, info);
+	if (err != -ENOENT)
+		return err;
+	snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_CARD);
 	snd_ctl_elem_info_set_id(info, id);
 	return snd_ctl_elem_info(a->ctl, info);
 }

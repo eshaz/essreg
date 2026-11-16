@@ -1360,14 +1360,14 @@ int es1869_treble_ctl_new(struct es1869 *chip)
 {
 	static const struct snd_kcontrol_new knew[] = {
 		{
-			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+			.iface = SNDRV_CTL_ELEM_IFACE_CARD,
 			.name = "Audio 2 Treble Correction Taps",
 			.info = fit_info,
 			.get = fit_get,
 			.put = fit_put,
 		},
 		{
-			.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+			.iface = SNDRV_CTL_ELEM_IFACE_CARD,
 			.name = "Audio 2 Treble Correction Phase Taps",
 			.info = fit_info,
 			.get = fit_get,
