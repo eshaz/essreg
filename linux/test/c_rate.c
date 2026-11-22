@@ -424,20 +424,25 @@ enum et_result c_clock(struct et_ctx *c, const struct et_case *k)
 	if (an_fit_sine(x, s[1].done, rf.rate, want, 1, &fit)) {
 		et_fail(c, "no tone came back");
 	} else {
+		// Audio 2's tone comes back low when Audio 1's 768 kHz clock
+		// runs fast, and the FM's note high when the FM's clock does
 		ppm = (fit.f / want - 1) * 1e6;
+		if (k->arg == 0)
+			ppm = -ppm;
 		et_measure(c, k->arg == 0 ? "768 kHz against 793.8 kHz" :
 					    "the FM's clock against 793.8 kHz",
-			   -ppm, "ppm", -3000, 3000);
+			   ppm, "ppm", -3000, 3000);
 	}
 	free(x);
 	if (k->arg == 0)
 		free(s[0].data);
 	free(s[1].data);
-	// the Armada's FM runs 0.21 % fast of 49716 Hz on the 793.8 kHz clock
+	// the Armada's FM runs 0.21 % slow of 49716 Hz on the 793.8 kHz
+	// clock: the master over 480, 49612.5 Hz, as essprobe measured it
 	if (k->arg == 1 && fabs(ppm) > 1000 && !c->fails) {
 		snprintf(c->why, sizeof(c->why),
 			 "the FM's clock runs %+.0f ppm of 49716 Hz against 793.8 kHz",
-			 -ppm);
+			 ppm);
 		return ET_KNOWN;
 	}
 	return ET_PASS;

@@ -199,7 +199,7 @@ Those readings point to one crystal under the chip and the system timer. A
 master of 800 / 481 of the board's 14.318 MHz gives +0.873 ppm against the
 kernel's count of the PM timer, which is what the three runs read, and two
 crystals would hardly agree that well while the laptop's clock is off by 30
-ppm. The FM's clock fits no such small ratio of either. On one crystal the
+ppm. The FM's clock is the master over 480, 49,612.5 Hz. On one crystal the
 difference between the chip and the system can't drift, so that a warming
 crystal shows only against NTP.
 
