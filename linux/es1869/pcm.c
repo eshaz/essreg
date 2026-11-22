@@ -7,7 +7,8 @@
  *
  * Device 0 is snd-es18xx's: playback subdevice 0 is Audio 2 (mirror.c),
  * subdevice 1 Audio 1, and capture subdevice 0 Audio 1. Device 1 records
- * the music DAC on Audio 1 (mixer 7Fh bit 4): 16-bit stereo at 49716 Hz.
+ * the music DAC on Audio 1 (mixer 7Fh bit 4): 16-bit stereo at the FM's
+ * 49612.5 Hz, which it calls 49613 Hz.
  * Audio 1 does one of the three at a time, and the others get -EBUSY.
  * Device 2 is both DACs at once (dual.c), and device 3 what Audio 2's DAC
  * took (monitor.c).
@@ -493,7 +494,7 @@ static int a1_prepare(struct snd_pcm_substream *substream)
 			 es1869_owner_names[chip->a1_owner], s.ch, s.dma_phys,
 			 s.dma_bytes, s.period);
 	if (chip->a1_owner == ES_OWN_FMC) {
-		// the chip records the music DAC at its own 49716 Hz, with A1h
+		// the chip records the music DAC at its own 49612.5 Hz, with A1h
 		// as ESS's driver sets it, for 48 kHz in the new mode
 		s.rate_num = ES_CLK_768;
 		s.rate_den = 16;

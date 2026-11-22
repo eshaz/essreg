@@ -28,7 +28,7 @@ application's buffer, and the monitor reads that instead. The Armada has no
 8-bit channel for Audio 2, so that path is untested on a chip.
 
 With Audio 2 To FM on (mixer 71h bit 0), the chip takes the frames at the
-music DAC's 49716 Hz, whatever rate the stream and the monitor say. The
+music DAC's 49,612.5 Hz, whatever rate the stream and the monitor say. The
 frames are the same; only their timing differs. es1869test's `mon.clock`
 uses this to hold the monitor against PCM device 1.
 

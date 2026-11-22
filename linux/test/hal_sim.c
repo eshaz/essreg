@@ -9,7 +9,7 @@
  * Notes:
  *
  * The paths: Audio 2 slaved to the FM goes to PCM 1 exactly, sides
- * swapped, plus +128, at 49716 Hz; the record mixer takes Audio 2 at 69h's
+ * swapped, plus +128, at the FM's rate; the record mixer takes Audio 2 at 69h's
  * level; the output is Audio 1 and Audio 2 at their levels and the master,
  * and the second card hears its left side, on a clock 800 ppm off. A note
  * from --fm-note is a sine on the sides its bits give. Record source 7

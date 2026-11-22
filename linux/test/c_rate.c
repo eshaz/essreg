@@ -402,7 +402,9 @@ enum et_result c_clock(struct et_ctx *c, const struct et_case *k)
 		s[0] = et_play(ET_A2, &a2f, et_tone(&a2f, pn, ET_HZ, ET_HZ, 6000),
 			       pn, 0);
 	} else {
-		// a native note: 581 x 49716 / 2^16 Hz on the FM's clock
+		// a native note, 581 / 2^16 of the FM's rate, with the output
+		// muted: the record mixer takes the FM before the master
+		et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
 		et_ctl_set(c, "FM Capture Volume", 0, 12, 12);
 		et_ctl_set(c, "Video Playback Switch", 0, 0, 0);
 		snprintf(cmd, sizeof(cmd), "%s --fm-note esfm:0x30:581:4:3.5",
@@ -429,22 +431,17 @@ enum et_result c_clock(struct et_ctx *c, const struct et_case *k)
 		ppm = (fit.f / want - 1) * 1e6;
 		if (k->arg == 0)
 			ppm = -ppm;
+		// the FM's clock is the master over 480, 49612.5 Hz, 10 ppm
+		// under PCM 1's 49613, as essprobe measured it in DOS
 		et_measure(c, k->arg == 0 ? "768 kHz against 793.8 kHz" :
 					    "the FM's clock against 793.8 kHz",
-			   ppm, "ppm", -3000, 3000);
+			   ppm, "ppm", k->arg == 0 ? -3000 : -100,
+			   k->arg == 0 ? 3000 : 100);
 	}
 	free(x);
 	if (k->arg == 0)
 		free(s[0].data);
 	free(s[1].data);
-	// the Armada's FM runs 0.21 % slow of 49716 Hz on the 793.8 kHz
-	// clock: the master over 480, 49612.5 Hz, as essprobe measured it
-	if (k->arg == 1 && fabs(ppm) > 1000 && !c->fails) {
-		snprintf(c->why, sizeof(c->why),
-			 "the FM's clock runs %+.0f ppm of 49716 Hz against 793.8 kHz",
-			 ppm);
-		return ET_KNOWN;
-	}
 	return ET_PASS;
 }
 

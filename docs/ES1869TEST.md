@@ -118,7 +118,7 @@ driver's default. The rate correction's own cases set it themselves.
 
 The cases reach the chip four ways:
 * **dig.** With Audio 2 slaved to the FM (mixer 71h bit 0), the music DAC
-  takes Audio 2's samples, one a frame at the FM's 49716 Hz whatever rate
+  takes Audio 2's samples, one a frame at the FM's 49,612.5 Hz whatever rate
   the stream has, and PCM device 1 records them exactly, with left and right
   swapped and the FM's idle level of +128 added. Every byte that Audio 2's
   DMA brings is checked, including the ring of words on a 16-bit channel.
@@ -139,9 +139,10 @@ against the stream, the filter's C code and the dig path.
   volumes. A microphone input with its own gain control, as on the Armada's
   Play! 3, doesn't, and then the cases that measure levels through the cable
   skip.
-* `clock`: the chip's clocks against each other, and in `clock.system` the
-  driver's line through 30 s of a stream's interrupts, the master clock
-  against the raw system clock and the clock NTP steers against that.
+* `clock`: the chip's clocks against each other, the FM's within 100 ppm of
+  PCM 1's 49,613 Hz in `clock.fm`, and in `clock.system` the driver's line
+  through 30 s of a stream's interrupts, the master clock against the raw
+  system clock and the clock NTP steers against that.
 * `dac`: Audio 2's image at 22.05 kHz with each of its DAC stages, KNOWN
   with the stages off; and the corner of its switched-capacitor filter at
   11025, 22050 and 32000 Hz (`dac.corner`), whose clock the driver sets from
@@ -231,7 +232,7 @@ against the stream, the filter's C code and the dig path.
     without it, in turn, since the level moves between sessions: the filter
     moves THD+N by under 1.5 dB and the level by under 0.1 dB.
 * `fm`: PCM 1's idle level, which output each FM side bit reaches with
-  `fm_sides` on and off, and a note's pitch.
+  `fm_sides` on and off, and a note's pitch, all with the output muted.
 * `a1rec`: Audio 1's recordings: formats, rates, sides, pitch, and the
   frames at their start. `a1rec.dc` measures the ADC's offset from a source
   that nothing drives, which should stay under half a step of the offset

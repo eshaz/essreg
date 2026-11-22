@@ -392,7 +392,7 @@ enum et_result c_pm_suspend(struct et_ctx *c, const struct et_case *k)
 enum et_result c_pm_stream(struct et_ctx *c, const struct et_case *k)
 {
 	static const struct et_fmt f = { ET_S16, 2, 44100 };
-	unsigned long frames = 10 * 49716, nrec = 12 * ET_FM_RATE;
+	unsigned long frames = 10 * ET_FM_RATE, nrec = 12 * ET_FM_RATE;
 	struct et_stream s[3];
 	unsigned long last;
 	char cmd[300];
@@ -458,7 +458,7 @@ enum et_result c_pm_stream(struct et_ctx *c, const struct et_case *k)
 enum et_result c_pm_real(struct et_ctx *c, const struct et_case *k)
 {
 	static const struct et_fmt f = { ET_S16, 2, 44100 };
-	unsigned long frames = 45 * 49716, nrec = 50 * ET_FM_RATE, last;
+	unsigned long frames = 45 * ET_FM_RATE, nrec = 50 * ET_FM_RATE, last;
 	struct et_stream s[3];
 	void *pat;
 	long tail;
@@ -713,7 +713,7 @@ enum et_result c_pwr_save(struct et_ctx *c, const struct et_case *k)
 		et_fail(c, "the chip hasn't gone down");
 	if (et_param_set(c, "pwr_save", 0))
 		return ET_ERROR;
-	return et_dig_run(c, &f, 2 * 49716, 71, NULL);
+	return et_dig_run(c, &f, 2 * ET_FM_RATE, 71, NULL);
 }
 
 // pwr.self: Self-Timed Power Down at its shortest: the chip goes down by
@@ -728,7 +728,7 @@ enum et_result c_pwr_self(struct et_ctx *c, const struct et_case *k)
 	c->hal->sleep(c->hal->ctx, 10);
 	if (et_ctl_set(c, "Self-Timed Power Down", 0, 0, 0) < 0)
 		return ET_ERROR;
-	return et_dig_run(c, &f, 2 * 49716, 72, NULL);
+	return et_dig_run(c, &f, 2 * ET_FM_RATE, 72, NULL);
 }
 
 // a note on the FM, as much of it as the driver allows: its exit status
@@ -921,7 +921,7 @@ enum et_result c_stress_all(struct et_ctx *c, const struct et_case *k)
 	h.cmd = cmd;
 	h.start = 0.5;
 	h.timeout = 75;
-	r = et_dig_run(c, &f, 60 * 49716, 61, &h);
+	r = et_dig_run(c, &f, 60 * ET_FM_RATE, 61, &h);
 	et_measure(c, "the helper's exit", h.status, "", 0, 0);
 	return r;
 }

@@ -125,7 +125,7 @@ ES1869_SET(audio2_own_clock, AUDIO2_OWN_CLOCK, S_BOOL, B_MIX, 0x71, 1, 1, 0, 1, 
 	   "Audio 2 at its own rate (71h bit 1), else slaved to Audio 1's")
 ES1869_SET(audio2_to_fm, AUDIO2_TO_FM, S_BOOL, B_MIX, 0x71, 0, 1, 0, 1, 0,
 	   T_NONE, F_CTL | F_PARAM | F_INIT | F_IDLE, 0, "Audio 2 To FM Playback Switch", "",
-	   "Audio 2 slaved to the FM (71h bit 0): mixed into the music DAC at 49716 Hz, its sides swapped")
+	   "Audio 2 slaved to the FM (71h bit 0): mixed into the music DAC at its rate, its sides swapped")
 ES1869_SET(video_switch, VIDEO_SWITCH, S_BOOL, B_MIX, 0x7F, 0, 1, 0, 1, 0,
 	   T_NONE, F_CTL | F_PARAM | F_INIT | F_MIXER, 0, "Video Playback Switch", "",
 	   "the music DAC driven by I2S (7Fh bit 0), which silences FM")

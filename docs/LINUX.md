@@ -115,7 +115,7 @@ programs that set the master still work.
   opening one while the other runs fails with EBUSY. Playback on Audio 2 and
   recording on Audio 1 run at once.
 * PCM device 1, capture: the music DAC recorded digitally on Audio 1, as
-  16-bit stereo at 49716 Hz (mixer 7Fh bit 4).
+  16-bit stereo at 49,613 Hz (mixer 7Fh bit 4).
 * PCM device 2, playback: both DACs as one four-channel device, channels 1
   and 2 on Audio 1 and 3 and 4 on Audio 2, on Audio 1's clock and from one
   start; on the Armada the two DACs began 1 to 4.5 frames apart at 44.1 kHz
@@ -181,27 +181,23 @@ Audio 1's level (14h) follows the table unmeasured.
 
 The chip's clocks are one master clock divided. The 768 kHz clock and the
 793.8 kHz one stand exactly 30 to 31 apart: es1869test reads 251.955 and
-251.952 ppm, and 31 / 30 is 251.953. The FM's stays 2081.82 ppm fast of
-49716 Hz on them, to 0.003 ppm over 90 minutes. PCM device 1 says 49716 Hz,
-the music DAC's nominal rate, and so records the FM about 0.2 % faster than
-it says.
+251.952 ppm, and 31 / 30 is 251.953. The FM's stays 2081.82 ppm slow of
+49716 Hz on them, to 0.003 ppm over 90 minutes: the master over 480,
+49,612.5 Hz. PCM device 1 says 49,613 Hz.
 
 The 793.8 kHz clock is the true one, and what the chip calls 768 kHz is
 768193.5 Hz. So 44.1 kHz plays at 44100.04 Hz by the Armada's raw system
 clock, 0.86 to 0.88 ppm fast in three runs, and 48 kHz at 48012.1 Hz, 252.9
 ppm sharp on any crystal. A line through the earliest interrupt of each
 second leaves 1.4 to 4 us rms, and its slope moved by about 0.02 ppm while
-the laptop compiled and warmed up. An earlier reading here, of 178 to 247
-ppm slow, was the test's: it timed a stream from its start through the end
-of its drain.
+the laptop compiled and warmed up.
 
 Those readings point to one crystal under the chip and the system timer. A
 master of 800 / 481 of the board's 14.318 MHz gives +0.873 ppm against the
 kernel's count of the PM timer, which is what the three runs read, and two
 crystals would hardly agree that well while the laptop's clock is off by 30
-ppm. The FM's clock is the master over 480, 49,612.5 Hz. On one crystal the
-difference between the chip and the system can't drift, so that a warming
-crystal shows only against NTP.
+ppm. On one crystal the difference between the chip and the system can't
+drift, so that a warming crystal shows only against NTP.
 
 On the Armada chronyd runs as a service and steers the system clock; without
 it, cron sets the clock from the network every six hours and nothing
@@ -543,7 +539,7 @@ MIDI files play these ways on the laptop:
   `aplaymidi -p "ES1869 ESFM synth" song.mid`. The bank is the firmware file
   `es1869/esfm-gm.bin`, ESS's `bnk_com.bin`.
 * PCM device 1 records what the FM plays, digitally and exactly: `arecord -D
-  hw:ES1869,1 -f S16_LE -r 49716 -c 2 fm.wav`. With FM idle it reads a
+  hw:ES1869,1 -f S16_LE -r 49613 -c 2 fm.wav`. With FM idle it reads a
   constant +128.
 
 The chip plays the FM's two sides the other way round from an OPL3: bit 4 of
@@ -558,8 +554,8 @@ chip has it, mirrored, which is what ESS's drivers do.
 The ESFM synth follows the rebuilt ESFM.DRV, which `tests/test_esfmgm.py`
 checks message by message in the emulator, and it played `build/GMCHECK.MID`
 on the Armada with every step as [TESTING.md](TESTING.md#g3-general-midi)
-describes it. Like ESS's driver, it plays 6 to 9 cents flat of A4 = 440 Hz
-([ESFM_ENGINE.md](ESFM_ENGINE.md#6-pitch)).
+describes it. Like ESS's driver, it plays 12.5 to 14.6 cents flat of A4 =
+440 Hz on the chip ([ESFM_ENGINE.md](ESFM_ENGINE.md#6-pitch)).
 
 The MPU-401 is raw MIDI device 0, in UART mode, and a byte coming in raises
 the chip's interrupt. The driver opens and sends through it, but no byte has
@@ -804,7 +800,7 @@ saved state wins over a parameter. The defaults are the Kconfig options
   2 at its own rate (71h bit 1), else slaved to Audio 1's. A write fails
   with EBUSY while Audio 2 is open.
 * `audio2_to_fm` ("Audio 2 To FM Playback Switch"): 0 to 1, default 0. Audio
-  2 slaved to the FM (71h bit 0): mixed into the music DAC at 49716 Hz, its
+  2 slaved to the FM (71h bit 0): mixed into the music DAC at its rate, its
   sides swapped. A write fails with EBUSY while Audio 2 is open.
 * `video_switch` ("Video Playback Switch"): 0 to 1, default 0. The music DAC
   driven by I2S (7Fh bit 0), which silences FM.

@@ -433,15 +433,13 @@ and `RATIO` makes it smaller from G up to F# within each octave.
 
 The frequency of an operator is F-number x f x 2^(block - 20) times its
 multiplier (register 0 bits 3:0, where 1 is x1), and f is the chip's output
-rate. If f is 49716 Hz, as on the OPL3 (14.31818 MHz / 288), every note is 9
-to 11 cents flat of A4 = 440 Hz. `FNUM` matches equal temperament within 1.1
-cents at f = 50000 Hz. On the Armada, a note recorded through the record
-mixer against the chip's 793.8 kHz clock shows the FM running 0.21 % fast of
-49716 Hz, about 49820 Hz on that clock, and 0.18 % fast on the laptop's own
-clock. So ESS's notes play about 3 cents sharper than 49716 Hz gives: 6 to 9
-cents flat of A4 = 440 Hz, and in tune would take 0.4 % more. Note 60 of GM
-program 81, with the patch's detune, reads 259.8 Hz in the music DAC's own
-frames, 12 cents flat at 49716 Hz.
+rate. `FNUM` matches equal temperament within 1.1 cents at f = 50000 Hz: it
+is AdLib's table. At an OPL3's 49716 Hz (14.31818 MHz / 288) every note is 9
+to 11 cents flat of A4 = 440 Hz. The ES1869's FM runs at its 23.814 MHz
+master over 480, 49612.5 Hz, which essprobe measured in DOS and es1869test's
+`clock.fm` measures through the record mixer against the chip's 793.8 kHz
+clock, so on the chip ESS's notes play 12.5 to 14.6 cents flat. Note 60 of
+GM program 81, whose operators are detuned, reads 259.3 Hz, 15.7 cents flat.
 
 ### Pitch bend
 
@@ -742,8 +740,8 @@ because the old one has the smallest age. A stolen voice is keyed off by
 takes that operator out of the mix, and at the key on its envelope starts
 its attack from the level that the release reached (ESFMu). An envelope
 delay d, register 5 bits 7:5, holds the operator's envelope back after the
-key on for 256 x 2^d samples of the chip, about 10 ms to 0.66 s at 49716 Hz
-(ESFMu), and the driver keeps the delay in every bend.
+key on for 256 x 2^d samples of the chip, about 10 ms to 0.66 s at 49612.5
+Hz (ESFMu), and the driver keeps the delay in every bend.
 
 ## 11. ESS's behavior that the rebuilt driver keeps
 
@@ -768,8 +766,8 @@ the same, or fix them:
 * **Volume 0** sets register 1 of every operator of the channel to 3Fh,
   modulators included, and loses the KSL bits until the volume comes back
   (section 7, verified).
-* **Tuning.** The F-numbers are 9 to 11 cents flat at 49716 Hz, and 6 to 9
-  cents flat at the rate the Armada's FM runs at (section 6).
+* **Tuning.** The F-numbers are 9 to 11 cents flat at 49716 Hz, and 12.5 to
+  14.6 cents flat at the chip's 49612.5 Hz (section 6).
 * **Pan.** Left and right are the other way round on the chip (section 8).
 
 ## 12. Open points

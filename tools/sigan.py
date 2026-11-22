@@ -16,7 +16,7 @@ a second recording made at the same time, such as a second card's or what
 Audio 2 played, and the first against it. -o writes PREFIX.txt and
 PREFIX-*.csv. --sig compares with that file instead of the signal made
 again here. --rec-rate takes the recording at another rate than its header
-gives, such as 44100 for PCM 1's 49716 Hz on the dig path, where each of
+gives, such as 44100 for PCM 1's 49613 Hz on the dig path, where each of
 the stream's samples takes a frame. --chans picks two of a recording's
 channels, counted from 0. Needs numpy.
 """

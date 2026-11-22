@@ -235,7 +235,7 @@ es1869ctl's pages.
   open.
 * `Audio 2 To FM Playback Switch` (the card interface, not in alsamixer): 0
   to 1, default 0. Audio 2 slaved to the FM (71h bit 0): mixed into the
-  music DAC at 49716 Hz, its sides swapped. Parameter `audio2_to_fm`. A
+  music DAC at its rate, its sides swapped. Parameter `audio2_to_fm`. A
   write fails with EBUSY while Audio 2 is open.
 * **Video** (`Video Playback Switch`, F3): 0 to 1, default 0. The music DAC
   driven by I2S (7Fh bit 0), which silences FM. Parameter `video_switch`.

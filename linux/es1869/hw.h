@@ -33,7 +33,9 @@
 #define ES_CLK_HI 793800 // A1h bit 7, 70h bit 7 clear
 #define ES_CLK_LO 396900 // A1h bit 7 clear, in the old A1h mode
 #define ES_CLK_768 768000 // 70h bit 7, or A1h in the new mode (71h bit 5)
-#define ES_FM_RATE 49716 // the music DAC: 14.31818 MHz / 288
+// the music DAC: the 23.814 MHz master over 480, 49612.5 Hz, where the
+// data sheet says 14.31818 MHz / 288, 49716 Hz; PCM 1 says 49613
+#define ES_FM_RATE 49613
 
 // FIFO depths: what the interrupt and the DMA position run ahead of the
 // converter by

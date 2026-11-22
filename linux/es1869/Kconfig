@@ -351,7 +351,7 @@ config SND_ES1869_DEFAULT_AUDIO2_TO_FM
 	default 0
 	help
 	  Audio 2 slaved to the FM (71h bit 0): mixed into the music DAC
-	  at 49716 Hz, its sides swapped. The ALSA control "Audio 2 To
+	  at its rate, its sides swapped. The ALSA control "Audio 2 To
 	  FM Playback Switch". The module parameter audio2_to_fm sets it
 	  at load and at runtime, through
 	  /sys/module/snd_es1869/parameters/audio2_to_fm.

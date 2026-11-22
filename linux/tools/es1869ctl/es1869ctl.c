@@ -625,9 +625,8 @@ static void stream(const char *title, const char *dir)
 	r = strtol(rate, NULL, 10);
 	note[0] = 0;
 	// the chip's two families, and the FM's own clock (docs/LINUX.md)
-	if (r == 49716)
-		snprintf(note, sizeof(note), ", really %.1f Hz",
-			 49716 * 1.00208182);
+	if (r == 49613 || r == 49716)
+		snprintf(note, sizeof(note), ", really 49612.5 Hz");
 	else if (r && 768000 % r == 0)
 		snprintf(note, sizeof(note), ", really %.2f Hz",
 			 r * (768193.548 / 768000));

@@ -7,8 +7,8 @@
  *
  * Notes:
  *
- * Slaved to the FM, Audio 2 plays one frame a music DAC frame, at 49716 Hz
- * whatever rate the stream has, so the recording runs that long.
+ * Slaved to the FM, Audio 2 plays one frame a music DAC frame, at the FM's
+ * 49612.5 Hz whatever rate the stream has, so the recording runs that long.
  *
  * The chip's interrupt comes when the DMA has fetched a period's last byte,
  * up to its FIFO of 64 bytes before that byte plays, and a stop clears the
@@ -232,7 +232,7 @@ enum et_result c_dig_fmt(struct et_ctx *c, const struct et_case *k)
 		{ ET_S8, 2, 44100 },  { ET_U16, 2, 48000 },
 	};
 
-	return dig_run(c, &fmts[k->arg], 49716, 0, 0, 0, k->arg + 1, NULL,
+	return dig_run(c, &fmts[k->arg], ET_FM_RATE, 0, 0, 0, k->arg + 1, NULL,
 		       NULL, 0, 0);
 }
 
@@ -260,7 +260,7 @@ enum et_result c_dig_typef(struct et_ctx *c, const struct et_case *k)
 		return ET_SKIP;
 	}
 	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
-	return dig_run(c, &f, 49716, 0, 0, 0, 7, NULL, NULL, 0, 0);
+	return dig_run(c, &f, ET_FM_RATE, 0, 0, 0, 7, NULL, NULL, 0, 0);
 }
 
 // dig.start: twenty short starts, none losing or adding a frame
@@ -292,7 +292,7 @@ enum et_result c_dig_pause(struct et_ctx *c, const struct et_case *k)
 	long gap = 0;
 
 	(void)k;
-	r = dig_run(c, &f, 2 * 49716, 0, 0.8, 0.4, 7, &gap, NULL, 0, 0);
+	r = dig_run(c, &f, 2 * ET_FM_RATE, 0, 0.8, 0.4, 7, &gap, NULL, 0, 0);
 	et_measure(c, "pause, idle frames", gap, "", 0.3 * ET_FM_RATE,
 		   0.6 * ET_FM_RATE);
 	return r;
@@ -303,7 +303,7 @@ enum et_result c_dig_access(struct et_ctx *c, const struct et_case *k)
 {
 	static const struct et_fmt f = { ET_S16, 2, 48000 };
 
-	return dig_run(c, &f, 3 * 49716, k->arg, 0, 0, 9 + k->arg, NULL,
+	return dig_run(c, &f, 3 * ET_FM_RATE, k->arg, 0, 0, 9 + k->arg, NULL,
 		       NULL, 0, 0);
 }
 
@@ -313,7 +313,7 @@ enum et_result c_dig_long(struct et_ctx *c, const struct et_case *k)
 	static const struct et_fmt f = { ET_S16, 2, 44100 };
 
 	(void)k;
-	return dig_run(c, &f, 30 * 49716, 0, 0, 0, 31, NULL, NULL, 0, 0);
+	return dig_run(c, &f, 30 * ET_FM_RATE, 0, 0, 0, 31, NULL, NULL, 0, 0);
 }
 
 // dig.drain.full: periods of 1000 frames asked for in a buffer of 8192 and
@@ -354,8 +354,8 @@ enum et_result c_dig_two(struct et_ctx *c, const struct et_case *k)
 	static const struct et_fmt f = { ET_S16, 2, 44100 };
 
 	(void)k;
-	return dig_run(c, &f, 3 * 49716, ET_MMAP | ET_POLLED, 0, 0, 13, NULL,
-		       NULL, 4096, 2048);
+	return dig_run(c, &f, 3 * ET_FM_RATE, ET_MMAP | ET_POLLED, 0, 0, 13,
+		       NULL, NULL, 4096, 2048);
 }
 
 // dig.runout: an application that stops writing, with no stop threshold and
@@ -528,7 +528,7 @@ enum et_result c_dig_trim_exact(struct et_ctx *c, const struct et_case *k)
 	if (et_param_set(c, "a2_resample", 1) ||
 	    et_param_set(c, "a2_trim_ppb", 0))
 		return ET_ERROR;
-	return dig_run(c, &f, 2 * 49716, 0, 0, 0, 61, NULL, NULL, 0, 0);
+	return dig_run(c, &f, 2 * ET_FM_RATE, 0, 0, 0, 61, NULL, NULL, 0, 0);
 }
 
 // dig.clock: 48 kHz in the Clock mode. The chip's 768 kHz clock plays 252

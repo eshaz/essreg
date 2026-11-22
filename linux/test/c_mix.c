@@ -75,8 +75,8 @@ static double hear2(struct et_ctx *c, const struct path *p, double *noise,
 	double *x, lvl;
 
 	if (p->play == ET_CMD) {
-		// a native FM note on both sides: 581 x 49716 / 2^16 Hz on
-		// the FM's clock, near 441 Hz
+		// a native FM note on both sides: 581 x 49612.5 / 2^16 Hz on
+		// the FM's clock, near 440 Hz
 		static char cmd[400];
 
 		snprintf(cmd, sizeof(cmd), "%s --fm-note esfm:0x30:581:4:1.2",

@@ -113,6 +113,8 @@ static int fm_record(struct et_ctx *c, const char *note, double *lvl,
 	int ch;
 
 	snprintf(cmd, sizeof(cmd), "%s --fm-note %s", self(), note);
+	// PCM 1 takes the music DAC before the master
+	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
 	et_ctl_set(c, "Video Playback Switch", 0, 0, 0);
 	s[0] = et_rec(ET_FMC, &et_fm_fmt, n, 0);
 	memset(&s[1], 0, sizeof(s[1]));
@@ -226,8 +228,8 @@ enum et_result c_fm_opl3_sides(struct et_ctx *c, const struct et_case *k)
 	return ET_PASS;
 }
 
-// fm.pitch: a native note at F-number 581, block 4 plays 581 x 49716 /
-// 2^16 Hz, exactly, on PCM 1's own clock
+// fm.pitch: a native note at F-number 581, block 4 plays 581 / 2^16 of the
+// FM's rate, exactly, on PCM 1's own clock
 enum et_result c_fm_pitch(struct et_ctx *c, const struct et_case *k)
 {
 	double lvl[2], hz[2], want = 581.0 * ET_FM_RATE / 65536;
