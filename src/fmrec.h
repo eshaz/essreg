@@ -9,10 +9,10 @@
  * gives as 14.31818 MHz / 288 = 49,716 Hz. On the laptop it is the chip's
  * 23.814 MHz master over 480, 49,612.5 Hz: essprobe measured it to 0.1 Hz
  * in DOS against Audio 1's 44,100 Hz (the master over 540), in ESFM's
- * native mode and the OPL3 mode alike. Mixer 7Fh bit 4 records its data on
- * Audio 1 at that rate, whatever A1h says (DS p.65). esfmrec saves those
- * samples as they come, so the WAV file says 49,613 Hz, and plays at the
- * FM's pitch and speed.
+ * native mode and the OPL3 mode alike, and Linux's driver finds the same.
+ * Mixer 7Fh bit 4 records its data on Audio 1 at that rate, whatever A1h
+ * says (DS p.65). esfmrec saves those samples as they come, so the WAV file
+ * says 49,613 Hz, and plays at the FM's pitch and speed.
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *

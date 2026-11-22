@@ -354,11 +354,14 @@ rate as 14.31818 MHz / 288 = 49,716 Hz. On the laptop it is the chip's
 DOS against Audio 1's 44,100 Hz, the master over 540 (`meas.fmrate`), and
 esswchk finds the same rate in ESFM's native mode and in the OPL3 mode. In
 Windows it reads about 49,605 Hz, because Windows 98's millisecond is 1,193
-counts of the PIT, not 1,193.18, and runs 153 ppm fast. The Linux report's
-49,819.5 Hz doesn't hold under DOS and Windows. So a file that says 49,716
-Hz plays 3.6 cents sharp, and one that says 49,820 Hz, as earlier builds
-wrote, 7.2 cents sharp and 0.4 % short. Nothing analog is involved, so the
-volume settings don't change what is recorded.
+counts of the PIT, not 1,193.18, and runs 153 ppm fast. The Linux driver's
+test, which fits an FM note recorded through the ADC on Audio 1's clock,
+finds the same rate once its sign is right. The Linux report's 49,819.5 Hz
+had the sign backwards. The data sheet's 49,716 Hz is the master over 479,
+one step from either. So a file that says 49,716 Hz plays 3.6 cents sharp,
+and one that says 49,820 Hz, as earlier builds wrote, 7.2 cents sharp and
+0.4 % short. Nothing analog is involved, so the volume settings don't change
+what is recorded.
 
 The device therefore accepts a single format, 16-bit stereo PCM at 49,613
 Hz, or at 49,716 or 49,820 Hz as earlier builds did, and its capabilities

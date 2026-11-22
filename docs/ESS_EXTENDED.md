@@ -587,9 +587,10 @@ reset, B9h, A4h and A5h, A8h, B1h, B2h, then B7h once with 90h or 98h plus
 24h for 16 bits, and B8h with its bits 3:0 all set, which turns the CODEC to
 the ADC and starts the DMA in one write. With mixer 7Fh bit 4 set, Audio 1
 records the music DAC's samples at its rate, whatever its own (DS p.65,
-AUDIO1.md): 49,716 Hz by the data sheet, and on the laptop 49,612.5 Hz, the
-master over 480, as essprobe measured it (the Linux report gives 49,819.5
-Hz).
+AUDIO1.md): 49,716 Hz by the data sheet, the master over 479, and on the
+laptop 49,612.5 Hz, the master over 480, as essprobe and, with its sign
+corrected, the Linux driver's test measured it (the Linux report's 49,819.5
+Hz had the sign backwards).
 
 ## Audio 2
 
