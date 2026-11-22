@@ -67,6 +67,69 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   its wave-in messages, and mixer 7Fh while it records), `settings.asm`
   (SYSTEM.INI, and the Audio 2 mode after every mixer reset), `fixdata.asm`
   (their data) and `fix.inc` (constants and ESS's device fields).
+* `linux/` holds snd-es1869, a Linux ALSA driver for the ES1869 with every
+  feature of the chip, in `linux/es1869/` (GPL-2.0-or-later, kernel style,
+  LF). `hw.c` is the chip core behind `struct es1869_io`, with no kernel
+  API, which `tests/test_es1869hw.py` builds for the host and runs on the
+  chip model of `tests/linuxchip.py`. `settings.def` lists every setting
+  once: `settings.c` makes each a module parameter writable at runtime and
+  an ALSA control, and `tools/es1869set.py` makes the Kconfig,
+  `oot_config.h` and the settings list in [LINUX.md](docs/LINUX.md).
+  `regs.h` comes from `src/esscat.tbl` through `tools/linuxregs.py`. `pcm.c`
+  is Audio 1 and the PCM devices, `mirror.c` Audio 2 (the ring of words on a
+  16-bit DMA channel), `monitor.c` PCM device 3, a capture of what Audio 2's
+  DAC took ([LINUX_MONITOR.md](docs/LINUX_MONITOR.md)), `dual.c` both DACs
+  as one four-channel device, `main.c` the probes, the interrupt and power,
+  and `esfm.c` the FM: the OPL3 library, the native ESFM's hwdep and the
+  token between them. `resample.c` is the rate correction's filter, its line
+  through the ring and the fit of the chip's clock, with no kernel API and
+  tested by `tests/test_es1869rs.py`, and `clock.c` feeds that fit from the
+  interrupts. `capfilt.c` is the correction filter on Audio 1's recordings
+  and its linearity stage after it, with no kernel API and tested by
+  `tests/test_es1869cf.py`, which `a1filter.c` runs in place over what the
+  DMA wrote. The module snd-es1869-esfm is the GM synth: `esfm_gm.c`, the
+  engine with no kernel API, written from
+  [ESFM_ENGINE.md](docs/ESFM_ENGINE.md), which `tests/test_esfmgm.py` runs
+  against `build/ESFM.DRV` in the emulator, and `esfm_synth.c`, its
+  sequencer client. `linux/tools/essreg` builds essreg over the driver's
+  register hwdep, and `tools/es1869patch.py` makes the kernel patch.
+  `linux/tools/es1869scope/` holds es1869clock, which logs the chip's clock
+  against the machine's, real time and other cards' crystals, and
+  es1869scope, which draws that log on the framebuffer, a capture as a
+  spectrogram (`spectro.c`), and the internal loop's response, live or from
+  two files (`loopview.c`), with its messages on the screen (`say.c`), the
+  state it shares with a viewer (`eqstate.c`) and the viewer attached to the
+  service (`chain.c`, on the controls of `ctl.c`, which `mixsave.c` sets for
+  a run and puts back), and the corrections followed over time (`eq.c`,
+  `zstep.c`, the loop's step at the sign of the DAC's codes, logged, since
+  Audio 1's own dead zone hides the DAC's gap from it, and `a1lin.c`, Audio
+  1's own curve and the tables of the driver's linearity stage, from the
+  analytic signals, which `-E -x -i` replays over files), on `tie.c` (time
+  error, Allan deviations, the three-cornered hat, pulses), `phase.c` (a
+  pilot tone's phase), `loop.c` (a path's response from what plays through
+  it) and `fft.c` (a fixed-point FFT in MMX), which
+  `tests/test_es1869scope.py` checks. `linux/tools/a2stall.c` finds the
+  stops of Audio 2's DAC from its DMA position. `linux/tools/es1869ctl` is
+  the settings and status panel (ncurses), whose pages are the groups of
+  `tools/es1869set.py`, which also makes the lists of
+  [LINUX_CONTROLS.md](docs/LINUX_CONTROLS.md). `linux/mqengine/` holds
+  snd-mqengine, a driver of an Opcode MIDIEngine 2Port/SE on the parallel
+  port: `proto.h` is the unit's protocol, with no kernel API, which
+  `tests/test_mqengine.py` runs on a model of the unit and
+  `linux/tools/mqengine.c` shares, and `linux/tools/mqengine-up.sh` turns
+  the port on and loads it. `tools/mqenginepatch.py` makes its kernel patch.
+  `linux/flyer/` holds snd-flyer, a driver of MOTU's PC-MIDI Flyer on the
+  parallel port, built the same way: `proto.h`, `tests/test_flyer.py`,
+  `linux/tools/flyer.c`, `linux/tools/flyer-up.sh` and `tools/flyerpatch.py`
+  ([FLYER.md](docs/FLYER.md)). `linux/config/` holds the Armada's sample
+  configuration: modprobe options, Kconfig lines and the `state.ES1869`
+  block, with the DAC stages off. `linux/test/` is es1869test, the driver's
+  loopback test suite (GPL-3.0-or-later,
+  [ES1869TEST.md](docs/ES1869TEST.md)): its cases in `c_*.c`, listed in
+  `cases.c`, the analysis in `an.c`, and the machine behind `struct et_hal`,
+  `hal_alsa.c` on the laptop and `hal_sim.c` a simulated chip with the cable
+  and a second card. Its 3d group builds ess3d's `src/s3dmeas.c`, and the
+  simulated chip `src/s3dsim.c`.
 * `driver/` holds ESS's original drivers, the reference for the
   byte-identical rebuilds, with ESS's ES1869F driver sets for Windows 3.1,
   NT 4.0, Windows 95 and OS/2 in `driver/es1869f/`, and `build/` the
@@ -91,22 +154,27 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   `hdpmifix.py`, which fixes HDPMI32i, and `sb16rec.py`, `essprec.py` and
   `wchkrec.py`, which analyze a recording of `SB16TEST /R`, `ESSPROBE /R`
   and `ESSWCHK /R` against its report, on `recan.py`'s markers, clock and
-  measures. `tests/` holds the Python tests (`esfmemu.py`, `vxdemu.py` and
-  `drvemu.py` run the drivers in a CPU emulator, `tsremu.py` runs
-  `esssb16.com` in one, with DOS, the memory managers and the DPMI host in
-  Python, and `dosrun.py` a DOS program, `sb16test.exe` or `essprobe.exe`,
-  in front of a card), and `tests/host/` the C tests. `sb16.py` is the Sound
-  Blaster 16 that the fronts are tested against, `esschip.py` the chip's
-  audio behind them, `dma8237.py` the DMA controllers, `sbgame.py` and
-  `sbscenes.py` what games do, and `sbfronts.py` the fronts as cards, with a
-  model of VDMAD for the VxD's, and the bare chip with a VGA (`ChipCard`);
-  `emm386dma.py` is EMM386's DMA translation, `pcicfg.py` the PCI
-  configuration space with the laptop's PIIX4, and `mpu401.py` the chip's
-  MPU-401 UART with a loopback cable. `sbfsm.py` is the front as a state
-  machine in Python, the reference of [SB16_FRONT.md](docs/SB16_FRONT.md),
-  and `sbops.py` the operations that the chip's model records. `sbfuzz.py`
-  makes random games, which `tests/test_sbfsm.py` plays on the fronts and
-  the reference alike.
+  measures. `testsig.py` makes the test signals for the ES1869's audio paths
+  on the Armada from one table, the same bytes at every run, with the
+  catalog and level tables of [TEST_SIGNALS.md](docs/TEST_SIGNALS.md) and
+  [TEST_LEVELS.md](docs/TEST_LEVELS.md), and `sigan.py` finds a signal in
+  any recording by its markers, takes the clocks' ratio and reports what the
+  signal measures, which `tests/test_testsig.py` checks on simulated paths.
+  `tests/` holds the Python tests (`esfmemu.py`, `vxdemu.py` and `drvemu.py`
+  run the drivers in a CPU emulator, `tsremu.py` runs `esssb16.com` in one,
+  with DOS, the memory managers and the DPMI host in Python, and `dosrun.py`
+  a DOS program, `sb16test.exe` or `essprobe.exe`, in front of a card), and
+  `tests/host/` the C tests. `sb16.py` is the Sound Blaster 16 that the
+  fronts are tested against, `esschip.py` the chip's audio behind them,
+  `dma8237.py` the DMA controllers, `sbgame.py` and `sbscenes.py` what games
+  do, and `sbfronts.py` the fronts as cards, with a model of VDMAD for the
+  VxD's, and the bare chip with a VGA (`ChipCard`); `emm386dma.py` is
+  EMM386's DMA translation, `pcicfg.py` the PCI configuration space with the
+  laptop's PIIX4, and `mpu401.py` the chip's MPU-401 UART with a loopback
+  cable. `sbfsm.py` is the front as a state machine in Python, the reference
+  of [SB16_FRONT.md](docs/SB16_FRONT.md), and `sbops.py` the operations that
+  the chip's model records. `sbfuzz.py` makes random games, which
+  `tests/test_sbfsm.py` plays on the fronts and the reference alike.
 * `docs/` holds [TESTING.md](docs/TESTING.md),
   [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md),
   [ESFM_OPL3.md](docs/ESFM_OPL3.md), [ESFM_BANK.md](docs/ESFM_BANK.md),
@@ -117,10 +185,19 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   [SB16.md](docs/SB16.md), [ESSSB16.md](docs/ESSSB16.md),
   [ESSPROBE.md](docs/ESSPROBE.md), [ESSWCHK.md](docs/ESSWCHK.md),
   [ESS_EXTENDED.md](docs/ESS_EXTENDED.md), [MPU401.md](docs/MPU401.md),
-  [SB16_FRONT.md](docs/SB16_FRONT.md), [RE_NOTES.md](docs/RE_NOTES.md) and
-  [STYLE.md](docs/STYLE.md). `REGISTERS.md` and the `REG_*.md` pages are
-  generated, and `docs/datasheet/` has the ES1869, ES938 and ES1868 data
-  sheets.
+  [SB16_FRONT.md](docs/SB16_FRONT.md), [RE_NOTES.md](docs/RE_NOTES.md),
+  [LINUX.md](docs/LINUX.md), [LINUX_CONTROLS.md](docs/LINUX_CONTROLS.md),
+  [ESFM_ENGINE.md](docs/ESFM_ENGINE.md),
+  [ES1869TEST.md](docs/ES1869TEST.md),
+  [ES1869SCOPE.md](docs/ES1869SCOPE.md),
+  [LINUX_MONITOR.md](docs/LINUX_MONITOR.md), [FLYER.md](docs/FLYER.md),
+  [TEST_SIGNALS.md](docs/TEST_SIGNALS.md),
+  [TEST_LEVELS.md](docs/TEST_LEVELS.md),
+  [CLOCK_CORRECTION.md](docs/CLOCK_CORRECTION.md),
+  [LOOP_TRANSFORM.md](docs/LOOP_TRANSFORM.md) and [STYLE.md](docs/STYLE.md).
+  `REGISTERS.md` and the `REG_*.md` pages are generated, as are the tables
+  of `TEST_SIGNALS.md` and `TEST_LEVELS.md` between their markers, and
+  `docs/datasheet/` has the ES1869, ES938 and ES1868 data sheets.
 
 ## Environment
 
@@ -164,11 +241,38 @@ python3 tools/dualwav.py same in.wav out.wav
 python3 tools/sb16rec.py SB16TEST.TXT run.wav
 python3 tools/essprec.py ESSPROBE.TXT run.wav
 
+# the test signals, a recording of one analyzed, and the docs' tables
+python3 tools/testsig.py               # out/testsig: WAVs, manifest, sums
+python3 tools/testsig.py --only cal sweep --list
+python3 tools/sigan.py sweep-44k rec.wav -o out/sweep [--ref tap.wav]
+python3 tools/testsig.py --doc         # TEST_SIGNALS.md, TEST_LEVELS.md
+
 # essprobe's window, src/essp0.h, from src/essp0.asm
 python3 tools/build_essp0.py
 
 # HDPMI32i's fix, from the release's file (--check FILE tells them apart)
 python3 tools/hdpmifix.py HDPMI32i.EXE third_party/hdpmi32i/HDPMI32i.EXE
+
+# the Linux driver: generated files, then the module against a tree
+python3 tools/linuxregs.py             # linux/es1869/regs.h
+python3 tools/es1869set.py             # Kconfig, oot_config.h, LINUX.md
+make -C linux KDIR=/path/to/linux-6.18 ARCH=i386
+make -C linux patch KSRC=/path/to/linux-6.18   # linux/es1869-driver.patch
+make -C linux deploy HOST=user@machine         # built there, for its kernel
+make -C linux mqengine KDIR=/path/to/linux-6.18 ARCH=i386  # snd-mqengine
+make -C linux flyer KDIR=/path/to/linux-6.18 ARCH=i386     # snd-flyer
+make -C linux/test                     # es1869test
+make -C linux/tools/es1869ctl          # the settings and status panel
+make -C linux dist                     # es1869test and essreg, packed
+linux/test/es1869test --sim            # its cases on the simulated chip
+python3 tools/rsquality.py             # the rate filter, measured
+python3 tools/es1869treble.py         # linux/es1869/treble.h, the DAC's fit
+python3 tools/es1869treble.py --last 0.062 --amixer   # a fit, to load live
+es1869scope -v 3 -s loop.ppm          # the loop's response (-m: from music)
+es1869scope -C -s cal.ppm             # Audio 1's correction, calibrated
+# es1869scope, es1869clock and the services es1869cal and es1869eq
+make -C linux/tools/es1869scope install install-services PREFIX=/usr
+python3 tools/clockan.py LOG           # a clockcmp log of the clocks
 
 # style
 flake8                                 # Python lint, clean
@@ -434,6 +538,46 @@ tools/wineshot.sh run ess3d.exe /sim tray
     command's first byte, send the rest (`esshw.c`).
   * DOS programs link with a 4 KB stack (`op STACK=4096`), and their big
     buffers are static.
+* **The Linux driver** (`linux/`):
+  * Kernel style (checkpatch, the kernel's `.clang-format` in `linux/`) and
+    LF; comments and docs in STYLE.md's voice. Its files are
+    GPL-2.0-or-later (SPDX), the test suite's and tools' GPL-3.0-or-later.
+  * It may follow the logic of ESS's disassembled code, but is written as
+    new C. Nothing committed mentions the Armada's sudo setup, address or
+    user.
+  * A new setting is a row in `settings.def` with its Kconfig default, then
+    `python3 tools/es1869set.py`; `tests/test_es1869set.py` checks the
+    generated files and keeps snd-es18xx's control names, which alsactl's
+    saved states use. A control is on the card interface, out of alsamixer,
+    unless its row has `F_MIXER`, which snd-es18xx's controls and Audio 2's
+    output rate, rate correction and treble correction have, and the tools
+    look a control up on the mixer interface, then the card's. No control's
+    dB scale may depend on another control: alsactl converts a level whose
+    range differs from the saved one, in a pass before it writes anything
+    (`mix.scale`).
+  * The chip core reaches the chip only through `struct es1869_io`, and its
+    sequences run on the model in `tests/test_es1869hw.py`.
+  * es1869test reaches the machine only through `struct et_hal`. A new case
+    goes in `cases.c` with its spec, passes on the simulated chip
+    (`es1869test --sim`), and the fault of `hal_sim.c` that it looks for
+    fails it. Every control and parameter it changes goes through
+    `et_ctl_set` and `et_param_set`, which journal the old value. A case
+    that needs snd-es1869's own devices, controls or parameters has
+    `ET_NEW`, which `--stock` (the run on snd-es18xx) skips, and a case that
+    suspends or reloads the driver is opt-in and needs `--destructive`.
+  * The ESFM engine makes the rebuilt ESFM.DRV's register writes for the
+    same messages. A difference on purpose is an option of
+    `struct esfm_gm_opts`, off in the comparison, with a test of what it
+    changes (`sides`, the chip's left and right, in `SidesTest`).
+  * On the Armada, ask celeronix's sessions before a hardware session and
+    check `mpc status` before unloading a sound module.
+  * The Armada's BIOS sets the PIIX4's Type F DMA timing on the ES1869's
+    channels, and a recording on DMA 1 in demand transfers then hangs the
+    machine at its first byte. The driver keeps it on and records in single
+    transfers under it (`piix4_type_f`, whose 0 and the driver's removal
+    turn it off), and a test records only once ISA bridge register 77h bit 7
+    reads clear, or the loaded module's proc file says it records in single
+    transfers, and the new module is the one loaded.
 * **Text** follows [docs/STYLE.md](docs/STYLE.md): documentation in
   complete, plain sentences, terse lowercase comments, the file header on
   new files, no em dashes and no "we". Every markdown file stays readable in
