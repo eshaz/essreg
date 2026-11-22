@@ -1,7 +1,7 @@
 /*
  * esfmrec records the ES1869's FM synthesizer digitally, straight from
  * the chip: the samples of its music DAC, before any analog stage. It
- * saves them unchanged in a WAV file at the music DAC's own rate, 49,820
+ * saves them unchanged in a WAV file at the music DAC's own rate, 49,613
  * Hz as measured (fmrec.h), 16-bit stereo.
  *
  * Usage:
@@ -104,7 +104,7 @@
 
 static const char usage[] =
     "esfmrec [options] [file]\n\n"
-    "Records the FM synthesizer digitally to a WAV file at 49,820 Hz.\n\n"
+    "Records the FM synthesizer digitally to a WAV file at 49,613 Hz.\n\n"
     "Options: /t=N (seconds), /split=N (a new file every N seconds), /raw, "
     "/min, /q, /log=file, /sim, /base=220, /cfg=800, /novxd";
 

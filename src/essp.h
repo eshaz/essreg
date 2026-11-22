@@ -32,7 +32,7 @@
 
 #include "esstypes.h"
 
-#define ESP_VERSION "2.1"
+#define ESP_VERSION "2.2"
 
 // esp_run's options
 #define ESP_O_RECORD 0x0001 // a recorded run: the level tone, then markers

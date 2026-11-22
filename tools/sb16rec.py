@@ -47,7 +47,8 @@ from recan import (CENTS, CLEAN_DB, DTMF_HI, DTMF_LO, DTMF_SYMS,  # noqa: E402
                    tone_fit, tone_text)
 
 DIRECT_HZ = 8000 * 56 / 1024        # s_direct: 437.5 Hz
-FM_HZ = 49716 * 0x241 / 65536       # s_fm: F-number 241h, block 4
+# s_fm: F-number 241h, block 4, at the ES1869's FM rate (fmrec.h)
+FM_HZ = 49612.5 * 0x241 / 65536
 CHECKS = {
     "l.tone8": "tone", "l.left16": "side", "l.right16": "side",
     "l.left8": "side", "l.right8": "side", "l.pitch": "pitch",

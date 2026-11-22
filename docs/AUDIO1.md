@@ -349,15 +349,22 @@ AudioDrive Record (220)". It records the FM synthesizer as the chip makes
 it, the way esfmrec does. Mixer register 7Fh bit 4 sends the music DAC's
 samples to Audio 1's DMA in place of the ADC's, at the music DAC's own rate,
 whatever rate Audio 1 is programmed for (DS p.65). The data sheet gives that
-rate as 14.31818 MHz / 288 = 49,716 Hz, but Linux's driver measured 49,819.5
-Hz on the laptop, steady over 90 minutes, so a file that says 49,716 Hz
-plays 3.6 cents flat. Nothing analog is involved, so the volume settings
-don't change what is recorded.
+rate as 14.31818 MHz / 288 = 49,716 Hz. On the laptop it is the chip's
+23.814 MHz master over 480, 49,612.5 Hz: essprobe measured it to 0.1 Hz in
+DOS against Audio 1's 44,100 Hz, the master over 540 (`meas.fmrate`), and
+esswchk finds the same rate in ESFM's native mode and in the OPL3 mode. In
+Windows it reads about 49,605 Hz, because Windows 98's millisecond is 1,193
+counts of the PIT, not 1,193.18, and runs 153 ppm fast. The Linux report's
+49,819.5 Hz doesn't hold under DOS and Windows. So a file that says 49,716
+Hz plays 3.6 cents sharp, and one that says 49,820 Hz, as earlier builds
+wrote, 7.2 cents sharp and 0.4 % short. Nothing analog is involved, so the
+volume settings don't change what is recorded.
 
-The device therefore accepts a single format, 16-bit stereo PCM at 49,820
-Hz, or at 49,716 Hz as before, and its capabilities list no standard format.
-A program that lets you type in the sample rate can record from it, but one
-that offers only the standard rates can't, because the device refuses them.
+The device therefore accepts a single format, 16-bit stereo PCM at 49,613
+Hz, or at 49,716 or 49,820 Hz as earlier builds did, and its capabilities
+list no standard format. A program that lets you type in the sample rate can
+record from it, but one that offers only the standard rates can't, because
+the device refuses them.
 
 Under the new device, the driver opens ESS's recording device 0 at 48,000
 Hz, with copies of the program's WAVEOPENDESC and format that give that

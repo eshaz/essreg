@@ -135,7 +135,7 @@ such as `t2=0` for Audio 2's single transfers.
   come from the 23.814 MHz master, over 30 and over 31, and Audio 2 within
   150 ppm of 48,012.1 Hz by the PIT. The music DAC's samples recorded on
   Audio 1 through mixer 7Fh bit 4, against Audio 2 at 44100 Hz
-  (`meas.fmrate`): 540/478, and 49,819.5 Hz. One FM operator in ESFM's
+  (`meas.fmrate`): 540/480, and 49,612.5 Hz. One FM operator in ESFM's
   native mode with register 6 at 10h (`meas.fm4`) and at 20h (`meas.fm5`),
   recorded the same way: on the right and on the left, 20 dB over the other
   side, the sides ESFM.DRV's TrueSides gives a panned channel. And Audio 2's

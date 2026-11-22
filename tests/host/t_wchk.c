@@ -249,10 +249,13 @@ static void test_fm(void) {
   CHECK(strstr(text, "no FM") != NULL);
   CHECK_EQ(wchk_fm_side(-10, -12, 'r', 1, text), WCHK_FAIL);
   CHECK(strstr(text, "on both sides") != NULL);
-  CHECK_EQ(wchk_fm_rate(49819.5, 30, text), WCHK_PASS);
-  CHECK(strstr(text, "49819.50 Hz over 30 s, +0 ppm") != NULL);
-  CHECK(strstr(text, "49716 Hz is -2077 ppm") != NULL);
+  CHECK_EQ(wchk_fm_rate(49612.5, 30, text), WCHK_PASS);
+  CHECK(strstr(text, "49612.50 Hz over 30 s, +0 ppm") != NULL);
+  CHECK(strstr(text, "49716 Hz is +2086 ppm") != NULL);
+  // Windows' millisecond of 1193 PIT counts reads it 153 ppm low
+  CHECK_EQ(wchk_fm_rate(49604.9, 30, text), WCHK_PASS);
   CHECK_EQ(wchk_fm_rate(49716, 30, text), WCHK_FAIL);
+  CHECK_EQ(wchk_fm_rate(49819.5, 30, text), WCHK_FAIL);
   CHECK_EQ(wchk_fm_rate(0, 30, text), WCHK_FAIL);
 }
 

@@ -82,7 +82,7 @@ import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FM_HZ = 49820               # esfmrec's rate (fmrec.h)
+FM_HZ = 49613               # esfmrec's rate (fmrec.h)
 OW2 = os.environ.get("OW2", "")
 
 
@@ -567,7 +567,7 @@ class WineTest(unittest.TestCase):
     def test_esfmrec(self):
         self.wine("esfmrec.exe", "/sim", "/t=2", "/q", "FM.WAV")
         data = read(self.path("FM.WAV"))
-        # 2 s at 49,820 Hz, 16-bit stereo, after a 44-byte header
+        # 2 s at 49,613 Hz, 16-bit stereo, after a 44-byte header
         self.assertEqual(data[:4], b"RIFF")
         self.assertEqual(struct.unpack("<IHHIIHH", data[16:36]),
                          (16, 1, 2, FM_HZ, FM_HZ * 4, 4, 16))
@@ -580,7 +580,7 @@ class WineTest(unittest.TestCase):
         self.assertLessEqual(abs(rising(right) - 1000), 1)   # 500 Hz
         self.assertEqual(max(map(abs, left)), 16383)          # -6 dB
         log = read(self.path("ESFMREC.LOG")).decode()
-        self.assertIn("FM.WAV: 2.0 s, 398560 bytes at 49820 Hz", log)
+        self.assertIn("FM.WAV: 2.0 s, 396904 bytes at 49613 Hz", log)
         # /raw: the same samples without the header
         self.wine("esfmrec.exe", "/sim", "/t=1", "/raw", "/q", "FM.PCM")
         raw = read(self.path("FM.PCM"))
@@ -692,12 +692,13 @@ class WineTest(unittest.TestCase):
                       res["a1.drain"][0][1])
         for c in ("fm.pan0", "opl.pan0"):
             self.assertRegex(res[c][0][1], r"^left -12\.\d, right -120", c)
-        self.assertIn("49819.", res["fm.rate"][0][1])
+        self.assertIn("49612.", res["fm.rate"][0][1])
         self.assertEqual(res["opl.rate"][0][0], "INFO")
         m = re.match(r"(\d+\.\d+) Hz over 3 s on the OPL3 mode: [+-]\d+ ppm "
-                     r"from 49819\.5 Hz, the master / 478", res["opl.rate"][0][1])
+                     r"from 49612\.5 Hz, the master / 480, as in the native "
+                     r"mode", res["opl.rate"][0][1])
         self.assertTrue(m, res["opl.rate"][0][1])
-        self.assertLess(abs(float(m.group(1)) / 49819.5 - 1), 500e-6)
+        self.assertLess(abs(float(m.group(1)) / 49612.5 - 1), 500e-6)
         self.assertIn("StartUp batch", res["env.once"][0][1])
         self.assertIn("ONCE.BAT: deleted", res["env.once"][0][1])
         self.assertEqual(res["sb.box"][0][0], "SKIP")

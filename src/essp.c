@@ -14,8 +14,9 @@
  * them. The rates the cases ask for are computed with the clocks the
  * first report measured, 793.8 and 396.9 kHz for A1h, 793.8 and 768 kHz
  * for 70h; the meas group checks what the drivers' fixes rest on against
- * what Linux's driver measured (the 768 kHz clock at 768,193.5 Hz, the
- * music DAC at 49,819.5 Hz, the ADC clean up to 52,920 Hz).
+ * what Linux's driver and the probe measured (the 768 kHz clock at
+ * 768,193.5 Hz, the music DAC at 49,612.5 Hz, the ADC clean up to 52,920
+ * Hz).
  *
  * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
  *
@@ -3359,7 +3360,8 @@ static void run_mpu(const struct ecase *c, const struct pc *p) {
 // --- what the drivers' fixes rest on -----------------------------------------
 
 #define CLK_768 768193.5  // the "768 kHz" clock as measured: the master / 31
-#define FM_HZ 49819.5     // the music DAC's rate, the master / 478
+#define FM_HZ 49612.5     // the music DAC's rate, the master / 480
+#define FM_F 583          // fm_note's F-number at block 4: 441.3 Hz
 #define FM 0x388          // the FM's ports (ESFM)
 #define READINGS 100000UL // count readings a case takes (400 in the short)
 #define PIECE 32          // readings in a row, time between them
@@ -3568,14 +3570,15 @@ static void fm_w(u16 reg, u8 v) {
   H->outb(FM + 1, v);
 }
 
-// voice 0's operator 0 alone keyed on, a sine at full level at 440.9 Hz
-// (F-number 580 and block 4 at 49,819.5 Hz) on the sides that register 6
+// voice 0's operator 0 alone keyed on, a sine at full level at 441.3 Hz
+// (F-number 583 and block 4 at 49,612.5 Hz) on the sides that register 6
 // bits 5:4 give it (sides), its other operators silent; with sides 0 the
 // key off, every operator silent, and native mode left. Native mode comes
 // with 105h = 80h through the OPL3's second bank (the Linux report), and
 // ends with a write to 388h
 static void fm_note(u8 sides) {
-  static const u8 op0[8] = {0x21, 0x00, 0xF0, 0x0F, 0x44, 0x12, 0x00, 0xE0};
+  static const u8 op0[8] = {
+      0x21, 0x00, 0xF0, 0x0F, FM_F & 0xFF, 0x10 | FM_F >> 8, 0x00, 0xE0};
   u16 op, r;
   u8 v;
 
@@ -3757,7 +3760,8 @@ static void meas_rec(const struct ecase *c, const struct pc *p) {
     mix_w(0x36, old36);
     mix_w(0x7F, old7f);
   }
-  listen(a, count, adc ? SND_HZ : 440.9, adc ? a->rate : FM_HZ, &h);
+  listen(a, count, adc ? SND_HZ : FM_F * FM_HZ / 65536.0, adc ? a->rate : FM_HZ,
+         &h);
   if (adc) {
     ok = h.tone >= -40 && h.snr >= 30 && fabs(ppm(rate[0], a->rate)) <= 5000;
     res(c->id, ok ? R_PASS : R_FAIL,
@@ -3766,13 +3770,13 @@ static void meas_rec(const struct ecase *c, const struct pc *p) {
         rate[0], a->rate, h.frames, h.tone, h.snr, h.lv[0], h.lv[1]);
   } else if (p->kind == K_FMRATE) {
     r = rate[1] ? rate[0] / rate[1] : 0;
-    dr = ppm(r, 540.0 / 478.0);
+    dr = ppm(r, 540.0 / 480.0);
     da = ppm(rate[0], FM_HZ);
     ok = r && fabs(dr) <= RATIO_PPM && fabs(da) <= PIT_PPM;
     res(c->id, ok ? R_PASS : R_FAIL,
         "the music DAC records at %.2f Hz, Audio 2 plays at %.2f by the "
-        "clock; their ratio %.6f, %+.0f ppm from 540/478; the music DAC %+.0f "
-        "ppm from 49819.5 Hz",
+        "clock; their ratio %.6f, %+.0f ppm from 540/480; the music DAC %+.0f "
+        "ppm from 49612.5 Hz",
         rate[0], rate[1], r, dr, da);
   } else {
     // the note's side 20 dB over the other: the side ESFM.DRV's TrueSides

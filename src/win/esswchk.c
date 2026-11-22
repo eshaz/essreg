@@ -90,7 +90,7 @@
 #include "wchk.h"
 #include "winio.h"
 
-#define VERSION "1.4"
+#define VERSION "1.5"
 #define TITLE "ES1869 Windows checks"
 #define IDC_CHECK 101
 #define IDC_STEP 102
@@ -999,7 +999,7 @@ static int fm_start(void) {
     return 0;
   if (dev < 0)
     return -1;
-  pcm_format(&f, 49820L, 2, 16);
+  pcm_format(&f, 49613L, 2, 16);
   err = waveInOpen(&fm.h, dev, (LPWAVEFORMAT)&f, 0, 0, CALLBACK_NULL);
   if (err) {
     pcm_format(&f, 49716L, 2, 16);
@@ -1236,10 +1236,10 @@ static void check_opl3_rate(void) {
     return;
   hz = wchk_fit_slope(&fit);
   sprintf(text,
-          "%.2f Hz over %lu s on the OPL3 mode: %+.0f ppm from 49819.5 Hz, "
-          "the master / 478, and %+.0f ppm from 49612.5 Hz, the master / 480",
-          hz, (unsigned long)secs, hz ? (hz / 49819.5 - 1) * 1e6 : 0,
-          hz ? (hz / 49612.5 - 1) * 1e6 : 0);
+          "%.2f Hz over %lu s on the OPL3 mode: %+.0f ppm from %.1f Hz, the "
+          "master / 480, as in the native mode",
+          hz, (unsigned long)secs, hz ? (hz / WCHK_FM_HZ - 1) * 1e6 : 0,
+          WCHK_FM_HZ);
   res("opl.rate", hz ? WCHK_INFO : WCHK_FAIL, "%s", text);
 }
 

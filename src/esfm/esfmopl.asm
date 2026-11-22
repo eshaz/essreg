@@ -45,7 +45,7 @@
 ;    instrument (and at least the carrier's in additive mode).  The levels
 ;    are General MIDI's 40 log10 curve in the chip's 0.75 dB steps for the
 ;    velocity and controllers 7 and 11, the pitch is tuned to the chip's
-;    49,819.5 Hz, and TrueSides puts left on the left output, as for device
+;    49,612.5 Hz, and TrueSides puts left on the left output, as for device
 ;    0.  Controllers 1, 6/38 with RPN 0, 7, 10, 11, 64, 120, 121 and 123 to
 ;    127, programs, pitch bend and running status play; a GM, GS or XG reset
 ;    in a long message sets every channel back.  A program change lets the
@@ -1387,7 +1387,7 @@ opl_vib:
 
 ; voice DI keyed on at its pitch with its channel's bend: registers A0h
 ; and B0h.  The F-number comes from the table of notes 19 to 31 at block
-; 0 for the chip's 49,819.5 Hz, interpolated between the semitones.  SI =
+; 0 for the chip's 49,612.5 Hz, interpolated between the semitones.  SI =
 ; dev; keeps all
 opl_freq:
         push    ax
@@ -1644,9 +1644,10 @@ fix_reset_enter:
 ; the first operator of the OPL3's channels 0 to 8
 opl_optab:      db 0, 1, 2, 8, 9, 10, 16, 17, 18
 
-; F-numbers of notes 19 (G0) to 31 at block 0 for 49,819.5 Hz:
-; 440 * 2^((n - 69) / 12) * 2^20 / 49819.5
-opl_fnum:       dw 516, 546, 579, 613, 650, 688, 729, 773, 819, 867, 919, 973, 1031
+; F-numbers of notes 19 (G0) to 31 at block 0 for 49,612.5 Hz, the chip's
+; 23.814 MHz master over 480 as measured on the laptop:
+; 440 * 2^((n - 69) / 12) * 2^20 / 49612.5
+opl_fnum:       dw 518, 549, 581, 616, 652, 691, 732, 776, 822, 871, 923, 977, 1036
 
 ; attenuation for a velocity or a controller x: 40 log10(127 / x) dB in
 ; 0.75 dB steps, 63 at most

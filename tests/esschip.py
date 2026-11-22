@@ -58,9 +58,10 @@ ADC_MAX_HZ = 52920
 # kHz is the master over 30, so 48 kHz plays 252.9 ppm sharp (the Linux
 # report)
 CLOCK_768 = 768193.5
-# the music DAC's rate, the FM's, as measured: the master over 478 (fmrec.h);
-# mixer 7Fh bit 4 records its samples on Audio 1 at that rate (DS p.65)
-FM_DAC_HZ = 49819.5
+# the music DAC's rate, the FM's, as essprobe measured it: the master over
+# 480 (fmrec.h); mixer 7Fh bit 4 records its samples on Audio 1 at that rate
+# (DS p.65)
+FM_DAC_HZ = 49612.5
 
 # Audio_Base+Ch's interrupt bits
 I_OVF, I_HE, I_PROC = 0x01, 0x02, 0x04

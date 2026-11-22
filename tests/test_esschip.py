@@ -211,7 +211,7 @@ class ExtendedTest(unittest.TestCase):
 
     def test_fm_digital(self):
         """mixer 7Fh bit 4: Audio 1 records the music DAC at its own rate,
-        49,819.5 Hz, whatever A1h says, a keyed operator's register 6 bit 5
+        49,612.5 Hz, whatever A1h says, a keyed operator's register 6 bit 5
         on the left and bit 4 on the right, as the chip plays them, and
         nothing while I2S has the music DAC (7Fh bit 0)"""
         for r6, mix7f, want in ((0x10, 0x10, "right"), (0x20, 0x10, "left"),

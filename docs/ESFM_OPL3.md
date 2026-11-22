@@ -112,6 +112,9 @@ the DMX sound library that Doom plays its music with
 * the 128 General MIDI programs;
 * the drums of notes 35 to 81 on channel 10, each with its own fixed note.
 
+On the laptop these instruments sound very good on the chip's OPL3 mode, so
+they stay the device's own bank.
+
 Another lump of that format, such as an `.OP2` file, plays instead when
 `Opl3Bank=` under `[ESFM.DRV]` in `SYSTEM.INI` names it. The device reads
 the file when a program opens it, if the file's date or time changed, as the
@@ -130,9 +133,10 @@ made:
   and of controllers 7 and 11, in the chip's steps of 0.75 dB. The modulator
   keeps the instrument's level, and in additive mode, where it sounds as
   well, it is never louder than the carrier.
-* The pitch is tuned to the chip's clock of 49,819.5 Hz, with the
-  instrument's base note offset, and notes beyond the chip's range fold in
-  by octaves.
+* The pitch is tuned to the chip's FM clock, 49,612.5 Hz, the 23.814 MHz
+  master over 480 as measured on the laptop
+  ([AUDIO1.md](AUDIO1.md#the-fm-recording-device)), with the instrument's
+  base note offset, and notes beyond the chip's range fold in by octaves.
 
 The device handles:
 * note on and off, programs and pitch bend;

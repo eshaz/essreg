@@ -593,7 +593,7 @@ class MeasTest(unittest.TestCase):
         self.assertRegex(self.probe.text("meas.clk768"),
                          r"1\.0887\d\d, [+-]\d ppm from 540/496")
         self.assertRegex(self.probe.text("meas.fmrate"),
-                         r"records at 49819\.\d\d Hz")
+                         r"records at 49612\.\d\d Hz")
         self.assertRegex(self.probe.text("meas.fm4"),
                          r"left -120\.0, right -12\.\d dBFS")
         self.assertRegex(self.probe.text("meas.fm5"),
@@ -655,7 +655,7 @@ class MeasTest(unittest.TestCase):
         self.assertEqual(run.results["meas.clk768"][0][0], "FAIL")
         self.assertRegex(run.text("meas.clk768"), r"-25\d ppm from 540/496")
         self.assertEqual(run.results["meas.fmrate"][0][0], "FAIL")
-        self.assertRegex(run.text("meas.fmrate"), r"-20\d\d ppm from 49819")
+        self.assertRegex(run.text("meas.fmrate"), r"\+20\d\d ppm from 49612")
 
     def test_no_record_path(self):
         """record source 7 bringing nothing: adc52 fails on the level"""

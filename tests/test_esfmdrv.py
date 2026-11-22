@@ -1599,7 +1599,7 @@ ADLIB_NOTE = ((0x20, 0x01), (0x23, 0x01), (0x40, 0x10), (0x43, 0x00),
 DEV_OPL_CHAN, DEV_OPL_VOICE, OV_SIZE = 0x44F, 0x54F, 16
 GENMIDI = os.path.join(ROOT, "third_party", "genmidi", "GENMIDI.lmp")
 OPTAB = (0, 1, 2, 8, 9, 10, 16, 17, 18)
-FM_HZ = 49819.5                 # the chip's FM rate (Linux's measure)
+FM_HZ = 49612.5                 # the chip's FM rate, the master / 480
 MOM_OPEN = 0x3C7
 DRVM_INIT, DRVM_ENABLE = 0x64, 0x67
 
@@ -2213,7 +2213,7 @@ class Opl3Test(unittest.TestCase):
         self.assertEqual(e.chip.regs[0x240], 1)
 
     def test_tables(self):
-        """the F-number table is the formula's at 49,819.5 Hz"""
+        """the F-number table is the formula's at 49,612.5 Hz"""
         with open(os.path.join(ROOT, "src", "esfm", "esfmopl.asm")) as f:
             src = f.read()
         line = src[src.index("opl_fnum:"):].split("\n")[0]

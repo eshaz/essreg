@@ -75,14 +75,13 @@ verdicts are [`src/wchk.c`](../src/wchk.c)'s.
   mode, with the same verdicts. SKIP when ESFM.DRV has no OPL3 device: ESS's
   driver, or `Opl3Device=0`.
 * **fm.rate**: the FM recording device's blocks over 30 seconds, fitted to
-  the clock: the music DAC's rate within 500 ppm of 49,819.5 Hz, which
-  Linux's driver measured.
+  the clock: the music DAC's rate within 500 ppm of 49,612.5 Hz, the 23.814
+  MHz master over 480, which essprobe measured in DOS. The laptop reads
+  about 49,605 Hz here, since Windows 98's millisecond is 1,193 counts of
+  the PIT and runs 153 ppm fast.
 * **opl.rate**: the same over 20 seconds while the OPL3 device has the chip
-  in its OPL3 mode, as INFO with how far it is from 49,819.5 Hz, the 23.814
-  MHz master over 478, and from 49,612.5 Hz, the master over 480. The
-  laptop's second run measured 49,605 Hz with `fm.rate`, in ESFM's native
-  mode, where Linux had measured 49,819.5 Hz, likely in the OPL3 mode, so
-  the two lines tell whether the modes run at different rates.
+  in its OPL3 mode, as INFO with how far it is from 49,612.5 Hz. The
+  laptop's runs measured both modes at the same rate.
 * **sb.box**: `SB16BOX.BAT`, which esswchk writes next to itself, runs
   `sb16test /A` in a DOS box on the VxD's Sound Blaster 16, with `BLASTER`
   from the VxD's resources and `H` from `SoundBlaster16DMA`. esswchk closes

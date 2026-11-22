@@ -703,7 +703,7 @@ class DrvEmu:
             dev_id, msg, user >> 16, user & 0xFFFF, dw1 >> 16, dw1 & 0xFFFF,
             dw2 >> 16, dw2 & 0xFFFF))
 
-    def open_in(self, dev_id=1, rate=49716, channels=2, bits=16, flags=0,
+    def open_in(self, dev_id=1, rate=49613, channels=2, bits=16, flags=0,
                 instance=0x33334444, hwave=0x0BED):
         """WIDM_OPEN with a PCMWAVEFORMAT: (result, dwUser)"""
         align = channels * bits // 8

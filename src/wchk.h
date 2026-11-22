@@ -34,7 +34,7 @@ enum { WCHK_PASS, WCHK_FAIL, WCHK_KNOWN, WCHK_INFO, WCHK_SKIP };
 extern const char *const wchk_rname[5];
 
 #define WCHK_TEXT 200       // a verdict's text, with its 0
-#define WCHK_FM_HZ 49819.5  // the music DAC's rate, as Linux's driver measured
+#define WCHK_FM_HZ 49612.5  // the music DAC's rate, the master over 480
 #define WCHK_DRAIN_MS 500   // eight headers of 500 bytes at 8 kHz
 #define WCHK_DRAIN_SLOW 600 // later than this is INFO
 
