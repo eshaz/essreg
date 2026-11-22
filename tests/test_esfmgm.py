@@ -108,6 +108,10 @@ def emulator(data, opts=ALL):
         e = ESFMEmu(f.read(), bank=data)
     for i, key in enumerate(SWITCHES):
         e.ini[("esfm.drv", key.lower())] = "1" if opts >> i & 1 else "0"
+    # ESS's side bits, as the engine writes them without its sides option:
+    # the driver's TrueSides also swaps a patch's own side, which sides
+    # leaves alone
+    e.ini[("esfm.drv", "truesides")] = "0"
     assert e.driverproc(DRV_ENABLE) & 0xFFFF == 1
     # the bank in place of the driver's own, as esfmpat loads one
     sel = e.galloc(len(data), data)

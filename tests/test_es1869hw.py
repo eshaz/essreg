@@ -35,7 +35,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_vxdext import HAVE_UNICORN  # noqa: E402
 
 if HAVE_UNICORN:
-    from esschip import a1_hz, a2_hz, decode, RACE_US  # noqa: E402
+    from esschip import (a1_hz, a2_hz, decode, CLOCK_768,  # noqa: E402
+                         RACE_US)
     from linuxchip import BASE, CFG, LinuxChip, run  # noqa: E402
     from sbgame import samples16, words  # noqa: E402
 
@@ -403,6 +404,12 @@ class IdentifyTest(unittest.TestCase):
         self.assertEqual(d.ldn(1), 1)
 
 
+def on_model(num):
+    """the clock the model runs for the driver's nominal one: its 768 kHz
+    clock is the measured one, the 23.814 MHz master over 31"""
+    return CLOCK_768 if num == 768000 else num
+
+
 @unittest.skipUnless(HAVE_UNICORN, "needs unicorn")
 class RateTest(unittest.TestCase):
     def test_audio1_every_divisor(self):
@@ -414,7 +421,7 @@ class RateTest(unittest.TestCase):
                                                     ctypes.byref(r),
                                                     ctypes.byref(new)), 0)
                 got = a1_hz(r.value, new.value)
-                self.assertAlmostEqual(got, num / den, places=6,
+                self.assertAlmostEqual(got, on_model(num) / den, places=6,
                                        msg="%d/%d" % (num, den))
                 self.assertEqual(new.value, num == 768000)
         self.assertNotEqual(lib.es1869_a1_rate(793800, 129, ctypes.byref(r),
@@ -429,7 +436,8 @@ class RateTest(unittest.TestCase):
             for den in range(1, 129):
                 self.assertEqual(lib.es1869_a2_rate(num, den,
                                                     ctypes.byref(r)), 0)
-                self.assertAlmostEqual(a2_hz(r.value), num / den, places=6)
+                self.assertAlmostEqual(a2_hz(r.value), on_model(num) / den,
+                                       places=6)
         self.assertNotEqual(lib.es1869_a2_rate(396900, 64, ctypes.byref(r)),
                             0)
 
@@ -528,7 +536,7 @@ class Audio1Test(unittest.TestCase):
         d = Driver()
         play_a1(d, self.data, settle_us=46, rate=(768000, 16), run_us=100)
         self.assertTrue(d.chip.mixer[0x71] & 0x20)
-        self.assertEqual(d.chip.a1_rate(), 48000)
+        self.assertEqual(d.chip.a1_rate(), CLOCK_768 / 16)
 
     def test_dma_requests_held_without_26h(self):
         """the model: with 26h bit 2 clear, Audio 1's requests never reach
@@ -779,7 +787,7 @@ class Audio2Test(unittest.TestCase):
     def test_rate_768(self):
         d = Driver()
         self.play(d, words(samples16(2048)), rate=(768000, 16), run_us=100)
-        self.assertEqual(d.chip.a2_rate(), 48000)
+        self.assertEqual(d.chip.a2_rate(), CLOCK_768 / 16)
         self.assertEqual(d.chip.mixer[0x72], 0xFD)
 
     def test_interrupt_and_ack(self):
