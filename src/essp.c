@@ -1063,10 +1063,11 @@ static const struct ecase cases[] = {
     {"meas.adc52", "k=7 e=3 r1=52920 clk=hi v2=204 S", "tone"},
     // Audio 1 records 16-bit stereo at 44100 Hz under the PIIX4's Type F
     // timing, which stopped the Armada under Linux: only when named
-    // (/C:typef), the safest first. m54 is the 8237 in single mode, as DOS
-    // has recorded on the laptop, and m14 in demand mode, as ESS's drivers
-    // and Linux record; b the B9h. hold1 and linux start with the channel
-    // masked, for 1 ms or for 1.5 s as Linux did
+    // (/C:typef), the safest first. m54 is the 8237 in single mode, as
+    // sb16test's 8-bit cases and Linux under Type F record, and m14 in
+    // demand mode, as ESS's drivers and esssb16 record; b the B9h. hold1 and
+    // linux start with the channel masked, for 1 ms or for 1.5 s as Linux's
+    // driver did
     {"typef.m54_b2", "", "-"},
     {"typef.m54_b0", "b9=0", "-"},
     {"typef.m54_b1", "b9=1", "-"},

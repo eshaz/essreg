@@ -586,8 +586,9 @@ take turns, and neither can record while the Audio 1 device plays.
 The third change concerns the Audio 2 DAC, which plays Windows' wave output.
 It now plays the samples as they are, without 4x oversampling and with the
 filter bypassed, at every sample rate. ESS's driver turns the 4x
-oversampling on at every playback, and its interpolation most likely dulls
-the treble.
+oversampling on at every playback, whose filter takes 6 dB more off the top
+of the band by 20.4 kHz, though it keeps the band below 17 kHz flatter and
+the images about 25 dB lower, as the Linux driver measured it.
 [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md#the-audio-2-dac-oversampling-and-the-filter)
 explains why, and what each setting does. This is how a non-oversampling
 (NOS) DAC plays, so at low sample rates, such as the 11 and 22 kHz of many

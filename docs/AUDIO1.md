@@ -240,11 +240,12 @@ To get one clock, the player takes Audio 2 as well, as its user 2, and
 clears mixer register 71h bit 1, which makes the Audio 2 DAC run at Audio
 1's sample rate and filter clock (DS p.64). Both DACs then convert each
 frame at the same tick, but not from the same frame: with the same start,
-Linux's driver measured them 1 to 6 frames apart at 44.1 kHz on the laptop,
-which is what `dualwav.py`'s delays below are for. The player turns 4x
-oversampling off and sets Audio 2's filter the same way as Audio 1's
-(`Audio1Filter`). When the device closes, it sets 71h bit 1 again, and Audio
-2 returns to its own rate.
+Linux's driver measured them 1 to 6 frames apart at 44.1 kHz on the laptop
+and -15 to +15 at 22,050 Hz, different at each start, so `dualwav.py`'s
+delays below hold for one start only. The player turns 4x oversampling off
+and sets Audio 2's filter the same way as Audio 1's (`Audio1Filter`). When
+the device closes, it sets 71h bit 1 again, and Audio 2 returns to its own
+rate.
 
 The two DMAs play rings of the same size and start together. Audio 1 starts
 (B8h bit 0) with its channel masked, and once the start settled, with
@@ -253,7 +254,8 @@ interrupts off, its channel is unmasked and Audio 2 starts with one write of
 Audio 1's interrupt refills both rings. A pause stops both DMAs, and a
 restart starts both again from where Audio 1's DMA stopped, with the same
 start sequence. The frames that the two FIFOs held at the pause, up to 256
-bytes in Audio 1's, are not played, and the DACs stay in step.
+bytes in Audio 1's, are not played, and the restart sets the DACs apart
+afresh, as any start does.
 
 A program writes the stream to device 1 as 4-channel PCM with 8 or 16 bits,
 at 4000 to 49000 Hz. Programs that use the wave mapper, such as Media
@@ -303,11 +305,15 @@ later, and the chip has no such clock. A pair of signals half a sample apart
 filters the samples instead, as any digital filter would.
 
 The two DACs' paths may differ by a fraction of a sample, and their starts
-by a few microseconds. To line them up, play an `invert` file of a tone and
-delay whichever DAC is ahead with `--delay1` or `--delay2`, in steps of 0.25
-frame, then adjust `--gain2` in steps of 0.1 dB, keeping the values that
-make the tone quietest. Use those values for every file you make afterwards.
-A recording of the output
+by whole frames that change at every start: 1 to 6 at 44.1 kHz and up to 15
+either way at 22,050 Hz under Linux, and in one run of esswchk on the laptop
+the player's right 19 to 38 frames ahead of its left at 44.1 kHz, with a
+stream a byte off ([ESSWCHK.md](ESSWCHK.md)). So `invert`, `half` and
+`hilbert` cancel or shift as designed only for a start that happens to match
+the delays. To find the delays of one start, play an `invert` file of a tone
+and delay whichever DAC is ahead with `--delay1` or `--delay2`, in steps of
+0.25 frame, then adjust `--gain2` in steps of 0.1 dB, keeping the values
+that make the tone quietest. A recording of the output
 ([AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#measuring-the-dac-on-the-card))
 measures the null more accurately than listening does.
 

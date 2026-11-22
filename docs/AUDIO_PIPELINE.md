@@ -19,11 +19,12 @@ DMA" setting, which replaces demand transfers with single transfers. Neither
 remedy needs a change to the driver, and [Finding out on the
 card](#finding-out-on-the-card) has the steps for trying them.
 
-The Audio 2 DAC sounds better without its 4x oversampling and with its
-filter bypassed, because the oversampling most likely dulls the treble.
-ESS's drivers turn the oversampling on, but `build/ES1869.DRV` and the
-extended `ES1869.VXD` play without it, for the reasons given in [The Audio 2
-DAC](#the-audio-2-dac-oversampling-and-the-filter).
+ESS's drivers turn the Audio 2 DAC's 4x oversampling on, but
+`build/ES1869.DRV` and the extended `ES1869.VXD` play without it and with
+the DAC's filter bypassed. Each way has its cost: as the Linux driver
+measured it, the 4x stage keeps the DAC flatter up to about 17 kHz and its
+images about 25 dB lower, and takes 6 dB more off by 20.4 kHz ([The Audio 2
+DAC](#the-audio-2-dac-oversampling-and-the-filter)).
 
 ## The path of a sound
 
@@ -132,16 +133,25 @@ The SCF is out of the way with either setting, because 4x oversampling
 bypasses it too. The only difference between ESS's mode and the rebuilt
 drivers' default is therefore the 4x interpolation. Without it, the DAC
 holds each sample for one sample period, which loses a little treble by a
-known amount. At 44.1 kHz the loss is 0.75 dB at 10 kHz, 1.7 dB at 15 kHz
-and 3.2 dB at 20 kHz.
+known amount: at 44.1 kHz, 0.75 dB at 10 kHz, 1.7 dB at 15 kHz and 3.2 dB at
+20 kHz.
 
-The data sheet doesn't say how the 4x mode interpolates. An interpolator
-that smooths between samples loses more treble than the plain DAC does,
-unless it is a long filter. A linear interpolator loses twice as much in dB:
-1.5 dB at 10 kHz, 3.4 dB at 15 kHz and 6.3 dB at 20 kHz. A cheap
-interpolator can also add noise or distortion of its own. Without the
-oversampling, the top octave therefore most likely keeps more of its level,
-and nothing is added to the sound. [Measuring the DAC on the
+The hold isn't all of it. The same tones played at twelve rates from 11,025
+to 132,300 Hz on both clocks, through a recorder whose own response drops
+out of the comparison, fit the hold within 0.27 dB rms and the hold times
+1 + 0.062 z^-1 (over 1.062) within 0.05 dB, and within 0.016 dB below 44.1
+kHz, where the recorder's own lines are out of the way. So each sample holds
+about 6 % of the one before, whatever the rate. A one-pole term fits as
+well. That adds 0.43 dB to the loss at 10 kHz, 0.8 dB at 15 kHz and 1.05 dB
+at 20 kHz, for 1.2, 2.5 and 4.2 dB in all.
+
+The data sheet doesn't say how the 4x mode interpolates. Measured on the
+Armada at 44.1 kHz, it is no linear interpolator but a filter of some
+length: it takes 1.74 dB off everything, stays within a dB of a plain DAC at
+twice the rate up to about 17 kHz, and then falls away, 6 dB lower by 20.4
+kHz. It takes about 25 dB off the images. So it keeps the images down, and
+it costs the top of the band. Fed 88.2 kHz, it fails: the level falls by 15
+dB and other tones appear. [Measuring the DAC on the
 card](#measuring-the-dac-on-the-card) shows how to measure the difference on
 your card.
 
@@ -201,11 +211,12 @@ much time the step has.
 * **The program sends its next buffer** (the program's own queue). It
   usually has hundreds of ms.
 
-A DMA request that is answered too late makes the sound skip. The FIFO runs
-dry while the DAC keeps its pace, so the DAC has nothing to play, and you
-hear a click or a short dropout. An interrupt that is handled more than 62
-ms late doesn't cause a skip. The DMA plays the old block again instead, and
-you hear a repeat or a stutter.
+A DMA request that is answered too late makes the sound skip. When the FIFO
+runs dry, the DAC stops until the next sample comes, so you hear a click or
+a short gap, and the sound goes on that much later with nothing lost, as the
+Linux driver measured it. An interrupt that is handled more than 62 ms late
+doesn't cause a skip. The DMA plays the old block again instead, and you
+hear a repeat or a stutter.
 
 The FIFO sizes are on DS p.10 and p.44. In Sound Blaster mode, which most
 DOS games use, Audio 1's FIFO is 64 bytes and the chip's firmware runs it.
@@ -226,11 +237,17 @@ bytes at a time and holds DRQ for all of them. For chipsets that handle
 demand transfers badly, ESS's driver offers single transfers instead, with
 one byte per request. It then writes 78h = 13h for Audio 2 and leaves B9h as
 the DSP reset sets it for Audio 1 ([DRIVER_CONFIG.md](DRIVER_CONFIG.md)).
+Single transfers take more of the bus, though: with both channels running,
+Audio 2 fell about 12 percent short with them
+([ESS_EXTENDED.md](ESS_EXTENDED.md#both-channels-at-once)).
 
 Other traffic on the bus delays the answer too, such as another DMA channel,
-a bus master, or a PCI device holding the bus. Some BIOSes have settings for
-how the chipset shares the bus with ISA DMA, such as *Passive Release* and
-*PCI Delayed Transaction*.
+a bus master, or a PCI device holding the bus. On the laptop under Linux, a
+PC Card sound card recording by programmed I/O through the CardBus bridge
+stopped Audio 2's DAC twice in 40 seconds, for up to 314 us, and the IDE
+channel's PCI latency timer at 10h, where it is 40h, stopped it 202 times.
+Some BIOSes have settings for how the chipset shares the bus with ISA DMA,
+such as *Passive Release* and *PCI Delayed Transaction*.
 
 ## Finding out on the card
 

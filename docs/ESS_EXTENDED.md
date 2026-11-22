@@ -175,8 +175,11 @@ game's channel over to an 8-bit one.
 Card register 25h bit 7 turns on the DRQ latch, which holds each audio DRQ
 high until a DACK pulse comes while the chip's own request is low, a
 hardware reset, or 8 to 16 ms pass with the request low (DS p.15, p.30).
-Card register 26h bits 4:2 mask the external, Audio 2 and Audio 1 DMA
-requests, for channels that two devices share (DS p.15, p.31).
+Card register 26h bits 4:2 gate the external, Audio 2 and Audio 1 DMA
+requests, for channels that two devices share (DS p.15, p.31). The data
+sheet's "1 = enable mask" means that a set bit lets the requests out: on the
+Armada, with bits 3:2 clear neither engine's DMA ran, and with them set
+(1Ch, the configuration ROM's value) both did.
 
 Card registers 20h to 22h give the interrupt pins' IRQs, and the audio
 device's PnP registers 70h and 72h select Audio 1's and Audio 2's interrupts
@@ -376,8 +379,10 @@ bit 0 first.
   Sound Blaster 16's 44,100 Hz at most, and `tests/esschip.py` counts a
   recording above 52,920 Hz as a violation.
 * **A2h, the filter** (DS p.68, p.72). The filter's clock is 7.16 MHz over
-  256 minus the value, and its roll-off is the clock over 82, best at 80 to
-  90 percent of half the rate. For the high clock's divisors 18 to 35,
+  256 minus the value by the data sheet, and 7,144,200 Hz, the 793.8 kHz
+  clock times 9, as the Linux driver measured it on the laptop through the
+  same filter of Audio 2 (72h). Its roll-off is the clock over 82, best at
+  80 to 90 percent of half the rate. For the high clock's divisors 18 to 35,
   ES1869.DRV takes the value from one of two tables, which its flag for the
   direction picks, one for playback (DGROUP 4Eh) and one for recording
   (60h), and otherwise computes it (6:1FF4, 6:2308). es18xx and es1938 write
@@ -394,7 +399,13 @@ bit 0 first.
 * **A8h, analog control** (DS p.68). Bits 1:0 are 01 for stereo and 10 for
   mono, and bit 3 turns the record monitor on. The data sheet wants bit 4
   written as 1 and bits 7:5 and 2 as 0, but ES1869.DRV writes F5h or F6h
-  (6:291D).
+  (6:291D). The monitor puts the record source on AOUT in place of the
+  playback mix while the ADC records, as the data sheet's diagram (p.49)
+  shows. Without it the playback mix goes on: on the Armada, Audio 2 played
+  on at its full level through a recording with bit 3 clear, though the data
+  sheet's steps (p.50) say AOUT is silent then, and fell silent when bit 3
+  was set with the microphone as the record source (es1869test's
+  `mix.monitor`).
 * **B1h, the interrupt** (DS p.68). Bit 6 enables the counter's interrupt
   and bit 5 the FIFO half-empty interrupt of programmed I/O; bit 4 does
   nothing, and bit 7 belongs to Compatibility mode. ES1869.DRV reads it and
@@ -818,13 +829,15 @@ run a motherboard DMA channel with its Type F timing. Two registers of its
 function 0, MBDMA at 76h and 77h, each name a channel in bits 2:0 (4 for
 none) and turn the timing on for it with bit 7. The laptop's BIOS leaves
 76h = 8Dh and 77h = 89h, Type F on DMA 5 and DMA 1, the ES1869's channels,
-and sets them again at every POST (the Linux report).
+and sets them again at every POST, and whenever the PnP BIOS is asked for
+the boot configuration (the Linux driver's notes).
 
-Under Linux, playback worked with Type F on, and the first byte a recording
-moved into memory hung the machine until a power cycle, with no message.
-Every such recording ran the 8237 in demand mode, and every rate recorded
-once 77h bit 7 was clear, so the Linux driver clears it for Audio 1's
-channel when it loads (the Linux report).
+Under Linux, playback worked with Type F on, and a recording in demand
+transfers hung the machine at its first byte until a power cycle, with no
+message, while one in single transfers ran cleanly. So the Linux driver now
+keeps Type F on and records in single transfers under it, the 8237 in single
+mode with B9h = 0, which its first version did by clearing 77h bit 7 instead
+(LINUX.md on the Linux branch).
 
 Under DOS and Windows:
 * **ESS's drivers record as Linux did.** ES1869.DRV's record start (6:2799)
@@ -832,12 +845,18 @@ Under DOS and Windows:
   "Single Mode DMA" is set, and B9h = 02h (6:28BC), with the channel
   unmasked before B8h starts the chip. Neither ESS's drivers nor the rebuilt
   ones touch the bridge.
-* **DOS has recorded on the laptop only in single mode.** sb16test's record
-  group through `esssb16`, mode 54h with B9h = 02h, finished with Type F on.
+* **The laptop's DOS runs had Type F off.** Every run of essprobe and
+  sb16test that read the bridge, each started from Windows 98 by esswchk,
+  found 76h = 77h = 0Ch: no channel, and Type F off. So Windows 98, or its
+  way to MS-DOS mode, takes off what the POST set, which fits ESS's
+  demand-mode recordings in Windows running cleanly (esswchk's `fm.rate`).
+  There, sb16test's record group through `esssb16` finished, the 16-bit
+  cases with the TSR's own transfer in demand mode and B9h = 02h, and so did
   essprobe's `h4.wrong1` and `h4.wrong2`, single-mode write transfers with
-  the chip playing, finished too, but the chip drove no data there.
-* So a demand-mode recording with Type F on is the case still to try, in
-  Windows 98 and in DOS.
+  the chip playing, though the chip drove no data there.
+* So a recording with Type F on is still to try, in a DOS started from the
+  boot menu without Windows, where `essreg tf` would show it on. essprobe's
+  `typef` group is that case.
 
 `essreg tf` reads 76h and 77h and says whether Type F is on for Audio 1's
 channel (PnP 74h). `tf=0` and `tf=1` change only the register that names

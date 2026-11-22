@@ -214,6 +214,46 @@ bytes C6h, C0h and the register number. The data-ready flag has to be polled
 at Audio_Base+Ch bit 6, because reading Audio_Base+Eh, as the original
 essreg did, also clears the audio interrupt.
 
+The mixer's index decodes 7 bits, so that 80h-FFh read as 00h-7Fh, and below
+60h it also drops bit 0, so that an odd register reads as the even one
+before it. The controller's registers have no copy there. A probe of the
+registers that the catalog doesn't name, on an idle Armada with the master
+muted, wrote FFh, 00h, 55h and AAh to each and put it back:
+* 02h, 06h, 08h, 12h, 16h, 18h, 20h, 24h, 30h, 34h, 5Eh and 67h keep
+  nothing.
+* 10h works as a second mixer reset: any write puts the levels at their
+  power-on values.
+* 1Eh, 2Ah and 2Ch are other ways to 0Eh, 3Ah and 3Ch.
+* 5Ch keeps its low 7 bits, and bit 7 flips by itself every 23 us, whatever
+  70h holds. Bit 5 opens a window on the audio, which reads back in turns of
+  four: a byte, 7Fh, another byte, 7Fh. The two bytes sit near 208 and 121
+  with about 7 of noise. They move with the sound before the master: a tone
+  at -20 dBFS through Audio 2, with the master muted, comes to 1.4 either
+  way, so full scale would be about 14, with noise to match. It tells that
+  something is playing, and no more. Bit 6 with bit 5 freezes the bytes.
+  Bits 4 to 0 change nothing that this shows, and with bit 5 clear the
+  window reads 00h.
+* 7Eh keeps all 8 bits. With bit 1 set, 74h and 76h read the high byte of
+  the sample Audio 2 is playing, left and right in turn.
+
+The same probe of the controller's unnamed registers, through the DSP:
+* A3h keeps all 8 bits and reads 83h at reset, and BCh keeps all 8 and reads
+  76h. Neither moved another register. What they do is still to find, with a
+  tone playing.
+* A0h keeps bits 2:0.
+* A9h reads 0Ch at reset and keeps bits 7, 6, 3 and 2, but a 1 in bit 7
+  stays when 0 is written.
+* B3h reads 13h or 12h: bit 0 follows nothing written.
+* A6h, A7h, AAh to AFh and BEh read 00h, B0h reads B0h and BFh reads FCh,
+  whatever is written.
+* B5h and B6h, the DAC's holding register, move by themselves between the
+  writes, so that a change there says nothing about the write before it.
+
+74h and 76h also read back live under a stream: 74h gives the high byte of
+the count and 76h the low, against the way they are written, and it runs up
+to FFFFh and reloads. It counts what the DMA brings, in steps of the demand
+size, not what the DAC takes, so it tells no more than the 8237's count.
+
 ES1869.VXD sends two undocumented DSP commands before it restores a DOS
 box's mixer settings: C3h, which reads a status byte, and C2h 01h.
 

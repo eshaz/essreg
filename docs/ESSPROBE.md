@@ -51,7 +51,7 @@ such as `t2=0` for Audio 2's single transfers.
   `build/ES1869.DRV`'s player (`both.go1` to `both.go3`): Audio 2's channel
   unmasked, Audio 1 started with its own channel masked, the player's polls
   of Audio_Base+Ch, then with interrupts off Audio 1's channel unmasked and
-  78h written once, so that both streams start in step.
+  78h written once, so that both streams start together.
 * **h1**: the DMA controllers behind the memory manager. When the 8237 gets
   what a program programmed while the channel is masked, and when its mask
   gets the program's mask and unmask (`h1.mask1`, `h1.mask5`, read where the
@@ -147,15 +147,16 @@ such as `t2=0` for Audio 2's single transfers.
   stopped the laptop under Linux
   ([ESS_EXTENDED.md](ESS_EXTENDED.md#type-f-dma-on-the-piix4)). Audio 1
   records 16-bit stereo at 44100 Hz into its buffer, started as ES1869.DRV
-  starts a recording, with the 8237 in single mode as DOS has recorded on
-  the laptop (`typef.m54_b2`, then B9h 0 and 1), in demand mode as ESS's
-  drivers and Linux record (`typef.m14_b0` to `typef.m14_b2`), and with the
-  channel masked at the start for 1 ms or, as Linux had it, for 1.5 s
-  (`typef.m14_hold1`, `typef.m14_linux`), the safest first. Each case
-  reports the bytes that came in, the rate the count moved at, how much of
-  the buffer was written, the guard bytes around it, and the bridge's
-  register. The group runs only when named, never in a whole run or in
-  `ESSCHECK.BAT`, and asks first. Version 1.9 adds the group.
+  starts a recording, with the 8237 in single mode, as sb16test's 8-bit
+  record cases and Linux under Type F record (`typef.m54_b2`, then B9h 0 and
+  1), in demand mode, as ESS's drivers and `esssb16` record (`typef.m14_b0`
+  to `typef.m14_b2`), and with the channel masked at the start for 1 ms or,
+  as Linux had it, for 1.5 s (`typef.m14_hold1`, `typef.m14_linux`), the
+  safest first. Each case reports the bytes that came in, the rate the count
+  moved at, how much of the buffer was written, the guard bytes around it,
+  and the bridge's register. The group runs only when named, never in a
+  whole run or in `ESSCHECK.BAT`, and asks first. Version 1.9 adds the
+  group.
 
 Every case uses the DMA channels that the card is configured for, Audio 1's
 (PnP 74h) and Audio 2's (75h), since other devices may own the others. An h1
