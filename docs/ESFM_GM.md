@@ -27,7 +27,9 @@ Each item names what GM Level 1 asks for, and then what ESS's `ESFM.DRV` and
 * **Program change.** Both drivers: yes.
 * **Controller 1, modulation.** ESS's driver: ignored. `build/ESFM.DRV`:
   vibrato.
-* **Controllers 7 and 11, volume and expression.** Both drivers: yes.
+* **Controllers 7 and 11, volume and expression.** Both drivers: yes, on the
+  operators that the patch marks for them ([What both drivers
+  keep](#what-both-drivers-keep-of-esss-code)).
 * **Controller 10, pan.** ESS's driver: the next notes, in 3 positions, with
   left and right the other way round. `build/ESFM.DRV`: the sounding notes
   too, in 3 positions, on the sides they name.
@@ -35,7 +37,8 @@ Each item names what GM Level 1 asks for, and then what ESS's `ESFM.DRV` and
   a program change lets it up.
 * **Controller 121, reset all controllers.** ESS's driver: also resets
   volume, pan and the bend range. `build/ESFM.DRV`: as RP-015 defines it.
-* **Controller 123, all notes off.** Both drivers: yes.
+* **Controller 123, all notes off.** Both drivers: yes, but with the pedal
+  down it also stops the notes that keys still hold.
 * **RPN 0, pitch bend range.** ESS's driver: semitones only.
   `build/ESFM.DRV`: semitones and cents.
 * **RPN 1, fine tuning.** ESS's driver: ignored. `build/ESFM.DRV`: yes.
@@ -99,7 +102,8 @@ and XG System On, sent in a long message, set every channel back to the GM
 defaults. Each channel gets program 0, volume 100, pan center, expression
 127, a bend range of 2 semitones, no tuning, no modulation or pressure and
 no RPN selected. The pedals go up, all notes go off and the master volume
-goes back to full.
+goes back to full. This holds with `ResetControllers=0` too, where a
+controller 121 of the program's own is ESS's.
 
 `midiOutReset` and opening the device reset the same things except the
 programs, which they keep, as ESS's driver does.
@@ -168,6 +172,42 @@ the other
 
 The chip has 18 voices, and GM asks for 24. When they run out, ESS's voice
 stealing reuses one. A layered patch with two voices takes two of them.
+
+## What both drivers keep of ESS's code
+
+Apart from what this page and [ESFM_MIDI.md](ESFM_MIDI.md) describe, the
+fixed driver plays as ESS's does. The Linux driver's study of the engine
+found these behaviors of ESS's code, and `tests/esfmemu.py` shows the first
+two. The OPL3 device has code of its own, which follows the MIDI spec in the
+channel mode controllers and is tuned to the chip's clock
+([ESFM_OPL3.md](ESFM_OPL3.md)).
+* **A layered patch on one voice.** A patch of mode 2 always takes two chip
+  voices ([ESFM_BANK.md](ESFM_BANK.md#bank-format)), stealing them if it
+  must. The second steal can pick the voice that the first patch voice just
+  got, which then holds the second patch voice alone, so that only one layer
+  sounds. It can happen while one chip voice is free, as with 17 notes of a
+  one-voice program on channel 1, a free voice last used by channel 16, and
+  then a note of program 16 on channel 2. 22 programs of ESS's bank are of
+  mode 2, among them three organs and the four solo strings.
+* **Volume on some operators only.** Each operator of a patch has a level
+  mode, which says whether and how far velocity, volume, expression and the
+  master volume turn it down, and the patch's author set it. Programs 31,
+  124 and 127 of ESS's bank have no operator that they turn down, and 121
+  only changes its tone, so these play at one level. Many others keep some
+  of their operators at full level. Volume 0 silences every operator of the
+  channel, whatever its mode.
+* **The tuning.** ESS's F-numbers are in tune for an FM clock of 50,000 Hz,
+  and the chip's runs at 49,612.5 Hz ([AUDIO1.md](AUDIO1.md)), so every note
+  plays 12.5 to 14.6 cents flat, about an eighth of a semitone.
+* **All notes off with the pedal down.** Controllers 123, 124 and 125 stop
+  the notes that keys still hold and keep those that the pedal holds, where
+  the MIDI spec has both sound on until the pedal goes up. Controllers 120,
+  126 and 127 key off every note of the channel, pedal or not, and after
+  120, all sound off, the notes' release still sounds.
+* **The top of the range.** A bend above the chip's highest block drops an
+  octave, and notes above 114 lose their operators' octave offsets.
+* **Notes in their release** keep their pitch, level, pan and vibrato when
+  the channel's bend, volume, pan or modulation changes.
 
 ## Proof
 

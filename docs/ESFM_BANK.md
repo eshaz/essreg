@@ -40,8 +40,20 @@ the patch is played (seg1:0C98):
 | 2     | two voices, both always allocated                                |
 | 3     | the entry is ignored                                             |
 
-Bit 0 of header byte 0 is passed to the voice allocator for each voice, but
-what exactly it does there isn't known.
+The rest of the header, as the Linux driver's study of ESS's code found it:
+* Bits 7:4 of byte 0 make operators fixed-frequency, bit 4 + *k* for
+  operator *k*. The operator's bytes 4 and 5 then go to registers 4 and 5 as
+  they are, and neither the note nor the pitch bend changes them
+  (seg1:0B44).
+* Bit 3 of byte 0 is unused, and it is 0 in every patch of ESS's banks.
+* Bit 0 of byte 0 keeps the voice off chip voices 16 and 17 (seg1:020C,
+  seg1:03DA). Why ESS keeps some voices off them isn't known.
+* Bytes 1 and 2 are never read.
+* Byte 3 holds a 2-bit *level mode* for each operator, operator 0 in bits
+  1:0 up to operator 3 in bits 7:6. It says how far velocity, volume and
+  expression turn the operator down: with 0 not at all, with 1 by up to 7
+  steps of 0.75 dB, with 2 by up to 15 and with 3 by up to 47 (seg1:08BF,
+  seg1:0F98).
 
 The operator records hold the eight ESFM operator registers, which the
 driver writes with these changes (seg1:0808):
@@ -52,7 +64,16 @@ driver writes with these changes (seg1:0808):
   added to the note, and byte 4 bits 7:2 scale a fine detune. The driver
   keeps byte 5 bits 7:5, the envelope delay, and replaces the rest of both
   bytes with the block and F-number it computes.
-* Bytes 0, 2, 3, 6 and 7 are copied as they are.
+* Bytes 2 and 3 are copied as they are, and so is byte 7, though register 7
+  is written as 00h first, while the operator's other registers change.
+* Byte 0 is copied, and `build/ESFM.DRV` adds bit 6, the vibrato, for
+  modulation and channel pressure
+  ([ESFM_GM.md](ESFM_GM.md#modulation-and-channel-pressure)).
+* Byte 6 is copied, but a channel panned left or right puts its side in bits
+  5:4 of every operator that has an output (seg1:0AB8). `build/ESFM.DRV`
+  adds bit 6, the deep vibrato, and with `TrueSides` swaps bits 5:4, which
+  the chip plays the other way round from what ESS's values say
+  ([ESFM_GM.md](ESFM_GM.md#pan)).
 
 The bank shipped in the driver, `esfm_patch_banks/bnk_com.bin`, is 8288
 bytes (2060h) long and holds 175 patches, 41 of them with two voices.

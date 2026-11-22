@@ -638,6 +638,7 @@ class SustainTest(unittest.TestCase):
 DEV_PROGRAM, DEV_RPN_DATA, DEV_CHAN_FLAGS, DEV_BEND = 0x20, 0x30, 0x40, 0x50
 DEV_CHAN_PAN, DEV_CHAN_VOLUME, DEV_CHAN_EXPR = 0x2D2, 0x2E2, 0x2F2
 DEV_GM_MOD, DEV_GM_PRESS, DEV_GM_RPN = 0x311, 0x321, 0x341
+DEV_GM_VIB = 0x331
 DEV_GM_CENTS, DEV_GM_FINE, DEV_GM_COARSE, DEV_GM_MASTER = (0x361, 0x371,
                                                            0x391, 0x3A1)
 
@@ -1479,6 +1480,27 @@ class SettingsTest(unittest.TestCase):
         # volume and expression only: pan and the bend are other keys'
         self.compare("ResetControllers", self.regs_after(
             cc(0, 7, 40), cc(0, 11, 60), cc(0, 121, 0)))
+
+    def test_gm_reset_whatever_reset_controllers(self):
+        """a GM reset sets the controllers back as RP-015 says with either
+        value, though ESS's controller 121 keeps the modulation: the next
+        note plays without the vibrato, as after a reset with none"""
+        for value in ("1", "0"):
+            with self.subTest(ResetControllers=value):
+                e = self.started(ini={"ResetControllers": value})
+                e.data(cc(0, 1, 100))                  # the deep vibrato
+                e.data(0x7F3C90)
+                e.longdata(GM_ON)
+                self.assertEqual((e.dev8(DEV_GM_MOD), e.dev8(DEV_GM_VIB),
+                                  e.dev16(DEV_GM_RPN)), (0, 0, 0x7F7F))
+                e.data(0x7F4090)
+                ref = self.started(ini={"ResetControllers": value})
+                ref.longdata(GM_ON)
+                ref.data(0x7F4090)
+                got, want = ([r[0] for v in x.note_voices(0, 0x40)
+                              for r in x.op_regs(v)] for x in (e, ref))
+                self.assertTrue(got)
+                self.assertEqual(got, want)
 
     def test_live_pan(self):
         self.compare("LivePan", self.regs_after(cc(0, 10, 0x7F), cc(0, 8, 0)))

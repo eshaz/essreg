@@ -800,22 +800,19 @@ fix_gm_reset:
         jz      .nextdev
         xor     di,di
 .chan:
-        ; controllers 121 (reset all controllers, the pedal up) and 123 (all
+        ; RP-015's reset of the controllers, the pedal up, whatever
+        ; ResetControllers says, since ESS's controller 121 keeps the
+        ; modulation, the pressure and the RPN; then controller 123 (all
         ; notes off)
-        push    si
-        push    word 0
-        mov     ax,di
-        or      ax,0x79B0               ; Bn 79h
-        push    ax
-        call    short_msg
+        call    fix_ctl_reset
         push    si
         push    word 0
         mov     ax,di
         or      ax,0x7BB0               ; Bn 7Bh
         push    ax
         call    short_msg
-        ; and what controller 121 keeps: program 0, volume 100, pan center,
-        ; bend range 2 semitones, no tuning
+        ; and what the controller reset keeps: program 0, volume 100, pan
+        ; center, bend range 2 semitones, no tuning
         mov     bx,di
         mov     byte [bx+si+DEV_PROGRAM],0
         mov     byte [bx+si+DEV_CHAN_VOLUME],100

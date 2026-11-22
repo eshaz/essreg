@@ -113,12 +113,14 @@ buffer.
 
 ### What was ruled out
 
-* In ESS's driver, these work as they should: voice allocation, voice
+* In ESS's driver, none of these holds a note: voice allocation, voice
   stealing, retriggering a playing note, controller 64 itself and the other
   controllers (including 120, 121 and 123-127), the RPN for the pitch bend
   range, running status in short messages apart from cause 6, the
   long-message parser apart from SysEx (cause 4) and running status (causes
-  5 and 6), and `MODM_RESET`, which silences everything.
+  5 and 6), and `MODM_RESET`, which silences everything. Voice stealing and
+  the channel mode controllers have quirks of their own, which both drivers
+  keep ([ESFM_GM.md](ESFM_GM.md#what-both-drivers-keep-of-esss-code)).
 * The chip doesn't hold notes on its own. In
   [ESFMu](https://github.com/Kagamiin/ESFMu), the hardware-accurate ESFM
   emulator, a key off that comes during an envelope delay releases the note
