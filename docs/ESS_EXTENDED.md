@@ -381,21 +381,22 @@ bit 0 first.
 * **A2h, the filter** (DS p.68, p.72). The filter's clock is 7.16 MHz over
   256 minus the value by the data sheet, and 7,144,200 Hz, the 793.8 kHz
   clock times 9, as the Linux driver measured it on the laptop through the
-  same filter of Audio 2 (72h). Its roll-off is the clock over 82, best at
-  80 to 90 percent of half the rate. For the high clock's divisors 18 to 35,
-  ES1869.DRV takes the value from one of two tables, which its flag for the
-  direction picks, one for playback (DGROUP 4Eh) and one for recording
-  (60h), and otherwise computes it (6:1FF4, 6:2308). es18xx and es1938 write
-  256 minus 7.16 MHz times 20 over 8 times 82 times the rate, a roll-off at
-  80 percent, NetBSD 256 minus 200279 over the rate, at 87 percent
-  (`ess_srtofc`), OSS and Allegro about 90 percent, and Impulse Tracker
-  always FEh. Measured on the Armada through Audio 2's filter (72h, whose
-  clock and ratio are the same), with snd-es1869's 256 minus 199582 over the
-  rate: the -3 dB point at 0.439 of the rate at 11025 and 22050 Hz, and at
-  0.454 at 32000 Hz, where the value rounds to 250 and the clock over 82 is
-  14553 Hz, within 0.3 percent of the 14514 Hz measured. The response rises
-  about 1 dB just under the corner, at 0.38 to 0.42 of the rate, and falls 7
-  dB by 0.46 (es1869test's `dac.corner`).
+  same filter of Audio 2 (72h,
+  [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#the-filters-measured)). Its roll-off
+  is the clock over 82, best at 80 to 90 percent of half the rate. For the
+  high clock's divisors 18 to 35, ES1869.DRV takes the value from one of two
+  tables, which its flag for the direction picks, one for playback (DGROUP
+  4Eh) and one for recording (60h), and otherwise computes it (6:1FF4,
+  6:2308). es18xx and es1938 write 256 minus 7.16 MHz times 20 over 8 times
+  82 times the rate, a roll-off at 80 percent, NetBSD 256 minus 200279 over
+  the rate, at 87 percent (`ess_srtofc`), OSS and Allegro about 90 percent,
+  and Impulse Tracker always FEh. Measured on the Armada through Audio 2's
+  filter (72h, whose clock and ratio are the same), with snd-es1869's 256
+  minus 199582 over the rate: the -3 dB point at 0.439 of the rate at 11025
+  and 22050 Hz, and at 0.454 at 32000 Hz, where the value rounds to 250 and
+  the clock over 82 is 14553 Hz, within 0.3 percent of the 14514 Hz
+  measured. The response rises about 1 dB just under the corner, at 0.38 to
+  0.42 of the rate, and falls 7 dB by 0.46 (es1869test's `dac.corner`).
 * **A4h and A5h, the count** (DS p.68). They reload a 16-bit counter, which
   counts up once for each byte that the DMA moves, so a block is at most
   65536 bytes. At its overflow the counter reloads; in auto-initialize mode
@@ -618,12 +619,15 @@ as the data sheet says (DS p.71), measured at +64.2 and +63.9, so a card
 under 32 has nothing to gain from them, and code 0 is its best setting.
 
 ESS's drivers correct two ways. ES1869.DRV subtracts the mean of a
-recording's first block from all that follow (`DCdrift`), which mostly takes
-out the thump of turning the CODEC at the start. ESSDC.EXE, a daemon,
-records every 10 minutes at 22050 Hz from source 6, a line that nothing
-drives, with B4h at 0, tries codes on BAh and BBh over the last blocks, and
-keeps the one with the smallest mean on each side. It restores 1Ch and B4h
-after that.
+recording's first block from all that follow (`DCdrift`). That doesn't take
+out the thump of turning the CODEC on at the start: the thump halves about
+every 25 ms and ESS's blocks last 62.5 ms, so it stays in the first block,
+and its share of that block's mean shifts the rest of the recording. A
+recording with `DCdrift` at 1 and at 0 would show by how much. ESSDC.EXE, a
+daemon, records every 10 minutes at 22050 Hz from source 6, a line that
+nothing drives, with B4h at 0, tries codes on BAh and BBh over the last
+blocks, and keeps the one with the smallest mean on each side. It restores
+1Ch and B4h after that.
 
 ## Audio 2
 
@@ -637,10 +641,10 @@ p.64-65):
   oversampling, bit 3 bypasses Audio 2's filter and bit 2 Audio 1's, and bit
   0 slaves Audio 2's DMA to the FM synthesizer, which mixes it in digitally.
   On the Armada, the music DAC recorded on Audio 1 (7Fh bit 4) then held
-  Audio 2's samples exactly, one a frame at 49716 Hz whatever 70h held, with
-  left and right swapped and the FM's idle level of +128 added. Bit 1 lets
-  Audio 2 run at its own rate; with it clear, Audio 2 runs at Audio 1's rate
-  and filter.
+  Audio 2's samples exactly, one a frame at the FM's 49,612.5 Hz whatever
+  70h held, with left and right swapped and the FM's idle level of +128
+  added. Bit 1 lets Audio 2 run at its own rate; with it clear, Audio 2 runs
+  at Audio 1's rate and filter.
 * **72h, the filter**, as A2h for Audio 1, used only when Audio 2 runs at
   its own rate.
 * **74h and 76h, the count**, minus the block's length in bytes.

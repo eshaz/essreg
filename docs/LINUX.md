@@ -100,7 +100,8 @@ The BIOS sets both registers where it builds the ES1869's PnP node: at every
 POST, and whenever the PnP BIOS is asked for the boot configuration, which
 Linux never does with PnP ACPI. Its SMM keeps both across a suspend to RAM.
 The driver writes its setting again at every resume, after whatever the BIOS
-or ACPI put back (celeronix-6a's BIOS notes, chapter 03).
+or ACPI put back (celeronix-6a's BIOS notes, chapter 03). Under Windows 98
+DOS programs read both at 0Ch, Type F off.
 
 ## Devices
 
@@ -560,8 +561,8 @@ the chip, and `esfm_a440=1`, the default, tunes them
 flat.
 
 The MPU-401 is raw MIDI device 0, in UART mode, and a byte coming in raises
-the chip's interrupt. The driver opens and sends through it, but no byte has
-yet been seen to cross a cable in either direction on the Armada.
+the chip's interrupt. MIDI in works on the Armada, but no byte has yet been
+seen to leave through MIDI out ([MPU401.md](MPU401.md)).
 
 ### A parallel port MIDI interface
 

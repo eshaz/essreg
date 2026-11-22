@@ -725,6 +725,14 @@ which an implementation fed with decoded events doesn't need. With
 bytes into the last message's, and a real-time byte becomes the running
 status ([ESFM_GM.md](ESFM_GM.md#running-status)).
 
+### Sides (TrueSides)
+
+`TrueSides=1` swaps bits 4 and 5 in each write of an operator's register 6
+that sends it to one side only (`fix_fm_value`), so that ESS's left, the
+pan's and a patch's own, plays on the chip's left output (section 8). The
+Linux engine's `sides` makes the same writes, which `test_true_sides` in
+`tests/test_esfmgm.py` checks byte for byte.
+
 ### The other switch
 
 `BetterSquareWave=0` plays ESS's bank, as section 2 describes. With every

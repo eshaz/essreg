@@ -572,13 +572,14 @@ tools/wineshot.sh run ess3d.exe /sim tray
     the chip's 49,612.5 Hz, in `TuneTest`).
   * On the Armada, ask celeronix's sessions before a hardware session and
     check `mpc status` before unloading a sound module.
-  * The Armada's BIOS sets the PIIX4's Type F DMA timing on the ES1869's
-    channels, and a recording on DMA 1 in demand transfers then hangs the
-    machine at its first byte. The driver keeps it on and records in single
-    transfers under it (`piix4_type_f`, whose 0 and the driver's removal
-    turn it off), and a test records only once ISA bridge register 77h bit 7
-    reads clear, or the loaded module's proc file says it records in single
-    transfers, and the new module is the one loaded.
+  * Under Linux the Armada's BIOS sets the PIIX4's Type F DMA timing on the
+    ES1869's channels (under Windows 98 they read 0Ch, off), and a recording
+    on DMA 1 in demand transfers then hangs the machine at its first byte.
+    The driver keeps it on and records in single transfers under it
+    (`piix4_type_f`, whose 0 and the driver's removal turn it off), and a
+    test records only once ISA bridge register 77h bit 7 reads clear, or the
+    loaded module's proc file says it records in single transfers, and the
+    new module is the one loaded.
 * **Text** follows [docs/STYLE.md](docs/STYLE.md): documentation in
   complete, plain sentences, terse lowercase comments, the file header on
   new files, no em dashes and no "we". Every markdown file stays readable in

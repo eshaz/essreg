@@ -89,7 +89,8 @@ measurement that moved further than a repeat run moves it, by its unit (1
 dB, 3 cents, 50 ppm or a tenth, 2 frames, a count not at all), gets the
 earlier value in the report and `moved` in the TSV, and the report ends with
 how many moved. A move doesn't fail the case: the case's own ranges decide
-that.
+that. The Armada's dates from November 6, before PCM 1's rate was 49,613 Hz
+and the ESFM synth was tuned, so its FM pitches and `clock.fm` move.
 
 The exit code is 0 when every case passed or was KNOWN, 1 for a bad option,
 2 without the driver, 3 when the card or the lock is busy or MPD plays, 4

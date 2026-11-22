@@ -203,8 +203,8 @@ dB: over *fc*, the poles lie at -0.432 +- 0.364j, -0.080 +- 0.938j and
 -0.682 +- 0.783j, and a zero near +-1.86j. The pair at 0.94 has a Q of 5.9,
 which is its resonance: a step rings there, falling by about a third a
 cycle. The group delay is 0.71 cycles of *fc* in the passband and 2.3 at the
-peak. ESS's FDh, corner 29 kHz, takes 2.4 dB out at 14.5 kHz, in the audible
-band.
+peak. ESS's FDh, corner 29,041 Hz, takes 0.5 dB out at 14.5 kHz and 1 dB
+from 18 to 20 kHz, in the audible band, and peaks 1.75 dB at 25.8 kHz.
 
 The clock is 7,144,200 Hz over 256 - x, which is the 793.8 kHz clock times
 9, and not the data sheet's 7.16 MHz. Almost nothing stands in front of the
