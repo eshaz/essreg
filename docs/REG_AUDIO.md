@@ -55,9 +55,11 @@ DS p.68, DSP channel.
   but ESS's driver writes 111b when it starts recording (F5h or F6h,
   docs/DRIVER_CONFIG.md).
 * **3 Record monitor** (`rec.monitor`, bit, caution, driver sets it, reset
-  by DSP reset). 1 = enable record monitor, so AOUT_L/R stay live while the
-  CODEC records (ADC direction); cleared by software reset (DS p.50, p.51,
-  p.68).
+  by DSP reset). 1 = AOUT_L/R carry the record source in place of the
+  playback mix while the CODEC records (ADC direction); 0 = the playback mix
+  goes on, where the data sheet has AOUT silent (measured). With AOUT as the
+  record source it closes a loop. Cleared by software reset (DS p.49, p.50,
+  p.51, p.68).
 * **2 A8h bit 2 (undocumented)** (`a1.analog.bit2`, bit, expert, driver sets
   it, reset by DSP reset). Reserved in the data sheet (write 0), but ESS's
   driver writes 1 when it starts recording (F5h or F6h,

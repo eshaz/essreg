@@ -417,7 +417,7 @@ FLD(F_A1_CNT_HI, R_CT_A5, 0, 8, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NO
 
 /* A8h bit 4 must be written as 1 and bits 7:5 and 2 as 0, which a read-modify-write keeps (DS p.68) */
 REG(R_CT_A8, BK_CTRL, 0, 0xA8, RF_NEEDS_IDLE, "Analog control", 68)
-FLD(F_A1_RECMON, R_CT_A8, 3, 1, K_BOOL, T_CAUTION, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_RECORD, FMT_NONE, "rec.monitor", "Record monitor", "1 = enable record monitor, so AOUT_L/R stay live while the CODEC records (ADC direction); cleared by software reset (DS p.50, p.51, p.68)")
+FLD(F_A1_RECMON, R_CT_A8, 3, 1, K_BOOL, T_CAUTION, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_RECORD, FMT_NONE, "rec.monitor", "Record monitor", "1 = AOUT_L/R carry the record source in place of the playback mix while the CODEC records (ADC direction); 0 = the playback mix goes on, where the data sheet has AOUT silent (measured). With AOUT as the record source it closes a loop. Cleared by software reset (DS p.49, p.50, p.51, p.68)")
 FLD(F_A1_CHAN, R_CT_A8, 0, 2, K_ENUM, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_A1CHAN, PG_DAC, FMT_NONE, "a1.channels", "Audio 1 stereo/mono", "Operation mode of the first DMA converters: 01 = stereo, 10 = mono; 00 and 11 are reserved (DS p.68)")
 FLD(F_A8_HIGH, R_CT_A8, 5, 3, K_HEX, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.analog.bits7_5", "A8h bits 7:5 (undocumented)", "Reserved in the data sheet (write 0), but ESS's driver writes 111b when it starts recording (F5h or F6h, docs/DRIVER_CONFIG.md)")
 FLD(F_A8_BIT2, R_CT_A8, 2, 1, K_BOOL, T_EXPERT, FF_DRVOWNED | FF_VOLATILE, E_NONE, PG_DAC, FMT_NONE, "a1.analog.bit2", "A8h bit 2 (undocumented)", "Reserved in the data sheet (write 0), but ESS's driver writes 1 when it starts recording (F5h or F6h, docs/DRIVER_CONFIG.md)")
@@ -607,11 +607,11 @@ FLD(F_PC_MODEM, R_PC_25, 2, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.m
 FLD(F_PC_CDROM, R_PC_25, 1, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.cdrom_present", "CD-ROM device present", "1 = the CD-ROM is LDN 3 or 4; 0 = the CD-ROM is not present (DS p.31)")
 FLD(F_PC_MPU, R_PC_25, 0, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.mpu401_ldn3", "MPU-401 is LDN 3", "1 = MPU-401 is LDN 3 and does not share audio interrupt 1 or 2; 0 = it is part of LDN 1 and shares it (DS p.31)")
 
-/* 26h is headed "(R)" on DS p.31, but p.15 has drivers set bits 4:2 to share DMA channels, so they are tiered EXPERT */
+/* 26h is headed "(R)" on DS p.31, but p.15 has drivers set bits 4:2 to share DMA channels, so they are tiered EXPERT. A clear bit 3 or 2 kept the engine's DMA from running on the Armada, whatever the data sheet's "1 = enable mask" says */
 REG(R_PC_26, BK_PNPCARD, 0, 0x26, 0, "Configuration ROM header 1", 31)
-FLD(F_PC_EXTDMAMASK, R_PC_26, 4, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ext_dma_mask", "External DMA mask", "1 = external DMA mask enabled, 0 = disabled; set it while DMA channels are shared (DS p.15, p.31)")
-FLD(F_PC_A2DMAMASK, R_PC_26, 3, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.a2_dma_mask", "Audio 2 DMA mask", "1 = Audio 2 DMA mask enabled, 0 = disabled; set it while DMA channels are shared (DS p.15, p.31)")
-FLD(F_PC_A1DMAMASK, R_PC_26, 2, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.a1_dma_mask", "Audio 1 DMA mask", "1 = Audio 1 DMA mask enabled, 0 = disabled; set it while DMA channels are shared (DS p.15, p.31)")
+FLD(F_PC_EXTDMAMASK, R_PC_26, 4, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.ext_dma_mask", "External DMA mask", "Gates the external DMA requests, for a channel two devices share; 1 lets them out if it works as bits 3:2 do (DS p.15, p.31)")
+FLD(F_PC_A2DMAMASK, R_PC_26, 3, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.a2_dma_mask", "Audio 2 DMA mask", "1 = Audio 2's DMA requests go out; 0 = they are masked, and Audio 2's DMA never runs (measured; DS p.15, p.31)")
+FLD(F_PC_A1DMAMASK, R_PC_26, 2, 1, K_BOOL, T_EXPERT, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.a1_dma_mask", "Audio 1 DMA mask", "1 = Audio 1's DMA requests go out; 0 = they are masked, and Audio 1's DMA never runs (measured; DS p.15, p.31)")
 FLD(F_PC_GPO1DACK, R_PC_26, 1, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.gpo1_is_dack", "GPO1 pin is DACK", "1 = the GPO1 pin is an external DACK and GPI an external DRQ; 0 = the GPO1 pin is GPO1 (DS p.31)")
 FLD(F_PC_GPO0GPCS, R_PC_26, 0, 1, K_BOOL, T_RO, 0, E_NONE, PG_PNP, FMT_NONE, "pnp.gpo0_is_gpcs", "GPO0 pin is GPCS", "1 = the GPO0 pin is the GPCS chip select; 0 = the GPO0 pin is GPO0 (DS p.31)")
 

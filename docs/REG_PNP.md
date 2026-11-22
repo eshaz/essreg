@@ -188,17 +188,19 @@ DS p.30.
 DS p.31.
 
 > 26h is headed "(R)" on DS p.31, but p.15 has drivers set bits 4:2 to share
-> DMA channels, so they are tiered EXPERT
+> DMA channels, so they are tiered EXPERT. A clear bit 3 or 2 kept the
+> engine's DMA from running on the Armada, whatever the data sheet's "1 =
+> enable mask" says
 
-* **4 External DMA mask** (`pnp.ext_dma_mask`, bit, expert). 1 = external
-  DMA mask enabled, 0 = disabled; set it while DMA channels are shared (DS
-  p.15, p.31).
-* **3 Audio 2 DMA mask** (`pnp.a2_dma_mask`, bit, expert). 1 = Audio 2 DMA
-  mask enabled, 0 = disabled; set it while DMA channels are shared (DS p.15,
-  p.31).
-* **2 Audio 1 DMA mask** (`pnp.a1_dma_mask`, bit, expert). 1 = Audio 1 DMA
-  mask enabled, 0 = disabled; set it while DMA channels are shared (DS p.15,
-  p.31).
+* **4 External DMA mask** (`pnp.ext_dma_mask`, bit, expert). Gates the
+  external DMA requests, for a channel two devices share; 1 lets them out if
+  it works as bits 3:2 do (DS p.15, p.31).
+* **3 Audio 2 DMA mask** (`pnp.a2_dma_mask`, bit, expert). 1 = Audio 2's DMA
+  requests go out; 0 = they are masked, and Audio 2's DMA never runs
+  (measured; DS p.15, p.31).
+* **2 Audio 1 DMA mask** (`pnp.a1_dma_mask`, bit, expert). 1 = Audio 1's DMA
+  requests go out; 0 = they are masked, and Audio 1's DMA never runs
+  (measured; DS p.15, p.31).
 * **1 GPO1 pin is DACK** (`pnp.gpo1_is_dack`, bit, read-only). 1 = the GPO1
   pin is an external DACK and GPI an external DRQ; 0 = the GPO1 pin is GPO1
   (DS p.31).
