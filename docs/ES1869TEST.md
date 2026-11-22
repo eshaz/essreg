@@ -335,7 +335,14 @@ against the stream, the filter's C code and the dig path.
   square wave's program 81, which the file plays, has a vibrato of its own);
   WildMidi on a DAC; a note out of the MPU-401. `midi.mpu.loop` sends 240
   bytes and reads them back through a cable from MIDI out to MIDI in, and
-  skips with no cable.
+  skips with no cable. `midi.esfm.tune` plays seventeen notes of Muted
+  Trumpet, A1 to A6 and C4 to B4, and measures each within 2 cents of A4 =
+  440 Hz on the FM's clock with `esfm_a440`, and A4 12.6 cents flat with
+  ESS's F-numbers. `midi.esfm.pan` plays the trumpet panned left, right and
+  to the center, and drums 41 and 50, which ESS's bank sends left and right
+  of their own, and checks each on its side with the other at least 60 dB
+  under it: ESS's left on the left output with `fm_sides`, on the right
+  without. The ESFM and OPL3 cases record PCM 1 with the output muted.
 * `3d`: the 3-D effect measured as ess3d measures it (src/s3dmeas.c), tones
   on Audio 2 recorded from record source 7, with each run's registers set
   through the driver's controls. `3d.quick` checks the boost with ESS's

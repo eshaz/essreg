@@ -4,12 +4,14 @@
 """The Linux driver's ESFM General MIDI engine (linux/es1869/esfm_gm.c),
 built for the host, against the fixed ESFM.DRV running in esfmemu: the same
 MIDI messages make the same native register writes, in the same order, and
-leave the same voice table (docs/ESFM_ENGINE.md).
+leave the same voice table (docs/ESFM_ENGINE.md), with the sides option as
+ESFM.DRV's TrueSides; and the engine's own a440, tuned to the chip's clock.
 
 usage: python3 -m unittest tests.test_esfmgm   (needs gcc and unicorn)
 """
 
 import ctypes
+import math
 import os
 import random
 import shutil
@@ -34,8 +36,13 @@ FIXED = os.path.join(ROOT, "build", "ESFM.DRV")
 SWITCHES = ["Vibrato", "Tuning", "ResetControllers", "LivePan", "SysEx",
             "PedalRelease", "SilenceOnClose"]
 ALL = (1 << len(SWITCHES)) - 1
-# the Linux engine's own: pan left with register 6 bit 5, the chip's left
+# the sides (fm_sides), as ESFM.DRV's TrueSides: one-sided register 6 turned
+# round, so that ESS's left plays on the chip's left
 SIDES = 1 << len(SWITCHES)
+# the Linux engine's own: F-numbers of A4 = 440 Hz on the chip's clock
+A440 = SIDES << 1
+# the chip's FM clock, the 23.814 MHz master over 480, as essprobe measured
+FM_HZ = 49612.5
 
 _LIB = {}
 
@@ -108,10 +115,7 @@ def emulator(data, opts=ALL):
         e = ESFMEmu(f.read(), bank=data)
     for i, key in enumerate(SWITCHES):
         e.ini[("esfm.drv", key.lower())] = "1" if opts >> i & 1 else "0"
-    # ESS's side bits, as the engine writes them without its sides option:
-    # the driver's TrueSides also swaps a patch's own side, which sides
-    # leaves alone
-    e.ini[("esfm.drv", "truesides")] = "0"
+    e.ini[("esfm.drv", "truesides")] = "1" if opts & SIDES else "0"
     assert e.driverproc(DRV_ENABLE) & 0xFFFF == 1
     # the bank in place of the driver's own, as esfmpat loads one
     sel = e.galloc(len(data), data)
@@ -206,6 +210,12 @@ class EsfmDrvTest(unittest.TestCase):
                                      "bnk_com_better_square_wave.bin"]):
             self.play(bank(name), ALL, 1500, seed)
 
+    def test_true_sides(self):
+        """the sides option makes TrueSides' writes"""
+        for seed, name in enumerate(["bnk_com.bin", "bnk_NT4.bin",
+                                     "bnk_com_better_square_wave.bin"]):
+            self.play(bank(name), ALL | SIDES, 1000, 50 + seed)
+
     def test_each_switch_off(self):
         for i, key in enumerate(SWITCHES):
             with self.subTest(switch=key):
@@ -235,15 +245,18 @@ class EsfmDrvTest(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("gcc"), "needs gcc")
 class SidesTest(unittest.TestCase):
-    """the sides option: pan left with bit 5 and right with bit 4, as the
-    chip plays them, and nothing else changed"""
+    """the sides option, as ESFM.DRV's TrueSides: each write of an
+    operator's register 6 that sends it to one side has bits 4 and 5
+    swapped, the pan's and the patch's own alike, and nothing else changes"""
 
     @staticmethod
-    def swapped(v):
+    def swapped(r, v):
         side = v & 0x30
-        return v ^ 0x30 if side in (0x10, 0x20) else v
+        if r < 0x240 and r & 7 == 6 and side in (0x10, 0x20):
+            return v ^ 0x30
+        return v
 
-    def test_only_the_pan_bits_change(self):
+    def test_one_sided_writes_turn_round(self):
         # the harness keeps one list of writes, so each engine's are taken
         # right after it runs
         rng = random.Random(5)
@@ -258,12 +271,9 @@ class SidesTest(unittest.TestCase):
             want = ess.writes()
             ours.short(msg)
             got = ours.writes()
-            self.assertEqual([r for r, _ in got], [r for r, _ in want], i)
-            for (r, a), (_, b) in zip(want, got):
-                if a != b:
-                    self.assertTrue(r < 0x240 and r & 7 == 6, hex(r))
-                    self.assertEqual(b, self.swapped(a), hex(r))
-                    moved += 1
+            self.assertEqual(got, [(r, self.swapped(r, v)) for r, v in want],
+                             i)
+            moved += sum(a != b for (_, a), (_, b) in zip(want, got))
             self.assertEqual(ours.voices(), ess.voices())
         self.assertGreater(moved, 100)
 
@@ -279,6 +289,90 @@ class SidesTest(unittest.TestCase):
             self.assertEqual(set(outs), {side}, val)
             e.short(0x80 | 60 << 8)
             e.writes()
+
+    def test_patch_sides_turn_round(self):
+        """at the center, drum 41, which ESS's bank sends left (10h), plays
+        on the chip's left (bit 5) with sides, and drum 50 on its right"""
+        for opts, left in ((ALL | SIDES, 0x20), (ALL, 0x10)):
+            e = Engine(bank(), opts)
+            e.writes()
+            for note, want in ((41, left), (50, left ^ 0x30)):
+                e.short(0x99 | note << 8 | 100 << 16)
+                outs = {v & 0x30 for r, v in e.writes()
+                        if r < 0x240 and r & 7 == 6 and v & 0x30}
+                self.assertEqual(outs, {want}, (opts, note))
+                e.short(0x89 | note << 8)
+                e.writes()
+
+
+def note_cents(writes, note):
+    """each operator's F-number and block in writes, as cents from the
+    note's pitch with A4 = 440 Hz, on the chip's clock"""
+    regs = {}
+    for r, v in writes:
+        if r < 0x240 and r & 7 in (4, 5):
+            regs[(r >> 3, r & 7)] = v
+    out = []
+    for (op, n), v in sorted(regs.items()):
+        if n == 4 and (op, 5) in regs:
+            r5 = regs[(op, 5)]
+            f = (v | (r5 & 3) << 8) * FM_HZ * 2 ** ((r5 >> 2 & 7) - 20)
+            out.append(1200 * math.log2(f / 440 / 2 ** ((note - 69) / 12)))
+    return out
+
+
+@unittest.skipUnless(shutil.which("gcc"), "needs gcc")
+class TuneTest(unittest.TestCase):
+    """a440: ESS's F-numbers, AdLib's table made for 50000 Hz, against those
+    of A4 = 440 Hz on the chip's 49612.5 Hz"""
+
+    @staticmethod
+    def cents(opts, notes, prog=59):
+        # Muted Trumpet: one voice, no operator detuned or transposed
+        e = Engine(bank(), opts)
+        e.writes()
+        e.short(0xC0 | prog << 8)
+        e.writes()
+        out = {}
+        for n in notes:
+            e.short(0x90 | n << 8 | 100 << 16)
+            out[n] = note_cents(e.writes(), n)
+            e.short(0x80 | n << 8)
+            e.writes()
+        return out
+
+    def test_a440_in_tune(self):
+        for n, cs in self.cents(ALL | A440, range(19, 115)).items():
+            self.assertEqual(len(cs), 4, n)
+            for c in cs:
+                self.assertLess(abs(c), 1.3, n)
+
+    def test_ess_table_flat(self):
+        for n, cs in self.cents(ALL, range(19, 115)).items():
+            self.assertEqual(len(cs), 4, n)
+            for c in cs:
+                self.assertTrue(-14.7 < c < -12.4, (n, c))
+
+    def test_only_the_f_numbers_change(self):
+        rng = random.Random(9)
+        ess = Engine(bank(), ALL)
+        ess.writes()
+        ours = Engine(bank(), ALL | A440)
+        ours.writes()
+        moved = 0
+        for i in range(3000):
+            msg = random_message(rng)
+            ess.short(msg)
+            want = ess.writes()
+            ours.short(msg)
+            got = ours.writes()
+            self.assertEqual([r for r, _ in got], [r for r, _ in want], i)
+            for (r, a), (_, b) in zip(want, got):
+                if a != b:
+                    self.assertTrue(r < 0x240 and r & 7 in (4, 5), hex(r))
+                    moved += 1
+            self.assertEqual(ours.voices(), ess.voices())
+        self.assertGreater(moved, 100)
 
 
 if __name__ == "__main__":

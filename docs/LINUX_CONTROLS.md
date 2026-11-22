@@ -516,8 +516,8 @@ Parameters only:
   The ESFM hwdep and synth open. Parameter `esfm`. It takes effect at the
   next open.
 * `FM Sides Switch` (the card interface, not in alsamixer): 0 to 1,
-  default 1. OPL3 channel A and the ESFM synth's pan left on the left
-  output; 0 the chip's mirror. Parameter `fm_sides`.
+  default 1. ESS's left and OPL3 channel A on the left output, each
+  one-sided write swapped; 0 the chip's mirror. Parameter `fm_sides`.
 * `ESFM Better Square Switch` (the card interface, not in alsamixer): 0 to
   1, default 0. The bank with the better square wave
   (es1869/esfm-gm-square.bin). Parameter `esfm_square`.
@@ -535,6 +535,9 @@ Parameters only:
 * `ESFM Tuning Switch` (the card interface, not in alsamixer): 0 to 1,
   default 1. RPN 1 and 2, fine and coarse tuning. Parameter `esfm_tuning`.
   It takes effect at the next open.
+* `ESFM A440 Switch` (the card interface, not in alsamixer): 0 to 1,
+  default 1. Notes in tune on the chip's FM clock; 0 ESS's F-numbers, 13
+  cents flat. Parameter `esfm_a440`. It takes effect at the next open.
 * `ESFM Reset Controllers Switch` (the card interface, not in alsamixer): 0
   to 1, default 1. Controller 121 as RP-015 has it; 0 ESS's reset. Parameter
   `esfm_reset_controllers`. It takes effect at the next open.

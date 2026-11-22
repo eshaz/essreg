@@ -340,7 +340,7 @@ ES1869_SET(esfm, ESFM, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
 	   "the ESFM hwdep and synth open")
 ES1869_SET(fm_sides, FM_SIDES, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
 	   T_NONE, F_CTL | F_PARAM, 0, "FM Sides Switch", "",
-	   "OPL3 channel A and the ESFM synth's pan left on the left output; 0 the chip's mirror")
+	   "ESS's left and OPL3 channel A on the left output, each one-sided write swapped; 0 the chip's mirror")
 ES1869_SET(esfm_delay, ESFM_DELAY, S_INT, B_NONE, 0, 0, 0, 0, 32, 6,
 	   T_NONE, F_PARAM, 0, "", "",
 	   "status reads after each ESFM address or data write")
@@ -362,6 +362,9 @@ ES1869_SET(esfm_vibrato, ESFM_VIBRATO, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
 ES1869_SET(esfm_tuning, ESFM_TUNING, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
 	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "ESFM Tuning Switch", "",
 	   "RPN 1 and 2, fine and coarse tuning")
+ES1869_SET(esfm_a440, ESFM_A440, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
+	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "ESFM A440 Switch", "",
+	   "notes in tune on the chip's FM clock; 0 ESS's F-numbers, 13 cents flat")
 ES1869_SET(esfm_reset_controllers, ESFM_RESET_CONTROLLERS, S_BOOL, B_NONE, 0, 0, 0, 0, 1, 1,
 	   T_NONE, F_CTL | F_PARAM | F_OPEN, 0, "ESFM Reset Controllers Switch", "",
 	   "controller 121 as RP-015 has it; 0 ESS's reset")

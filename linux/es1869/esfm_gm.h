@@ -21,8 +21,9 @@ struct esfm_gm_io {
 	void (*write)(void *ctx, u16 reg, u8 val);
 };
 
-// the fixed driver's [ESFM.DRV] switches; each false gives ESS's behaviour
-// there (docs/ESFM_ENGINE.md section 9)
+// the fixed driver's [ESFM.DRV] switches, sides as its TrueSides, and a440
+// of this driver's own; each false gives ESS's behaviour there
+// (docs/ESFM_ENGINE.md section 9)
 struct esfm_gm_opts {
 	bool vibrato; // the modulation wheel and channel pressure
 	bool tuning; // RPN 0 with cents, RPN 1 and 2, bend ranges past 24
@@ -31,7 +32,8 @@ struct esfm_gm_opts {
 	bool sysex; // GM, GM2, GS and XG resets, the master volume
 	bool pedal_release; // a program change lets the pedal up
 	bool silence; // a close keys off what the pedal holds too
-	bool sides; // pan left on the chip's left output, register 6 bit 5
+	bool sides; // ESS's left on the chip's left: one-sided register 6 swapped
+	bool a440; // F-numbers of A4 = 440 Hz on the chip's 49612.5 Hz
 };
 
 struct esfm_voice {

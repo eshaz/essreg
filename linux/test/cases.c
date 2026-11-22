@@ -69,6 +69,8 @@ FN(c_a1play_click)
 FN(c_midi_esfm)
 FN(c_midi_soft)
 FN(c_midi_opl3)
+FN(c_midi_esfm_tune)
+FN(c_midi_esfm_pan)
 FN(c_buf_delay)
 FN(c_buf_drain)
 FN(c_buf_xrun)
@@ -461,6 +463,10 @@ const struct et_case et_cases[] = {
 	     "GMCHECK.MID on the ESFM synth, every step on PCM 1")
 	CASE("midi.opl3", ET_MIDI | N, c_midi_opl3, 0,
 	     "the OPL3 synth with sbiload's bank: notes, pitch and pan on PCM 1")
+	CASE("midi.esfm.tune", ET_MIDI | N, c_midi_esfm_tune, 0,
+	     "the ESFM synth's notes within 2 cents of A440 on the FM's clock, and ESS's F-numbers' A4 12.6 cents flat")
+	CASE("midi.esfm.pan", ET_MIDI | N, c_midi_esfm_pan, 0,
+	     "ESS's left on the left output with fm_sides: pan 0, 127 and 64, and a patch's own side, drums 41 and 50")
 	CASE("midi.soft", ET_MIDI | R, c_midi_soft, 0,
 	     "WildMidi on Audio 1, heard by the second card")
 };

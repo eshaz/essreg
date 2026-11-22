@@ -1010,10 +1010,11 @@ config SND_ES1869_DEFAULT_FM_SIDES
 	range 0 1
 	default 1
 	help
-	  OPL3 channel A and the ESFM synth's pan left on the left
-	  output; 0 the chip's mirror. The ALSA control "FM Sides
-	  Switch". The module parameter fm_sides sets it at load and at
-	  runtime, through /sys/module/snd_es1869/parameters/fm_sides.
+	  ESS's left and OPL3 channel A on the left output, each
+	  one-sided write swapped; 0 the chip's mirror. The ALSA control
+	  "FM Sides Switch". The module parameter fm_sides sets it at
+	  load and at runtime, through
+	  /sys/module/snd_es1869/parameters/fm_sides.
 
 config SND_ES1869_DEFAULT_ESFM_DELAY
 	int "esfm_delay"
@@ -1084,6 +1085,16 @@ config SND_ES1869_DEFAULT_ESFM_TUNING
 	  Tuning Switch". The module parameter esfm_tuning sets it at
 	  load and at runtime, through
 	  /sys/module/snd_es1869/parameters/esfm_tuning.
+
+config SND_ES1869_DEFAULT_ESFM_A440
+	int "esfm_a440"
+	range 0 1
+	default 1
+	help
+	  Notes in tune on the chip's FM clock; 0 ESS's F-numbers, 13
+	  cents flat. The ALSA control "ESFM A440 Switch". The module
+	  parameter esfm_a440 sets it at load and at runtime, through
+	  /sys/module/snd_es1869/parameters/esfm_a440.
 
 config SND_ES1869_DEFAULT_ESFM_RESET_CONTROLLERS
 	int "esfm_reset_controllers"

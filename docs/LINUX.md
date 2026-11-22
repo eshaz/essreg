@@ -544,18 +544,20 @@ MIDI files play these ways on the laptop:
 
 The chip plays the FM's two sides the other way round from an OPL3: bit 4 of
 C0h-C8h, an OPL3's channel A and its left, sounds on the right output, and
-so does bit 4 of the native mode's register 6, which ESS's driver uses for
-the left. With `fm_sides=1`, the default, the driver swaps the two bits in
-what the OPL3 synth and hwdep write, and the ESFM synth pans left with bit
-5, so that a channel panned left sounds on the left. The ESFM hwdep writes
-its registers as it gets them. With `fm_sides=0` both synths play as the
-chip has it, mirrored, which is what ESS's drivers do.
+so does bit 4 of the native mode's register 6, which ESS's driver and bank
+use for the left. With `fm_sides=1`, the default, the driver swaps the two
+bits in each one-sided write of the OPL3 synth and hwdep and of the ESFM
+synth, as ESFM.DRV's `TrueSides` does, so that left is left, a patch's own
+too. The ESFM hwdep writes what it gets. With `fm_sides=0` both synths play
+mirrored, as ESS's drivers do.
 
 The ESFM synth follows the rebuilt ESFM.DRV, which `tests/test_esfmgm.py`
 checks message by message in the emulator, and it played `build/GMCHECK.MID`
 on the Armada with every step as [TESTING.md](TESTING.md#g3-general-midi)
-describes it. Like ESS's driver, it plays 12.5 to 14.6 cents flat of A4 =
-440 Hz on the chip ([ESFM_ENGINE.md](ESFM_ENGINE.md#6-pitch)).
+describes it. ESS's F-numbers play 12.5 to 14.6 cents flat of A4 = 440 Hz on
+the chip, and `esfm_a440=1`, the default, tunes them
+([ESFM_ENGINE.md](ESFM_ENGINE.md#6-pitch)). The kernel's OPL3 synth plays as
+flat.
 
 The MPU-401 is raw MIDI device 0, in UART mode, and a byte coming in raises
 the chip's interrupt. The driver opens and sends through it, but no byte has
@@ -974,8 +976,9 @@ saved state wins over a parameter. The defaults are the Kconfig options
 * `opl3` ("OPL3 Switch"): 0 to 1, default 1. The OPL3 hwdep and synth open.
 * `esfm` ("ESFM Switch"): 0 to 1, default 1. The ESFM hwdep and synth open.
   It takes effect at the next open.
-* `fm_sides` ("FM Sides Switch"): 0 to 1, default 1. OPL3 channel A and the
-  ESFM synth's pan left on the left output; 0 the chip's mirror.
+* `fm_sides` ("FM Sides Switch"): 0 to 1, default 1. ESS's left and OPL3
+  channel A on the left output, each one-sided write swapped; 0 the chip's
+  mirror.
 * `esfm_delay`: 0 to 32, default 6. Status reads after each ESFM address or
   data write.
 * `esfm_bank`: default "es1869/esfm-gm.bin". The GM bank's firmware file; a
@@ -994,6 +997,9 @@ saved state wins over a parameter. The defaults are the Kconfig options
   open.
 * `esfm_tuning` ("ESFM Tuning Switch"): 0 to 1, default 1. RPN 1 and 2, fine
   and coarse tuning. It takes effect at the next open.
+* `esfm_a440` ("ESFM A440 Switch"): 0 to 1, default 1. Notes in tune on the
+  chip's FM clock; 0 ESS's F-numbers, 13 cents flat. It takes effect at the
+  next open.
 * `esfm_reset_controllers` ("ESFM Reset Controllers Switch"): 0 to 1,
   default 1. Controller 121 as RP-015 has it; 0 ESS's reset. It takes effect
   at the next open.

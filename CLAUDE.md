@@ -566,9 +566,10 @@ tools/wineshot.sh run ess3d.exe /sim tray
     `ET_NEW`, which `--stock` (the run on snd-es18xx) skips, and a case that
     suspends or reloads the driver is opt-in and needs `--destructive`.
   * The ESFM engine makes the rebuilt ESFM.DRV's register writes for the
-    same messages. A difference on purpose is an option of
-    `struct esfm_gm_opts`, off in the comparison, with a test of what it
-    changes (`sides`, the chip's left and right, in `SidesTest`).
+    same messages, with `sides` those of its `TrueSides`. A difference on
+    purpose is an option of `struct esfm_gm_opts`, off in the comparison,
+    with a test of what it changes (`a440`, the F-numbers of A4 = 440 Hz on
+    the chip's 49,612.5 Hz, in `TuneTest`).
   * On the Armada, ask celeronix's sessions before a hardware session and
     check `mpc status` before unloading a sound module.
   * The Armada's BIOS sets the PIIX4's Type F DMA timing on the ES1869's

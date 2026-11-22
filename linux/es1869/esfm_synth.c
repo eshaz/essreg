@@ -91,6 +91,7 @@ static void esfm_opts(struct esfm_gm_opts *o)
 	o->sysex = es1869_val(ES_S_esfm_sysex);
 	o->silence = es1869_val(ES_S_esfm_silence_on_close);
 	o->sides = es1869_val(ES_S_fm_sides);
+	o->a440 = es1869_val(ES_S_esfm_a440);
 }
 
 // the bank file, checked; the fallback when it is missing or bad

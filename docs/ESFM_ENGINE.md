@@ -441,6 +441,17 @@ master over 480, 49612.5 Hz, which essprobe measured in DOS and es1869test's
 clock, so on the chip ESS's notes play 12.5 to 14.6 cents flat. Note 60 of
 GM program 81, whose operators are detuned, reads 259.3 Hz, 15.7 cents flat.
 
+The Linux driver's `esfm_a440`, on by default, takes the F-numbers of A4 =
+440 Hz on that clock in place of `FNUM`, 440 x 2^((n - 69) / 12) x 2^20 /
+49612.5 for notes 19 to 30, as ESFM.DRV's OPL3 device does:
+
+```
+A440:  518  549  581  616  652  691  732  776  822  871  923  977
+```
+
+Every note is then within 1.3 cents of equal temperament, and the rest of
+the arithmetic, the detune and the bend, is ESS's.
+
 ### Pitch bend
 
 The bend is the 14-bit value of `En`, data 2 x 128 + data 1 (seg1:13D2), and
@@ -592,9 +603,11 @@ but the chip plays them the other way round. On the Armada's ES1869,
 recorded digitally (mixer 7Fh bit 4) and through the output, bit 4 of
 register 6 sounds on the right output and bit 5 on the left, and so do bits
 4 and 5 of C0h-C8h in the OPL3 mode, an OPL3's channels A and B. So ESS's
-driver and the rebuilt one play a channel panned left on the right output.
-The Linux driver pans with the chip's sides (`fm_sides`,
-[LINUX.md](LINUX.md#midi)).
+driver plays a channel panned left on the right output, and what a patch
+sends left of its own, such as drum 41, the low floor tom, on the right too.
+The rebuilt driver's `TrueSides` and the Linux driver's `fm_sides` swap the
+two bits in each write that sends an operator to one side only, the pan's
+and the patch's own alike ([LINUX.md](LINUX.md#midi)).
 
 ESS's driver pans only the next notes. The rebuilt driver also pans the
 sounding notes (section 9).
@@ -767,8 +780,10 @@ the same, or fix them:
   modulators included, and loses the KSL bits until the volume comes back
   (section 7, verified).
 * **Tuning.** The F-numbers are 9 to 11 cents flat at 49716 Hz, and 12.5 to
-  14.6 cents flat at the chip's 49612.5 Hz (section 6).
-* **Pan.** Left and right are the other way round on the chip (section 8).
+  14.6 cents flat at the chip's 49612.5 Hz (section 6). The Linux driver's
+  `esfm_a440` tunes them.
+* **Pan.** Left and right are the other way round on the chip (section 8),
+  unless `TrueSides` or the Linux driver's `fm_sides` turns them round.
 
 ## 12. Open points
 

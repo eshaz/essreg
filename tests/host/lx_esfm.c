@@ -28,7 +28,8 @@ static void lx_write(void *ctx __attribute__((unused)), u16 reg, u8 val)
 static const struct esfm_gm_io lx_io = { NULL, lx_write };
 
 // opts: bit 0 Vibrato, 1 Tuning, 2 ResetControllers, 3 LivePan, 4 SysEx,
-// 5 PedalRelease, 6 SilenceOnClose, 7 the sides (fm_sides)
+// 5 PedalRelease, 6 SilenceOnClose, 7 the sides (fm_sides, TrueSides), 8
+// a440 (esfm_a440)
 struct esfm_gm *lx_esfm_new(const u8 *bank, u32 len, unsigned int opts)
 {
 	struct esfm_gm *g = calloc(1, sizeof(*g));
@@ -37,6 +38,7 @@ struct esfm_gm *lx_esfm_new(const u8 *bank, u32 len, unsigned int opts)
 		.reset_controllers = opts & 4, .live_pan = opts & 8,
 		.sysex = opts & 16, .pedal_release = opts & 32,
 		.silence = opts & 64, .sides = opts & 128,
+		.a440 = opts & 256,
 	};
 
 	if (g)

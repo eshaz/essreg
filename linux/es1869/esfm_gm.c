@@ -37,6 +37,13 @@ static const u16 fnum_tab[12] = {
 	0x2D7, 0x302, 0x330, 0x360, 0x394, 0x3CA
 };
 
+// with a440, the same for A4 = 440 Hz on the chip's FM clock, the 23.814
+// MHz master over 480: 440 * 2^((n - 69) / 12) * 2^20 / 49612.5 for notes
+// 19 (G0) to 30, as ESFM.DRV's OPL3 device has them. ESS's table is
+// AdLib's, made for 50000 Hz, and plays 12.5 to 14.6 cents flat here
+static const u16 fnum_a440[12] = { 518, 549, 581, 616, 652, 691,
+				   732, 776, 822, 871, 923, 977 };
+
 static const u16 detune_tab[12] = {
 	256, 242, 228, 215, 203, 192, 181, 171, 161, 152, 144, 136
 };
@@ -67,8 +74,17 @@ static const u8 master_tab[32] = {
 	15, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 2, 1, 0
 };
 
+// with sides, an operator's register 6 that sends it to one side has bits
+// 4 and 5 swapped, as ESFM.DRV's TrueSides does: the chip plays bit 4 on
+// its right output and bit 5 on its left, and ESS's pan and patches take
+// bit 4 for the left
 static void wr(struct esfm_gm *g, u16 reg, u8 val)
 {
+	u8 side = val & 0x30;
+
+	if (g->opts.sides && reg < 0x240 && (reg & 7) == 6 &&
+	    (side == 0x10 || side == 0x20))
+		val ^= 0x30;
 	g->io->write(g->io->ctx, reg, val);
 }
 
@@ -330,7 +346,8 @@ static void program_operator(struct esfm_gm *g, unsigned int v,
 			if (block > 1)
 				delta >>= block - 1;
 		}
-		fnum = (fnum_tab[semi] + delta) & 0xFFFF;
+		fnum = ((g->opts.a440 ? fnum_a440 : fnum_tab)[semi] + delta) &
+		       0xFFFF;
 		r5 = ((fnum >> 8) & 3) + (p[5] & 0xE0) + block * 4;
 		g->voice[v].reg5[op] = r5;
 		g->voice[v].base[op] = fnum;
@@ -524,13 +541,11 @@ static void vibrato(struct esfm_gm *g, u8 ch)
 	}
 }
 
-// the output bits of a pan position: ESS's 10h for the left, which the
-// chip plays on its right output, or with sides 20h, its left
-static u8 pan_bits(const struct esfm_gm *g, u8 val)
+// the output bits of a pan position, ESS's: 10h for the left and 20h for
+// the right, which wr() turns round with sides
+static u8 pan_bits(u8 val)
 {
-	u8 left = g->opts.sides ? 0x20 : 0x10;
-
-	return val > 0x50 ? 0x30 ^ left : val < 0x30 ? left : 0x30;
+	return val > 0x50 ? 0x20 : val < 0x30 ? 0x10 : 0x30;
 }
 
 // --- messages ----------------------------------------------------------------------
@@ -546,8 +561,8 @@ static bool control_fixed(struct esfm_gm *g, u8 ch, u8 cc, u8 val)
 		c->mod = val;
 		vibrato(g, ch);
 	} else if ((cc == 8 || cc == 10) && o->live_pan) {
-		if (c->pan != pan_bits(g, val)) {
-			c->pan = pan_bits(g, val);
+		if (c->pan != pan_bits(val)) {
+			c->pan = pan_bits(val);
 			refresh(g, ch);
 		}
 	} else if ((cc == 98 || cc == 99) && o->tuning) {
@@ -612,7 +627,7 @@ static void control(struct esfm_gm *g, u8 ch, u8 cc, u8 val)
 		break;
 	case 8:
 	case 10:
-		c->pan = pan_bits(g, val);
+		c->pan = pan_bits(val);
 		break;
 	case 11:
 		c->expr = val;

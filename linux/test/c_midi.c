@@ -10,11 +10,16 @@
  * The file's steps (docs/TESTING.md, G3): modulation 0.5-4.5 s, channel
  * pressure 5-8.5 s, pan 9-13 s, fine tuning 13.5-17.5 s, coarse tuning
  * 18-20.8 s, a bend range of 12 21.5-25.5 s, the master volume 26-30 s and
- * controller 121 30.5-34 s. ESS's notes play about 12 cents flat, so the
- * pitches are measured against the file's first note, within 10 cents:
- * program 81 is two voices a few cents apart, which beat, so the full
- * vibrato measured 11 to 22 cents from run to run on the Armada, and only
- * its floor of 10 cents, against 0.2 without it, is checked.
+ * controller 121 30.5-34 s. The pitches are measured against the file's
+ * first note, within 10 cents: program 81 is two voices a few cents apart,
+ * which beat, so the full vibrato measured 11 to 22 cents from run to run
+ * on the Armada, and only its floor of 10 cents, against 0.2 without it, is
+ * checked. Its operators sit 5.5 cents flat to 2 cents sharp of C4 with
+ * esfm_a440, and 10.5 to 18.1 cents flat with ESS's F-numbers, which
+ * midi.esfm.tune measures on a patch with none detuned.
+ *
+ * The cases record the FM on PCM 1 with the output muted, which the music
+ * DAC's digital path doesn't hear.
  *
  * The limits are those of ESS's bank and of every change of the rebuilt
  * driver, so midi.esfm sets them whatever the machine keeps. The better
@@ -390,6 +395,8 @@ enum et_result c_midi_esfm(struct et_ctx *c, const struct et_case *k)
 	et_ctl_set(c, "ESFM Better Square Switch", 0, 0, 0);
 	for (fix = 0; fix < sizeof(esfm_fixes) / sizeof(esfm_fixes[0]); fix++)
 		et_ctl_set(c, esfm_fixes[fix], 0, 1, 1);
+	et_ctl_set(c, "ESFM A440 Switch", 0, 1, 1);
+	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
 	et_ctl_set(c, "Video Playback Switch", 0, 0, 0);
 	et_mix_dig(c, 0);
 	snprintf(cmd, sizeof(cmd), "aplaymidi -p 'ES1869 ESFM synth' '%s'",
@@ -424,10 +431,10 @@ enum et_result c_midi_esfm(struct et_ctx *c, const struct et_case *k)
 	r.off = x / ET_FM_RATE - 0.5;
 	et_measure(c, "MIDI time 0 in the recording", r.off, "s", 0, 1.5);
 
-	// the reference: the first note, in tune before the vibrato
-	ref = pitch(&r, 1, 0.8, 0.6, 259.8);
-	et_measure(c, "C4, against A440", cents(ref, 261.626), "cents", -20,
-		   0);
+	// the reference: the first note before the vibrato, about 3 cents flat
+	// with esfm_a440 on the FM's clock, and PCM 1's rate 10 ppm over it
+	ref = pitch(&r, 1, 0.8, 0.6, 261.6);
+	et_measure(c, "C4, against A440", cents(ref, 261.626), "cents", -8, 2);
 	et_measure(c, "modulation 0: vibrato", vibrato(&r, 1, 0.8, 0.6, ref),
 		   "cents", 0, 4);
 	et_measure(c, "modulation 40: vibrato", vibrato(&r, 1, 1.7, 0.7, ref),
@@ -531,6 +538,7 @@ enum et_result c_midi_opl3(struct et_ctx *c, const struct et_case *k)
 		return ET_ERROR;
 	}
 	et_param_get(c, "fm_sides", &sides);
+	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
 	et_ctl_set(c, "Video Playback Switch", 0, 0, 0);
 	et_mix_dig(c, 0);
 	snprintf(cmd, sizeof(cmd), "aplaymidi -p 'OPL3 FM synth' '%s'", path);
@@ -575,6 +583,223 @@ out:
 	free(r.ch[0]);
 	free(r.ch[1]);
 	free(s[0].data);
+	return ET_PASS;
+}
+
+// --- the ESFM synth's pitch and sides ------------------------------------------
+
+// the events, written to the output directory as file, through the ESFM
+// synth while PCM 1 records secs with the output muted; r gets both sides
+// less the idle level, its MIDI time 0 from the first sound, which each
+// file puts at 0.5 s, and data the recording, to free
+static int esfm_take(struct et_ctx *c, const char *file, double secs,
+		     struct rec *r, struct et_stream *s)
+{
+	char path[512], cmd[700];
+	struct et_stream cmd_s;
+	long first, o;
+	int ch;
+
+	memset(r, 0, sizeof(*r));
+	snprintf(path, sizeof(path), "%s/%s", c->outdir, file);
+	if (smf_write(path, file)) {
+		et_fail(c, "can't write %s", path);
+		return -1;
+	}
+	et_ctl_set(c, "Master Playback Switch", 0, 0, 0);
+	et_ctl_set(c, "Video Playback Switch", 0, 0, 0);
+	et_mix_dig(c, 0);
+	snprintf(cmd, sizeof(cmd), "aplaymidi -p 'ES1869 ESFM synth' '%s'",
+		 path);
+	s[0] = et_rec(ET_FMC, &et_fm_fmt, (unsigned long)(secs * ET_FM_RATE),
+		      0);
+	memset(&cmd_s, 0, sizeof(cmd_s));
+	cmd_s.role = ET_CMD;
+	cmd_s.cmd = cmd;
+	cmd_s.start = 0.5;
+	cmd_s.timeout = secs + 8;
+	s[1] = cmd_s;
+	if (et_run(c, s, 2) || s[1].status) {
+		et_fail(c, "aplaymidi: exit %d", s[1].status);
+		free(s[0].data);
+		return -1;
+	}
+	r->n = s[0].done;
+	for (ch = 0; ch < 2; ch++) {
+		long i;
+
+		r->ch[ch] = et_chan(&et_fm_fmt, s[0].data, r->n, ch);
+		for (i = 0; i < r->n; i++)
+			r->ch[ch][i] -= ET_FM_IDLE;
+	}
+	first = an_onset(r->ch[0], r->n, 2);
+	o = an_onset(r->ch[1], r->n, 2);
+	if (o >= 0 && (first < 0 || o < first))
+		first = o;
+	if (first < 0) {
+		et_fail(c, "the synth made no sound");
+		return 1;
+	}
+	r->off = (double)first / ET_FM_RATE - 0.5;
+	return 0;
+}
+
+static void esfm_done(struct et_ctx *c, struct rec *r, struct et_stream *s,
+		      const char *dump)
+{
+	if (c->fails)
+		et_dump(c, dump, &et_fm_fmt, s[0].data, s[0].done);
+	free(r->ch[0]);
+	free(r->ch[1]);
+	free(s[0].data);
+}
+
+// the ESFM synth from ESS's bank, with its GM reset
+static int esfm_ready(struct et_ctx *c)
+{
+	if (!has_port("ES1869 ESFM synth")) {
+		et_note(c, "no ESFM synth: load snd-es1869-esfm");
+		return -1;
+	}
+	et_ctl_set(c, "ESFM Better Square Switch", 0, 0, 0);
+	et_ctl_set(c, "ESFM SysEx Switch", 0, 1, 1);
+	return 0;
+}
+
+// midi.esfm.tune's notes: C4 to B4, one of each of the table's semitones,
+// and A in each other octave, a block each
+static const int tune_keys[] = { 33, 45, 57, 60, 61, 62, 63, 64, 65,
+				 66, 67, 68, 69, 70, 71, 81, 93 };
+
+// program 59, Muted Trumpet: one voice, no operator detuned or
+// transposed, so that it plays the note's own pitch; a note 1.2 s, its
+// pitch taken over 0.6 s from 0.35 s after its start, past the attack, 33
+// cycles of A1
+static void tune_events(const int *keys, int n)
+{
+	int i;
+
+	nev = 0;
+	at(0.0, 6, 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7);
+	at(0.1, 2, 0xC0, 59);
+	for (i = 0; i < n; i++)
+		note(0.5 + 1.2 * i, 1.5 + 1.2 * i, keys[i]);
+	qsort(evs, nev, sizeof(evs[0]), by_time);
+}
+
+// midi.esfm.tune: notes in tune, A4 = 440 Hz, on the FM's clock, which is
+// what PCM 1 records them on; with esfm_a440 off, ESS's F-numbers, AdLib's
+// table for 50000 Hz, A4 12.6 cents flat
+enum et_result c_midi_esfm_tune(struct et_ctx *c, const struct et_case *k)
+{
+	static const int a4[] = { 69 };
+	struct et_stream s[2];
+	struct rec r;
+	int pass, i, n, err;
+
+	(void)k;
+	if (esfm_ready(c))
+		return ET_SKIP;
+	for (pass = 0; pass < 2; pass++) {
+		const int *keys = pass ? a4 : tune_keys;
+
+		n = pass ? 1 : (int)(sizeof(tune_keys) / sizeof(tune_keys[0]));
+		et_ctl_set(c, "ESFM A440 Switch", 0, !pass, !pass);
+		tune_events(keys, n);
+		err = esfm_take(c, pass ? "ESSTUNE.MID" : "TUNE.MID",
+				1.5 + 1.2 * n, &r, s);
+		if (err < 0)
+			return ET_ERROR;
+		for (i = 0; !err && i < n; i++) {
+			double want = 440 * pow(2, (keys[i] - 69) / 12.0);
+			// the fit is on PCM 1's rate; the FM's clock is under it
+			double f = pitch(&r, 0, 0.85 + 1.2 * i, 0.6, want) *
+				   ET_FM_HZ / ET_FM_RATE;
+			char name[48];
+
+			snprintf(name, sizeof(name), "%s, note %d",
+				 pass ? "ESS's F-numbers" : "esfm_a440",
+				 keys[i]);
+			et_measure(c, name, cents(f, want), "cents",
+				   pass ? -14 : -2, pass ? -11 : 2);
+		}
+		esfm_done(c, &r, s, pass ? "fm-ess" : "fm");
+	}
+	return ET_PASS;
+}
+
+// midi.esfm.pan's file: Muted Trumpet, its operators on both sides,
+// panned left, right and to the center, then at the center drum 41, the
+// low floor tom, which ESS's bank sends left (10h), and 4 s later, when
+// its ring has died, drum 50, the high tom, sent right (20h)
+static void pan_events(void)
+{
+	nev = 0;
+	at(0.0, 6, 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7);
+	at(0.1, 2, 0xC0, 59);
+	at(0.1, 3, 0xB9, 10, 64);
+	cc(0.3, 10, 0);
+	note(0.5, 1.1, 69);
+	cc(1.3, 10, 127);
+	note(1.5, 2.1, 69);
+	cc(2.3, 10, 64);
+	note(2.5, 3.1, 69);
+	at(3.5, 3, 0x99, 41, 100);
+	at(3.7, 3, 0x89, 41, 0);
+	at(7.5, 3, 0x99, 50, 100);
+	at(7.7, 3, 0x89, 50, 0);
+	qsort(evs, nev, sizeof(evs[0]), by_time);
+}
+
+// a sound on one side, the other at least 60 dB under it
+static void one_side(struct et_ctx *c, const struct rec *r, double t,
+		     const char *what, int right)
+{
+	double on = an_dbfs(level(r, right, t, 0.3));
+	double off = an_dbfs(level(r, !right, t, 0.3));
+	char name[64];
+
+	snprintf(name, sizeof(name), "%s, on the %s", what,
+		 right ? "right" : "left");
+	et_measure(c, name, on, "dBFS", -50, 0);
+	snprintf(name, sizeof(name), "%s, the %s under it", what,
+		 right ? "left" : "right");
+	et_measure(c, name, off - on, "dB", -200, -60);
+}
+
+// midi.esfm.pan: what ESS calls left sounds on the left output with
+// fm_sides, a channel's pan and a patch's own side alike, and on the right
+// without, as ESS's driver plays it
+enum et_result c_midi_esfm_pan(struct et_ctx *c, const struct et_case *k)
+{
+	struct et_stream s[2];
+	struct rec r;
+	long sides = 1;
+	double l, rr;
+	int left, err;
+
+	(void)k;
+	if (esfm_ready(c))
+		return ET_SKIP;
+	et_ctl_set(c, "ESFM Live Pan Switch", 0, 1, 1);
+	et_param_get(c, "fm_sides", &sides);
+	left = !sides;
+	pan_events();
+	err = esfm_take(c, "PAN.MID", 9.0, &r, s);
+	if (err < 0)
+		return ET_ERROR;
+	if (!err) {
+		one_side(c, &r, 0.75, "pan 0", left);
+		one_side(c, &r, 1.75, "pan 127", !left);
+		l = an_dbfs(level(&r, 0, 2.75, 0.3));
+		rr = an_dbfs(level(&r, 1, 2.75, 0.3));
+		et_measure(c, "pan 64, left", l, "dBFS", -50, 0);
+		et_measure(c, "pan 64, right against left", rr - l, "dB", -0.5,
+			   0.5);
+		one_side(c, &r, 3.52, "drum 41, ESS's left", left);
+		one_side(c, &r, 7.52, "drum 50, ESS's right", !left);
+	}
+	esfm_done(c, &r, s, "fm");
 	return ET_PASS;
 }
 

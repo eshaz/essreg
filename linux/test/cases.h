@@ -13,6 +13,7 @@
 #include "et.h"
 
 #define ET_FM_RATE 49613 // PCM 1's, the music DAC's 49612.5 Hz
+#define ET_FM_HZ 49612.5 // the FM's clock, the master over 480 (clock.fm)
 #define ET_FM_IDLE 128 // what PCM 1 reads with the FM silent
 #define ET_HZ 441.0 // the tones', as sb16test's
 #define ET_HZ_R 661.5 // the right side's, where the sides differ
