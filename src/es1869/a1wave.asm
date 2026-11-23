@@ -847,9 +847,12 @@ a1_setup:
         mov     ax,3FFCh
 .block: test    byte [si+A1_FMT],FMT_DUAL
         jz      .blk
-        mov     cx,[si+DEV_A2_BUFSIZE]  ; and in Audio 2's buffer
+        mov     cx,[si+DEV_A2_BUFSIZE]  ; and in Audio 2's buffer, twice
+        shr     cx,1                    ; as long in words on a 16-bit
+        cmp     byte [si+DEV_A2_DMA],3  ; channel (a1_a2_words)
+        jbe     .a2b
         shr     cx,1
-        and     cl,0FCh
+.a2b:   and     cl,0FCh
         cmp     ax,cx
         jbe     .blk
         mov     ax,cx
@@ -1066,7 +1069,8 @@ a1_settle:
         ret
 
 ; Audio 2's 8237 channel on its ring, as ESS's playback start programs it
-; (6:2C6E), a 16-bit channel in words
+; (6:2C6E): a 16-bit channel in words, a word for each byte of the ring,
+; since the chip takes a word's low byte (a1_a2_words)
 a1_dma2:
         pushf
         cli
@@ -1091,7 +1095,6 @@ a1_dma2:
         shr     bl,1                    ; a word address, 17 bits
         rcr     ax,1
         shl     bl,1
-        shr     cx,1
 .addr:  mov     dl,[si+DEV_A2_ADDR]
         out     dx,al
         mov     al,ah

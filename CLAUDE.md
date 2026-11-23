@@ -224,6 +224,10 @@ tools/wineshot.sh run ess3d.exe /sim tray
     the start settled (`a1_settle`), as the fronts do; `tests/drvemu.py`
     loses the start's first byte otherwise (`RACE_POLLS`). Dual playback
     starts Audio 2 with one write of 78h as Audio 1's channel is unmasked.
+  * On a 16-bit channel the chip takes a word's low byte a DMA cycle, as
+    `tests/drvemu.py` models it, so Audio 2's ring in dual playback is one
+    of words there, a byte of the sound in each (`a1_a2_words`). A write
+    while the DMA runs fills the room the ring has and returns (`a1_topup`).
 * **VxD extension hooks.** ESS's code changes only under `%if ESSREG_EXT`,
   with instructions of the same length and never an added one, so ESS's code
   keeps its addresses. `EssCodeTest` (`tests/test_vxdext.py`) checks this,

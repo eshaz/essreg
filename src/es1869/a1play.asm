@@ -318,8 +318,12 @@ a1_split:
         add     bx,[si+A1_ALIGN]
         mov     es,[si+DEV_A2_BUF_SEL]
         mov     di,[si+DEV_A2_BUF_OFF]
-        call    .half
-        popf
+        call    a1_a2_words
+        jnc     .bytes
+        call    .words
+        jmp     .split
+.bytes: call    .half
+.split: popf
         pop     di
         pop     ax
         mov     cx,ax
@@ -341,6 +345,37 @@ a1_split:
         jnz     .frame
         pop     si
         ret
+; the same into a ring of words, a byte in each word (a1_a2_words)
+.words: mov     ax,[si+A1_WRING]
+        shl     ax,1
+        add     di,ax
+        mov     dx,[si+A1_SPLITN]
+        push    bp
+        mov     bp,[si+A1_ALIGN]
+        push    si
+        mov     si,bx
+        cld
+.wframe:
+        mov     cx,bp
+.wbyte: lodsb
+        mov     ah,al
+        stosw
+        loop    .wbyte
+        add     si,bp                   ; past the other DAC's half
+        sub     dx,bp
+        jnz     .wframe
+        pop     si
+        pop     bp
+        ret
+
+; CF set if Audio 2's ring is one of words: on a 16-bit channel the 8237
+; moves a word a cycle and the chip takes its low byte, so each byte of
+; the sound goes in a word of a ring twice as long, as ESS's playback
+; copies it (1:1B82); SI = dev
+a1_a2_words:
+        cmp     byte [si+DEV_A2_DMA],4
+        cmc
+        ret
 
 ; AX more bytes written, AX kept; SI = dev
 a1_wrote:
@@ -356,14 +391,17 @@ a1_wrote:
         ret
 
 ; CX bytes of silence into the ring from offset AX, wrapping at its end,
-; and into Audio 2's in dual playback; SI = dev
+; and into Audio 2's in dual playback, twice as many in a ring of words;
+; SI = dev
 a1_quiet:
         jcxz    .done
+        push    bx
         push    di
         push    cx
         push    ax
         mov     es,[si+DEV_BUF_SEL]
         mov     di,[si+DEV_BUF_OFF]
+        mov     bx,[si+A1_RING]
         call    .ring
         pop     ax
         pop     cx
@@ -371,11 +409,18 @@ a1_quiet:
         jz      .one
         mov     es,[si+DEV_A2_BUF_SEL]
         mov     di,[si+DEV_A2_BUF_OFF]
-        call    .ring
+        mov     bx,[si+A1_RING]
+        call    a1_a2_words
+        jnc     .a2
+        shl     ax,1
+        shl     cx,1
+        shl     bx,1
+.a2:    call    .ring
 .one:   pop     di
+        pop     bx
 .done:  ret
-; CX bytes from offset AX of the ring at ES:DI
-.ring:  mov     dx,[si+A1_RING]
+; CX bytes from offset AX of the ring of BX bytes at ES:DI
+.ring:  mov     dx,bx
         sub     dx,ax                   ; bytes to the end
         push    di
         add     di,ax
@@ -485,12 +530,18 @@ a1_ready:
         je      .fill
         mov     es,[si+DEV_BUF_SEL]
         mov     di,[si+DEV_BUF_OFF]
+        mov     bx,[si+A1_PRING]
+        mov     cx,[si+A1_RING]
         call    .ring
         test    byte [si+A1_FMT],FMT_DUAL
         jz      .pos
         mov     es,[si+DEV_A2_BUF_SEL]
         mov     di,[si+DEV_A2_BUF_OFF]
-        call    .ring
+        call    a1_a2_words
+        jnc     .a2
+        shl     bx,1
+        shl     cx,1
+.a2:    call    .ring
 .pos:   mov     ax,[si+A1_WRING]
         sub     ax,[si+A1_PRING]
         jae     .w
@@ -502,17 +553,18 @@ a1_ready:
         pop     si
         pop     bp
         retf    2
-; the ring at ES:DI turned left by PRING: three reversals
+; the ring of CX bytes at ES:DI turned left by BX bytes: three reversals,
+; which keep the bytes of a word in their order
 .ring:  mov     ax,di
-        mov     dx,[si+A1_PRING]
+        mov     dx,bx
         call    .rev
         mov     ax,di
-        add     ax,[si+A1_PRING]
-        mov     dx,[si+A1_RING]
-        sub     dx,[si+A1_PRING]
+        add     ax,bx
+        mov     dx,cx
+        sub     dx,bx
         call    .rev
         mov     ax,di
-        mov     dx,[si+A1_RING]
+        mov     dx,cx
 ; DX bytes at ES:AX reversed
 .rev:   or      dx,dx
         jz      .rdone
@@ -549,7 +601,11 @@ a1_freeze:
 ; goes into the ring now, as ESS's write does for Audio 2 (6:2FC1), not at
 ; the next interrupt: after a short first header the DMA would play a
 ; gap.  A1_TOPUP bytes at a time with interrupts off, so they can run in
-; between; silence is there already past WPOS
+; between; silence is there already past WPOS.  It fills the room the
+; ring has and no more: going on with what the DMA freed meanwhile, a few
+; frames a pass at 44.1 kHz, kept the program in waveOutWrite until its
+; whole buffer was in the ring, and its next call, a pause too, came that
+; late (esswchk's p.restart); the interrupts fill on from there
 A1_TOPUP        equ 2048
 a1_topup:
         push    bp
@@ -577,6 +633,8 @@ a1_topup:
         je      .done                   ; nothing copied
         or      di,di
         jnz     .done                   ; all there was
+        cmp     ax,A1_TOPUP
+        jb      .done                   ; the ring is full
         popf
         jmp     .more
 .done:  popf

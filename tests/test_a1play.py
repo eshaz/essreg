@@ -258,6 +258,27 @@ class PlayTest(A1Case):
                              WHDR_DONE)
         self.assertEqual(e.getpos(user)[1:], (TIME_BYTES, len(data)))
 
+    def test_write_fills_the_room_and_returns(self):
+        """a header written while the DMA runs fills what room the ring has
+        and returns: the DMA moving 16 bytes at each reading of its count
+        while the driver runs, as at 44.1 kHz on the laptop, it took the
+        whole header into the ring first, one reading's bytes a pass, and a
+        pause written next came that late (esswchk's p.restart)"""
+        e, user = self.opened(rate=44100)
+        block = e.dev16(A1_BLOCK)
+        first, second = pattern(2 * block, 5), pattern(5 * block, 6)
+        e.write(user, e.header(first))
+        e.dma(block // 2)
+        e.dma_per_count = 16
+        moved = len(e.played)
+        self.assertEqual(e.write(user, e.header(second)), 0)
+        moved = len(e.played) - moved
+        e.dma_per_count = 0
+        self.assertLess(moved, block // 4)
+        self.play(e, 10)
+        data = first + second
+        self.assertEqual(bytes(e.played[:len(data)]), data)
+
     def test_done_only_once_played(self):
         """a header that another follows comes back once the DMA took its
         end, and the last one once the DAC played it too, a FIFO later: a
@@ -775,16 +796,40 @@ class DualTest(A1Case):
                                  len(a) // width)
 
     def test_16_bit_audio2_channel(self):
+        """on a 16-bit channel the chip takes a word's low byte, so Audio
+        2's ring is one of words, a byte of the sound in each, as ESS's
+        playback copies it (1:1B82): the 8237 counts a word a byte, and the
+        ring takes half the buffer's bytes"""
         e, user = self.dual(a2_dma=5)
         block = e.dev16(A1_BLOCK)
+        self.assertLessEqual(4 * block, drvemu.BUF_SIZE)
         a, b = pattern(block * 3, 13), pattern(block * 3, 14)
         e.write(user, e.header(quad(a, b, 4)))
         d = e.chip.dma[5]
-        self.assertEqual(d["count"], block - 1)     # words
+        self.assertEqual(d["count"], 2 * block - 1)     # words
         self.assertEqual(d["addr"], (drvemu.A2_BUF_PARA * 16 >> 1) & 0xFFFF)
+        ring = e.rd(drvemu.A2_BUF_PARA * 16, 4 * block)
+        self.assertEqual(ring[0:2 * block:2], b[:block])
         self.play(e, 5)
         self.assertEqual(bytes(e.played[:len(a)]), a)
         self.assertEqual(bytes(e.played2[:len(b)]), b)
+
+    def test_16_bit_audio2_channel_pause(self):
+        """a pause and restart turn Audio 2's ring of words as Audio 1's
+        ring of bytes, and the silence after the sound is in words too"""
+        e, user = self.dual(rate=22050, a2_dma=5)
+        block = e.dev16(A1_BLOCK)
+        a, b = pattern(block * 6, 17), pattern(block * 6, 18)
+        e.write(user, e.header(quad(a, b, 4)))
+        e.dma(block + 100)
+        e.interrupt()
+        e.dma(300)
+        self.assertEqual(e.wod(0, WODM_PAUSE, user), 0)
+        self.assertEqual(e.wod(0, WODM_RESTART, user), 0)
+        self.play(e, 9)
+        self.assertEqual(bytes(e.played[:len(a)]), a)
+        self.assertEqual(bytes(e.played2[:len(b)]), b)
+        self.assertEqual(set(e.played2[len(b):]), {0})
 
     def test_pause_keeps_them_in_step(self):
         e, user = self.dual(rate=22050)

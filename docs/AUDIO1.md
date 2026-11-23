@@ -168,7 +168,11 @@ the DMA position (VxD function 0004), returns the headers that the DMA has
 played past with `WOM_DONE`, and copies queued data into the free part of
 the ring. A buffer that a program writes while the device is playing goes
 into the ring at once, as ESS's write does for Audio 2 (6:2FC1), in pieces
-of 2 KB with interrupts off.
+of 2 KB with interrupts off, as far as the ring has room, and the interrupts
+copy the rest. Earlier builds went on with what the DMA freed meanwhile, a
+few frames a pass at 44.1 kHz, so that `waveOutWrite` came back only once
+the whole buffer was in the ring, and a pause the program called next came
+that late (esswchk's `p.restart` on the laptop).
 
 The player reads the DMA's count until two readings agree within 32 bytes,
 four times at most, and keeps the last (`a1_count`), with ESS's VxD as with
@@ -217,7 +221,13 @@ before ESS frees its interrupt handler.
 * Audio 1 has to be on an 8-bit DMA channel (0, 1 or 3), and the VxD must
   not be in its no-DMA mode. Otherwise `WODM_GETNUMDEVS` stays at 1. For
   dual playback, Audio 2 may use any channel, including the 16-bit channel
-  5, because the player programs it as ESS's playback does.
+  5, because the player programs it as ESS's playback does. On a 16-bit
+  channel the 8237 moves a word a cycle and the chip takes its low byte
+  ([ESS_EXTENDED.md](ESS_EXTENDED.md)), so Audio 2's ring there is one of
+  words, a byte of the sound in each, as ESS's playback copies it (1:1B82),
+  and it takes up to half of Audio 2's buffer. Earlier builds wrote the
+  bytes as they were, and Audio 2 played every other one, noise, as the
+  laptop's DMA 5 did in esswchk's `p.dual44` sounds.
 * The CODEC's switched-capacitor filter is bypassed by default (71h bit 2),
   as the Audio 2 DAC's filter is ([The filter of the Audio 1
   CODEC](#the-filter-of-the-audio-1-codec)).

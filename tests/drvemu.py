@@ -275,6 +275,9 @@ class DrvEmu:
         # added to VxD 0004's next answers, one each: a reading of the
         # 8237's count that a byte tore between its low and high byte
         self.vxd_tear = []
+        # bytes the chip takes before each of VxD 0004's answers: the DMA
+        # running while the driver's code does
+        self.dma_per_count = 0
         self.dsp_taken = []     # ECX of each call to 040D
         self.heap = HEAP_OFF
         self.app = APP_PARA * 16
@@ -632,6 +635,8 @@ class DrvEmu:
         elif dx == 0x0000:
             ax = 0x0404
         elif dx == 0x0004:
+            if self.dma_per_count:
+                self.dma(self.dma_per_count)
             ch = A1_DMA if bx == 0 else self.a2_dma
             ax = self.chip.dma_count(ch)
             if self.vxd_tear:
@@ -743,27 +748,30 @@ class DrvEmu:
     def dma(self, n):
         """the chip takes n bytes from each channel that runs, in step: the
         8237 moves on, and what it read is kept, Audio 1's in played and
-        Audio 2's in played2"""
+        Audio 2's in played2. The chip takes a byte a DMA cycle: on a
+        16-bit channel the 8237 moves a word, which it counts, and the chip
+        gets the word's low byte (ESS_EXTENDED.md)"""
         for ch, out in ((A1_DMA, self.played), (self.a2_dma, self.played2)):
             d = self.chip.dma[ch]
             if d["mask"]:
                 continue
+            size = d["count"] + 1
             if ch >= 4:     # words: a 17-bit word address, the page's bit 0
-                size = (d["count"] + 1) * 2
                 base = ((d["page"] & 0xFE) << 16) | (d["addr"] << 1)
+                step = 2
             else:
-                size = d["count"] + 1
                 base = (d["page"] << 16) | d["addr"]
-            pos = d["pos"] * 2 if ch >= 4 else d["pos"]
+                step = 1
+            pos = d["pos"]
             for _i in range(n):
                 if ch == A1_DMA and self.chip.a1_race:
                     self.chip.a1_race = False   # the chip drops it
                 else:
-                    out.append(self.rd(base + pos, 1)[0])
+                    out.append(self.rd(base + pos * step, 1)[0])
                 pos += 1
                 if pos >= size:
                     pos = 0
-            d["pos"] = pos // 2 if ch >= 4 else pos
+            d["pos"] = pos
 
     def interrupt(self):
         """an Audio 1 interrupt through ESS's handler: DX:AX unused"""
