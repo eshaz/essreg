@@ -90,7 +90,7 @@
 #include "wchk.h"
 #include "winio.h"
 
-#define VERSION "1.5"
+#define VERSION "1.6"
 #define TITLE "ES1869 Windows checks"
 #define IDC_CHECK 101
 #define IDC_STEP 102
@@ -1274,19 +1274,45 @@ static void fill(s16 __huge *p, u32 frames, int chans, struct snd_tone *t) {
   }
 }
 
+// the last sound's times, for its times line: when its writes returned,
+// when its pause was called, and when each header came back, ms after its
+// first write, "-" for one that didn't
+static char play_times[256];
+
+static void times_text(u32 t0, u32 wrote, u32 paused, const u32 *back, int k) {
+  int j;
+
+  _bprintf(play_times, sizeof(play_times), "writes back at %lu ms", wrote - t0);
+  if (paused)
+    _bprintf(play_times + strlen(play_times),
+             sizeof(play_times) - strlen(play_times),
+             ", pause called at %lu ms", paused - t0);
+  _bprintf(play_times + strlen(play_times),
+           sizeof(play_times) - strlen(play_times), "; headers back at");
+  for (j = 0; j < k && strlen(play_times) < sizeof(play_times) - 8; j++)
+    if (back[j])
+      _bprintf(play_times + strlen(play_times),
+               sizeof(play_times) - strlen(play_times), " %lu", back[j] - t0);
+    else
+      strcat(play_times, " -");
+}
+
 // 16-bit frames of the tone into headers of an eighth of a second, on
 // dev, played to the end, with a pause of 400 ms pause_at ms in where it
-// isn't 0; parts gets when they began, paused, went on and ended; 0, or an
-// MMSYSERR
+// isn't 0; parts gets when they began, paused, went on and ended, and
+// play_times the rest; 0, or an MMSYSERR
 static UINT play(int dev, DWORD rate, int chans, struct snd_tone *t, u32 frames,
                  u32 pause_at, u32 *parts) {
   static struct wbuf b[MAX_HDRS];
+  static u32 back[MAX_HDRS];
   PCMWAVEFORMAT f;
   HWAVEOUT h;
-  u32 per = rate / 8, left = frames, n;
+  u32 per = rate / 8, left = frames, n, wrote, paused = 0, now;
   int j, k = 0, opened;
   UINT err;
 
+  play_times[0] = 0;
+  memset(back, 0, sizeof(back));
   pcm_format(&f, rate, chans, 16);
   err = waveOutOpen(&h, dev, (LPWAVEFORMAT)&f, 0, 0, CALLBACK_NULL);
   opened = !err;
@@ -1302,17 +1328,27 @@ static UINT play(int dev, DWORD rate, int chans, struct snd_tone *t, u32 frames,
   parts[0] = timeGetTime() - rec_t0;
   for (j = 0; !err && j < k; j++)
     err = waveOutWrite(h, b[j].h, sizeof(WAVEHDR));
+  wrote = timeGetTime() - rec_t0;
   if (!err && pause_at) {
     wait_ms(pause_at);
+    paused = timeGetTime() - rec_t0;
     waveOutPause(h);
     parts[1] = timeGetTime() - rec_t0;
     wait_ms(400);
     parts[2] = timeGetTime() - rec_t0;
     waveOutRestart(h);
   }
-  while (!err && k && !(b[k - 1].h->dwFlags & WHDR_DONE) && !stop_now)
+  while (!err && k && !stop_now) {
+    now = timeGetTime() - rec_t0;
+    for (j = 0; j < k; j++)
+      if (!back[j] && (b[j].h->dwFlags & WHDR_DONE))
+        back[j] = now;
+    if (back[k - 1])
+      break;
     pump();
+  }
   parts[pause_at ? 3 : 1] = timeGetTime() - rec_t0;
+  times_text(parts[0], wrote, paused, back, k);
   if (opened) {
     waveOutReset(h);
     for (j = 0; j < k; j++)
@@ -1410,6 +1446,8 @@ static void rec_tone(const char *id, int dev, DWORD rate, int chans,
     return;
   }
   sound_line(id, syms, tm, parts, pause_ms ? 4 : 2, expect, spec);
+  if (!opt.sim && play_times[0])
+    put("%-20s times %s", id, play_times);
 }
 
 static void rec_fm(BYTE pan) {

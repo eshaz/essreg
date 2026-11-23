@@ -136,6 +136,12 @@ differ, so ESSCHECK's one recording holds both runs.
   in the player's dual start.
 * `p.fm0` and `p.fm127`: the ESFM's note panned left and right.
 
+Each Audio 1 sound also has a `times` line: when its writes came back, when
+its pause was called, and when each of its headers came back, in ms after
+its first write. Version 1.6 adds it, after a run where the last header came
+back 740 ms after the end of the sound at 44.1 kHz, though 50 ms at 22,050
+Hz.
+
 `python3 tools/wchkrec.py WCHECK.TXT run.wav` finds the markers, fits the
 report's clock to the recording's, and measures each sound: a tone on its
 side, as `tools/essprec.py` measures it, naming a stream a byte off; the
