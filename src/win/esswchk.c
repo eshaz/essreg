@@ -1311,7 +1311,7 @@ static UINT play(int dev, DWORD rate, int chans, struct snd_tone *t, u32 frames,
   PCMWAVEFORMAT f;
   HWAVEOUT h;
   u32 per = rate / 8, left = frames, n, wrote, paused = 0, now;
-  int j, k = 0, opened;
+  int j, k = 0, opened, last;
   UINT err;
 
   play_times[0] = 0;
@@ -1341,12 +1341,16 @@ static UINT play(int dev, DWORD rate, int chans, struct snd_tone *t, u32 frames,
     parts[2] = timeGetTime() - rec_t0;
     waveOutRestart(h);
   }
+  // the last header's flag first: the driver gives the headers back in
+  // order, so once it is done the scan finds every one before it done,
+  // also when an interrupt gives back two in the middle of the scan
   while (!err && k && !stop_now) {
     now = timeGetTime() - rec_t0;
+    last = (b[k - 1].h->dwFlags & WHDR_DONE) != 0;
     for (j = 0; j < k; j++)
       if (!back[j] && (b[j].h->dwFlags & WHDR_DONE))
         back[j] = now;
-    if (back[k - 1])
+    if (last)
       break;
     pump();
   }
@@ -1420,11 +1424,14 @@ static u32 sound_marker(char *syms) {
 static void rec_tone(const char *id, int dev, DWORD rate, int chans,
                      double hz_l, double hz_r, u32 pause_ms, const char *expect,
                      const char *spec) {
+  static char full[96];
   struct snd_tone t;
   char syms[8];
   u32 parts[4], tm;
   UINT err = 0;
 
+  // the spec, and the tone's length for tools/wchkrec.py
+  _bprintf(full, sizeof(full), "%.80s ms=%u", spec, SND_MS);
   tm = sound_marker(syms);
   memset(parts, 0, sizeof(parts));
   snd_tone(&t, hz_l, hz_r, (double)rate, 12000);
@@ -1448,7 +1455,7 @@ static void rec_tone(const char *id, int dev, DWORD rate, int chans,
     res(id, WCHK_FAIL, "the device failed (MMSYSERR %u)", err);
     return;
   }
-  sound_line(id, syms, tm, parts, pause_ms ? 4 : 2, expect, spec);
+  sound_line(id, syms, tm, parts, pause_ms ? 4 : 2, expect, full);
   if (!opt.sim && play_times[0])
     put("%-20s times %s", id, play_times);
 }

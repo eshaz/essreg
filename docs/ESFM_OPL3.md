@@ -187,7 +187,7 @@ and `fm.pan0` of [ESSWCHK.md](ESSWCHK.md)), so the device plays a little
 under the ESFM device's level by default. An emulation of the chip's output
 with ESFMu, of every message the driver writes, gives the peaks of the 20
 songs of [third_party/windows_midi](../third_party/windows_midi/README.md)
-and `GROOVE.MID` without the headroom between -10.8 and +2.2 dBFS, the
+and `GROOVE.MID` without the headroom between -10.9 and +2.2 dBFS, the
 loudest being Windows 98's *Fur Elise* with both of its arrangements, and
 with the default 6 dB and `MpcSongs` at most -4.5 dBFS. ESFMu played
 esswchk's note 1.9 dB louder than the laptop did. `Opl3Headroom=0` gives the

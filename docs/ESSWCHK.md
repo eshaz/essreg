@@ -141,14 +141,22 @@ Each Audio 1 sound also has a `times` line: when its writes came back, when
 its pause was called, and when each of its headers came back, in ms after
 its first write. Version 1.6 adds it, after a run where the last header came
 back 740 ms after the end of the sound at 44.1 kHz, though 50 ms at 22,050
-Hz.
+Hz. The next run, with the player's fix, had it back about 60 ms after the
+end. A `-` is a header that hadn't come back when the last one had: the
+driver gives them back in order, so version 1.7 reads the last one's flag
+before the others, and the dual sounds' last two, which one interrupt gives
+back together, no longer show one as missing. From version 1.7 a sound's
+`spec` gives its length, `ms=`.
 
 `python3 tools/wchkrec.py WCHECK.TXT run.wav` finds the markers, fits the
 report's clock to the recording's, and measures each sound: a tone on its
 side, as `tools/essprec.py` measures it, naming a stream a byte off; the
 pause; the dual sounds' delay of the right against the left, in frames at
 44,100 Hz, within one frame when they started in step; and the FM's note on
-its side by its level.
+its side by its level. A sound ends in the report when its last header came
+back, after the DAC played it out, so the tone's last part is measured over
+its length from its start, `ms=` or 1000 ms, and not into the quiet after
+it.
 
 ## The tests
 

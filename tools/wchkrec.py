@@ -27,6 +27,11 @@ measures each sound by what it should hold:
 At the end, the dual sounds' delays and their spread, which a start that
 races changes from one sound to the next.
 
+A sound's end in the report is when its last header came back, after the
+DAC played it out, so a tone's last part, after its pause too, is measured
+over the tone's length from its start: ms= in its spec, from esswchk 1.7,
+or 1000 ms.
+
 The recording can be mono or stereo, at any rate (tools/recan.py); a mono
 one has no sides, which is INFO. Needs numpy.
 
@@ -37,6 +42,7 @@ Example:
 import argparse
 import math
 import os
+import re
 import sys
 
 import numpy as np
@@ -48,10 +54,24 @@ from recan import (HZ, RATE, SIDE_DB, Recording, band_limit,  # noqa: E402
                    cleanness, fit_clock, level_db, markers, pitch,
                    read_report, read_wav)
 
+SND_MS = 1000               # an esswchk sound's length before ms= in its spec
+
 # both DACs' tones this close are in step: a frame at 44,100 Hz, the
 # first run on the card to calibrate it, since their analog paths differ
 STEP_FRAMES = 1.0
 DUAL_HZ = 44100.0           # the dual sounds' rate
+
+
+def lengths(report):
+    """each sound's length in ms, from its spec line"""
+    out = {}
+    with open(report, encoding="latin-1") as f:
+        for line in f:
+            parts = line.split(None, 2)
+            if len(parts) == 3 and parts[1] == "spec":
+                m = re.search(r"\bms=(\d+)", parts[2])
+                out[parts[0]] = int(m.group(1)) if m else SND_MS
+    return out
 
 
 def phase(x, f, rate=RATE):
@@ -141,6 +161,14 @@ def judge(rec, case, sound, swapped):
 def analyze(report, wav, out=sys.stdout):
     """the recording's results after the report's; the number that failed"""
     checks, sounds, marks = read_report(report)
+    # a tone's last part ends the tone's length after it starts
+    ms = lengths(report)
+    for name, (mark, us, spans, want) in sounds.items():
+        if want in ("left", "lpause", "step") and spans:
+            on, off = spans[-1]
+            end = on + 1000 * ms.get(name, SND_MS)
+            sounds[name] = (mark, us, spans[:-1] + [(on, min(off, end))],
+                            want)
     counts = {}
     for _name, res, _det in checks:
         counts[res] = counts.get(res, 0) + 1

@@ -56,10 +56,12 @@ def piano(secs, rate=RATE):
 class Run:
     """a report in esswchk's format and the recording made to it; `sound`
     gives each sound's frames in place of the right ones, `delay` a dual
-    sound's right in frames at 44,100 Hz"""
+    sound's right in frames at 44,100 Hz, `drain` how long after a sound
+    the report has it end, when its last header came back, and `ms` whether
+    the tones' specs give their length, as from esswchk 1.7"""
 
     def __init__(self, true_sides=True, delay=None, sound=None, mono=False,
-                 drift=0.0, before=None):
+                 drift=0.0, before=None, drain=0.0, ms=True):
         self.lines = ["esswchk 1.0: the drivers' fixes on the ES1869, in "
                       "Windows", "", "[fm] the FM, recorded digitally",
                       "fm.pan0              %s  left -12.3, right -120.0 "
@@ -83,13 +85,16 @@ class Run:
             for a, b in zip(parts[0::2], parts[1::2]):
                 events.append((a, sound.get(name, self.make)(
                     name, expect, b - a, delay.get(name, 0.0))))
+            shown = parts[:-1] + [parts[-1] + drain]
+            if ms and expect in ("left", "lpause", "step"):
+                spec += " ms=1000"
             self.lines += ["%-20s INFO  recorded: marker %s at %d us, "
                            "sound%s us, %s expected" % (
                                name, syms, round(t * 1e6), "".join(
                                    " %d-%d" % (round(a * 1e6),
                                                round(b * 1e6))
-                                   for a, b in zip(parts[0::2],
-                                                   parts[1::2])),
+                                   for a, b in zip(shown[0::2],
+                                                   shown[1::2])),
                                expect),
                            "%-20s spec  %s" % (name, spec)]
             t = parts[-1] + 0.5
@@ -187,6 +192,16 @@ class WchkrecTest(unittest.TestCase):
         self.assertRegex(res["p.dual44a"][1], r"the right [+-]0\.0\d frames")
         self.assertIn("the clock: 10 markers", text)
         self.assertIn("a spread of 0.0", text)
+
+    def test_header_back_after_the_tone(self):
+        """the report's sound ends when its last header came back, after
+        the DAC played the tone out: the tone is measured over its length,
+        ms= in its spec, or 1000 ms in an older report"""
+        for ms in (True, False):
+            with self.subTest(ms=ms):
+                res, failed, text = self.run_of(drain=0.06, ms=ms)
+                self.assertEqual(failed, 0, text)
+                self.assertEqual(res["p.start44a"][0], "PASS", text)
 
     def test_a_stream_a_byte_off(self):
         """noise where the tone should be: the line names the fault"""
