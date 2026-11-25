@@ -1,4 +1,3 @@
-#include <conio.h>
 #include <i86.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,130 +5,36 @@
 #include "debug.h"
 #include "regs.h"
 
-/*
-unsigned int inp(int portid);
-unsigned int inpw(int portid);
-unsigned int outp(int portid, int value);
-unsigned int outpw(int portid, unsigned int value);
-*/
-
-unsigned int read_audio_reg(unsigned int reg_addr) {
-  int config_device_reg_addr = config_base;
-  int config_device_reg_data = config_base + 0x01;
-
-  int logical_device_select_port = config_base + config_logical_device_reg;
-
-  // set config register to audio logical device (1)
-  outp(config_device_reg_addr, logical_device_select_port);
-  outp(config_device_reg_data, audio_config_logical_device);
-
-  // set config register to input register and read data
-  outp(config_device_reg_addr, reg_addr);
-  return inp(config_device_reg_data);
+int read_audio_reg(unsigned int reg_addr) {
+  // read from audio logical device (1), restoring the index and LDN after
+  return esshw_pnp_read(1, (u8)reg_addr);
 }
 
-unsigned int read_mixer_reg(unsigned int reg_addr) {
-  int mixer_set_port = audio_base + 0x4;
-  int mixer_read_port = audio_base + 0x5;
-
-  // set mixer register to be read
-  outp(mixer_set_port, reg_addr);
-  return inp(mixer_read_port);
+int read_mixer_reg(unsigned int reg_addr) {
+  return esshw_mixer_read((u8)reg_addr);
 }
 
 void write_mixer_reg(unsigned int reg_addr, unsigned char reg_value) {
-  int mixer_set_port = audio_base + 0x4;
-  int mixer_read_port = audio_base + 0x5;
-
-  // set mixer register to be read
-  outp(mixer_set_port, reg_addr);
-  outp(mixer_read_port, reg_value);
-}
-
-static int wait_for_controller_ready() {
-  unsigned int wait = 0;
-
-  // poll for low bit 7 of audiobase + Ch until clear
-  while (1) {
-    if (!(inp(audio_base + 0x0c) & 0x80)) {
-      return 0;
-    }
-
-    if (wait == controller_wait_timeout) {
-      return -1;
-    }
-
-    wait++;
-  }
-}
-
-static int wait_for_controller_read() {
-  unsigned int wait = 0;
-
-  // poll for high bit 6 port audiobase + Ch
-  while (1) {
-    if ((inp(audio_base + 0x0e) & 0x80)) {
-      return 0;
-    }
-
-    if (wait == controller_wait_timeout) {
-      return -1;
-    }
-
-    wait++;
-  }
+  esshw_mixer_write((u8)reg_addr, reg_value);
 }
 
 int read_controller_reg(unsigned char reg_addr) {
-  unsigned int tries = 0;
-
-do_read:
-  tries++;
-
-  if (wait_for_controller_ready() == -1) {
-    if (tries == controller_retry_count) {
-      return -1;
-    } else {
-      goto do_read;
-    }
-  }
-
-  // write command to read controller registers 0xC0
-  outp(audio_base + 0x0c, 0xc0);
-  // write register to read
-  outp(audio_base + 0x0c, reg_addr);
-
-  if (wait_for_controller_read() == -1) {
-    if (tries == controller_retry_count) {
-      return -1;
-    } else {
-      goto do_read;
-    }
-  }
-
-  // read byte from audiobase + Ah
-  return inp(audio_base + 0x0a);
+  return esshw_ctrl_read(reg_addr);
 }
 
 int write_controller_reg(unsigned char reg_addr, unsigned char reg_value) {
-  unsigned int tries = 0;
+  int err = esshw_ctrl_write(reg_addr, reg_value);
 
-do_read:
-  tries++;
-
-  if (wait_for_controller_ready() == -1) {
-    if (tries == controller_retry_count) {
-      printf("Timeout waiting for controller register ready flag.\n");
-      return -1;
-    } else {
-      goto do_read;
-    }
+  if (err < 0) {
+    printf("Timeout waiting for controller register ready flag.\n");
+    return -1;
   }
-
-  outp(audio_base + 0x0c, reg_addr);
-  outp(audio_base + 0x0c, reg_value);
-
   return 0;
+}
+
+void set_safe_protocol(unsigned char on_off) {
+  esshw.flags = on_off ? ESSHW_SAFE : ESSHW_LEGACY;
+  printf("Safe DSP protocol %s\n", on_off ? "Enabled" : "Disabled");
 }
 
 unsigned char get_mono_in() {
@@ -160,7 +65,7 @@ unsigned char get_mono_in_level() {
 void set_mono_in_level(unsigned char level) {
   if (level > 0x0f)
     level = 0x0f;
-  write_mixer_reg(0x6d, (level << 4) & level);
+  write_mixer_reg(0x6d, (level << 4) | level);
   get_mono_in_level();
 }
 
@@ -169,7 +74,7 @@ void set_mono_in_level_pct(unsigned char level_pct) {
 }
 
 unsigned char get_digital_power_down() {
-  unsigned char value = inp(audio_base + 0x06) & 0x08;
+  unsigned char value = esshw_port_read(0x06) & 0x08;
 
   printf("Digital Power Down ");
   if (value) {
@@ -182,7 +87,7 @@ unsigned char get_digital_power_down() {
 }
 
 unsigned char get_analog_stays_on() {
-  unsigned char value = inp(audio_base + 0x07) & 0x08;
+  unsigned char value = esshw_port_read(0x07) & 0x08;
 
   printf("Analog Stays On ");
   if (value) {
@@ -195,17 +100,17 @@ unsigned char get_analog_stays_on() {
 }
 
 void set_analog_stays_on(unsigned char on_off) {
-  unsigned char value = inp(audio_base + 0x07);
+  unsigned char value = esshw_port_read(0x07);
 
   value = (value & 0xf7) | (on_off ? 0x08 : 0x00);
 
-  outp(audio_base + 0x07, value);
+  esshw_port_write(0x07, value);
 
   get_analog_stays_on();
 }
 
 unsigned char get_fm_reset() {
-  unsigned char value = inp(audio_base + 0x07) & 0x20;
+  unsigned char value = esshw_port_read(0x07) & 0x20;
 
   printf("FM Reset ");
   if (value) {
@@ -218,11 +123,11 @@ unsigned char get_fm_reset() {
 }
 
 void set_fm_reset(unsigned char on_off) {
-  unsigned char value = inp(audio_base + 0x07);
+  unsigned char value = esshw_port_read(0x07);
 
   value = (value & 0xdf) | (on_off ? 0x20 : 0x00);
 
-  outp(audio_base + 0x07, value);
+  esshw_port_write(0x07, value);
 
   get_fm_reset();
 }
@@ -261,6 +166,24 @@ void set_3d_mode(unsigned char on_off) {
   // 0x0c 3d enable, release from reset
   write_mixer_reg(0x50, (original_value & 0xf3) | (on_off ? 0x0c : 0x04));
   get_3d_mode();
+}
+
+unsigned char get_3d_limit() {
+  // mixer 50h bit 0 is reserved in the data sheet, ESS's driver sets it from
+  // its "3D Limit" setting
+  unsigned char on_off = read_mixer_reg(0x50) & 0x01;
+  if (on_off) {
+    printf("3D Limit Enabled\n");
+  } else {
+    printf("3D Limit Disabled\n");
+  }
+  return on_off;
+}
+
+void set_3d_limit(unsigned char on_off) {
+  unsigned char original_value = read_mixer_reg(0x50);
+  write_mixer_reg(0x50, (original_value & 0xfe) | (on_off ? 0x01 : 0x00));
+  get_3d_limit();
 }
 
 unsigned char get_3d_level() {
@@ -343,102 +266,123 @@ void set_fm_sync_audio_2(unsigned char on_off) {
   get_fm_sync_audio_2();
 }
 
-unsigned int get_audio_1_sample_rate() {
-  int rate = read_controller_reg(0xa1);
+unsigned long get_audio_1_sample_rate() {
+  int reg = read_controller_reg(0xa1);
+  unsigned long rate;
 
-  if (rate >= 0) {
-    rate = rate & 0x80 ? 795500 / (256 - rate)  //  rate > 22kHz
-                       : 397700 / (128 - rate); // rate <= 22kHz
-
-    printf("Audio 1 Sample Rate: %u Hz\n", rate);
-    return rate;
+  if (reg < 0) {
+    printf("Audio 1 Sample Rate: %s\n", esshw_strerror(reg));
+    return 0;
   }
-
-  return 0;
-}
-
-unsigned int get_audio_2_sample_rate() {
-  unsigned int rate = read_mixer_reg(0x70);
-  unsigned int master_clock = rate & 0x80
-                                  ? 768000  //  48kHz, 32kHz, 16kHz, 8kHz, etc.
-                                  : 793800; // 44.1kHz, 22.05kHz, etc.
-  rate = master_clock / (128 - rate);
-
-  printf("Audio 2 Sample Rate: %u Hz\n", rate);
+  if (read_mixer_reg(0x71) & 0x20) {
+    // mixer 71h bit 5: A1h works like 70h (DS p.64)
+    rate = (reg & 0x80 ? 768000UL : 793800UL) / (128 - (reg & 0x7f));
+  } else {
+    rate = reg & 0x80 ? 795500UL / (256 - reg)  //  rate > 22kHz
+                      : 397700UL / (128 - reg); // rate <= 22kHz
+  }
+  printf("Audio 1 Sample Rate: %lu Hz\n", rate);
+  // mixer 7Fh bit 4: Audio 1 records the music DAC at its rate (DS p.65)
+  if (read_mixer_reg(0x7f) & 0x10)
+    printf("  (music DAC digital record is on: the music DAC rate applies)\n");
   return rate;
 }
 
-unsigned int calc_filter_rate(unsigned char reg) {
-  return (unsigned long)7160000 / (256 - reg);
-}
+unsigned long get_audio_2_sample_rate() {
+  int reg = read_mixer_reg(0x70);
+  unsigned long master_clock = reg & 0x80
+                                   ? 768000UL  //  48kHz, 32kHz, 16kHz, 8kHz
+                                   : 793800UL; // 44.1kHz, 22.05kHz, etc.
+  unsigned long rate = master_clock / (128 - (reg & 0x7f));
 
-unsigned int get_audio_1_filter_rate() {
-  int rate = read_controller_reg(0xa2);
-
-  if (rate >= 0) {
-    rate = calc_filter_rate(rate);
-    printf("Audio 1 Filter Rate: %u Hz\n", rate);
-    return rate;
-  }
-
-  return 0;
-}
-
-unsigned int get_audio_2_filter_rate() {
-  unsigned int rate = read_mixer_reg(0x72);
-
-  rate = calc_filter_rate(rate);
-
-  printf("Audio 2 Filter Rate: %u Hz\n", rate);
+  printf("Audio 2 Sample Rate: %lu Hz\n", rate);
   return rate;
 }
 
+static unsigned long calc_filter_rate(unsigned char reg) {
+  return 7160000UL / (256 - reg);
+}
+
+unsigned long get_audio_1_filter_rate() {
+  int reg = read_controller_reg(0xa2);
+  unsigned long rate;
+
+  if (reg < 0) {
+    printf("Audio 1 Filter Rate: %s\n", esshw_strerror(reg));
+    return 0;
+  }
+  rate = calc_filter_rate((unsigned char)reg);
+  printf("Audio 1 Filter Rate: %lu Hz\n", rate);
+  return rate;
+}
+
+unsigned long get_audio_2_filter_rate() {
+  unsigned long rate = calc_filter_rate((unsigned char)read_mixer_reg(0x72));
+
+  printf("Audio 2 Filter Rate: %lu Hz\n", rate);
+  return rate;
+}
+
+// ADC offset adjust, BAh / BBh bits 4:0 (DS p.71)
+// offset = 64 * bits[3:0], or -64 * (bits[3:0] + 1) when bit 4 is set
 static int calc_offset_value(unsigned char offset_reg) {
-  return offset_reg & 0x10 ? -64 * (offset_reg & 0x0f + 1)
+  return offset_reg & 0x10 ? -64 * ((offset_reg & 0x0f) + 1)
                            : 64 * (offset_reg & 0x0f);
 }
 
 static unsigned char calc_offset_reg(int offset_value) {
-  return offset_value < 0 ? ((-offset_value / 64) & 0x0f) | 0x10
-                          : (offset_value / 64) & 0x0f;
+  if (offset_value < 0) {
+    int steps = (-offset_value + 63) / 64; // -1 to -64 is 1 step
+    if (steps > 16)
+      steps = 16;
+    return 0x10 | ((steps - 1) & 0x0f);
+  }
+  if (offset_value > 960)
+    offset_value = 960;
+  return (offset_value / 64) & 0x0f;
 }
 
-int get_adc_offset_left() {
-  int offset = calc_offset_value(read_controller_reg(0xba));
+static int get_adc_offset(unsigned char reg, const char *label) {
+  int value = read_controller_reg(reg);
 
-  if (offset >= 0)
-    printf("ACD Offset Left:  %d samples\n", offset);
-
-  return offset;
+  if (value < 0) {
+    printf("ADC Offset %s: %s\n", label, esshw_strerror(value));
+    return 0;
+  }
+  // BAh bit 5 (disable wake-up delay) isn't part of the offset
+  value = calc_offset_value((unsigned char)(value & 0x1f));
+  printf("ADC Offset %s %d samples\n", label, value);
+  return value;
 }
 
-int get_adc_offset_right() {
-  int offset = calc_offset_value(read_controller_reg(0xbb));
+int get_adc_offset_left() { return get_adc_offset(0xba, "Left: "); }
 
-  if (offset >= 0)
-    printf("ACD Offset Right: %d samples\n", offset);
+int get_adc_offset_right() { return get_adc_offset(0xbb, "Right:"); }
 
+static int set_adc_offset(unsigned char reg, int offset) {
+  int old = read_controller_reg(reg);
+  unsigned char value = calc_offset_reg(offset);
+
+  // without the old value its top bits would be lost
+  if (old < 0) {
+    printf("ADC offset not set: %s\n", esshw_strerror(old));
+    return old;
+  }
+  if (old > 0)
+    value |= (unsigned char)(old & 0xe0); // keep BAh bit 5
+  write_controller_reg(reg, value);
+  delay(1);
   return offset;
 }
 
 int set_adc_offset_left(int offset) {
-  unsigned char offset_value = calc_offset_reg(offset);
-  write_controller_reg(0xba, offset_value);
-
-  delay(1);
-
+  set_adc_offset(0xba, offset);
   get_adc_offset_left();
-
   return offset;
 }
 
 int set_adc_offset_right(int offset) {
-  unsigned char offset_value = calc_offset_reg(offset);
-  write_controller_reg(0xbb, offset_value);
-
-  delay(1);
-
+  set_adc_offset(0xbb, offset);
   get_adc_offset_right();
-
   return offset;
 }

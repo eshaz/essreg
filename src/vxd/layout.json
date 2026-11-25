@@ -1,0 +1,104 @@
+{
+  "format": 1,
+  "source": "ES1869.VXD",
+  "stub": "stub.bin",
+  "winres": "version.bin",
+  "gap": "gap.bin",
+  "header": {
+    "sig": "LE",
+    "border": 0,
+    "worder": 0,
+    "level": 0,
+    "cpu": 2,
+    "os": 4,
+    "modver": 0,
+    "mflags": 229376,
+    "startobj": 0,
+    "eip": 0,
+    "stackobj": 0,
+    "esp": 0,
+    "pagesize": 512,
+    "autodata": 0,
+    "debuginfo": 0,
+    "debuglen": 0,
+    "instpreload": 0,
+    "instdemand": 0,
+    "heapsize": 0,
+    "res3": "000000000000000000000000",
+    "devid": 15111,
+    "ddkver": 1024
+  },
+  "objects": [
+    {
+      "section": "LCOD",
+      "name": "LCOD",
+      "flags": 8261,
+      "base": 0
+    },
+    {
+      "section": "MCOD",
+      "name": "MCOD",
+      "flags": 41029,
+      "base": 0
+    },
+    {
+      "section": "RARE",
+      "name": "RARE",
+      "flags": 8197,
+      "base": 0
+    },
+    {
+      "section": "PNP",
+      "name": "PNP",
+      "flags": 8197,
+      "base": 0
+    },
+    {
+      "section": "PCOD",
+      "name": "PCOD",
+      "flags": 8197,
+      "base": 0
+    },
+    {
+      "section": "PDAT",
+      "name": "PDAT",
+      "flags": 8227,
+      "base": 0
+    },
+    {
+      "section": "ICOD",
+      "name": "ICOD",
+      "flags": 8213,
+      "base": 0
+    }
+  ],
+  "orphan_pages": [
+    {
+      "after": "MCOD",
+      "file": "slack.bin"
+    }
+  ],
+  "resident_names": [
+    [
+      "ES1869V",
+      0
+    ]
+  ],
+  "nonresident_names": [
+    [
+      "ES1869 AudioDrive Virtual Device (Version 4.04.00.1166)",
+      0
+    ],
+    [
+      "AUDDRV_DDB",
+      1
+    ]
+  ],
+  "entries": [
+    {
+      "ordinal": 1,
+      "symbol": "AUDDRV_DDB",
+      "flags": 3
+    }
+  ]
+}

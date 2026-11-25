@@ -1,0 +1,1560 @@
+# (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+#
+# Licensed under GPL Version 3.0
+"""Run essctl.exe and ess3d.exe as 16-bit Windows programs under Wine.
+
+Opt-in (slow, and needs 32-bit Wine, Xvfb and Open Watcom):
+
+  ESSREG_WINE=1 OW2=/path/to/open-watcom python3 -m unittest tests.test_wine
+
+- profiles: /save and /load in batch mode against the simulated chip; a
+  save keeps the file's other sections, and a full disk (a file size
+  limit) leaves the old file as it was
+- /i2s=off and /i2s=on: ESSWaveTableChip in the ES1869's software key,
+  and mixer 7Fh bit 0 cleared
+- ESFM: tests/host/drvhold.c loads and enables the real driver/ESFM.DRV,
+  then starts "essctl /load" with a profile naming a bank larger than the
+  driver's own, and dumps the bank the driver holds before and after
+- ESFM voices: "essctl /dump" with the ESS driver, then the fixed build,
+  also with its SYSTEM.INI switches set,
+  shows the driver's 18 voices and, for the fixed build, its counters
+- ES1869.DRV: "essctl /dump" with ESS's driver, then the rebuilt one,
+  loaded by drvhold, names it and the rebuilt one's settings
+- ESFM bank file: the fixed build loads the bank named in SYSTEM.INI
+  [ESFM.DRV] Bank= when a program opens the device, and the OPL3 device's
+  Opl3Bank= at its open, and "essctl /load" of a profile with a bank names
+  it there
+- the box of the patch banks: tests/host/cfgcall.c opens ESFMCFG.DLL's
+  box as the drivers' Settings button does, reads both lists from the
+  banks folder and SYSTEM.INI, and chooses; OK writes the keys that
+  changed, Cancel nothing, and Opl3Device=0 grays the OPL3 list
+- ess3d: commands against the simulated chip, bad input and no card, read
+  from its /log= file, since Wine's winevdm always exits with 0 and drops
+  the program's exit code; without /q, no card shows in the display, which
+  closes by itself
+- ess3d's display: a second ess3d hands its setting to the display of the
+  first and exits, and the first goes after the second one's time
+- ess3d's tray icon: a second "ess3d tray" opens the panel of the first,
+  and "ess3d exit" closes it (Wine shows no tray icon for a 16-bit
+  program, whose 16-bit and 32-bit icon handles differ there)
+- ess3d measure: the quick plan against the effect of /sim writes its
+  report and puts the mixer back, and the next ess3d puts back the
+  mixer of a measurement that was ended by force; the chirp plan finds
+  the poles and the zero of the effect's boost
+- esfmrec: /sim records the test tone for /t= seconds into a WAV file at
+  the music DAC's rate, and /raw writes the samples alone
+- esfmrec ended by force: the header it saved every 5 s holds the
+  samples, and the next start repairs it and removes the marker
+- esfmrec on a full disk (a file size limit): it stops, and the WAV file
+  holds what was written; /split= goes on in NAME_2.WAV without a gap
+- esswchk: /sim passes every check of the fixed drivers, /sim=old gives
+  the old drivers' FAIL and KNOWN, and DmaCountTwice=0 in SYSTEM.INI the
+  counts' INFO; sb.box writes SB16BOX.BAT for the VxD's Sound Blaster 16,
+  judges sb16test's report by its summary, and waits for it idle, on a
+  timer; /R gives each sound's line with its marker, which
+  tools/wchkrec.py passes in a recording made to the report; a bad
+  option, no card (with the MIDI list's lines), /once= and a run ended by
+  force, which leaves the report's .$$$
+- essinst: with ESS's drivers in the Windows SYSTEM folder, /y
+  /norestart keeps them as .ORG files, stages the rebuilt ones as .NEW
+  files and lists them in WININIT.INI; a restart carried out by hand puts
+  them in place, and /restore stages ESS's again. Another driver in place
+  changes nothing. The OPL3 device gets a copy of ESS's entry in the MIDI
+  list, and loses it with Opl3Device=0 or /restore, which gives the MIDI
+  mapper ESS's device back. The box of the patch banks goes in the SYSTEM
+  folder and the banks in its ESFMBANK, and /restore takes the box out
+
+Win16 wants 8.3 path names, so the work directory is reached through a
+short symbolic link in /tmp.
+"""
+
+import io
+import os
+import re
+import resource
+import shutil
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FM_HZ = 49613               # esfmrec's rate (fmrec.h)
+OW2 = os.environ.get("OW2", "")
+
+
+def available():
+    return (os.environ.get("ESSREG_WINE") == "1" and shutil.which("wine")
+            and shutil.which("Xvfb") and
+            os.path.exists(os.path.join(OW2, "binl64", "wcc")))
+
+
+def read(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+@unittest.skipUnless(available(), "set ESSREG_WINE=1 and OW2 (needs wine, "
+                     "Xvfb and Open Watcom)")
+class WineTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        work = cls.tmp.name
+        cls.link = tempfile.mktemp(prefix="es", dir="/tmp")[:12]
+        os.symlink(work, cls.link)
+        cls.win = "Z:" + cls.link.replace("/", "\\")
+        subprocess.run([os.path.join(ROOT, "tools", "ow2build.sh"), OW2],
+                       check=True, capture_output=True)
+        shutil.copy(os.path.join(ROOT, "out", "ow2", "essctl.exe"), work)
+        shutil.copy(os.path.join(ROOT, "out", "ow2", "ess3d.exe"), work)
+        shutil.copy(os.path.join(ROOT, "out", "ow2", "esfmrec.exe"), work)
+        shutil.copy(os.path.join(ROOT, "out", "ow2", "esswchk.exe"), work)
+        os.makedirs(os.path.join(work, "INST"))
+        shutil.copy(os.path.join(ROOT, "out", "ow2", "essinst.exe"),
+                    os.path.join(work, "INST"))
+        shutil.copy(os.path.join(ROOT, "driver", "ESFM.DRV"), work)
+        env = dict(os.environ, WATCOM=OW2, INCLUDE=os.path.join(OW2, "h"),
+                   PATH=os.path.join(OW2, "binl64") + ":" + os.environ["PATH"])
+        subprocess.run(["wcc", os.path.join(ROOT, "tests", "host", "drvhold.c"),
+                        "-i=%s;%s" % (os.path.join(OW2, "h"),
+                                      os.path.join(OW2, "h", "win")),
+                        "-bt=windows", "-ml", "-zW", "-zc", "-3", "-zq",
+                        "-fo=drvhold.obj"], cwd=work, env=env, check=True)
+        subprocess.run(["wlink", "name", "drvhold.exe", "system", "windows",
+                        "option", "quiet", "file", "drvhold.obj", "library",
+                        "mmsystem.lib"], cwd=work, env=env, check=True)
+        # cfgcall opens ESFMCFG.DLL's box and works it from a timer
+        subprocess.run(["wcc", os.path.join(ROOT, "tests", "host", "cfgcall.c"),
+                        "-i=%s;%s" % (os.path.join(OW2, "h"),
+                                      os.path.join(OW2, "h", "win")),
+                        "-bt=windows", "-ml", "-zW", "-zc", "-3", "-zq",
+                        "-fo=cfgcall.obj"], cwd=work, env=env, check=True)
+        subprocess.run(["wlink", "name", "cfgcall.exe", "system", "windows",
+                        "option", "quiet", "file", "cfgcall.obj"], cwd=work,
+                       env=env, check=True)
+        cls.env = dict(os.environ, WINEARCH="win32", WINEDEBUG="-all",
+                       WINEPREFIX=os.path.join(work, "prefix"),
+                       DISPLAY=":93")
+        cls.xvfb = subprocess.Popen(["Xvfb", ":93", "-screen", "0",
+                                     "800x600x24", "-nolisten", "tcp"],
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+        time.sleep(1.5)
+        # a server of its own, so it never inherits a test's file size limit
+        os.makedirs(cls.env["WINEPREFIX"])
+        subprocess.run(["wineserver", "-p"], env=cls.env, timeout=60)
+        subprocess.run(["wineboot", "-i"], env=cls.env, timeout=300,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    @classmethod
+    def tearDownClass(cls):
+        subprocess.run(["wineserver", "-k"], env=cls.env)
+        cls.xvfb.kill()
+        os.unlink(cls.link)
+        cls.tmp.cleanup()
+
+    def wine(self, *args):
+        return subprocess.run(["wine"] + list(args), env=self.env,
+                              cwd=self.link, timeout=120,
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL)
+
+    def path(self, name):
+        return os.path.join(self.link, name)
+
+    def reg(self, *args):
+        return subprocess.run(["wine", "reg"] + list(args), env=self.env,
+                              cwd=self.link, timeout=120,
+                              capture_output=True).stdout.decode("latin-1")
+
+    def test_profile_round_trip(self):
+        self.wine("essctl.exe", "/sim", "/save", "a.ini", "/q")
+        text = read(self.path("a.ini")).decode()
+        self.assertIn("fx.3d.level=0", text)
+        text = text.replace("fx.3d.level=0", "fx.3d.level=40")
+        text = text.replace("rec.source=Microphone", "rec.source=Line")
+        with open(self.path("a.ini"), "w", newline="\r\n") as f:
+            f.write(text)
+        self.wine("essctl.exe", "/sim", "/load", "a.ini", "/save", "b.ini",
+                  "/q")
+        back = read(self.path("b.ini")).decode()
+        self.assertIn("fx.3d.level=40", back)
+        self.assertIn("rec.source=Line", back)
+        log = read(self.path("ESSCTL.LOG")).decode()
+        self.assertIn("57 settings applied", log)
+
+    def test_profile_save_is_safe(self):
+        # a section of the user's own stays, and no temporary file is left
+        with open(self.path("KEEP.INI"), "w", newline="\r\n") as f:
+            f.write("[Mine]\nnote=kept\n\n[Fields]\nfx.3d.level=40\n")
+        self.wine("essctl.exe", "/sim", "/save", "KEEP.INI", "/q")
+        text = read(self.path("KEEP.INI")).decode()
+        self.assertTrue(text.startswith("[ESSCTL]\r\nFormat=1\r\n"))
+        self.assertIn("[Mine]\r\nnote=kept\r\n", text)
+        self.assertIn("fx.3d.level=0\r\n", text)
+        self.assertNotIn("fx.3d.level=40", text)
+        self.assertFalse(os.path.exists(self.path("KEEP.$$$")))
+        self.assertFalse(os.path.exists(self.path("KEEP.$$B")))
+
+        # a disk that's full before the new file is written: the old one
+        # stays as it was
+        def limit():
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (200,) * 2)
+
+        old = read(self.path("KEEP.INI"))
+        subprocess.run(["wine", "essctl.exe", "/sim", "/save", "KEEP.INI",
+                        "/q"], env=self.env, cwd=self.link, timeout=120,
+                       preexec_fn=limit, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+        self.assertEqual(read(self.path("KEEP.INI")), old)
+        self.assertFalse(os.path.exists(self.path("KEEP.$$$")))
+
+    def test_i2s_off(self):
+        key = r"HKLM\System\CurrentControlSet\Services\Class\Media\0003"
+        # without the ES1869's key nothing changes, and the log says why
+        self.wine("essctl.exe", "/sim", "/i2s=off", "/q")
+        log = read(self.path("ESSCTL.LOG")).decode()
+        self.assertIn("/i2s=off: the ES1869's driver settings aren't in the "
+                      "registry", log)
+        self.reg("add", key, "/v", "Driver", "/d", "es1869.vxd", "/f")
+        self.reg("add", key + r"\Config", "/v", "Disable Warning", "/t",
+                 "REG_BINARY", "/d", "ff", "/f")
+        # I2S has the music DAC, then /i2s=off takes it back for FM
+        with open(self.path("i2s.ini"), "w", newline="\r\n") as f:
+            f.write("[Fields]\nfx.i2s.enable=on\n")
+        self.wine("essctl.exe", "/sim", "/load", "i2s.ini", "/save",
+                  "i2s1.ini", "/q")
+        self.assertIn("fx.i2s.enable=on", read(self.path("i2s1.ini")).decode())
+        self.wine("essctl.exe", "/sim", "/load", "i2s.ini", "/i2s=off",
+                  "/save", "i2s2.ini", "/q")
+        self.assertIn("fx.i2s.enable=off",
+                      read(self.path("i2s2.ini")).decode())
+        values = self.reg("query", key + r"\Config")
+        self.assertIn("ESSWaveTableChip    REG_BINARY    01000000", values)
+        self.wine("essctl.exe", "/sim", "/i2s=on", "/q")
+        values = self.reg("query", key + r"\Config")
+        self.assertIn("ESSWaveTableChip    REG_BINARY    00000000", values)
+        log = read(self.path("ESSCTL.LOG")).decode()
+        self.assertIn("/i2s=off: FM has the music DAC now", log)
+        self.assertIn("/i2s=on: ESS's driver gives the music DAC to I2S", log)
+
+    def test_esfm_live_load(self):
+        bank = bytearray(read(os.path.join(ROOT, "esfm_patch_banks",
+                                           "bnk_com_better_square_wave.bin")))
+        size = len(bank)
+        voice = bytearray(bank[0x200:0x200 + 36])
+        voice[0] &= ~6
+        for i in range(40):
+            struct.pack_into("<H", bank, 2 * (216 + i), size + 36 * i)
+            bank += voice
+        with open(self.path("BIG.BIN"), "wb") as f:
+            f.write(bank)
+        with open(self.path("PROF.INI"), "w", newline="\r\n") as f:
+            f.write("[ESSCTL]\nFormat=1\n[ESFM]\nBank=%s\\BIG.BIN\n" % self.win)
+        self.wine("drvhold.exe", "ESFM.DRV", self.win,
+                  "%s\\essctl.exe /sim /load %s\\PROF.INI /q" %
+                  (self.win, self.win))
+        before = read(self.path("BEFORE.BIN"))
+        after = read(self.path("AFTER.BIN"))
+        original = read(os.path.join(ROOT, "esfm_patch_banks",
+                                     "bnk_com.bin"))
+        self.assertEqual(before[:len(original)], original)
+        self.assertEqual(after[:len(bank)], bytes(bank))
+        self.assertIn("ESFM bank loaded", read(self.path("ESSCTL.LOG"))
+                      .decode())
+
+    def driver_dump(self, driver):
+        shutil.copy(driver, self.path("DRV.DRV"))
+        self.wine("drvhold.exe", "DRV.DRV", self.win,
+                  "%s\\essctl.exe /sim /dump %s\\ESFM.TXT /q" %
+                  (self.win, self.win))
+        return read(self.path("ESFM.TXT")).decode("latin-1")
+
+    def system_ini(self):
+        return os.path.join(self.env["WINEPREFIX"], "drive_c", "windows",
+                            "system.ini")
+
+    def fixed_driver(self):
+        fixed = os.path.join(self.link, "FIXED.DRV")
+        if not os.path.exists(fixed):
+            sys.path.insert(0, os.path.join(ROOT, "tools"))
+            import build_esfm
+            build_esfm.build(True, fixed, workdir=self.link)
+        return fixed
+
+    def test_esfm_bank_file(self):
+        bank = bytearray(read(os.path.join(ROOT, "esfm_patch_banks",
+                                           "bnk_com.bin")))
+        off = struct.unpack_from("<H", bank, 0)[0]
+        bank[off + 4] = 0x5A
+        with open(self.path("MARK.BIN"), "wb") as f:
+            f.write(bank)
+        # and the OPL3 device's, a GENMIDI lump
+        shutil.copy(os.path.join(ROOT, "third_party", "genmidi",
+                                 "GENMIDI.lmp"), self.path("DOOM.OP2"))
+        ini = self.system_ini()
+        saved = read(ini)
+        try:
+            with open(ini, "ab") as f:
+                f.write(b"\r\n[ESFM.DRV]\r\nBank=%s\\MARK.BIN\r\n"
+                        b"Opl3Bank=%s\\DOOM.OP2\r\n" %
+                        (self.win.encode(), self.win.encode()))
+            text = self.driver_dump(self.fixed_driver())
+            # the driver read SYSTEM.INI, the file's date and the file
+            # through KERNEL when drvhold opened the devices
+            self.assertEqual(read(self.path("BEFORE.BIN"))[:len(bank)],
+                             bytes(bank))
+            self.assertIn("Bank file: %s\\MARK.BIN, %d bytes" %
+                          (self.win, len(bank)), text)
+            self.assertRegex(text, r"OPL3 bank file: %s\\DOOM\.OP2, dated "
+                             r"\d{4}-\d\d-\d\d \d\d:\d\d\r\nRead when a "
+                             r"program opens the device, if its date or "
+                             r"time changed: 1 checks, 1 load\r" %
+                             re.escape(self.win))
+        finally:
+            with open(ini, "wb") as f:
+                f.write(saved)
+
+    def test_esfm_profile_names_bank_file(self):
+        bank = read(os.path.join(ROOT, "esfm_patch_banks",
+                                 "bnk_com_better_square_wave.bin"))
+        with open(self.path("SQUARE.BIN"), "wb") as f:
+            f.write(bank)
+        with open(self.path("PROF2.INI"), "w", newline="\r\n") as f:
+            f.write("[ESSCTL]\nFormat=1\n[ESFM]\nBank=%s\\SQUARE.BIN\n" %
+                    self.win)
+        ini = self.system_ini()
+        saved = read(ini)
+        try:
+            shutil.copy(self.fixed_driver(), self.path("DRV.DRV"))
+            self.wine("drvhold.exe", "DRV.DRV", self.win,
+                      "%s\\essctl.exe /sim /load %s\\PROF2.INI /q" %
+                      (self.win, self.win))
+            self.assertEqual(read(self.path("AFTER.BIN"))[:len(bank)], bank)
+            text = read(ini).decode("latin-1").replace("\r\n", "\n")
+            self.assertIn("[ESFM.DRV]\nBank=%s\\SQUARE.BIN" % self.win,
+                          text)
+            self.assertIn("ESFM.DRV plays it from the file now",
+                          read(self.path("ESSCTL.LOG")).decode("latin-1"))
+        finally:
+            with open(ini, "wb") as f:
+                f.write(saved)
+
+    def test_esfm_voices_in_dump(self):
+        text = self.driver_dump(os.path.join(ROOT, "driver", "ESFM.DRV"))
+        self.assertIn("ESFM.DRV", text)
+        self.assertIn("The MIDI device is closed", text)
+        self.assertIn("ESS driver: drops messages", text)
+        self.assertEqual(text.count("  free"), 18)
+        text = self.driver_dump(self.fixed_driver())
+        self.assertIn("Fixed driver: 0 messages queued", text)
+        self.assertIn("Settings: from SYSTEM.INI, the OPL3 device 6 dB down, "
+                      "the square-wave bank", text)
+        self.assertIn("Bank file: none, the driver's own bank plays", text)
+        self.assertIn("OPL3 bank file: none, the driver's own bank plays",
+                      text)
+        self.assertEqual(text.count("  free"), 18)
+
+    def test_esfm_settings_from_system_ini(self):
+        # KERNEL's GetPrivateProfileInt at DRV_ENABLE, and ESS's bank
+        # (resource 1235) with BetterSquareWave=0
+        ini = self.system_ini()
+        saved = read(ini)
+        try:
+            with open(ini, "ab") as f:
+                f.write(b"\r\n[ESFM.DRV]\r\nVibrato=0\r\nSysEx=0\r\n"
+                        b"TrueSides=0\r\nBetterSquareWave=0\r\n")
+            text = self.driver_dump(self.fixed_driver())
+            self.assertIn("Settings: from SYSTEM.INI, off: Vibrato, SysEx, "
+                          "TrueSides, the OPL3 device 6 dB down, ESS's bank",
+                          text)
+            ess = read(os.path.join(ROOT, "esfm_patch_banks", "bnk_com.bin"))
+            self.assertEqual(read(self.path("BEFORE.BIN"))[:len(ess)], ess)
+        finally:
+            with open(ini, "wb") as f:
+                f.write(saved)
+
+    def test_wave_driver_in_dump(self):
+        # the Device information lines: none loaded, then ESS's and the
+        # rebuilt ES1869.DRV, loaded by drvhold without DRV_LOAD
+        self.wine("essctl.exe", "/sim", "/dump", "INFO.TXT", "/q")
+        text = read(self.path("INFO.TXT")).decode("latin-1")
+        self.assertIn("Wave driver:\tES1869.DRV isn't loaded\r", text)
+        text = self.driver_dump(os.path.join(ROOT, "driver", "ES1869.DRV"))
+        self.assertIn("Wave driver:\tESS's ES1869.DRV\r", text)
+        self.assertNotIn("Wave Audio 1:", text)
+        text = self.driver_dump(os.path.join(ROOT, "build", "ES1869.DRV"))
+        self.assertIn("Wave driver:\tthe rebuilt ES1869.DRV, not enabled "
+                      "yet\r", text)
+        self.assertIn("Wave Audio 1:\tfilter bypassed; Audio 2: not "
+                      "oversampled, filter bypassed\r", text)
+        # no device before DRV_LOAD, so no channels
+        self.assertNotIn("Audio 1:\tfree", text)
+        self.assertIn("a wave driver: loaded only",
+                      read(self.path("DRVHOLD.LOG")).decode("latin-1"))
+
+    def ess3d(self, *args, log="E3.LOG"):
+        """Run ess3d.exe, returns the lines it added to its log."""
+        path = self.path(log)
+        old = len(read(path).splitlines()) if os.path.exists(path) else 0
+        self.wine("ess3d.exe", *args)
+        lines = read(path).decode().splitlines() if os.path.exists(path) \
+            else []
+        # without the time stamps
+        return [line.split(" ", 2)[2] for line in lines[old:]]
+
+    def test_ess3d_commands(self):
+        def run(*args):
+            return self.ess3d("/sim", "/q", "/log=E3.LOG", *args)
+
+        self.assertEqual(run("on", "level", "40"), ["3-D on, level 40 of 63"])
+        # in order, each run starts from the simulated chip's reset values
+        self.assertEqual(run("ON", "level", "40", "level", "+30", "down", "8",
+                             "toggle"), ["3-D off, level 55 of 63"])
+        self.assertEqual(run("toggle", "level", "50%", "up"),
+                         ["3-D on, level 36 of 63"])
+        self.assertEqual(run("on", "hold", "down", "2"),
+                         ["3-D on, held in reset, level 0 of 63"])
+        self.assertEqual(run("hold", "on", "reset", "show"),
+                         ["3-D on, level 0 of 63"])
+        self.assertEqual(run("on", "bogus"), ["unknown command: bogus"])
+        self.assertEqual(run("level", "64"),
+                         ["level 64: the level is 0 to 63, or 0% to 100%"])
+        # Wine has no ES1869, and /q without /log= writes ESS3D.LOG
+        self.assertEqual(self.ess3d("/q", "toggle", log="ESS3D.LOG"),
+                         ["No ES1869 answered at 220h: use /base=, or /sim "
+                          "to try ess3d without the card"])
+        # without /q the problem shows in the display, which goes away by
+        # itself: a message box would wait for a click
+        t = time.time()
+        self.assertEqual(self.ess3d("/log=E3.LOG", "toggle"),
+                         ["No ES1869 answered at 220h: use /base=, or /sim "
+                          "to try ess3d without the card"])
+        self.assertLess(time.time() - t, 30)
+
+    def test_ess3d_measure(self):
+        # the quick plan against the made-up effect of src/s3dsim.c
+        for name in ("M.TXT", "M.$$$", "ESS3DSIM.RST"):
+            if os.path.exists(self.path(name)):
+                os.remove(self.path(name))
+        self.wine("ess3d.exe", "measure", "quick", "/sim", "/q",
+                  "/log=E3M.LOG", "/out=M.TXT")
+        text = read(self.path("M.TXT")).decode("latin-1")
+        self.assertTrue(text.startswith("ess3d measure: the 3-D effect"))
+        self.assertIn("plan: quick, 25 runs", text)
+        self.assertIn("  1  ess            0C 3F 8F 95 94 80  M>M", text)
+        self.assertIn("S>S deg    +50   +42   +27", text)
+        self.assertIn("ratio limit: from S/M -24 to +6 dB, S>S at 1 kHz "
+                      "changes by -15.3 dB; it holds S out at +5.4 to +5.4 "
+                      "dB re M", text)
+        self.assertIn("pan: 0, 22.5, 45, 67.5 and 90 degrees come out at "
+                      "-37, -24, 49, 115, 127", text)
+        # the limit's fall and rise in dB a second, the S it holds, and
+        # the boost back to its full gain
+        self.assertIn(" 22  step limit     0D 3F 8F 95 94 80      51 -14.4  "
+                      "+0.0     +5.4      0    5.2   +0.0    >+3.6", text)
+        self.assertIn(" 24  off again      04 3F 8F 95 94 80     0  no "
+                      "change over 0.1 dB", text)
+        # the properties that the quick plan's runs show
+        self.assertRegex(text, r"\r\nfall: 257\.\d / \(n \+ 1\) dB a second")
+        self.assertIn("\r\n", text)
+        # the mixer is back and the restore file gone
+        self.assertFalse(os.path.exists(self.path("ESS3DSIM.RST")))
+        self.assertFalse(os.path.exists(self.path("M.$$$")))
+        self.assertIn("ess3d measure started",
+                      read(self.path("E3M.LOG")).decode())
+        # ended by force: the restore file and the report so far stay, and
+        # the next ess3d puts the mixer back
+        run = subprocess.Popen(["wine", "ess3d.exe", "measure", "quick",
+                                "/sim", "/q", "/out=K.TXT"], env=self.env,
+                               cwd=self.link, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        deadline = time.time() + 60
+        while not os.path.exists(self.path("K.$$$")) or \
+                b"  1  ess" not in read(self.path("K.$$$")):
+            self.assertLess(time.time(), deadline)
+            time.sleep(0.2)
+        self.wine("taskkill", "/f", "/im", "winevdm.exe")
+        run.wait(timeout=60)
+        self.assertTrue(os.path.exists(self.path("ESS3DSIM.RST")))
+        self.ess3d("/sim", "/q", "/log=E3M.LOG", "show")
+        self.assertFalse(os.path.exists(self.path("ESS3DSIM.RST")))
+        self.assertIn("ess3d put the mixer back",
+                      read(self.path("ESS3D.LOG")).decode())
+        # one from before a restart only goes away
+        with open(self.path("ESS3DSIM.RST"), "w", newline="") as f:
+            f.write("boot=1000\r\n50=0F\r\n")
+        self.ess3d("/sim", "/q", "/log=E3M.LOG", "show")
+        self.assertFalse(os.path.exists(self.path("ESS3DSIM.RST")))
+
+    def test_ess3d_chirp(self):
+        # the chirp plan against /sim: its response in twelfths of an
+        # octave, and the filters the summary fits to it
+        for name in ("C.TXT", "C.$$$"):
+            if os.path.exists(self.path(name)):
+                os.remove(self.path(name))
+        self.wine("ess3d.exe", "measure", "chirp", "/sim", "/q",
+                  "/log=E3C.LOG", "/out=C.TXT")
+        text = read(self.path("C.TXT")).decode("latin-1")
+        self.assertIn("plan: chirp, 5 runs", text)
+        self.assertIn("  1  ess            0C 3F 8F 95 94 80\r\n", text)
+        self.assertIn("filters: each chirp run's boost fitted", text)
+        self.assertIn("     peak +16.8 dB at 456 Hz; zeros 0 Hz, ", text)
+        # Watcom's floating point may round the last digit the other way
+        self.assertRegex(text, r"; poles 38\d Hz, 54\d Hz, 1 over 50 kHz")
+        self.assertFalse(os.path.exists(self.path("C.$$$")))
+
+    def test_ess3d_display(self):
+        def start(*args):
+            return subprocess.Popen(["wine", "ess3d.exe", "/sim",
+                                     "/log=E3D.LOG"] + list(args),
+                                    env=self.env, cwd=self.link,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+
+        first = start("/t=30000", "on")
+        # it writes the log, then shows the display
+        deadline = time.time() + 60
+        while not os.path.exists(self.path("E3D.LOG")):
+            self.assertLess(time.time(), deadline)
+            time.sleep(0.1)
+        time.sleep(1)
+        t = time.time()
+        start("/t=5000", "level", "10").wait(timeout=60)
+        second = time.time() - t
+        first.wait(timeout=60)
+        first_after = time.time() - t
+        # the second one showed no display of its own, and the first one's
+        # went 5 s after the second one's setting instead of after 30 s
+        self.assertLess(second, 5)
+        self.assertGreater(first_after, 4.5)
+        self.assertLess(first_after, 15)
+        self.assertEqual(len(read(self.path("E3D.LOG")).splitlines()), 2)
+
+    def test_ess3d_tray(self):
+        def logged(text):
+            deadline = time.time() + 60
+            while True:
+                path = self.path("E3T.LOG")
+                if os.path.exists(path) and text in read(path).decode():
+                    return
+                self.assertLess(time.time(), deadline, text)
+                time.sleep(0.1)
+
+        # no tray icon: exit does nothing
+        self.assertEqual(self.ess3d("/sim", "/q", "/log=E3T.LOG", "exit",
+                                    log="E3T.LOG"), [])
+        tray = subprocess.Popen(["wine", "ess3d.exe", "/sim", "/log=E3T.LOG",
+                                 "tray"], env=self.env, cwd=self.link,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        logged("tray: started")
+        # a second "tray" opens the first one's panel and exits
+        self.wine("ess3d.exe", "/sim", "/log=E3T.LOG", "tray")
+        logged("tray: panel")
+        # a command, then the icon closes
+        self.wine("ess3d.exe", "/sim", "/q", "/log=E3T.LOG", "on", "exit")
+        tray.wait(timeout=60)
+        lines = read(self.path("E3T.LOG")).decode().splitlines()
+        self.assertEqual([line.split(" ", 2)[2] for line in lines],
+                         ["tray: started", "tray: panel",
+                          "3-D on, level 0 of 63", "tray: closed"])
+
+    def test_esfmrec(self):
+        self.wine("esfmrec.exe", "/sim", "/t=2", "/q", "FM.WAV")
+        data = read(self.path("FM.WAV"))
+        # 2 s at 49,613 Hz, 16-bit stereo, after a 44-byte header
+        self.assertEqual(data[:4], b"RIFF")
+        self.assertEqual(struct.unpack("<IHHIIHH", data[16:36]),
+                         (16, 1, 2, FM_HZ, FM_HZ * 4, 4, 16))
+        self.assertEqual(struct.unpack("<I", data[40:44])[0], 2 * FM_HZ * 4)
+        self.assertEqual(len(data), 44 + 2 * FM_HZ * 4)
+        pcm = struct.unpack("<%dh" % ((len(data) - 44) // 2), data[44:])
+        left, right = pcm[0::2], pcm[1::2]
+        rising = lambda s: sum(a < 0 <= b for a, b in zip(s, s[1:]))  # noqa
+        self.assertLessEqual(abs(rising(left) - 2000), 1)    # 1 kHz
+        self.assertLessEqual(abs(rising(right) - 1000), 1)   # 500 Hz
+        self.assertEqual(max(map(abs, left)), 16383)          # -6 dB
+        log = read(self.path("ESFMREC.LOG")).decode()
+        self.assertIn("FM.WAV: 2.0 s, 396904 bytes at 49613 Hz", log)
+        # /raw: the same samples without the header
+        self.wine("esfmrec.exe", "/sim", "/t=1", "/raw", "/q", "FM.PCM")
+        raw = read(self.path("FM.PCM"))
+        self.assertEqual(len(raw), FM_HZ * 4)
+        self.assertEqual(raw[:4000], data[44:4044])
+
+    def wav_lengths(self, name):
+        data = read(self.path(name))
+        return len(data), struct.unpack("<I", data[4:8])[0] + 8, \
+            struct.unpack("<I", data[40:44])[0]
+
+    def test_esfmrec_ended_by_force(self):
+        rec = subprocess.Popen(["wine", "esfmrec.exe", "/sim", "/q",
+                                "/log=KILL.LOG", "KILL.WAV"], env=self.env,
+                               cwd=self.link, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        deadline = time.time() + 60
+        while not os.path.exists(self.path("KILL.LOG")):
+            self.assertLess(time.time(), deadline)
+            time.sleep(0.1)
+        # past the first save at 5 s, then End Task
+        time.sleep(7)
+        self.wine("taskkill", "/f", "/im", "winevdm.exe")
+        rec.wait(timeout=60)
+        self.assertTrue(os.path.exists(self.path("ESFMSIM.RST")))
+        size, riff, data = self.wav_lengths("KILL.WAV")
+        self.assertGreaterEqual(data, 5 * FM_HZ * 4)
+        self.assertLess(data, size - 44)
+        # the next start repairs the header and removes the marker
+        self.wine("esfmrec.exe", "/sim", "/t=1", "/q", "/log=KILL.LOG",
+                  "NEXT.WAV")
+        size, riff, data = self.wav_lengths("KILL.WAV")
+        self.assertEqual(riff, size)
+        self.assertEqual(data, (size - 44) // 4 * 4)
+        self.assertFalse(os.path.exists(self.path("ESFMSIM.RST")))
+        log = read(self.path("KILL.LOG")).decode()
+        self.assertIn("ended by force", log)
+        self.assertIn("KILL.WAV is repaired, 0:00:0", log)
+        self.assertIn("NEXT.WAV: 1.0 s", log)
+
+    def test_esfmrec_disk_full(self):
+        def limit():
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (600 * 1024,) * 2)
+
+        subprocess.run(["wine", "esfmrec.exe", "/sim", "/t=10", "/q",
+                        "/log=FULL.LOG", "FULL.WAV"], env=self.env,
+                       cwd=self.link, timeout=120, preexec_fn=limit,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        size, riff, data = self.wav_lengths("FULL.WAV")
+        self.assertLessEqual(size, 600 * 1024)
+        self.assertEqual(riff, size)
+        self.assertEqual(data, (size - 44) // 4 * 4)
+        log = read(self.path("FULL.LOG")).decode()
+        self.assertIn("FULL.WAV failed: is the disk full?", log)
+        self.assertFalse(os.path.exists(self.path("ESFMSIM.RST")))
+
+    def test_esfmrec_split(self):
+        self.wine("esfmrec.exe", "/sim", "/t=3", "/split=1", "/q", "SP.WAV")
+        pcm = b""
+        for name in ("SP.WAV", "SP_2.WAV", "SP_3.WAV"):
+            data = read(self.path(name))
+            self.assertEqual(len(data), 44 + FM_HZ * 4)
+            pcm += data[44:]
+        self.assertFalse(os.path.exists(self.path("SP_4.WAV")))
+        # the tone runs on across the files
+        left = struct.unpack("<%dh" % (len(pcm) // 2), pcm)[0::2]
+        rising = sum(a < 0 <= b for a, b in zip(left, left[1:]))
+        self.assertLessEqual(abs(rising - 3000), 1)
+
+    # --- esswchk ---------------------------------------------------------
+
+    WCHK = ("vxd.count2", "vxd.count1", "a1.position", "a1.drain",
+            "fm.pan0", "fm.pan127", "opl.pan0", "opl.pan127", "fm.rate")
+
+    def wchk(self, name, *args):
+        """esswchk with args, its report NAME.TXT and log NAME.LOG: the
+        report's {check: [(result, details)]}, its text and the log"""
+        self.wine("esswchk.exe", "/out=%s.TXT" % name, "/log=%s.LOG" % name,
+                  *args)
+        text = read(self.path(name + ".TXT")).decode("latin-1")
+        res = {}
+        for line in text.splitlines():
+            parts = line.split(None, 2)
+            if len(parts) == 3 and parts[1] in ("PASS", "FAIL", "KNOWN",
+                                                "INFO", "SKIP"):
+                res.setdefault(parts[0], []).append((parts[1], parts[2]))
+        return res, text, read(self.path(name + ".LOG")).decode("latin-1")
+
+    def test_esswchk_sim(self):
+        """the fixed drivers: every check passes, the report gets its
+        name, /once= deletes its file, and the log has the exit code"""
+        with open(self.path("ONCE.BAT"), "w", newline="\r\n") as f:
+            f.write("@ECHO OFF\n")
+        # and the banks that SYSTEM.INI names, for env.banks
+        self.keep_system_ini()
+        self.set_ini("ESFM.DRV", "Bank", r"C:\BANKS\SQUARE.BIN")
+        self.set_ini("ESFM.DRV", "Opl3Bank", None)
+        res, text, log = self.wchk("W1", "/sim", "/auto", "/q", "/nobox",
+                                   "/once=ONCE.BAT")
+        self.assertEqual(res["env.banks"], [(
+            "INFO", r"SYSTEM.INI: [ESFM.DRV] Bank=C:\BANKS\SQUARE.BIN, "
+            "Opl3Bank=")])
+        for c in self.WCHK:
+            self.assertEqual([r for r, _d in res[c]], ["PASS"], c)
+        self.assertIn("100000 readings, 0 torn", res["vxd.count2"][0][1])
+        self.assertIn("the count up to 8191, 32 wraps", res["vxd.count2"][0][1])
+        self.assertIn("the last header back 531, 532, 533 ms",
+                      res["a1.drain"][0][1])
+        for c in ("fm.pan0", "opl.pan0"):
+            self.assertRegex(res[c][0][1], r"^left -12\.\d, right -120", c)
+        self.assertIn("49612.", res["fm.rate"][0][1])
+        self.assertEqual(res["opl.rate"][0][0], "INFO")
+        m = re.match(r"(\d+\.\d+) Hz over 3 s on the OPL3 mode: [+-]\d+ ppm "
+                     r"from 49612\.5 Hz, the master / 480, as in the native "
+                     r"mode", res["opl.rate"][0][1])
+        self.assertTrue(m, res["opl.rate"][0][1])
+        self.assertLess(abs(float(m.group(1)) / 49612.5 - 1), 500e-6)
+        self.assertIn("StartUp batch", res["env.once"][0][1])
+        self.assertIn("ONCE.BAT: deleted", res["env.once"][0][1])
+        self.assertEqual(res["sb.box"][0][0], "SKIP")
+        self.assertIn("pass=9 fail=0 known=0", text)
+        self.assertIn("ES1869.VXD with the extension 1.26",
+                      res["env.vxd"][0][1])
+        self.assertFalse(os.path.exists(self.path("ONCE.BAT")))
+        self.assertFalse(os.path.exists(self.path("W1.$$$")))
+        self.assertIn("esswchk done: pass=9 fail=0", log)
+        self.assertIn("exit 0", log)
+
+    def test_esswchk_old(self):
+        """the drivers before the fixes: ESS's VxD's counts are INFO with
+        their tears, a torn position and the early drain fail, and the FM
+        panned left sounds on the right, as ESS's ESFM.DRV plays it"""
+        res, text, log = self.wchk("W2", "/sim=old", "/auto", "/q", "/nobox")
+        for c in ("vxd.count2", "vxd.count1"):
+            self.assertEqual(res[c][0][0], "INFO", c)
+            self.assertRegex(res[c][0][1], r"\d+ torn \(0 near 128, \d+ "
+                             r"near 256.*one in 3\d\d, as ESS's VxD")
+        self.assertEqual(res["a1.position"][0][0], "FAIL")
+        self.assertRegex(res["a1.position"][0][1], r"[1-9]\d* steps back")
+        self.assertEqual(res["a1.drain"][0][0], "FAIL")
+        self.assertIn("at the DMA's end", res["a1.drain"][0][1])
+        for c in ("fm.pan0", "fm.pan127"):
+            self.assertEqual(res[c][0][0], "KNOWN", c)
+            self.assertIn("TrueSides off; on the other side", res[c][0][1])
+        for c in ("opl.pan0", "opl.pan127"):
+            self.assertEqual(res[c], [("SKIP", "no OPL3 FM MIDI device: "
+                                       "ESS's ESFM.DRV, or Opl3Device=0")])
+        self.assertEqual(res["opl.rate"][0][0], "SKIP")
+        self.assertIn("failed: a1.position a1.drain", text)
+        self.assertIn("exit 4", log)
+
+    def test_esswchk_dmacounttwice_off(self):
+        """DmaCountTwice=0: the extended VxD reads the count once, as
+        ESS's: INFO with the tears"""
+        ini = self.system_ini()
+        saved = read(ini)
+        try:
+            with open(ini, "ab") as f:
+                f.write(b"\r\n[ES1869.VXD]\r\nDmaCountTwice=0\r\n")
+            res, _text, _log = self.wchk("W3", "/sim", "/q", "/nobox")
+        finally:
+            with open(ini, "wb") as f:
+                f.write(saved)
+        self.assertEqual(res["vxd.count2"][0][0], "INFO")
+        self.assertIn("DmaCountTwice=0", res["env.ini"][0][1])
+
+    def test_esswchk_box(self):
+        """sb.box: SB16BOX.BAT sets BLASTER for the VxD's front and runs
+        sb16test /A into SB16BOX.TXT, whose summary decides; its
+        ctl.poll16 line is copied"""
+        canned = ("sb16test 1.6: checks the Sound Blaster 16 that games "
+                  "find\r\nctl.poll16           PASS  100000 readings, 0 "
+                  "torn\r\n\r\n[summary] done\r\npass=61 fail=0 known=3 "
+                  "info=40 skip=2\r\n")
+        with open(self.path("SB16BOX.TXT"), "w", newline="") as f:
+            f.write(canned)
+        res, _text, _log = self.wchk("W4", "/sim", "/q")
+        self.assertEqual(res["sb.box"][0][0], "PASS")
+        self.assertIn("pass=61 fail=0 known=3 info=40; ctl.poll16 ",
+                      res["sb.box"][0][1])
+        bat = read(self.path("SB16BOX.BAT")).decode().upper()
+        self.assertIn("SET BLASTER=A220 I5 D1 H5 P330 T6", bat)
+        self.assertRegex(bat, r"SB16TEST\.EXE /A /O:\S+\\SB16BOX\.TXT")
+        with open(self.path("SB16BOX.TXT"), "w", newline="") as f:
+            f.write(canned.replace("fail=0", "fail=2"))
+        res, _text, _log = self.wchk("W5", "/sim", "/q")
+        self.assertEqual(res["sb.box"][0][0], "FAIL")
+        os.remove(self.path("SB16BOX.TXT"))
+
+    def test_esswchk_box_idle(self):
+        """sb.box with no report coming: esswchk waits for it idle, on a
+        timer's messages, and /sim then skips it"""
+        if os.path.exists(self.path("SB16BOX.TXT")):
+            os.remove(self.path("SB16BOX.TXT"))
+        res, _text, log = self.wchk("W11", "/sim", "/q")
+        self.assertEqual(res["sb.box"][0][0], "SKIP")
+        self.assertIn("/sim: no DOS box", res["sb.box"][0][1])
+        self.assertNotIn("No timer", log)
+        self.assertIn("exit 0", log)
+
+    def test_esswchk_go(self):
+        """/go, the whole run: essinst's line, then Windows' end for
+        ESSCHECK.BAT /W and esswchk's folder, each logged, where /sim
+        stops; without ESSCHECK.BAT next to it, nothing"""
+        bat = self.path("ESSCHECK.BAT")
+        with open(bat, "w", newline="\r\n") as f:
+            f.write("@ECHO OFF\n")
+        try:
+            self.wine("esswchk.exe", "/go", "/sim", "/log=W12.LOG")
+        finally:
+            os.remove(bat)
+        log = read(self.path("W12.LOG")).decode("latin-1")
+        self.assertRegex(log, r"The whole run: .*\\ESSINST\.EXE /y "
+                         r"/norestart\r?\n")
+        m = re.search(r"The whole run: Windows ends for \S+ /C "
+                      r"(.*)\\ESSCHECK\.BAT /W (.*?)\r?\n", log)
+        self.assertTrue(m, log)
+        self.assertEqual(m.group(1), m.group(2))
+        self.assertNotIn("esswchk 1.1 started", log)
+        self.wine("esswchk.exe", "/go", "/sim", "/log=W13.LOG")
+        log = read(self.path("W13.LOG")).decode("latin-1")
+        self.assertIn("The whole run needs ", log)
+        self.assertNotIn("ESSINST", log)
+
+    def test_esswchk_sounds(self):
+        """/R: the level tone and the start marker BADC, each sound after
+        its marker # its number *, with its parts, what it should hold and
+        its spec, then the end marker CDAB"""
+        res, text, _log = self.wchk("W6", "/sim", "/R", "/q", "/nobox")
+        self.assertIn("marker BADC at 0 us", res["rec.start"][0][1])
+        want = [("p.start44a", "left"), ("p.start44b", "left"),
+                ("p.start44c", "left"), ("p.start22", "left"),
+                ("p.restart", "lpause"), ("p.dual44a", "step"),
+                ("p.dual44b", "step"), ("p.dual44c", "step"),
+                ("p.fm0", "fml"), ("p.fm127", "fmr")]
+        for i, (c, expect) in enumerate(want):
+            self.assertRegex(res[c][0][1], r"^recorded: marker #%03d\* at "
+                             r"\d+ us, sound( \d+-\d+)+ us, %s expected$" %
+                             (i + 1, expect), c)
+            self.assertRegex(text, r"\n%s +spec  dev=" % re.escape(c))
+        self.assertEqual(len(re.findall(r" \d+-\d+",
+                                        res["p.restart"][0][1])), 2)
+        self.assertRegex(res["rec.end"][0][1], r"^marker CDAB at \d+ us$")
+
+    def test_esswchk_round_trip(self):
+        """/R's report, and a recording made to it: tools/wchkrec.py finds
+        every marker and passes every sound"""
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("needs numpy")
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import test_wchkrec
+        import wchkrec
+        self.wchk("W10", "/sim", "/R", "/q", "/nobox")
+        test_wchkrec.write_wav(self.path("W10.WAV"), test_wchkrec.recording(
+            self.path("W10.TXT")))
+        out = io.StringIO()
+        failed = wchkrec.analyze(self.path("W10.TXT"), self.path("W10.WAV"),
+                                 out)
+        self.assertEqual(failed, 0, out.getvalue())
+        self.assertIn("the clock: 12 markers", out.getvalue())
+        self.assertIn("0 of 10 recorded sounds failed", out.getvalue())
+
+    def test_esswchk_bad_option(self):
+        with open(self.path("ONCE2.BAT"), "w") as f:
+            f.write("@ECHO OFF\n")
+        self.wine("esswchk.exe", "/q", "/log=W7.LOG", "/once=ONCE2.BAT",
+                  "/zz")
+        self.assertIn("A bad command line", read(self.path("W7.LOG")).decode())
+        self.assertFalse(os.path.exists(self.path("ONCE2.BAT")))
+
+    def test_esswchk_no_card(self):
+        """without the card or its drivers every check is skipped, and the
+        report says why; it lists the MIDI list of the Multimedia control
+        panel, an entry a line, and the MIDI mapper's choice"""
+        self.addCleanup(self.reg, "delete", self.MEDIA, "/f")
+        self.addCleanup(self.reg, "delete", "HKCU\\" + self.MIDIMAP, "/f")
+        self.midi_entries()
+        self.reg("add", "HKCU\\" + self.MIDIMAP, "/v", "CurrentInstrument",
+                 "/d", "ESFM Synthesis (220)", "/f")
+        res, text, log = self.wchk("W8", "/auto", "/q")
+        self.assertIn("no ES1869.VXD answers", res["env.vxd"][0][1])
+        for c in self.WCHK + ("sb.box",):
+            self.assertEqual(res[c][0][0], "SKIP", c)
+        self.assertIn("pass=0 fail=0 known=0", text)
+        self.assertIn("No ES1869 answers", log)
+        self.assertEqual(sorted(d for _r, d in res["env.midi"]), [
+            "esfm.drv<0001>: MIDI for Internal ESFM Synthesis; Driver "
+            "esfm.drv, Port none, Active 0, DevNode 00000001",
+            "esfm.drv<0018>: MIDI for Internal ESFM Synthesis; Driver "
+            "esfm.drv, Port none, Active 1, DevNode 00001D0C",
+            "essmpu.drv<0018>: MIDI for External MIDI Port; Driver "
+            "essmpu.drv, Port none, Active 1, DevNode none"])
+        self.assertEqual(res["env.mapper"], [
+            ("INFO", "the MIDI mapper's CurrentInstrument: ESFM Synthesis "
+             "(220)")])
+        self.assertEqual(res["opl.list"][0][0], "SKIP")
+
+    def test_esswchk_opl3_list(self):
+        """Opl3Device=2: the report lists the card's MIDI drivers, and
+        opl.list says what Windows made of ESFMOPL3.DRV's entry"""
+        self.keep_system_ini()
+        self.addCleanup(self.reg, "delete", self.MEDIA, "/f")
+        self.midi_entries()
+        self.card_keys("0018")
+        self.set_opl3_device("2")
+        system = self.windows("system")
+        for left in ("ESFMOPL3.DRV",):
+            found = self.find(system, left)
+            if found:
+                os.remove(found)
+        res, _text, _log = self.wchk("W10", "/auto", "/q")
+        self.assertEqual(res["env.card"], [(
+            "INFO", "System\\CurrentControlSet\\Services\\Class\\MEDIA\\"
+            "0018\\Drivers\\midi: esfm.drv, essmpu.drv")])
+        self.assertEqual(res["opl.list"], [
+            ("FAIL", "esfmopl3.drv<0018> isn't in the MIDI list")])
+        # what Windows made of the driver, whatever the verdict
+        self.assertEqual(res["env.opl3"], [
+            ("INFO", "esfmopl3.drv<0018>: no entry; not among the card's MIDI "
+             "drivers; ES1869.VXD told Windows that it is there: no "
+             "ES1869.VXD answers"),
+            ("INFO", "ESFMOPL3.DRV not loaded, and SYSTEM's copy is missing "
+             "(2); ESFM.DRV isn't the fixed one; 0 MIDI devices called OPL3 "
+             "FM Synthesis")])
+        self.assertIn("Opl3Driver=1", res["env.ini"][0][1])
+        # essinst's entry as Windows left it after a start, inactive: the
+        # copy of ESS's entry did so on the laptop
+        ess, _keys = self.reg_values(self.MEDIA + r"\esfm.drv<0018>")
+        self.midi_entry("esfmopl3.drv<0018>", [
+            (n, t, d.replace(" ", "") if n == "DevNode" else d)
+            for n, (t, d) in dict(ess, Driver=("REG_SZ", "esfmopl3.drv"),
+                                  Active=("REG_SZ", "0")).items()])
+        key = self.CLASS + r"\0018\Drivers\midi\esfmopl3.drv"
+        self.reg("add", key, "/v", "Driver", "/d", "esfmopl3.drv", "/f")
+        res, _text, _log = self.wchk("W11", "/auto", "/q")
+        self.assertEqual(res["opl.list"], [
+            ("FAIL", "esfmopl3.drv<0018> is inactive (Active 0): Windows "
+             "didn't take it over at the start")])
+        self.assertEqual(res["env.opl3"][0], (
+            "INFO", "esfmopl3.drv<0018>: Active 0, DevNode the card's; among "
+            "the card's MIDI drivers; ES1869.VXD told Windows that it is "
+            "there: no ES1869.VXD answers"))
+        # the installed file loads, which Wine's loader checks
+        shutil.copy(os.path.join(ROOT, "build", "ESFMOPL3.DRV"),
+                    os.path.join(system, "ESFMOPL3.DRV"))
+        self.addCleanup(os.remove, os.path.join(system, "ESFMOPL3.DRV"))
+        # active on the card's devnode: only the driver, which Wine doesn't
+        # load, is missing
+        self.reg("add", self.MEDIA + r"\esfmopl3.drv<0018>", "/v", "Active",
+                 "/d", "1", "/f")
+        res, _text, _log = self.wchk("W12", "/auto", "/q")
+        self.assertEqual(res["opl.list"], [
+            ("FAIL", "ESFMOPL3.DRV isn't loaded")])
+        self.assertIn("esfmopl3.drv", res["env.card"][0][1])
+        self.assertEqual(res["env.opl3"][1], (
+            "INFO", "ESFMOPL3.DRV not loaded, but SYSTEM's copy loads; "
+            "ESFM.DRV isn't the fixed one; 0 MIDI devices called OPL3 FM "
+            "Synthesis"))
+
+    def test_esswchk_ended_by_force(self):
+        """a run ended by force leaves its report as NAME.$$$, with the
+        lines of the checks that finished"""
+        run = subprocess.Popen(["wine", "esswchk.exe", "/sim", "/q",
+                                "/out=W9.TXT", "/log=W9.LOG"], env=self.env,
+                               cwd=self.link, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        deadline = time.time() + 60
+        while b"a1.position" not in (read(self.path("W9.$$$")) if
+                                     os.path.exists(self.path("W9.$$$"))
+                                     else b""):
+            self.assertLess(time.time(), deadline)
+            time.sleep(0.2)
+        self.wine("taskkill", "/f", "/im", "winevdm.exe")
+        run.wait(timeout=60)
+        self.assertFalse(os.path.exists(self.path("W9.TXT")))
+        text = read(self.path("W9.$$$")).decode("latin-1")
+        self.assertIn("vxd.count2           PASS", text)
+        self.assertNotIn("[summary]", text)
+
+    # --- essinst ---------------------------------------------------------
+
+    DRIVERS = (("ES1869.VXD", "ES1869VX"), ("ES1869.DRV", "ES1869"),
+               ("ESFM.DRV", "ESFM"))
+
+    def windows(self, *names):
+        return os.path.join(self.env["WINEPREFIX"], "drive_c", "windows",
+                            *names)
+
+    @staticmethod
+    def find(folder, name):
+        """the file called name in folder, in any case, or None"""
+        for f in os.listdir(folder):
+            if f.lower() == name.lower():
+                return os.path.join(folder, f)
+        return None
+
+    def essinst_setup(self):
+        """ESS's drivers in the SYSTEM folder, the rebuilt ones next to
+        essinst.exe, and nothing left of an earlier run. Wine shows itself
+        to 16-bit programs as Windows NT, where essinst refuses to run, so
+        it shows winevdm.exe, which runs them, Windows 98 for the test"""
+        key = r"HKCU\Software\Wine\AppDefaults\winevdm.exe"
+        self.reg("add", key, "/v", "Version", "/d", "win98", "/f")
+        self.addCleanup(self.reg, "delete", key, "/f")
+        system = self.windows("system")
+        for name, base in self.DRIVERS:
+            shutil.copy(os.path.join(ROOT, "build", name),
+                        self.path(os.path.join("INST", name)))
+            for left in (name, base + ".ORG", base + ".NEW", base + ".$$$"):
+                found = self.find(system, left)
+                if found:
+                    os.remove(found)
+            shutil.copy(os.path.join(ROOT, "driver", name),
+                        os.path.join(system, name))
+        # and the OPL3 device's driver, which ESS's set doesn't have, the
+        # box of the patch banks and the banks
+        for name in ("ESFMOPL3.DRV", "ESFMCFG.DLL"):
+            shutil.copy(os.path.join(ROOT, "build", name),
+                        self.path(os.path.join("INST", name)))
+        shutil.rmtree(self.path(os.path.join("INST", "BANKS")),
+                      ignore_errors=True)
+        shutil.copytree(os.path.join(ROOT, "build", "BANKS"),
+                        self.path(os.path.join("INST", "BANKS")))
+        for left in ("ESFMOPL3.DRV", "ESFMOPL3.NEW", "ESFMOPL3.$$$",
+                     "ESFMCFG.DLL", "ESFMCFG.NEW", "ESFMCFG.$$$"):
+            found = self.find(system, left)
+            if found:
+                os.remove(found)
+        found = self.find(system, "ESFMBANK")
+        if found:
+            shutil.rmtree(found)
+        for left in ("WININIT.INI", "ESSINST.LOG"):
+            found = self.find(self.windows(), left)
+            if found:
+                os.remove(found)
+
+    def wininit(self):
+        """WININIT.INI's [rename] entries, {destination: source}, lowercase"""
+        found = self.find(self.windows(), "WININIT.INI")
+        if not found:
+            return {}
+        out, section = {}, None
+        for row in read(found).decode("latin-1").splitlines():
+            row = row.strip()
+            if row.startswith("["):
+                section = row.lower()
+            elif "=" in row and section == "[rename]":
+                dest, src = row.split("=", 1)
+                out[dest.lower()] = src.lower()
+        return out
+
+    def restart(self):
+        """what Windows does with WININIT.INI when it starts"""
+        for dest, src in self.wininit().items():
+            names = [self.windows("system", p.rsplit("\\", 1)[1])
+                     for p in (dest, src)]
+            dest, src = [self.find(os.path.dirname(n), os.path.basename(n))
+                         or n for n in names]
+            if os.path.exists(dest):
+                os.remove(dest)
+            os.rename(src, dest)
+        os.remove(self.find(self.windows(), "WININIT.INI"))
+
+    def essinst_log(self):
+        return read(self.find(self.windows(), "ESSINST.LOG")).decode()
+
+    def test_essinst(self):
+        self.essinst_setup()
+        system = self.windows("system")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        log = self.essinst_log()
+        for name, base in self.DRIVERS:
+            self.assertIn("%s: ESS's driver, kept as %s.ORG." % (name, base),
+                          log)
+            ess = read(os.path.join(ROOT, "driver", name))
+            new = read(os.path.join(ROOT, "build", name))
+            self.assertEqual(read(self.find(system, base + ".ORG")), ess)
+            self.assertEqual(read(self.find(system, base + ".NEW")), new)
+            self.assertEqual(read(self.find(system, name)), ess)
+            self.assertIsNone(self.find(system, base + ".$$$"))
+        self.assertIn("Done: the drivers go in place at the next restart.",
+                      log)
+        renames = self.wininit()
+        self.assertEqual(len(renames), 3)
+        for name, base in self.DRIVERS:
+            dest = [d for d in renames if d.endswith("\\" + name.lower())]
+            self.assertEqual(len(dest), 1)
+            self.assertTrue(renames[dest[0]].endswith(
+                "\\%s.new" % base.lower()))
+            self.assertTrue(dest[0].startswith("c:\\windows\\system\\"))
+        # the box of the patch banks, which nothing has loaded, goes in at
+        # once, and the banks into SYSTEM\\ESFMBANK, where it lists them
+        self.assertEqual(read(self.find(system, "ESFMCFG.DLL")),
+                         read(os.path.join(ROOT, "build", "ESFMCFG.DLL")))
+        banks = sorted(os.listdir(os.path.join(ROOT, "build", "BANKS")))
+        folder = self.find(system, "ESFMBANK")
+        self.assertEqual(sorted(f.upper() for f in os.listdir(folder)), banks)
+        for name in banks:
+            self.assertEqual(read(self.find(folder, name)), read(
+                os.path.join(ROOT, "build", "BANKS", name)))
+        self.assertIn("ESFMCFG.DLL: copied into place.", log)
+
+        # the restart puts them in place, and then there's nothing to do
+        self.restart()
+        for name, base in self.DRIVERS:
+            self.assertEqual(read(self.find(system, name)),
+                             read(os.path.join(ROOT, "build", name)))
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        self.assertEqual(self.essinst_log().count("installed already."),
+                         3 + 1 + len(banks))
+        self.assertEqual(self.wininit(), {})
+
+        # /restore stages ESS's drivers again, from the copies, takes the
+        # box out and leaves the banks
+        self.wine("INST\\essinst.exe", "/y", "/restore", "/norestart")
+        self.assertEqual(len(self.wininit()), 3)
+        self.assertIsNone(self.find(system, "ESFMCFG.DLL"))
+        self.assertEqual(len(os.listdir(folder)), len(banks))
+        self.restart()
+        for name, base in self.DRIVERS:
+            ess = read(os.path.join(ROOT, "driver", name))
+            self.assertEqual(read(self.find(system, name)), ess)
+            self.assertEqual(read(self.find(system, base + ".ORG")), ess)
+
+    MAPPER = r"Software\Microsoft\Multimedia\Sound Mapper"
+
+    def preferred(self, root, value):
+        out = self.reg("query", root + "\\" + self.MAPPER, "/v", value)
+        for row in out.splitlines():
+            parts = row.split(None, 2)
+            if len(parts) == 3 and parts[0] == value and parts[1] == "REG_SZ":
+                return parts[2].strip()
+        return None
+
+    def prefer(self, root, value, name):
+        self.reg("add", root + "\\" + self.MAPPER, "/v", value, "/d", name,
+                 "/f")
+
+    def test_essinst_preferred_devices(self):
+        # Windows keeps its preferred devices by name, and the rebuilt
+        # ES1869.DRV names device 0 after its DAC
+        self.essinst_setup()
+        for root in ("HKCU", r"HKU\.DEFAULT"):
+            self.addCleanup(self.reg, "delete", root + "\\" + self.MAPPER,
+                            "/f")
+            self.prefer(root, "Playback", "ESS AudioDrive Playback (220)")
+            self.prefer(root, "Record", "ESS AudioDrive Record (220)")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        for root in ("HKCU", r"HKU\.DEFAULT"):
+            self.assertEqual(self.preferred(root, "Playback"),
+                             "ESS AudioDrive Audio 2 (220)")
+            self.assertEqual(self.preferred(root, "Record"),
+                             "ESS AudioDrive Record (220)")
+        log = self.essinst_log()
+        self.assertIn("The preferred playback device, ESS AudioDrive "
+                      "Playback (220), becomes ESS AudioDrive Audio 2 (220).",
+                      log)
+        self.assertIn("The preferred playback device is ESS AudioDrive "
+                      "Audio 2 (220).", log)
+        self.restart()
+
+        # installed by an essinst that left the names: they alone change,
+        # and Windows doesn't restart
+        self.prefer("HKCU", "Playback", "ESS AudioDrive Playback (220)")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        self.assertIn("Naming the preferred devices:", self.essinst_log())
+        self.assertEqual(self.preferred("HKCU", "Playback"),
+                         "ESS AudioDrive Audio 2 (220)")
+        self.assertEqual(self.wininit(), {})
+
+        # ESS's names back with ESS's drivers, also for the new devices
+        self.prefer("HKCU", "Playback", "ESS AudioDrive Audio 1 (220)")
+        self.prefer("HKCU", "Record", "ESS AudioDrive FM Digital (220)")
+        self.wine("INST\\essinst.exe", "/y", "/restore", "/norestart")
+        self.assertEqual(len(self.wininit()), 3)
+        for root in ("HKCU", r"HKU\.DEFAULT"):
+            self.assertEqual(self.preferred(root, "Playback"),
+                             "ESS AudioDrive Playback (220)")
+            self.assertEqual(self.preferred(root, "Record"),
+                             "ESS AudioDrive Record (220)")
+
+    MEDIA = r"HKLM\System\CurrentControlSet\Control\MediaResources\midi"
+    MIDIMAP = r"Software\Microsoft\Windows\CurrentVersion\Multimedia\MIDIMap"
+
+    def midi_entry(self, key, values, instruments=False):
+        for name, kind, data in values:
+            self.reg("add", self.MEDIA + "\\" + key, "/v", name, "/t", kind,
+                     "/d", data, "/f")
+        if instruments:
+            self.reg("add", self.MEDIA + "\\" + key + r"\Instruments", "/f")
+
+    def midi_entries(self):
+        """the MIDI list as Windows 98 left it on the laptop: ESS's device on
+        the card's install (0018), that of an earlier install of the card
+        (0001), inactive, and the card's MIDI port"""
+        media = r"System\CurrentControlSet\Services\Class\MEDIA\00"
+        for no, active, node in (("0001", "0", "01000000"),
+                                 ("0018", "1", "0C1D0000")):
+            self.midi_entry("esfm.drv<%s>" % no, (
+                ("Active", "REG_SZ", active),
+                ("Description", "REG_SZ", "Internal ESFM Synthesis"),
+                ("FriendlyName", "REG_SZ", "MIDI for Internal ESFM Synthesis"),
+                ("Driver", "REG_SZ", "esfm.drv"),
+                ("DevNode", "REG_BINARY", node),
+                ("SoftwareKey", "REG_SZ", media + no[2:])), True)
+        self.midi_entry("essmpu.drv<0018>", (
+            ("Active", "REG_SZ", "1"),
+            ("Description", "REG_SZ", "External MIDI Port"),
+            ("FriendlyName", "REG_SZ", "MIDI for External MIDI Port"),
+            ("Driver", "REG_SZ", "essmpu.drv")))
+
+    def reg_values(self, key):
+        """key's values, {name: (type, data)}, and its keys, or None"""
+        out = self.reg("query", key, "/s")
+        if "\nHKEY_" not in "\n" + out.lstrip():
+            return None
+        values, keys = {}, []
+        for row in out.splitlines():
+            if row.upper().startswith("HKEY_"):
+                keys.append(row.strip())
+                continue
+            parts = row.split(None, 2)
+            if len(keys) == 1 and len(parts) >= 2 and \
+                    parts[1].startswith("REG_"):
+                values[parts[0]] = (parts[1], parts[2].strip()
+                                    if len(parts) == 3 else "")
+        return values, keys[1:]
+
+    def mapper(self, root):
+        out = self.reg("query", root + "\\" + self.MIDIMAP, "/v",
+                       "CurrentInstrument")
+        for row in out.splitlines():
+            parts = row.split(None, 2)
+            if len(parts) == 3 and parts[0] == "CurrentInstrument":
+                return parts[2].strip()
+        return None
+
+    CLASS = r"HKLM\System\CurrentControlSet\Services\Class\MEDIA"
+    CARD_DRIVERS = (("esfm.drv", "Internal ESFM Synthesis"),
+                    ("essmpu.drv", "External MIDI Port"))
+
+    def card_keys(self, *nos):
+        """the MIDI drivers of the card's installs (Class\\MEDIA\\nnnn) as
+        ESS's INF writes them"""
+        for no in nos:
+            self.addCleanup(self.reg, "delete", self.CLASS + "\\" + no, "/f")
+            for drv, desc in self.CARD_DRIVERS:
+                key = r"%s\%s\Drivers\midi\%s" % (self.CLASS, no, drv)
+                self.reg("add", key, "/v", "Description", "/d", desc, "/f")
+                self.reg("add", key, "/v", "Driver", "/d", drv, "/f")
+
+    def card_driver(self, no, drv="esfmopl3.drv"):
+        """the values of the card's MIDI driver drv in install no, or None"""
+        key = r"%s\%s\Drivers\midi\%s" % (self.CLASS, no, drv)
+        got = self.reg_values(key)
+        return got and got[0]
+
+    def opl3_device(self):
+        """Opl3Device in [ESFM.DRV] of SYSTEM.INI, or None"""
+        text = read(self.system_ini()).decode("latin-1").replace("\r", "")
+        section = None
+        for row in text.splitlines():
+            row = row.strip()
+            if row.startswith("["):
+                section = row.lower()
+            elif section == "[esfm.drv]" and row.lower().startswith(
+                    "opl3device="):
+                return row.split("=", 1)[1].strip()
+        return None
+
+    def set_opl3_device(self, value):
+        """Opl3Device=value in [ESFM.DRV] of SYSTEM.INI, in place of the one
+        there: a second section would go unread"""
+        text = read(self.system_ini())
+        new, n = re.subn(rb"(?im)^opl3device=.*$",
+                         b"Opl3Device=" + value.encode(), text)
+        if not n:
+            new = text + b"\r\n[ESFM.DRV]\r\nOpl3Device=" + value.encode() + \
+                b"\r\n"
+        with open(self.system_ini(), "wb") as f:
+            f.write(new)
+
+    # --- the box of the MIDI patch banks (ESFMCFG.DLL) ----------------------
+
+    def ini_value(self, section, key):
+        """key in section of SYSTEM.INI, or None"""
+        text = read(self.system_ini()).decode("latin-1").replace("\r", "")
+        cur = None
+        for row in text.splitlines():
+            row = row.strip()
+            if row.startswith("["):
+                cur = row.lower()
+            elif cur == "[%s]" % section.lower() and "=" in row and \
+                    row.split("=", 1)[0].strip().lower() == key.lower():
+                return row.split("=", 1)[1].strip()
+        return None
+
+    def set_ini(self, section, key, value):
+        """key=value in section of SYSTEM.INI, None takes it out"""
+        text = read(self.system_ini()).decode("latin-1").replace("\r", "")
+        rows, cur, done = [], None, False
+        for row in text.splitlines():
+            s = row.strip()
+            if s.startswith("["):
+                if cur == "[%s]" % section.lower() and not done and value:
+                    rows.append("%s=%s" % (key, value))
+                    done = True
+                cur = s.lower()
+            elif cur == "[%s]" % section.lower() and "=" in s and \
+                    s.split("=", 1)[0].strip().lower() == key.lower():
+                if value is not None:
+                    rows.append("%s=%s" % (key, value))
+                done = True
+                continue
+            rows.append(row)
+        if not done and value is not None:
+            if cur != "[%s]" % section.lower():
+                rows.append("[%s]" % section)
+            rows.append("%s=%s" % (key, value))
+        with open(self.system_ini(), "wb") as f:
+            f.write(("\r\n".join(rows) + "\r\n").encode("latin-1"))
+
+    def banks_setup(self):
+        """ESFMCFG.DLL in the SYSTEM folder, and in its ESFMBANK folder an
+        ESFM bank, one wrapped in RIFF, a GENMIDI lump and a file that is
+        neither"""
+        self.keep_system_ini()
+        system = self.windows("system")
+        shutil.copy(os.path.join(ROOT, "out", "ow2", "esfmcfg.dll"),
+                    os.path.join(system, "ESFMCFG.DLL"))
+        folder = os.path.join(system, "ESFMBANK")
+        os.makedirs(folder, exist_ok=True)
+        self.addCleanup(shutil.rmtree, folder)
+        self.addCleanup(os.remove, os.path.join(system, "ESFMCFG.DLL"))
+        bank = read(os.path.join(ROOT, "esfm_patch_banks", "bnk_com.bin"))
+        riff = (b"RIFF" + struct.pack("<I", 12 + len(bank) + (len(bank) & 1))
+                + b"Ptchfm4 " + struct.pack("<I", len(bank)) + bank +
+                b"\0" * (len(bank) & 1))
+        for name, data in (
+                ("ESS.BIN", bank), ("RIFF.PAT", riff),
+                ("DOOM.OP2", read(os.path.join(ROOT, "third_party", "genmidi",
+                                               "GENMIDI.lmp"))),
+                ("JUNK.BIN", bytes(range(256)) * 12)):
+            with open(os.path.join(folder, name), "wb") as f:
+                f.write(data)
+        for key in ("Bank", "Opl3Bank", "Opl3Device", "BetterSquareWave"):
+            self.set_ini("ESFM.DRV", key, None)
+
+    def box(self, device, esfm, opl3):
+        """cfgcall's run: the box for device, entries esfm and opl3 picked
+        (-1 keeps one) and OK, or Cancel with esfm "cancel"; what it saw,
+        {name: value}, with the lists as name_entries"""
+        self.wine("cfgcall.exe", self.win, str(device), str(esfm), str(opl3))
+        seen = {"esfm_entries": [], "opl3_entries": []}
+        for row in read(self.path("CFGCALL.TXT")).decode(
+                "latin-1").splitlines():
+            name, _sp, rest = row.partition(" ")
+            first, _sp, text = rest.partition(" ")
+            if name in ("esfm", "opl3") and first.isdigit():
+                seen[name + "_entries"].append(text)
+            elif name in ("esfm", "opl3"):
+                seen["%s_%s" % (name, first)] = text
+            else:
+                seen[name] = rest
+        return seen
+
+    def test_bank_box(self):
+        """ESFMCFG.DLL's box, which the Settings button of either MIDI
+        driver opens: each list has the driver's own bank and the files of
+        its kind in SYSTEM\\ESFMBANK, and OK writes the keys that changed"""
+        self.banks_setup()
+        seen = self.box(0, 1, 1)
+        self.assertEqual(seen["title"], "MIDI patch banks")
+        self.assertEqual(seen["esfm_entries"], [
+            "The driver's own: the square-wave bank", "ESS.BIN", "RIFF.PAT"])
+        self.assertEqual(seen["opl3_entries"], [
+            "The driver's own: Freedoom's GENMIDI", "DOOM.OP2"])
+        self.assertEqual((seen["esfm_selected"], seen["opl3_selected"],
+                          seen["opl3_enabled"]), ("0", "0", "1"))
+        self.assertEqual(seen["focus"], "102")          # the ESFM list
+        self.assertEqual(seen["result"], "1")           # DRVCNF_OK
+        folder = "c:\\windows\\system\\esfmbank\\"
+        self.assertEqual(self.ini_value("ESFM.DRV", "Bank").lower(),
+                         folder + "ess.bin")
+        self.assertEqual(self.ini_value("ESFM.DRV", "Opl3Bank").lower(),
+                         folder + "doom.op2")
+        # from the OPL3 device's Settings: its list first; Cancel changes
+        # nothing
+        seen = self.box(1, "cancel", -1)
+        self.assertEqual((seen["esfm_selected"], seen["opl3_selected"],
+                          seen["focus"], seen["result"]),
+                         ("1", "1", "105", "0"))
+        self.assertEqual(self.ini_value("ESFM.DRV", "Bank").lower(),
+                         folder + "ess.bin")
+        # the driver's own banks: the keys go
+        seen = self.box(0, 0, 0)
+        self.assertEqual(seen["result"], "1")
+        self.assertIsNone(self.ini_value("ESFM.DRV", "Bank"))
+        self.assertIsNone(self.ini_value("ESFM.DRV", "Opl3Bank"))
+
+    def test_bank_box_settings(self):
+        """a key that names a file elsewhere is in the list by its path;
+        BetterSquareWave=0 names ESS's bank the driver's own, and with
+        Opl3Device=0 the OPL3 list is off and its key stays"""
+        self.banks_setup()
+        self.set_ini("ESFM.DRV", "Bank", r"C:\BANKS\MINE.BIN")
+        self.set_ini("ESFM.DRV", "Opl3Bank", r"C:\BANKS\X.OP2")
+        self.set_ini("ESFM.DRV", "BetterSquareWave", "0")
+        self.set_ini("ESFM.DRV", "Opl3Device", "0")
+        seen = self.box(1, 2, 0)
+        self.assertEqual(seen["esfm_entries"], [
+            "The driver's own: ESS's bank", "ESS.BIN", "RIFF.PAT",
+            r"C:\BANKS\MINE.BIN"])
+        self.assertEqual((seen["esfm_selected"], seen["opl3_enabled"],
+                          seen["focus"]), ("3", "0", "102"))
+        self.assertEqual(seen["opl3_entries"][-1], r"C:\BANKS\X.OP2")
+        self.assertEqual(seen["result"], "1")
+        self.assertTrue(self.ini_value("ESFM.DRV", "Bank").lower().endswith(
+            "esfmbank\\riff.pat"))
+        self.assertEqual(self.ini_value("ESFM.DRV", "Opl3Bank"),
+                         r"C:\BANKS\X.OP2")
+
+    def keep_system_ini(self):
+        saved = read(self.system_ini())
+
+        def back():
+            with open(self.system_ini(), "wb") as f:
+                f.write(saved)
+        self.addCleanup(back)
+
+    def test_essinst_midi_list(self):
+        # the OPL3 device's driver among the card's MIDI drivers, with its
+        # entry in the MIDI list, in place of an earlier essinst's copy of
+        # ESS's entry; and out again
+        self.essinst_setup()
+        self.keep_system_ini()
+        self.addCleanup(self.reg, "delete", self.MEDIA, "/f")
+        for root in ("HKCU", r"HKU\.DEFAULT"):
+            self.addCleanup(self.reg, "delete", root + "\\" + self.MIDIMAP,
+                            "/f")
+        self.midi_entries()
+        self.card_keys("0001", "0018")
+        ess, _keys = self.reg_values(self.MEDIA + r"\esfm.drv<0018>")
+        self.midi_entry("esfm.drv<9001>", [(n, t, d if n != "DevNode" else
+                                            d.replace(" ", ""))
+                                           for n, (t, d) in ess.items()] +
+                        [("Port", "REG_DWORD", "1")])
+        system = self.windows("system")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        log = self.essinst_log()
+        self.assertIn("The card gets ESFMOPL3.DRV among its MIDI drivers, and "
+                      "the MIDI list MIDI for Internal OPL3 FM Synthesis, as "
+                      "esfmopl3.drv<0018>, in place of an old entry.", log)
+        self.assertIn("ESFMOPL3.DRV: copied into place.", log)
+        self.assertIn("SYSTEM.INI: [ESFM.DRV] Opl3Device=2.", log)
+        self.assertIsNone(self.reg_values(self.MEDIA + r"\esfm.drv<9001>"))
+        opl, keys = self.reg_values(self.MEDIA + r"\esfmopl3.drv<0018>")
+        self.assertEqual(opl, dict(
+            ess, Driver=("REG_SZ", "esfmopl3.drv"),
+            FriendlyName=("REG_SZ", "MIDI for Internal OPL3 FM Synthesis"),
+            Description=("REG_SZ", "Internal OPL3 FM Synthesis")))
+        self.assertEqual([k.rsplit("\\", 1)[1] for k in keys],
+                         ["Instruments"])
+        self.assertEqual(self.card_driver("0018"), {
+            "Description": ("REG_SZ", "Internal OPL3 FM Synthesis"),
+            "Driver": ("REG_SZ", "esfmopl3.drv")})
+        self.assertIsNone(self.card_driver("0001"))
+        self.assertEqual(read(self.find(system, "ESFMOPL3.DRV")),
+                         read(os.path.join(ROOT, "build", "ESFMOPL3.DRV")))
+        self.assertEqual(self.opl3_device(), "2")
+        self.assertEqual(len(self.wininit()), 3)
+        self.restart()
+
+        # in place: nothing to do (the drivers, ESFMOPL3.DRV, the box of the
+        # patch banks and the banks)
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        log = self.essinst_log()
+        self.assertEqual(log.count("installed already."), 4 + 1 + len(
+            os.listdir(os.path.join(ROOT, "build", "BANKS"))))
+        self.assertIn("The MIDI list has the OPL3 device, MIDI for Internal "
+                      "OPL3 FM Synthesis, as esfmopl3.drv<0018>.", log)
+
+        # another install's driver and entry: they go, the card's stay
+        self.midi_entry("esfmopl3.drv<0001>", [
+            ("Driver", "REG_SZ", "esfmopl3.drv"), ("Active", "REG_SZ", "0"),
+            ("SoftwareKey", "REG_SZ",
+             r"System\CurrentControlSet\Services\Class\MEDIA\0001")])
+        key = self.CLASS + r"\0001\Drivers\midi\esfmopl3.drv"
+        self.reg("add", key, "/v", "Driver", "/d", "esfmopl3.drv", "/f")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        log = self.essinst_log()
+        self.assertIn("The old entries of MIDI for Internal OPL3 FM Synthesis "
+                      "are out of the MIDI list.", log)
+        self.assertIsNone(self.reg_values(self.MEDIA +
+                                          r"\esfmopl3.drv<0001>"))
+        self.assertIsNone(self.card_driver("0001"))
+        self.assertIsNotNone(self.card_driver("0018"))
+        self.assertIsNotNone(self.reg_values(self.MEDIA +
+                                             r"\esfmopl3.drv<0018>"))
+        self.assertEqual(self.wininit(), {})
+
+        # Opl3Device=0: the driver, its entry and its file go, and the key
+        # stays 0
+        self.set_opl3_device("0")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        log = self.essinst_log()
+        self.assertIn("MIDI for Internal OPL3 FM Synthesis "
+                      "(esfmopl3.drv<0018>) is out of the MIDI list.", log)
+        self.assertIsNone(self.reg_values(self.MEDIA +
+                                          r"\esfmopl3.drv<0018>"))
+        self.assertIsNone(self.card_driver("0018"))
+        self.assertIsNone(self.find(system, "ESFMOPL3.DRV"))
+        self.assertEqual(self.opl3_device(), "0")
+        self.assertEqual(self.wininit(), {})
+
+        # back on, and the mapper on it, by the device's name as Windows 98
+        # keeps it and by its key: /restore gives the mapper ESS's device,
+        # the same way, and Opl3Device=1
+        self.set_opl3_device("1")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        self.assertIsNotNone(self.card_driver("0018"))
+        self.assertEqual(self.opl3_device(), "2")
+        self.reg("add", "HKCU\\" + self.MIDIMAP, "/v", "CurrentInstrument",
+                 "/d", "OPL3 FM Synthesis (220)", "/f")
+        self.reg("add", r"HKU\.DEFAULT" + "\\" + self.MIDIMAP, "/v",
+                 "CurrentInstrument", "/d", "esfmopl3.drv<0018>", "/f")
+        self.wine("INST\\essinst.exe", "/y", "/restore", "/norestart")
+        log = self.essinst_log()
+        self.assertIn("The MIDI list loses the OPL3 device, MIDI for Internal "
+                      "OPL3 FM Synthesis (esfmopl3.drv<0018>).", log)
+        self.assertIsNone(self.reg_values(self.MEDIA +
+                                          r"\esfmopl3.drv<0018>"))
+        self.assertIsNone(self.card_driver("0018"))
+        self.assertIsNone(self.find(system, "ESFMOPL3.DRV"))
+        self.assertEqual(self.opl3_device(), "1")
+        for key in ("esfm.drv<0001>", "esfm.drv<0018>", "essmpu.drv<0018>"):
+            self.assertIsNotNone(self.reg_values(self.MEDIA + "\\" + key))
+        self.assertEqual(self.mapper("HKCU"), "ESFM Synthesis (220)")
+        self.assertEqual(self.mapper(r"HKU\.DEFAULT"), "esfm.drv<0018>")
+
+    def test_essinst_no_card_driver(self):
+        # no driver of the card's install: the OPL3 device stays ESFM.DRV's
+        # device 1, and nothing goes in
+        self.essinst_setup()
+        self.keep_system_ini()
+        self.addCleanup(self.reg, "delete", self.MEDIA, "/f")
+        self.midi_entries()
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        log = self.essinst_log()
+        self.assertIn("so the OPL3 device stays ESFM.DRV's device 1", log)
+        self.assertIsNone(self.reg_values(self.MEDIA +
+                                          r"\esfmopl3.drv<0018>"))
+        self.assertIsNone(self.find(self.windows("system"), "ESFMOPL3.DRV"))
+        self.assertIsNone(self.opl3_device())
+
+    def test_essinst_other_driver(self):
+        # another ESFM.DRV in place: nothing is written at all
+        self.essinst_setup()
+        system = self.windows("system")
+        with open(self.find(system, "ESFM.DRV"), "wb") as f:
+            f.write(b"MZ another driver")
+        self.wine("INST\\essinst.exe", "/y", "/norestart")
+        log = self.essinst_log()
+        self.assertIn("ESFM.DRV isn't ESS's driver 4.04.00.1319", log)
+        self.assertEqual(self.wininit(), {})
+        for name, base in self.DRIVERS:
+            self.assertIsNone(self.find(system, base + ".ORG"))
+            self.assertIsNone(self.find(system, base + ".NEW"))
+
+
+if __name__ == "__main__":
+    unittest.main()

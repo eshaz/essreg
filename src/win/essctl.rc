@@ -1,0 +1,134 @@
+/*
+ * Resources of essctl (16-bit Windows resource script).
+ *
+ * (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
+ *
+ * Licensed under GPL Version 3.0
+ */
+
+#include <windows.h>
+#include <ver.h>
+#include "resource.h"
+
+#ifndef DS_3DLOOK
+#define DS_3DLOOK 0x0004L
+#endif
+
+ESSCTL ICON "essctl.ico"
+
+ESSCTL MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&Load profile...\tCtrl+O", IDM_LOAD
+        MENUITEM "&Save profile...\tCtrl+S", IDM_SAVE
+        MENUITEM "&Dump registers...", IDM_DUMP
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_EXIT
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Refresh\tF5", IDM_REFRESH
+        MENUITEM "&Auto refresh", IDM_AUTOREFRESH
+    END
+    POPUP "&Options"
+    BEGIN
+        MENUITEM "&Expert mode", IDM_EXPERT
+        MENUITEM "&FM keeps the music DAC", IDM_FMDAC
+    END
+    POPUP "E&SFM"
+    BEGIN
+        MENUITEM "&Load patch bank...", IDM_ESFM_LOAD
+        MENUITEM "&Restore original bank", IDM_ESFM_RESTORE
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About ES1869 Control...", IDM_ABOUT
+    END
+END
+
+ESSCTL ACCELERATORS
+BEGIN
+    VK_F5, IDM_REFRESH, VIRTKEY
+    "^O", IDM_LOAD
+    "^S", IDM_SAVE
+END
+
+/* the page area (IDC_PAGEAREA) is a hidden placeholder, page controls are
+ * created over it at run time and IDC_PGSCROLL scrolls long pages */
+ESSCTL DIALOG 0, 0, 420, 262
+STYLE WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | DS_3DLOOK
+CLASS "EssCtlDlg"
+CAPTION "ES1869 Control"
+MENU ESSCTL
+FONT 8, "MS Sans Serif"
+BEGIN
+    LISTBOX         IDC_PAGES, 4, 4, 84, 222,
+                    LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP | WS_BORDER
+    LTEXT           "", IDC_PAGEAREA, 92, 4, 315, 222, NOT WS_VISIBLE
+    SCROLLBAR       IDC_PGSCROLL, 408, 4, 9, 222, SBS_VERT | NOT WS_VISIBLE
+    LTEXT           "", IDC_HELPTEXT, 4, 229, 412, 18, SS_NOPREFIX
+    LTEXT           "", IDC_STATUS, 4, 250, 250, 9, SS_NOPREFIX
+    LTEXT           "", IDC_OWNERS, 258, 250, 158, 9, SS_NOPREFIX
+END
+
+BITEDIT DIALOG 0, 0, 236, 156
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_3DLOOK
+CAPTION "Register"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT           "", IDC_BE_NAME, 6, 6, 224, 18, SS_NOPREFIX
+    LTEXT           "Value (hex):", -1, 6, 29, 42, 9
+    EDITTEXT        IDC_BE_HEX, 50, 27, 18, 12, ES_UPPERCASE
+    SCROLLBAR       IDC_BE_SLIDER, 72, 28, 158, 10, WS_TABSTOP
+    LTEXT           "Bits:", -1, 6, 45, 18, 9
+    CONTROL         "7", IDC_BE_BIT7, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
+                    26, 44, 16, 10
+    CONTROL         "6", IDC_BE_BIT6, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
+                    43, 44, 16, 10
+    CONTROL         "5", IDC_BE_BIT5, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
+                    60, 44, 16, 10
+    CONTROL         "4", IDC_BE_BIT4, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
+                    77, 44, 16, 10
+    CONTROL         "3", IDC_BE_BIT3, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
+                    94, 44, 16, 10
+    CONTROL         "2", IDC_BE_BIT2, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
+                    111, 44, 16, 10
+    CONTROL         "1", IDC_BE_BIT1, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
+                    128, 44, 16, 10
+    CONTROL         "0", IDC_BE_BIT0, "BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP,
+                    145, 44, 16, 10
+    LISTBOX         IDC_BE_FIELDS, 6, 58, 224, 72,
+                    LBS_NOINTEGRALHEIGHT | LBS_USETABSTOPS | WS_VSCROLL |
+                    WS_BORDER | WS_TABSTOP
+    DEFPUSHBUTTON   "&Write", IDOK, 124, 136, 50, 14
+    PUSHBUTTON      "Close", IDCANCEL, 180, 136, 50, 14
+END
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEFLAGSMASK 0x3F
+FILEFLAGS 0
+FILEOS VOS_DOS_WINDOWS16
+FILETYPE VFT_APP
+FILESUBTYPE 0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4"
+        BEGIN
+            VALUE "FileDescription", "ES1869 Control\0"
+            VALUE "FileVersion", "1.0\0"
+            VALUE "InternalName", "ESSCTL\0"
+            VALUE "LegalCopyright", "(c) 2024 Ethan Halsall, GPL version 3\0"
+            VALUE "OriginalFilename", "ESSCTL.EXE\0"
+            VALUE "ProductName", "essreg\0"
+            VALUE "ProductVersion", "1.0\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1252
+    END
+END

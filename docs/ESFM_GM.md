@@ -1,0 +1,297 @@
+# ESFM.DRV and General MIDI
+
+This page describes what General MIDI (GM Level 1) asks of a synthesizer,
+what ESS's `ESFM.DRV` does, and what [`build/ESFM.DRV`](../build) adds.
+
+The new code is in [`src/esfm/esfmgm.asm`](../src/esfm/esfmgm.asm), which is
+assembled into the fixed driver only. ESS's code is unchanged apart from the
+calls into the new code, which are under `%if ESFM_FIX` in
+[`src/esfm/seg1.asm`](../src/esfm/seg1.asm). Each part can be turned off in
+`SYSTEM.INI`, and ESS's code then handles it as before. The keys are
+`Vibrato`, `Tuning`, `ResetControllers`, `LivePan`, `SysEx`,
+`RunningStatus`, `TrueSides` and `MpcSongs` under `[ESFM.DRV]`
+([DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv)). The fixed driver's second
+device, which plays General MIDI on the chip's OPL3 mode, has a page of its
+own ([ESFM_OPL3.md](ESFM_OPL3.md)).
+
+## At a glance
+
+Each item names what GM Level 1 asks for, and then what ESS's `ESFM.DRV` and
+`build/ESFM.DRV` do:
+
+* **16 channels, drums on channel 10.** Both drivers: yes.
+* **128 programs, drum notes 35-81.** Both drivers: from the patch bank.
+* **24 voices.** Both drivers: 18, the chip's limit.
+* **Note on with velocity, note off.** Both drivers: yes.
+* **Pitch bend, 2 semitones by default.** Both drivers: yes.
+* **Program change.** Both drivers: yes.
+* **Controller 1, modulation.** ESS's driver: ignored. `build/ESFM.DRV`:
+  vibrato.
+* **Controllers 7 and 11, volume and expression.** Both drivers: yes, on the
+  operators that the patch marks for them ([What both drivers
+  keep](#what-both-drivers-keep-of-esss-code)).
+* **Controller 10, pan.** ESS's driver: the next notes, in 3 positions, with
+  left and right the other way round. `build/ESFM.DRV`: the sounding notes
+  too, in 3 positions, on the sides they name.
+* **Controller 64, sustain.** ESS's driver: yes. `build/ESFM.DRV`: yes, and
+  a program change lets it up.
+* **Controller 121, reset all controllers.** ESS's driver: also resets
+  volume, pan and the bend range. `build/ESFM.DRV`: as RP-015 defines it.
+* **Controller 123, all notes off.** Both drivers: yes, but with the pedal
+  down it also stops the notes that keys still hold.
+* **RPN 0, pitch bend range.** ESS's driver: semitones only.
+  `build/ESFM.DRV`: semitones and cents.
+* **RPN 1, fine tuning.** ESS's driver: ignored. `build/ESFM.DRV`: yes.
+* **RPN 2, coarse tuning.** ESS's driver: ignored. `build/ESFM.DRV`: yes,
+  except on channel 10.
+* **Channel pressure.** ESS's driver: ignored. `build/ESFM.DRV`: vibrato.
+* **GM System On (and GM2, GS and XG resets).** ESS's driver: ignored.
+  `build/ESFM.DRV`: sets every channel back to the defaults.
+* **Master volume, `F0 7F dd 04 01 ll mm F7`.** ESS's driver: ignored.
+  `build/ESFM.DRV`: turns every voice down.
+* **Running status.** ESS's driver: in short messages, lost after a
+  real-time byte. `build/ESFM.DRV`: in short and long messages, and across
+  buffers.
+
+## Modulation and channel pressure
+
+The chip has a vibrato of its own, about 6 Hz and 7 or 14 cents deep, which
+is switched on for each operator. Controller 1 or channel pressure,
+whichever is larger, turns it on for a channel:
+* At 0 the vibrato is off, and only the patch's own vibrato remains.
+* At 1-63 it has the shallow depth, 7 cents.
+* At 64-127 it has the deep one, 14 cents.
+
+The driver switches the vibrato on for all 4 operators of the channel's
+voices, so the pitch wobbles while the sound stays the same, and notes that
+are already sounding follow the change. Because the chip has only these two
+depths, the vibrato doesn't grow smoothly as the wheel moves.
+
+## Tuning and the bend range
+
+Three RPNs set the bend range and the tuning:
+* RPN 0, the pitch bend range, takes the semitones from controller 6 and the
+  cents from controller 38. Controller 6 also sets the cents back to 0, as
+  the MIDI spec says for a data entry MSB.
+* RPN 1, fine tuning, goes from -100 to +100 cents, with 2000h in tune, and
+  is set with controllers 6 and 38.
+* RPN 2, coarse tuning, goes from -64 to +63 semitones, with 40h in tune,
+  and is set with controller 6. It changes the next notes, not the ones
+  already sounding, and channel 10 plays its drums untuned.
+
+A new bend range or fine tuning moves the notes that are sounding, as a bend
+does. Bend and fine tuning together reach 24 semitones either way, which is
+as far as ESS's pitch table goes. RPN 7F7Fh (null) and any NRPN select
+nothing, so data entry is ignored until the next RPN. ESS's driver only
+knows RPN 0, in semitones, and a range above 24 semitones makes it read past
+its pitch table.
+
+## Controller 121
+
+In the fixed driver, controller 121 resets what RP-015 of the MIDI
+Manufacturers Association lists: expression to 127, modulation and channel
+pressure to 0, the sustain pedal up, pitch bend centered and no RPN
+selected. It keeps the volume, pan, bend range and tuning. ESS's driver also
+resets the volume, pan and bend range, and it leaves the notes that are
+sounding bent until the next pitch bend.
+
+## GM, GS and XG resets
+
+GM System On (`F0 7E 7F 09 01 F7`), GM2 System On (`09 03`), the GS reset
+and XG System On, sent in a long message, set every channel back to the GM
+defaults. Each channel gets program 0, volume 100, pan center, expression
+127, a bend range of 2 semitones, no tuning, no modulation or pressure and
+no RPN selected. The pedals go up, all notes go off and the master volume
+goes back to full. This holds with `ResetControllers=0` too, where a
+controller 121 of the program's own is ESS's.
+
+`midiOutReset` and opening the device reset the same things except the
+programs, which they keep, as ESS's driver does.
+
+The reset happens before the rest of its buffer plays. Programs send a reset
+as a buffer of its own, which is how a SysEx event of a MIDI file is sent,
+so the order only matters for a buffer that mixes a reset with notes. While
+the device is suspended, ESS's code refuses every message, and a reset or
+master volume in a refused message changes nothing either.
+
+## Master volume
+
+The master volume message, `F0 7F dd 04 01 ll mm F7` with any device number,
+turns down every voice, including the notes that are already sounding. It
+follows GM's volume curve, 40 log10(v / 127) dB, in the chip's 0.75 dB
+steps. It turns down the operators that volume and expression turn down, and
+the patch says which ones those are.
+
+The master volume doesn't touch the Windows mixer, so `midiOutSetVolume`
+still sets the ES1869's FM volume, as it does with ESS's driver. The OPL3
+device follows the same curve on every voice
+([ESFM_OPL3.md](ESFM_OPL3.md#the-level)).
+
+## Pan
+
+The chip sends each operator to the left, to the right or to both, so pan
+has 3 positions, as with ESS's driver: 0-47 pans left, 48-80 to both sides
+and 81-127 right. Controllers 10 (pan) and 8 (balance, which does the same
+here) also move the notes that are sounding. A value within the position the
+channel already has writes nothing, so a pan sweep rewrites the notes 3
+times rather than 128.
+
+ESS's driver sets bit 4 of an operator's register 6 for left and bit 5 for
+right, but the chip plays bit 4 on the right output and bit 5 on the left,
+as bit 4 of C0h-C8h, an OPL3's left, also plays on the right. The Linux
+driver's session measured this on the Armada 1500c's ES1869, in the chip's
+digital output and at its line out. So with ESS's driver a channel panned
+left sounds on the right. `build/ESFM.DRV` swaps the two bits in every write
+that sends an operator to one side only
+([`src/esfm/esfmgm.asm`](../src/esfm/esfmgm.asm), `fix_fm_value`), so a
+patch's own sides turn round with them, and `TrueSides=0` writes ESS's bits.
+The swap is in the driver's register write, which ESS's code reaches with
+the same three bytes it had (seg1:0044), so its tables keep their offsets. A
+DOS program's FM, in a Windows DOS box or through esssb16, still reaches the
+chip as the program wrote it, so an OPL3 game's left plays on the right.
+
+## Running status
+
+In a buffer sent with `midiOutLongMsg`, ESS's parser keeps the data bytes of
+the last message when running status starts the next one, and it ORs the new
+data bytes into them, so `90 3C 7F 40 7F` plays notes 3Ch and 7Ch. A note
+off sent this way turns off the wrong note and leaves the right one hanging
+([ESFM_MIDI.md](ESFM_MIDI.md#5-running-status-in-long-messages)). The fixed
+parser starts each message afresh.
+
+A real-time byte (F8h-FFh) sent with `midiOutShortMsg` becomes ESS's running
+status, so the next message in running status is lost. In the fixed driver,
+a real-time byte leaves the running status alone, and a system common byte
+(F0h-F7h) ends it.
+
+ESS's parser also starts each long buffer afresh. The fixed parser goes on
+where the last buffer stopped, and a short message's status becomes the
+running status of the next buffer, as if all the bytes had come one after
+the other
+([ESFM_MIDI.md](ESFM_MIDI.md#6-running-status-after-a-real-time-byte-and-between-buffers)).
+
+## Voices
+
+The chip has 18 voices, and GM asks for 24. When they run out, ESS's voice
+stealing reuses one. A layered patch with two voices takes two of them.
+
+## Songs with two arrangements
+
+The MIDI files of Windows 3.0 and 3.1, and the classics of Windows 98's
+Media folder, follow Microsoft's authoring guidelines for the Multimedia PC.
+Each holds its song twice, once for each kind of synthesizer that the MIDI
+Mapper of Windows 3.1 played on:
+* the extended arrangement, for a synthesizer of 16 notes or more, on
+  channels 1 to 10, with its drums on channel 10;
+* the base-level arrangement, for one of 6 melodic notes and 3 drum notes,
+  such as an AdLib, on channels 13 to 16, with its drums on channel 16.
+
+Channels 11 and 12 stay unused. The Mapper of Windows 3.1 sent a synthesizer
+the channels of the arrangement that its setup named. The Mapper of Windows
+95 and 98 sends all 16 channels to the device that the Multimedia control
+panel names, so a General MIDI device plays both arrangements at once: every
+part twice, and channel 16's drums as notes of the channel's program, the
+piano unless the song names another. On FM the two copies of a part start in
+step, so they add up to twice the level, 6 dB louder, which takes Windows
+98's *Fur Elise* past the 16 bits of the chip's FM output on the OPL3
+device.
+
+With `MpcSongs`, the default, both devices of `build/ESFM.DRV` play such a
+song's extended arrangement only. A note on of channels 13 to 16 is left out
+while channels 1 to 10 have had a message and channels 11 and 12 none, since
+the device's open or its last reset: `MODM_RESET`, which a player sends when
+it stops, or a GM, GS or XG reset. Note offs and the channel mode messages
+(controllers 120 to 127) don't count, because players and the resets send
+them to all 16 channels. The other messages of channels 13 to 16 still set
+those channels up.
+
+A General MIDI song that uses channels 13 to 16 uses 11 or 12 as well, and
+sets them up at its start, so all of it plays. Should a song's first message
+on channel 11 or 12 come later, the next notes of channels 13 to 16 play
+from then on. Of the 20 songs in
+[third_party/windows_midi](../third_party/windows_midi/README.md), the rule
+finds the 15 that hold two arrangements, before the first note of the copy,
+and leaves the 5 General MIDI songs alone, and `GROOVE.MID` too. With
+`MpcSongs=0`, both arrangements play, as on ESS's driver. The code is
+[`src/esfm/esfmmpc.asm`](../src/esfm/esfmmpc.asm), and essctl's *ESFM* page
+counts the notes that it left out.
+
+## What both drivers keep of ESS's code
+
+Apart from what this page and [ESFM_MIDI.md](ESFM_MIDI.md) describe, the
+fixed driver plays as ESS's does. The Linux driver's study of the engine
+found these behaviors of ESS's code, and `tests/esfmemu.py` shows the first
+two. The OPL3 device has code of its own, which follows the MIDI spec in the
+channel mode controllers and is tuned to the chip's clock
+([ESFM_OPL3.md](ESFM_OPL3.md)).
+* **A layered patch on one voice.** A patch of mode 2 always takes two chip
+  voices ([ESFM_BANK.md](ESFM_BANK.md#bank-format)), stealing them if it
+  must. The second steal can pick the voice that the first patch voice just
+  got, which then holds the second patch voice alone, so that only one layer
+  sounds. It can happen while one chip voice is free, as with 17 notes of a
+  one-voice program on channel 1, a free voice last used by channel 16, and
+  then a note of program 16 on channel 2. 22 programs of ESS's bank are of
+  mode 2, among them three organs and the four solo strings.
+* **Volume on some operators only.** Each operator of a patch has a level
+  mode, which says whether and how far velocity, volume, expression and the
+  master volume turn it down, and the patch's author set it. Programs 31,
+  124 and 127 of ESS's bank have no operator that they turn down, and 121
+  only changes its tone, so these play at one level. Many others keep some
+  of their operators at full level. Volume 0 silences every operator of the
+  channel, whatever its mode.
+* **The tuning.** ESS's F-numbers are in tune for an FM clock of 50,000 Hz,
+  and the chip's runs at 49,612.5 Hz ([AUDIO1.md](AUDIO1.md)), so every note
+  plays 12.5 to 14.6 cents flat, about an eighth of a semitone.
+* **All notes off with the pedal down.** Controllers 123, 124 and 125 stop
+  the notes that keys still hold and keep those that the pedal holds, where
+  the MIDI spec has both sound on until the pedal goes up. Controllers 120,
+  126 and 127 key off every note of the channel, pedal or not, and after
+  120, all sound off, the notes' release still sounds.
+* **The top of the range.** A bend above the chip's highest block drops an
+  octave, and notes above 114 lose their operators' octave offsets.
+* **Notes in their release** keep their pitch, level, pan and vibrato when
+  the channel's bend, volume, pan or modulation changes.
+
+## Proof
+
+`GMTest` in [`tests/test_esfmdrv.py`](../tests/test_esfmdrv.py) runs both
+drivers in the CPU emulator ([ESFM_MIDI.md](ESFM_MIDI.md#proof)) and reads
+the chip's registers:
+
+* **Controller 1 at 40, then 100, on a sounding note.** ESS's driver: no
+  change. `build/ESFM.DRV`: vibrato on, then deep.
+* **Channel pressure.** ESS's driver: no change. `build/ESFM.DRV`: vibrato.
+* **RPN 1 at 2800h (+25 cents).** ESS's driver: no change. `build/ESFM.DRV`:
+  the pitch of a bend of 2400h.
+* **RPN 2 at 4Ch.** ESS's driver: no change. `build/ESFM.DRV`: C4 plays as
+  C5.
+* **Bend range of 1 semitone 50 cents, bend at the top.** ESS's driver: 1
+  semitone up. `build/ESFM.DRV`: the pitch of range 3, bent halfway up.
+* **Controller 121 after volume 50, pan left, range 12.** ESS's driver:
+  volume 100, pan center, range 2. `build/ESFM.DRV`: volume 50, pan left,
+  range 12.
+* **GM, GM2, GS or XG reset after changes.** ESS's driver: nothing.
+  `build/ESFM.DRV`: every default back, notes off.
+* **Master volume at 64.** ESS's driver: no change. `build/ESFM.DRV`: voices
+  11.25 dB quieter.
+* **Pan on a sounding note.** ESS's driver: no change. `build/ESFM.DRV`: the
+  note moves.
+* **`90 3C 7F 40 7F` in a long message.** ESS's driver: notes 3Ch and 7Ch.
+  `build/ESFM.DRV`: notes 3Ch and 40h.
+* **`90 3C`, then `7F 40 7F` in the next long message.** ESS's driver:
+  nothing. `build/ESFM.DRV`: notes 3Ch and 40h.
+* **A song's start with both arrangements.** ESS's driver: channels 1, 10,
+  13 and 16 play. `build/ESFM.DRV`: channels 1 and 10 (`MpcSongsTest`, on
+  both devices).
+
+[`tests/test_midisuite.py`](../tests/test_midisuite.py) plays the 20 songs
+of [third_party/windows_midi](../third_party/windows_midi/README.md), and
+`GROOVE.MID` and `GMCHECK.MID`, through both devices, and checks every
+message against a reference of what General MIDI asks for
+([TESTING.md](MIDI_SUITE.md)).
+
+## Listening on the hardware
+
+[`build/GMCHECK.MID`](../build), which
+[`tools/gmcheck.py`](../tools/gmcheck.py) makes, plays each feature in turn.
+[TESTING.md](TESTING.md#g3-general-midi) lists what to listen for.

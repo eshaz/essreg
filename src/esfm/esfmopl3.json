@@ -1,0 +1,53 @@
+{
+ "module": "ESFMOPL3",
+ "stub": "",
+ "align": 4,
+ "resource_align": 4,
+ "first_item": 512,
+ "header": {
+  "linker_ver": 5,
+  "linker_rev": 60,
+  "flags": 33537,
+  "autodata": 2,
+  "heap": 0,
+  "stack": 0,
+  "sssp": 0,
+  "entry": [1, "LibEntry"],
+  "target_os": 2,
+  "other_flags": 0,
+  "swap_min": 0,
+  "expected_ver": 1024
+ },
+ "segments": [
+  {"index": 1, "flags": 3392, "minalloc": "length"},
+  {"index": 2, "flags": 3169, "minalloc": "length"}
+ ],
+ "resources": [],
+ "resident_names": [
+  ["ESFMOPL3", 0],
+  ["WEP", 1],
+  ["DRIVERPROC", 2],
+  ["MODMESSAGE", 3]
+ ],
+ "nonresident_names": [
+  ["midi:OPL3 FM Synthesis Driver", 0]
+ ],
+ "modules": ["KERNEL", "USER"],
+ "entry_bundles": [
+  {
+   "count": 3,
+   "segment": 1,
+   "movable": false,
+   "entries": [
+    {"ordinal": 1, "flags": 1, "symbol": "WEP"},
+    {"ordinal": 2, "flags": 1, "symbol": "DriverProc"},
+    {"ordinal": 3, "flags": 1, "symbol": "modMessage"}
+   ]
+  }
+ ],
+ "symbols": ["WEP", "DriverProc", "modMessage", "LibEntry"],
+ "order": [
+  {"item": "seg1", "offset": 512},
+  {"item": "seg2", "offset": 512}
+ ]
+}
