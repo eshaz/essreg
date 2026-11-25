@@ -353,8 +353,8 @@ class WineTest(unittest.TestCase):
         self.assertEqual(text.count("  free"), 18)
         text = self.driver_dump(self.fixed_driver())
         self.assertIn("Fixed driver: 0 messages queued", text)
-        self.assertIn("Settings: from SYSTEM.INI, the square-wave bank",
-                      text)
+        self.assertIn("Settings: from SYSTEM.INI, the OPL3 device 6 dB down, "
+                      "the square-wave bank", text)
         self.assertIn("Bank file: none, the driver's own bank plays", text)
         self.assertIn("OPL3 bank file: none, the driver's own bank plays",
                       text)
@@ -371,7 +371,8 @@ class WineTest(unittest.TestCase):
                         b"TrueSides=0\r\nBetterSquareWave=0\r\n")
             text = self.driver_dump(self.fixed_driver())
             self.assertIn("Settings: from SYSTEM.INI, off: Vibrato, SysEx, "
-                          "TrueSides, ESS's bank", text)
+                          "TrueSides, the OPL3 device 6 dB down, ESS's bank",
+                          text)
             ess = read(os.path.join(ROOT, "esfm_patch_banks", "bnk_com.bin"))
             self.assertEqual(read(self.path("BEFORE.BIN"))[:len(ess)], ess)
         finally:
