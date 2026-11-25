@@ -8,8 +8,8 @@ assembled into the fixed driver only. ESS's code is unchanged apart from the
 calls into the new code, which are under `%if ESFM_FIX` in
 [`src/esfm/seg1.asm`](../src/esfm/seg1.asm). Each part can be turned off in
 `SYSTEM.INI`, and ESS's code then handles it as before. The keys are
-`Vibrato`, `Tuning`, `ResetControllers`, `LivePan`, `SysEx`, `RunningStatus`
-and `TrueSides` under `[ESFM.DRV]`
+`Vibrato`, `Tuning`, `ResetControllers`, `LivePan`, `SysEx`,
+`RunningStatus`, `TrueSides` and `MpcSongs` under `[ESFM.DRV]`
 ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv)). The fixed driver's second
 device, which plays General MIDI on the chip's OPL3 mode, has a page of its
 own ([ESFM_OPL3.md](ESFM_OPL3.md)).
@@ -123,7 +123,9 @@ steps. It turns down the operators that volume and expression turn down, and
 the patch says which ones those are.
 
 The master volume doesn't touch the Windows mixer, so `midiOutSetVolume`
-still sets the ES1869's FM volume, as it does with ESS's driver.
+still sets the ES1869's FM volume, as it does with ESS's driver. The OPL3
+device follows the same curve on every voice
+([ESFM_OPL3.md](ESFM_OPL3.md#the-level)).
 
 ## Pan
 
@@ -172,6 +174,47 @@ the other
 
 The chip has 18 voices, and GM asks for 24. When they run out, ESS's voice
 stealing reuses one. A layered patch with two voices takes two of them.
+
+## Songs with two arrangements
+
+The MIDI files of Windows 3.0 and 3.1, and the classics of Windows 98's
+Media folder, follow Microsoft's authoring guidelines for the Multimedia PC.
+Each holds its song twice, once for each kind of synthesizer that the MIDI
+Mapper of Windows 3.1 played on:
+* the extended arrangement, for a synthesizer of 16 notes or more, on
+  channels 1 to 10, with its drums on channel 10;
+* the base-level arrangement, for one of 6 melodic notes and 3 drum notes,
+  such as an AdLib, on channels 13 to 16, with its drums on channel 16.
+
+Channels 11 and 12 stay unused. The Mapper of Windows 3.1 sent a synthesizer
+the channels of the arrangement that its setup named. The Mapper of Windows
+95 and 98 sends all 16 channels to the device that the Multimedia control
+panel names, so a General MIDI device plays both arrangements at once: every
+part twice, and channel 16's drums as notes of the channel's program, the
+piano unless the song names another. On FM the two copies of a part start in
+step, so they add up to twice the level, 6 dB louder, which takes Windows
+98's *Fur Elise* past the 16 bits of the chip's FM output on the OPL3
+device.
+
+With `MpcSongs`, the default, both devices of `build/ESFM.DRV` play such a
+song's extended arrangement only. A note on of channels 13 to 16 is left out
+while channels 1 to 10 have had a message and channels 11 and 12 none, since
+the device's open or its last reset: `MODM_RESET`, which a player sends when
+it stops, or a GM, GS or XG reset. Note offs and the channel mode messages
+(controllers 120 to 127) don't count, because players and the resets send
+them to all 16 channels. The other messages of channels 13 to 16 still set
+those channels up.
+
+A General MIDI song that uses channels 13 to 16 uses 11 or 12 as well, and
+sets them up at its start, so all of it plays. Should a song's first message
+on channel 11 or 12 come later, the next notes of channels 13 to 16 play
+from then on. Of the 20 songs in
+[third_party/windows_midi](../third_party/windows_midi/README.md), the rule
+finds the 15 that hold two arrangements, before the first note of the copy,
+and leaves the 5 General MIDI songs alone, and `GROOVE.MID` too. With
+`MpcSongs=0`, both arrangements play, as on ESS's driver. The code is
+[`src/esfm/esfmmpc.asm`](../src/esfm/esfmmpc.asm), and essctl's *ESFM* page
+counts the notes that it left out.
 
 ## What both drivers keep of ESS's code
 
@@ -237,6 +280,15 @@ the chip's registers:
   `build/ESFM.DRV`: notes 3Ch and 40h.
 * **`90 3C`, then `7F 40 7F` in the next long message.** ESS's driver:
   nothing. `build/ESFM.DRV`: notes 3Ch and 40h.
+* **A song's start with both arrangements.** ESS's driver: channels 1, 10,
+  13 and 16 play. `build/ESFM.DRV`: channels 1 and 10 (`MpcSongsTest`, on
+  both devices).
+
+[`tests/test_midisuite.py`](../tests/test_midisuite.py) plays the 20 songs
+of [third_party/windows_midi](../third_party/windows_midi/README.md), and
+`GROOVE.MID` and `GMCHECK.MID`, through both devices, and checks every
+message against a reference of what General MIDI asks for
+([TESTING.md](MIDI_SUITE.md)).
 
 ## Listening on the hardware
 

@@ -660,7 +660,8 @@ tells you which applies: "VxD settings: from SYSTEM.INI" or "the defaults".
 When the section or a key is missing, the default applies. A value is read
 the way `GetPrivateProfileInt` reads it, as its leading digits, or 0 if
 there are none. Write `1` or `0`, because `yes` and `on` read as 0.
-`DosFMDelay` takes a number of milliseconds, where `0` is off as well.
+`DosFMDelay` takes a number of milliseconds, where `0` is off as well, and
+`ESFM.DRV`'s `Opl3Headroom` a number of decibels.
 
 For example, these settings give ESS's DOS box behavior, ESS's DirectSound
 driver, ESS's wave devices and ESS's modes of both DACs, while keeping the
@@ -913,6 +914,23 @@ its default and by what the key does at 1, and the sentence that begins
   Instruments*) opens the box of the patch banks, `ESFMCFG.DLL`, where the
   banks of both devices are chosen, while that DLL is there. ESFMOPL3.DRV
   reads the key too. With 0, the button stays gray.
+* **MpcSongs** (default 1). A song written for the MIDI Mapper of Windows
+  3.x, which holds an extended arrangement on channels 1 to 10 and a
+  base-level copy of it on channels 13 to 16, plays the extended one only,
+  on both devices: a note of channels 13 to 16 is left out while channels 1
+  to 10 have had a message and channels 11 and 12 none, since the device's
+  open or its last reset
+  ([ESFM_GM.md](ESFM_GM.md#songs-with-two-arrangements)). With 0, both
+  arrangements play, every part twice, with the copy's drums on channel 16
+  as notes of a melodic instrument.
+
+`Opl3Headroom=` lowers every note of the OPL3 device by that many decibels,
+from 0 to 47, in the chip's steps of 0.75 dB. The default, 6, keeps its
+loudest songs under the 16 bits of the chip's FM output, and makes a note
+about as loud as on the ESFM device
+([ESFM_OPL3.md](ESFM_OPL3.md#the-level)). With 0, a note at full velocity,
+volume and expression plays at the chip's full level, as it did before the
+key.
 
 `Opl3Bank=` names the OPL3 device's bank, a GENMIDI lump such as Doom's
 (`#OPL_II#` and 175 instruments), which the device reads at its open as the

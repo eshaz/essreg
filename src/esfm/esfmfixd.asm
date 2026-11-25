@@ -5,10 +5,10 @@
 ; Licensed under GPL Version 3.0
 
 fix_sig:        db 'ESFMFIX', 0
-fix_version:    dw 6            ; 2: the bank file, 4: fix_opts, 5: the
+fix_version:    dw 7            ; 2: the bank file, 4: fix_opts, 5: the
                                 ; OPL3 device's DEV_OPL_READY, 6: its bank
-                                ; file.  3 was an earlier build's pedal
-                                ; times
+                                ; file, 7: its headroom and MpcSongs.  3
+                                ; was an earlier build's pedal times
 fix_lock:       dw 0            ; nonzero while a call holds the driver
 q_head:         dw 0            ; next entry to handle
 q_tail:         dw 0            ; next free entry
@@ -47,6 +47,11 @@ fix_opl3_sel:   dw 0            ; the OPL3 bank that plays: its selector,
 fix_opl3_off:   dw 0            ; CS for the built-in one, and offset
 fix_opl3_blk:   dw 0            ; the file's block, 0 for the built-in bank
 
+; from version 7: Opl3Headroom= in the chip's 0.75 dB steps (esfmini.asm),
+; and the notes of base-level copies that MpcSongs left out (esfmmpc.asm)
+fix_opl3_att:   dw OPL3_ATT_DEFAULT
+fix_mpc_drops:  dw 0
+
 ; SYSTEM.INI keys (esfmini.asm): the key, its fix_opts bit
 fix_settings:
         dw fix_key_queue, OPT_QUEUE
@@ -62,6 +67,7 @@ fix_settings:
         dw fix_key_sides, OPT_SIDES
         dw fix_key_opl3, OPT_OPL3
         dw fix_key_settings, OPT_SETTINGS
+        dw fix_key_mpc, OPT_MPC
         dw 0
 fix_key_queue:   db 'QueueWhileBusy', 0
 fix_key_silence: db 'SilenceOnClose', 0
@@ -76,6 +82,8 @@ fix_key_square:  db 'BetterSquareWave', 0
 fix_key_sides:   db 'TrueSides', 0
 fix_key_opl3:    db 'Opl3Device', 0
 fix_key_settings: db 'BankSettings', 0
+fix_key_mpc:     db 'MpcSongs', 0
+fix_key_headroom: db 'Opl3Headroom', 0
 fix_ini_sect:   db 'ESFM.DRV', 0
 fix_ini_key:    db 'Bank', 0
 fix_ini_okey:   db 'Opl3Bank', 0

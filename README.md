@@ -515,6 +515,11 @@ one queues the messages instead, and it fixes more:
   ([docs/ESFM_GM.md](docs/ESFM_GM.md)).
 * A channel panned left plays on the left. ESS's driver plays it on the
   right, because the chip's sides are the other way round from ESS's bits.
+* The MIDI files of Windows 3.0 and 3.1, and the classics of Windows 98,
+  hold each song twice, for two kinds of synthesizer, on channels 1 to 10
+  and 13 to 16. Both devices play the first arrangement only, so no part
+  plays twice and the drums of channel 16 don't play as a piano
+  ([docs/ESFM_GM.md](docs/ESFM_GM.md#songs-with-two-arrangements)).
 * Running status in `midiOutLongMsg` buffers no longer mixes up notes. It
   carries on across buffers, and a clock or active sensing byte no longer
   breaks it.
@@ -535,7 +540,8 @@ one queues the messages instead, and it fixes more:
   chip as a real OPL3, and can program it through the FM ports itself. One
   of the two devices is open at a time, and essinst adds the new one to the
   MIDI tab of the Multimedia control panel
-  ([docs/ESFM_OPL3.md](docs/ESFM_OPL3.md)).
+  ([docs/ESFM_OPL3.md](docs/ESFM_OPL3.md)). It plays 6 dB under the chip's
+  full level, `Opl3Headroom`, so that its loudest songs stay clean.
 
 [docs/ESFM_MIDI.md](docs/ESFM_MIDI.md) has the details. Each change can be
 turned off with its own key under `[ESFM.DRV]` in `SYSTEM.INI`, which the
@@ -994,6 +1000,8 @@ copy C:\WINDOWS\SYSTEM\ESFM.ORG C:\WINDOWS\SYSTEM\ESFM.DRV
   the fixed `ESFM.DRV` adds.
 * [docs/ESFM_OPL3.md](docs/ESFM_OPL3.md): the fixed `ESFM.DRV`'s OPL3
   device, its instruments, and its entry in the Multimedia control panel.
+* [docs/MIDI_SUITE.md](docs/MIDI_SUITE.md): the tests that play songs and
+  General MIDI's rules through both MIDI devices.
 * [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md): where skipped samples
   come from, the Audio 2 DAC's oversampling and filter, and what to try on
   the card.

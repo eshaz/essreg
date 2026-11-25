@@ -79,8 +79,9 @@ OPT_OPL3        equ 0x0800      ; Opl3Device: device 1 on OPL3 mode
 OPT_OPL3_DRV    equ 0x1000      ; Opl3Device=2: device 1 is ESFMOPL3.DRV's
 OPT_SETTINGS    equ 0x2000      ; BankSettings: the Multimedia control
                                 ; panel's Settings box (esfmcfg.asm)
+OPT_MPC         equ 0x4000      ; MpcSongs: a song's base-level copy left out
 OPT_READ        equ 0x8000      ; SYSTEM.INI was read
-OPT_DEFAULT     equ 0x2FFF
+OPT_DEFAULT     equ 0x6FFF
 
 ; ESFM_FIX: General MIDI state (esfmgm.asm), after ESS's fields.  The fixed
 ; driver allocates DEV_FIX_SIZE bytes for each device
@@ -113,7 +114,17 @@ DEV_OPL_SYX     equ 0x443   ; OPL_SYX bytes: its start
 OPL_SYX         equ 12
 DEV_OPL_CHAN    equ 0x44F   ; 16 channels of OCH_SIZE bytes
 DEV_OPL_VOICE   equ 0x54F   ; 18 voices of OV_SIZE bytes
-DEV_FIX_SIZE    equ 0x66F
+
+; ESFM_FIX: MpcSongs, both devices (esfmmpc.asm)
+DEV_MPC         equ 0x66F   ; byte: MPC_*, the channels a song used
+DEV_FIX_SIZE    equ 0x670
+MPC_EXT         equ 1       ; DEV_MPC: channels 1 to 10
+MPC_MID         equ 2       ; channels 11 and 12
+
+; ESFM_FIX: Opl3Headroom= (esfmini.asm), in decibels, and what the default
+; makes of it in the chip's 0.75 dB steps (fix_opl3_att)
+OPL3_HEADROOM_DEFAULT equ 6
+OPL3_ATT_DEFAULT equ 8
 
 ; a channel of the OPL3 device
 OCH_PROG        equ 0       ; its program

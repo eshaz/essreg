@@ -62,6 +62,7 @@ fix_gm_init:
         cmp     bx,16
         jb      .chan
         mov     byte [di+DEV_GM_MASTER],0
+        mov     byte [di+DEV_MPC],0     ; a new song (esfmmpc.asm)
         mov     word [di+DEV_LONG_IDX],0
         mov     word [di+DEV_LONG_MSG],0
         mov     word [di+DEV_LONG_MSG+2],0
@@ -827,6 +828,7 @@ fix_gm_reset:
         cmp     di,16
         jb      .chan
         mov     byte [si+DEV_GM_MASTER],0
+        mov     byte [si+DEV_MPC],0     ; a new song (esfmmpc.asm)
 .nextdev:
         mov     si,[si+DEV_NEXT]
         jmp     .dev

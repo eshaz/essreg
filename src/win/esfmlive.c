@@ -198,6 +198,7 @@ static u16 fix_version(const struct live *lv) {
 // version 6 the OPL3 device's bank file after them (src/esfm/esfmfixd.asm)
 #define FIX_OPTS 304
 #define FIX_OPATH 318
+#define FIX_V7 582 // version 7: fix_opl3_att and fix_mpc_drops
 static u16 fix_opts(const struct live *lv) {
   const u8 __far *fix = find_fix(lv);
 
@@ -493,6 +494,12 @@ int esfm_diag_read(struct esfm_diag *d, int read_chip) {
     d->opl3_time = *(u16 __far *)(fix + FIX_OPTS + 12);
     _fmemcpy(d->opl3_file, fix + FIX_OPATH, sizeof(d->opl3_file) - 1);
   }
+  // version 7: Opl3Headroom and MpcSongs (src/esfm/esfmmpc.asm)
+  if (fix && d->version >= 7 &&
+      (u32)(FP_OFF(fix) - FP_OFF(lv.dg)) + FIX_V7 + 4 <= dgsize) {
+    d->opl3_att = *(u16 __far *)(fix + FIX_V7);
+    d->mpc_drops = *(u16 __far *)(fix + FIX_V7 + 2);
+  }
   // version 5: the OPL3 device (src/esfm/esfmopl.asm), whose program may
   // write the chip itself while it's open, also after a power resume
   d->opl3 = fix && d->version >= 5 && ((opl & 1) || opl_client);
@@ -588,27 +595,53 @@ static const struct {
     {ESFM_OPT_LIVE_PAN, "LivePan"},      {ESFM_OPT_SYSEX, "SysEx"},
     {ESFM_OPT_RUNNING, "RunningStatus"}, {ESFM_OPT_SIDES, "TrueSides"},
     {ESFM_OPT_OPL3, "Opl3Device"},       {ESFM_OPT_SETTINGS, "BankSettings"},
+    {ESFM_OPT_MPC, "MpcSongs"},
 };
+
+// text after line's, as far as it fits in size bytes
+static void add(char *line, unsigned size, const char *text) {
+  unsigned n = strlen(line);
+
+  if (n + 1 < size)
+    strncat(line, text, size - n - 1);
+}
 
 static void settings_text(const struct esfm_diag *d, const char *nl, char *buf,
                           unsigned size) {
-  static char line[240];
+  static char line[320], part[64];
   int i, off = 0;
+  unsigned q;
 
   strcpy(line, d->opts & ESFM_OPT_READ
                    ? "Settings: from SYSTEM.INI"
                    : "Settings: the defaults (not read yet)");
   for (i = 0; i < (int)(sizeof(esfm_keys) / sizeof(esfm_keys[0])); i++)
     if (!(d->opts & esfm_keys[i].bit)) {
-      strcat(line, off++ ? ", " : ", off: ");
-      strcat(line, esfm_keys[i].key);
+      add(line, sizeof(line), off++ ? ", " : ", off: ");
+      add(line, sizeof(line), esfm_keys[i].key);
     }
   if ((d->opts & ESFM_OPT_OPL3) && (d->opts & ESFM_OPT_OPL3_DRV))
-    strcat(line, ", the OPL3 device through ESFMOPL3.DRV");
-  strcat(line,
-         d->opts & ESFM_OPT_SQUARE ? ", the square-wave bank" : ", ESS's bank");
-  strcat(line, nl);
+    add(line, sizeof(line), ", the OPL3 device through ESFMOPL3.DRV");
+  // Opl3Headroom, in the chip's 0.75 dB steps
+  if (d->version >= 7 && (d->opts & ESFM_OPT_OPL3)) {
+    q = d->opl3_att * 3;
+    if (q % 4)
+      _bprintf(part, sizeof(part), ", the OPL3 device %u.%02u dB down", q / 4,
+               q % 4 * 25);
+    else
+      _bprintf(part, sizeof(part), ", the OPL3 device %u dB down", q / 4);
+    add(line, sizeof(line), part);
+  }
+  add(line, sizeof(line),
+      d->opts & ESFM_OPT_SQUARE ? ", the square-wave bank" : ", ESS's bank");
+  add(line, sizeof(line), nl);
   strncat(buf, line, size - strlen(buf) - 1);
+  if (d->version >= 7 && d->mpc_drops) {
+    _bprintf(line, sizeof(line),
+             "MpcSongs: %u notes of songs' base-level copies left out%s",
+             d->mpc_drops, nl);
+    strncat(buf, line, size - strlen(buf) - 1);
+  }
 }
 
 static const char *note_name(u8 note, char *buf) {

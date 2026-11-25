@@ -20,9 +20,10 @@ verdicts are [`src/wchk.c`](../src/wchk.c)'s.
 
 * **env**: the VxD and its extension, whether ES1869.DRV and ESFM.DRV are
   the rebuilt ones and their settings, `DmaCountTwice`, `Opl3Driver`,
-  `TrueSides` and `Opl3Device` from `SYSTEM.INI`, and the wave and MIDI
-  devices. `env.banks` gives the patch banks that `Bank=` and `Opl3Bank=`
-  name, which the box of the patch banks writes
+  `TrueSides`, `Opl3Device`, `Opl3Headroom` and `MpcSongs` from `SYSTEM.INI`
+  (the last two from version 1.7), and the wave and MIDI devices.
+  `env.banks` gives the patch banks that `Bank=` and `Opl3Bank=` name, which
+  the box of the patch banks writes
   ([ESFM_BANK.md](ESFM_BANK.md#choosing-a-bank-in-the-multimedia-control-panel)).
   `env.once` says what became of the StartUp batch. `env.midi` gives the
   MIDI list of the Multimedia control panel, an entry a line with its key,

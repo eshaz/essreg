@@ -53,10 +53,11 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
 * `src/esfm/` holds `ESFM.DRV` as NASM source, made by `tools/ne2asm.py`.
   `seg1-4.asm` is ESS's code. `esfmfix.asm`, `esfmfile.asm`, `esfmped.asm`
   and `esfmgm.asm` hold the fixes and General MIDI, `esfmopl.asm` the OPL3
-  device (device 1: General MIDI on the chip's OPL3 mode), `esfmcfg.asm` the
-  Settings button of the Multimedia control panel, and `esfmini.asm` their
-  SYSTEM.INI switches, all assembled with `ESFM_FIX=1`. `esfmopl3.asm` is
-  `ESFMOPL3.DRV`, a MIDI driver of its own whose one device is ESFM.DRV's
+  device (device 1: General MIDI on the chip's OPL3 mode), `esfmmpc.asm` the
+  songs with two arrangements of both devices (`MpcSongs`), `esfmcfg.asm`
+  the Settings button of the Multimedia control panel, and `esfmini.asm`
+  their SYSTEM.INI switches, all assembled with `ESFM_FIX=1`. `esfmopl3.asm`
+  is `ESFMOPL3.DRV`, a MIDI driver of its own whose one device is ESFM.DRV's
   device 1, so that Windows lists the OPL3 device in the Multimedia control
   panel, linked by `tools/build_esfm.py` with `esfmopl3.json`.
 * `src/es1869/` holds `ES1869.DRV` (wave, mixer and aux) as NASM source,
@@ -77,7 +78,10 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   `tools/hdpmifix.py` (its emulation of STI before IRETD), for esssb16's
   protected-mode games, with its origin, the fix and the hashes in its
   README. `third_party/genmidi/` holds Freedoom's `GENMIDI.lmp`, the OPL3
-  device's instruments, with its origin, hashes and license in its README.
+  device's instruments, with its origin, hashes and license in its README,
+  and `third_party/windows_midi/` the MIDI files of Windows 3.0, 98 and XP
+  that the MIDI suite plays, with their arrangements and hashes in its
+  README.
 * `src/esssb16.asm` is `esssb16.com`, the DOS TSR that answers games as a
   Sound Blaster 16 and plays their sound on Audio 1, through the port traps
   of EMM386, QPI (QEMM, JEMM with QPIEMU) and HDPMI32i. It is the VxD's
@@ -106,11 +110,15 @@ chip on DOS and Windows 9x. [README.md](README.md) is the user guide.
   machine in Python, the reference of [SB16_FRONT.md](docs/SB16_FRONT.md),
   and `sbops.py` the operations that the chip's model records. `sbfuzz.py`
   makes random games, which `tests/test_sbfsm.py` plays on the fronts and
-  the reference alike.
+  the reference alike. `midiref.py` is what General MIDI asks of a device,
+  the reference that `tests/test_midisuite.py` checks both MIDI devices of
+  ESFM.DRV against, message by message, with songs
+  ([MIDI_SUITE.md](docs/MIDI_SUITE.md)).
 * `docs/` holds [TESTING.md](docs/TESTING.md),
   [ESFM_MIDI.md](docs/ESFM_MIDI.md), [ESFM_GM.md](docs/ESFM_GM.md),
   [ESFM_OPL3.md](docs/ESFM_OPL3.md), [ESFM_BANK.md](docs/ESFM_BANK.md),
-  [VXD_API.md](docs/VXD_API.md), [VXD_INTERNALS.md](docs/VXD_INTERNALS.md),
+  [MIDI_SUITE.md](docs/MIDI_SUITE.md), [VXD_API.md](docs/VXD_API.md),
+  [VXD_INTERNALS.md](docs/VXD_INTERNALS.md),
   [SPATIALIZER.md](docs/SPATIALIZER.md),
   [DRIVER_CONFIG.md](docs/DRIVER_CONFIG.md),
   [AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md), [AUDIO1.md](docs/AUDIO1.md),
@@ -139,6 +147,9 @@ the hook.
 # every test (about 6 minutes), or one class
 python3 tests/run_tests.py
 python3 -m unittest tests.test_esfmdrv.SustainTest
+
+# the MIDI suite, each song whole (about 4 minutes)
+ESSREG_MIDI_FULL=1 python3 -m unittest tests.test_midisuite
 
 # the drivers, then ESS's drivers rebuilt byte for byte
 python3 tools/build_esfm.py            # build/ESFM.DRV
@@ -383,9 +394,16 @@ tools/wineshot.sh run ess3d.exe /sim tray
     the devices read at their next open. `ConfigureTest` and
     `Opl3DriverTest` test both drivers' answers, and `test_bank_box` in
     `tests/test_wine.py` the box.
+  * What a device plays is in `tests/midiref.py` too: a change to its notes,
+    its levels or what it leaves out (`MpcSongs` in `esfmmpc.asm`, checked
+    at the top of `short_msg` and of `opl_message`) goes into the reference,
+    and `tests/test_midisuite.py` passes on both devices. The OPL3 device's
+    carrier level is GM's curve of the velocity, controllers 7 and 11, the
+    master volume (`DEV_GM_MASTER`) and `Opl3Headroom` (`fix_opl3_att`),
+    summed so that no byte overflows (`opl_level`).
 * **The status block** (`esfmfixd.asm`, found by `ESFMFIX`) is read by
   essctl at fixed offsets (`src/win/esfmlive.c`). A change to its layout
-  bumps `fix_version`, and the next version is 7.
+  bumps `fix_version`, and the next version is 8.
 * **ES1869.DRV's status** (`es_status` in `src/es1869/fixdata.asm`, found by
   `ESDRVFIX`, the player's block and the FM recording device's) is read by
   essctl (`src/wavestat.c` and `src/win/wavelive.c`). A change to its layout

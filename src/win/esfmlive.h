@@ -105,6 +105,10 @@ struct esfm_diag {
   u16 opl3_date;
   u16 opl3_time;
   char opl3_file[128];
+  // fixed driver 7 and up: Opl3Headroom in the chip's 0.75 dB steps, and
+  // the notes of songs' base-level copies that MpcSongs left out
+  u16 opl3_att;
+  u16 mpc_drops;
   char why[96]; // why nothing could be read
 };
 
@@ -124,6 +128,7 @@ struct esfm_diag {
 #define ESFM_OPT_OPL3 0x0800     // Opl3Device: device 1 on OPL3 mode
 #define ESFM_OPT_OPL3_DRV 0x1000 // Opl3Device=2: device 1 is ESFMOPL3.DRV's
 #define ESFM_OPT_SETTINGS 0x2000 // BankSettings: the box of the patch banks
+#define ESFM_OPT_MPC 0x4000      // MpcSongs: a song's base-level copy left out
 #define ESFM_OPT_READ 0x8000     // read from SYSTEM.INI (at DRV_ENABLE)
 
 // file_state: what the last MODM_OPEN found

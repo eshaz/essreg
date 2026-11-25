@@ -2005,6 +2005,12 @@ short_msg:
         mov_ cl,ch                                      ; 1128
         and cl,0x7f                                     ; 112A
         mov [bp-0x2],cl                                 ; 112D
+%if ESFM_FIX
+        call fix_mpc_ess                ; esfmmpc.asm: MpcSongs
+        jnc ..@fix_mpc_keep
+        jmp near L1_13FE                ; a note of a base-level copy
+..@fix_mpc_keep:
+%endif
         mov_ al,dl                                      ; 1130
         and ax,0xf0                                     ; 1132
         sub ax,0x80                                     ; 1135
@@ -3817,6 +3823,7 @@ R1_1ECB: dw 0xFFFF, 0x0000                              ; 1ECB KERNEL.LocalSize
 %include "esfmfile.asm"
 %include "esfmini.asm"
 %include "esfmped.asm"
+%include "esfmmpc.asm"
 %include "esfmgm.asm"
 %include "esfmopl.asm"
 %include "esfmcfg.asm"

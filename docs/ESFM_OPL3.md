@@ -130,9 +130,10 @@ made:
   then the one off the longest. With every voice on, the second voice of an
   instrument goes first, then the note on the longest.
 * The carrier's level follows General MIDI's curve, 40 log10 of the velocity
-  and of controllers 7 and 11, in the chip's steps of 0.75 dB. The modulator
-  keeps the instrument's level, and in additive mode, where it sounds as
-  well, it is never louder than the carrier.
+  and of controllers 7 and 11, in the chip's steps of 0.75 dB, with the
+  master volume and `Opl3Headroom` below that ([below](#the-level)). The
+  modulator keeps the instrument's level, and in additive mode, where it
+  sounds as well, it is never louder than the carrier.
 * The pitch is tuned to the chip's FM clock, 49,612.5 Hz, the 23.814 MHz
   master over 480 as measured on the laptop
   ([AUDIO1.md](AUDIO1.md#the-fm-recording-device)), with the instrument's
@@ -144,7 +145,13 @@ The device handles:
   semitones and cents), 7, 10, 11, 64, 120, 121 and 123 to 127;
 * running status, in short messages and across long messages, and around
   real-time bytes;
-* long messages: a GM, GM2, GS or XG reset sets every channel back.
+* long messages: a GM, GM2, GS or XG reset sets every channel back, and the
+  master volume (`F0 7F dd 04 01 ll mm F7`) turns every note down, those
+  that sound too, on the ESFM device's curve
+  ([ESFM_GM.md](ESFM_GM.md#master-volume));
+* a song that holds two arrangements, as the MIDI files of Windows 3.0 and
+  the classics of Windows 98 do, plays its extended one only, with
+  `MpcSongs` ([ESFM_GM.md](ESFM_GM.md#songs-with-two-arrangements)).
 
 A program change lets the channel's sustain pedal up, as on the ESFM device,
 with `PedalRelease` ([DRIVER_CONFIG.md](DRIVER_CONFIG.md#63-esfmdrv)). A
@@ -161,6 +168,33 @@ sounds on the left. With `TrueSides=0` it sounds on the right.
 
 A message that comes while the driver is busy, such as one sent at interrupt
 time, waits in the driver's queue as device 0's do (`QueueWhileBusy`).
+
+## The level
+
+The chip adds up its 18 voices into the 16 bits of its FM output, the music
+DAC's input. A voice of two operators at the chip's full level, as DMX plays
+a note at full velocity and full volume, reaches an eighth of that range, so
+a chord of a few loud voices fills it. Past the top the sum clips, and the
+notes of [ESFMu](https://github.com/Kagamiin/ESFMu), an emulator of the ESFM
+made from tests of real chips, put the ES1869 among the ESS chips whose sum
+overflows there instead.
+
+`Opl3Headroom` under `[ESFM.DRV]` lowers every note by that many decibels,
+in the chip's steps of 0.75 dB, 6 dB by default. On the laptop the device
+played esswchk's note, program 0 at velocity 100, at -28.9 dB in the FM's
+digital recording, where the ESFM device played it at -32.3 dB (`opl.pan0`
+and `fm.pan0` of [ESSWCHK.md](ESSWCHK.md)), so the device plays a little
+under the ESFM device's level by default. An emulation of the chip's output
+with ESFMu, of every message the driver writes, gives the peaks of the 20
+songs of [third_party/windows_midi](../third_party/windows_midi/README.md)
+and `GROOVE.MID` without the headroom between -10.8 and +2.2 dBFS, the
+loudest being Windows 98's *Fur Elise* with both of its arrangements, and
+with the default 6 dB and `MpcSongs` at most -4.5 dBFS. ESFMu played
+esswchk's note 1.9 dB louder than the laptop did. `Opl3Headroom=0` gives the
+level the device had before the key.
+
+The master volume turns every note down on the ESFM device's curve,
+`fix_master_curve`, and a GM, GS or XG reset or `MODM_RESET` puts it back.
 
 ## The Multimedia control panel
 
@@ -290,6 +324,13 @@ MIDI devices have its name.
 * esswchk's `opl.pan0` and `opl.pan127` play a note on the OPL3 device
   panned left, then right, and record it through the FM recording device
   ([ESSWCHK.md](ESSWCHK.md)).
+* `test_headroom` in `Opl3Test` checks `Opl3Headroom`'s steps, and
+  `MpcSongsTest` the songs with two arrangements on both devices.
+* [tests/test_midisuite.py](../tests/test_midisuite.py) plays 22 songs and
+  random streams through both devices and checks every message against a
+  reference of General MIDI: no stuck note, every note's level, the songs'
+  copies left out, and a new song that starts as on a device that played
+  nothing before ([TESTING.md](MIDI_SUITE.md)).
 
 ## Limits
 

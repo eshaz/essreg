@@ -122,6 +122,8 @@ The Python tests, in `tests/test_*.py`, cover the following:
   EMM386, where its window traps a port, and `tools/essprec.py` on a
   recording of the model's run and broken ones ([ESSPROBE.md](ESSPROBE.md)).
   The meas cases also run on models where a fact the fixes rest on fails.
+* `test_midisuite` checks both MIDI devices of `ESFM.DRV` against General
+  MIDI, with songs ([MIDI_SUITE.md](MIDI_SUITE.md)).
 * Other tests run `esfmpat` on copies of `ESFM.DRV` and check that the
   generated documentation is current.
 
@@ -834,6 +836,9 @@ See [ESFM_OPL3.md](ESFM_OPL3.md). With the drivers installed by essinst:
    `opl.list` checks the same entry.
 2. Choose ESS's device again. While a program plays on one device, the other
    can't be opened.
+3. Play `third_party\windows_midi\win30\CANYON.MID` on each device: its
+   drums play as drums, with no piano in their rhythm. With `MpcSongs=0` and
+   a restart, its parts play twice, with a piano on channel 16.
 
 ### H. ess3d
 

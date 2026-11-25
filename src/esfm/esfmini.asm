@@ -7,8 +7,10 @@
 ; (docs/DRIVER_CONFIG.md).  The keys are read once, at the first
 ; DRV_ENABLE or device count, with GetPrivateProfileInt: a key that isn't
 ; there keeps its default.  Opl3Device=2 also sets OPT_OPL3_DRV: device 1
-; is ESFMOPL3.DRV's (esfmopl.asm).  Bank= isn't one of them: it names the
-; bank file, and it's read again at every MODM_OPEN (esfmfile.asm).
+; is ESFMOPL3.DRV's (esfmopl.asm).  Opl3Headroom= is a number of decibels,
+; which fix_opl3_att keeps in the chip's 0.75 dB steps, rounded.  Bank=
+; isn't one of them: it names the bank file, and it's read again at every
+; MODM_OPEN (esfmfile.asm).
 ;
 ; (c) 2026 Ethan Halsall <ethan.s.halsall@gmail.com>
 ;
@@ -51,6 +53,23 @@ fix_read_settings:
         and     [fix_opts],cx
 .skip:  add     si,4
         jmp     .next
-.read:  or      word [fix_opts],OPT_READ
+.read:  push    ds                      ; Opl3Headroom=, 0 to 47 dB
+        push    word fix_ini_sect
+        push    ds
+        push    word fix_key_headroom
+        push    word OPL3_HEADROOM_DEFAULT
+        push    ds
+        push    word fix_ini_file
+        kernel  GetPrivateProfileInt   ; digits only, unsigned
+        cmp     ax,47
+        jbe     .steps
+        mov     ax,47
+.steps: shl     ax,2                    ; dB * 4 / 3, rounded
+        inc     ax
+        mov     cl,3
+        div     cl
+        xor     ah,ah
+        mov     [fix_opl3_att],ax
+        or      word [fix_opts],OPT_READ
         pop     si
 .done:  ret

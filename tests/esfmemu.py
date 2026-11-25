@@ -1149,6 +1149,9 @@ class ESFMEmu:
             st["opath"] = path.split(b"\0")[0].decode("latin-1")
             names = ("okstate", "osel", "ooff", "oblk")
             st.update(zip(names, struct.unpack_from("<4H", dgroup, at + 574)))
+        if st["version"] >= 7:                  # Opl3Headroom, MpcSongs
+            names = ("opl3_att", "mpc_drops")
+            st.update(zip(names, struct.unpack_from("<2H", dgroup, at + 582)))
         return st
 
     def pedals(self):

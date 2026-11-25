@@ -631,7 +631,7 @@ class SustainTest(unittest.TestCase):
     def test_status_block_version(self):
         # 3 was an earlier build's pedal times, 4 added the settings, 5
         # the OPL3 device, 6 its bank file
-        self.assertEqual(self.emu("fixed").fix_state()["version"], 6)
+        self.assertEqual(self.emu("fixed").fix_state()["version"], 7)
 
 
 # General MIDI (esfmgm.asm): device fields, esfmdev.inc
@@ -1340,10 +1340,21 @@ class BankFileTest(unittest.TestCase):
 SETTINGS = ["QueueWhileBusy", "SilenceOnClose", "PedalRelease", "Vibrato",
             "Tuning", "ResetControllers", "LivePan", "SysEx",
             "RunningStatus", "BetterSquareWave", "TrueSides", "Opl3Device",
-            "BankSettings"]
+            "BankSettings", "MpcSongs"]
 OPT = {k: 1 << i for i, k in enumerate(SETTINGS[:12])}
 OPT["BankSettings"] = 0x2000    # after OPT_OPL3_DRV
-OPT_DEFAULT, OPT_READ = 0x2FFF, 0x8000
+OPT["MpcSongs"] = 0x4000
+OPT_DEFAULT, OPT_READ = 0x6FFF, 0x8000
+# Opl3Headroom=, read after the bits: its default in dB, and what the
+# driver makes of a value, the chip's 0.75 dB steps (fix_opl3_att)
+HEADROOM_DB = 6
+
+
+def headroom_steps(db=HEADROOM_DB):
+    return round(min(max(db, 0), 47) / 0.75)
+
+
+HEADROOM = headroom_steps()
 OPT_OPL3_DRV = 0x1000           # Opl3Device=2: device 1 is ESFMOPL3.DRV's
 GM_ON = bytes([0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7])
 
@@ -1374,7 +1385,10 @@ class SettingsTest(unittest.TestCase):
         e = self.started(open_it=False)
         self.assertEqual(e.fix_state()["opts"], OPT_DEFAULT | OPT_READ)
         self.assertEqual(e.int_reads, [("SYSTEM.INI", "ESFM.DRV", k, 1)
-                                       for k in SETTINGS])
+                                       for k in SETTINGS] +
+                         [("SYSTEM.INI", "ESFM.DRV", "Opl3Headroom",
+                           HEADROOM_DB)])
+        self.assertEqual(e.fix_state()["opl3_att"], HEADROOM)
 
     def test_each_key(self):
         for key in SETTINGS:
@@ -1394,7 +1408,7 @@ class SettingsTest(unittest.TestCase):
         e.ini = {}
         self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
         e.open()
-        self.assertEqual(len(e.int_reads), len(SETTINGS))
+        self.assertEqual(len(e.int_reads), len(SETTINGS) + 1)
         self.assertEqual(e.fix_state()["opts"],
                          OPT_DEFAULT & ~OPT["Vibrato"] | OPT_READ)
 
@@ -1504,6 +1518,15 @@ class SettingsTest(unittest.TestCase):
 
     def test_live_pan(self):
         self.compare("LivePan", self.regs_after(cc(0, 10, 0x7F), cc(0, 8, 0)))
+
+    def test_mpc_songs(self):
+        def mpc_song(e):
+            for m in MpcSongsTest.SETUP + MpcSongsTest.NOTES:
+                e.data(m)
+            return sorted({c for f, c, _n in e.voices() if f & 1})
+        stock, on = self.compare("MpcSongs", mpc_song)
+        self.assertEqual(stock, [0, 9, 12, 15])
+        self.assertEqual(on, [0, 9])
 
     def test_true_sides(self):
         """a note panned hard left: register 6 bit 5 on the chip, its left
@@ -1667,6 +1690,8 @@ def cents(hz, note):
 class Opl3Test(unittest.TestCase):
     """Device 1, General MIDI on the chip's OPL3 compatibility mode with
     Freedoom's GENMIDI instruments (src/esfm/esfmopl.asm)."""
+
+    head = HEADROOM             # Opl3Headroom's steps in check_note
 
     @classmethod
     def setUpClass(cls):
@@ -1848,7 +1873,7 @@ class Opl3Test(unittest.TestCase):
             sub = self.table(e)[v][3] & 1
             gv = ins["voices"][sub]
             mod, car, c0 = self.regs(e, v)
-            a = min(63, att(vel) + att(vol) + att(127))
+            a = min(63, att(vel) + att(vol) + att(127) + self.head)
             self.assertEqual(mod[:4], list(gv["mod"][:4]))
             self.assertEqual(car[:4], list(gv["car"][:4]))
             self.assertEqual(car[4], gv["car"][4] & 0xC0 | a)
@@ -1881,7 +1906,8 @@ class Opl3Test(unittest.TestCase):
         e.data(cc(0, 11, 32))
         v = self.keyed(e, 0, 60)[0]
         car = self.regs(e, v)[1]
-        self.assertEqual(car[4] & 0x3F, min(63, att(127) + att(64) + att(32)))
+        self.assertEqual(car[4] & 0x3F,
+                         min(63, att(127) + att(64) + att(32) + HEADROOM))
 
     def test_pan(self):
         p = self.single[0]
@@ -2234,6 +2260,27 @@ class Opl3Test(unittest.TestCase):
         self.assertEqual(e.chip.writes, writes + 3)
         self.assertEqual(e.chip.regs[0x240], 1)
 
+    def test_headroom(self):
+        """Opl3Headroom=, in dB: every carrier that much lower, in the
+        chip's 0.75 dB steps, rounded; a value out of 0 to 47 dB is held
+        there"""
+        p = self.single[0]
+        for value, steps in (("0", 0), ("1", 1), ("2", 3), ("3", 4),
+                             ("6", 8), ("12", 16), ("47", 63), ("90", 63),
+                             ("40000", 63), ("-4", 0), ("no", 0)):
+            with self.subTest(value=value):
+                e = self.emu([p << 8 | 0xC0, 0x7F3C90],
+                             ini={"Opl3Headroom": value})
+                self.assertEqual(e.fix_state()["opl3_att"], steps)
+                self.head = steps
+                self.check_note(e, p, 60)
+        # additive voices: the modulator never louder than the carrier
+        p = next(p for p in self.single if self.bank[p]["voices"][0]["fb"] &
+                 1 and self.bank[p]["voices"][0]["mod"][5] < 0x3F)
+        e = self.emu([p << 8 | 0xC0, 0x7F3C90])
+        self.head = HEADROOM
+        self.check_note(e, p, 60)
+
     def test_tables(self):
         """the F-number table is the formula's at 49,612.5 Hz"""
         with open(os.path.join(ROOT, "src", "esfm", "esfmopl.asm")) as f:
@@ -2248,6 +2295,133 @@ class Opl3Test(unittest.TestCase):
             "db", ",").replace("\n", ",").split(",") if x.strip() and
             not x.strip().startswith(";")]
         self.assertEqual(got[:128], [att(x) for x in range(128)])
+
+
+DEV_MPC = 0x66F                 # MPC_EXT: channels 1-10, MPC_MID: 11-12
+
+
+@unittest.skipUnless(HAVE_UNICORN, "needs the unicorn module")
+class MpcSongsTest(unittest.TestCase):
+    """MpcSongs (src/esfm/esfmmpc.asm): a song written for Windows 3.x's
+    MIDI Mapper, with its extended arrangement on channels 1 to 10 and its
+    base-level copy on 13 to 16, plays the extended one only, on both
+    devices; a General MIDI song, which uses channel 11 or 12, plays all"""
+
+    # an MPC song's first tick, as in Windows 3.0's CANYON.MID: channel 16
+    # first, then each channel's program and volume, then a chord on
+    # channel 1, its copy on 13, and the drums of channels 10 and 16
+    SETUP = [0x00CF, cc(15, 7, 67), 0x5AC0, cc(0, 7, 83), 0x1BC1,
+             cc(1, 7, 107), cc(9, 7, 78), 0x55CC, cc(12, 7, 64), 0x01CD,
+             cc(13, 7, 65)]
+    NOTES = [0x643C90, 0x644090, 0x643C9C, 0x64409C, 0x642499, 0x64249F]
+
+    def emu(self, device, ini=None):
+        e = ESFMEmu(builds()["fixed"])
+        for key, value in (ini or {}).items():
+            e.ini[("esfm.drv", key.lower())] = value
+        self.assertEqual(e.driverproc(DRV_ENABLE) & 0xFFFF, 1)
+        e.open(device=device)
+        return e
+
+    def play(self, e, msgs):
+        for m in msgs:
+            if isinstance(m, bytes):
+                self.assertEqual(e.longdata(m)[0], 0)
+            else:
+                self.assertEqual(e.data(m), 0)
+        return e
+
+    def channels(self, e):
+        """the channels whose notes the device has keyed on"""
+        if e.device == 0:
+            return sorted({c for f, c, _n in e.voices() if f & 1})
+        return sorted({e.dev8(DEV_OPL_VOICE + OV_SIZE * v + 1)
+                       for v in e.chip.opl_keyed()})
+
+    def each(self, ini=None):
+        for device in (0, 1):
+            with self.subTest(device=device):
+                yield device, self.emu(device, ini)
+
+    def test_mpc_song(self):
+        for device, e in self.each():
+            self.play(e, self.SETUP + self.NOTES)
+            self.assertEqual(self.channels(e), [0, 9])
+            self.assertEqual(e.dev8(DEV_MPC), 1)
+            self.assertEqual(e.fix_state()["mpc_drops"], 3)
+            # their note offs pass, and the copy's other messages set its
+            # channels up
+            self.play(e, [0x003C8C, 0x05CC, cc(12, 7, 30)])
+            self.assertEqual(self.channels(e), [0, 9])
+
+    def test_both_with_mpc_songs_0(self):
+        for device, e in self.each({"MpcSongs": "0"}):
+            self.play(e, self.SETUP + self.NOTES)
+            self.assertEqual(self.channels(e), [0, 9, 12, 15])
+            self.assertEqual(e.fix_state()["mpc_drops"], 0)
+
+    def test_general_midi_song(self):
+        # channel 11 set up at the start: every channel plays
+        for device, e in self.each():
+            self.play(e, [0x30CA, cc(10, 7, 90)] + self.SETUP + self.NOTES)
+            self.assertEqual(self.channels(e), [0, 9, 12, 15])
+            self.assertEqual(e.dev8(DEV_MPC), 3)
+
+    def test_channel_12_later(self):
+        # a General MIDI song whose channel 12 comes after its first notes:
+        # the notes of 13 to 16 play again from then on
+        for device, e in self.each():
+            self.play(e, self.SETUP + self.NOTES + [0x643091, 0x003C8C,
+                                                    0x643C8C, 0x40CB])
+            self.assertEqual(self.channels(e), [0, 1, 9])
+            self.play(e, [0x643E9C])
+            self.assertEqual(self.channels(e), [0, 1, 9, 12])
+
+    def test_what_doesnt_count(self):
+        # a player's note offs and all notes off on every channel, and
+        # real-time bytes, are no use of channels 11 and 12
+        for device, e in self.each():
+            panic = [cc(c, 123, 0) for c in range(16)] + [
+                cc(c, 121, 0) for c in range(16)] + [0x003C8A, 0x003C8B]
+            self.play(e, panic + self.SETUP + [0xF8, 0xFE] + self.NOTES)
+            self.assertEqual(self.channels(e), [0, 9])
+
+    def test_base_level_alone(self):
+        # a song for a base-level synthesizer only: nothing on 1 to 10
+        for device, e in self.each():
+            self.play(e, [0x55CC, cc(12, 7, 64), 0x643C9C, 0x64249F])
+            self.assertEqual(self.channels(e), [12, 15])
+
+    def test_resets_start_a_new_song(self):
+        for reset in ("MODM_RESET", "GM", "GS", "XG"):
+            for device, e in self.each():
+                with self.subTest(reset=reset):
+                    self.play(e, self.SETUP + self.NOTES)
+                    if reset == "MODM_RESET":
+                        self.assertEqual(e.reset(), 0)
+                    else:
+                        self.play(e, [{"GM": GM_ON, "GS": GS_RESET,
+                                       "XG": XG_ON}[reset]])
+                    self.assertEqual(e.dev8(DEV_MPC), 0)
+                    self.play(e, [0x643C9C])
+                    self.assertEqual(self.channels(e), [12])
+
+    def test_open_starts_a_new_song(self):
+        for device, e in self.each():
+            self.play(e, self.SETUP + self.NOTES)
+            e.close()
+            e.open(device=device, enable=False)
+            self.play(e, [0x643C9C])
+            self.assertEqual(self.channels(e), [12])
+
+    def test_long_messages(self):
+        # the song in a long message, with running status
+        song = bytes([0xCF, 0x00, 0xC0, 0x5A, 0xB0, 0x07, 0x53, 0xCC, 0x55,
+                      0x90, 0x3C, 0x64, 0x40, 0x64, 0x9C, 0x3C, 0x64,
+                      0x40, 0x64, 0x99, 0x24, 0x64, 0x9F, 0x24, 0x64])
+        for device, e in self.each():
+            self.play(e, [song])
+            self.assertEqual(self.channels(e), [0, 9])
 
 
 DRV_LOAD, DRV_OPEN, DRV_CLOSE, DRV_FREE = 1, 3, 4, 6

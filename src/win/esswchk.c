@@ -90,7 +90,7 @@
 #include "wchk.h"
 #include "winio.h"
 
-#define VERSION "1.6"
+#define VERSION "1.7"
 #define TITLE "ES1869 Windows checks"
 #define IDC_CHECK 101
 #define IDC_STEP 102
@@ -674,11 +674,14 @@ static void check_env(void) {
   drv.count_fixed = drv.vxd_ext >= 0x0126 && drv.dct;
   res("env.ini", WCHK_INFO,
       "SYSTEM.INI: [ES1869.VXD] DmaCountTwice=%d, SoundBlaster16DMA=%d, "
-      "Opl3Driver=%d; [ESFM.DRV] TrueSides=%d, Opl3Device=%d",
+      "Opl3Driver=%d; [ESFM.DRV] TrueSides=%d, Opl3Device=%d, "
+      "Opl3Headroom=%d, MpcSongs=%d",
       drv.dct,
       GetPrivateProfileInt("ES1869.VXD", "SoundBlaster16DMA", 5, "SYSTEM.INI"),
       GetPrivateProfileInt("ES1869.VXD", "Opl3Driver", 1, "SYSTEM.INI"), drv.ts,
-      GetPrivateProfileInt("ESFM.DRV", "Opl3Device", 1, "SYSTEM.INI"));
+      GetPrivateProfileInt("ESFM.DRV", "Opl3Device", 1, "SYSTEM.INI"),
+      GetPrivateProfileInt("ESFM.DRV", "Opl3Headroom", 6, "SYSTEM.INI"),
+      GetPrivateProfileInt("ESFM.DRV", "MpcSongs", 1, "SYSTEM.INI"));
   // the patch banks that the devices play, as the box of the Multimedia
   // control panel's Settings button chose them (ESFMCFG.DLL)
   GetPrivateProfileString("ESFM.DRV", "Bank", "", bank, sizeof(bank),

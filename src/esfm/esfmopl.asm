@@ -498,15 +498,20 @@ opl_byte:
 .out:   ret
 
 ; the SysEx in DEV_OPL_SYX ended: a GM (or GM2), GS or XG reset sets every
-; channel back.  SI = dev
+; channel back, and the master volume turns every note down as on device 0
+; (fix_master_curve).  SI = dev
 ;   F0 7E dd 09 01 F7                   GM System On (09 03: GM2)
 ;   F0 41 dd 42 12 40 00 7F 00 41 F7    GS reset
 ;   F0 43 1n 4C 00 00 7E 00 F7          XG System On
+;   F0 7F dd 04 01 ll mm F7             master volume
 opl_sysex:
         push    cx
+        push    dx
         push    di
         mov     al,[si+DEV_OPL_LSYX]
         mov     ah,[si+DEV_OPL_SYX+1]
+        cmp     ah,0x7F
+        je      .master
         cmp     ah,0x7E
         je      .gm
         cmp     ah,0x41
@@ -545,7 +550,26 @@ opl_sysex:
         inc     di
         loop    .cmp
 .reset: call    opl_reset_all
+        jmp     .out
+.master:
+        cmp     al,7
+        jne     .out
+        cmp     word [si+DEV_OPL_SYX+3],0x0104
+        jne     .out
+        mov     bl,[si+DEV_OPL_SYX+6]   ; mm: the 14 bits / 512
+        and     bl,0x7F
+        shr     bl,2
+        xor     bh,bh
+        mov     al,[cs:bx+fix_master_curve]
+        mov     [si+DEV_GM_MASTER],al
+        xor     dl,dl
+.level: mov     al,2                    ; every channel's notes
+        call    opl_update
+        inc     dl
+        cmp     dl,16
+        jb      .level
 .out:   pop     di
+        pop     dx
         pop     cx
         ret
 
@@ -653,6 +677,8 @@ opl_start:
         mov     [si+DEV_OPL_LSTAT],al
         mov     [si+DEV_OPL_LGOT],al
         mov     [si+DEV_OPL_LSYX],al
+        mov     [si+DEV_MPC],al
+        mov     [si+DEV_GM_MASTER],al
         mov     byte [si+DEV_OPL_READY],OPL_HAS | OPL_ENGINE
         pop     di
         pop     dx
@@ -725,6 +751,8 @@ opl_reset_all:
         push    cx
         push    di
         call    opl_all_off
+        mov     byte [si+DEV_MPC],0     ; a new song (esfmmpc.asm)
+        mov     byte [si+DEV_GM_MASTER],0
         mov     cx,16
         lea     di,[si+DEV_OPL_CHAN]
 .chan:  call    opl_chan_init
@@ -782,6 +810,10 @@ opl_message:
         mov     dh,bh
         and     dh,0x7F
         and     cl,0x7F
+        mov     al,bl                   ; MpcSongs (esfmmpc.asm)
+        mov     ah,dh
+        call    fix_mpc
+        jc      .out
         mov     al,bl
         and     al,0xF0
         cmp     al,0x80
@@ -1291,10 +1323,13 @@ opl_level:
         mov     bl,dl
         add     al,[cs:bx+opl_att]
         mov     bl,dh
-        add     al,[cs:bx+opl_att]
+        add     al,[cs:bx+opl_att]      ; at most 189
+        add     al,[fix_opl3_att]       ; Opl3Headroom (esfmini.asm), 252
+        add     al,[si+DEV_GM_MASTER]   ; the master volume
+        jc      .max
         cmp     al,0x3F
         jbe     .att
-        mov     al,0x3F
+.max:   mov     al,0x3F
 .att:   cmp     al,[di+OV_TL]
         je      .out
         mov     [di+OV_TL],al
